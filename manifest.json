@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Dynamics Helper",
+  "version": "0.1.0",
+  "description": "Injects a floating helper button with a menu into Microsoft Dynamics 365 (onesupport.crm.dynamics.com) pages.",
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://onesupport.crm.dynamics.com/*"],
+      "js": ["contentScript.js"],
+      "css": ["contentStyle.css"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://zebra-ai-web-prd.ait.microsoft.com/*",
+        "http://zebra-ai-web-prd.ait.microsoft.com/*",
+        "https://zebra-ai-web-prd.azurewebsites.net/*",
+        "http://zebra-ai-web-prd.azurewebsites.net/*"
+      ],
+      "js": ["zebraAutomation.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*.png", "items.json"],
+      "matches": ["https://onesupport.crm.dynamics.com/*"]
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "permissions": ["storage"]
+}

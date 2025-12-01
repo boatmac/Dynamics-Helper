@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dynamics Helper - Options</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+    }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; padding: 0; }
+    header { padding: 16px 20px; background: #0f172a; color: #fff; }
+    header h1 { margin: 0; font-size: 18px; }
+    main { padding: 18px 20px; display: grid; gap: 18px; grid-template-columns: 1fr 1fr; align-items: start; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    .card { background: #fff; color: #0f172a; border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,0.06); }
+    .card header { background: transparent; color: inherit; border-bottom: 1px solid rgba(0,0,0,0.06); }
+    .card header h2 { margin: 0; padding: 12px 14px; font-size: 16px; }
+    .card .content { padding: 14px; display: grid; gap: 12px; }
+
+    label { font-weight: 600; font-size: 13px; }
+    input[type="text"], input[type="number"], textarea { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid #d1d5db; font-size: 14px; }
+    input[type="color"] { width: 48px; height: 34px; padding: 0; border: 1px solid #d1d5db; border-radius: 6px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    button { appearance: none; -webkit-appearance: none; border: 1px solid #d1d5db; background: #2563eb; color: #fff; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    button.secondary { background: #f3f4f6; color: #111827; }
+    button.warning { background: #dc2626; }
+
+    .status { font-size: 13px; color: #065f46; }
+    .error { color: #b91c1c; font-weight: 600; }
+    textarea { min-height: 360px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dynamics Helper — Options</h1>
+  </header>
+  <main>
+    <section class="card">
+      <header><h2>UI Preferences</h2></header>
+      <div class="content">
+        <div>
+          <label for="buttonText">Button Text</label>
+          <input id="buttonText" type="text" placeholder="DH" />
+        </div>
+        <div class="row">
+          <div>
+            <label for="primaryColor">Primary Color</label><br />
+            <input id="primaryColor" type="color" value="#2563eb" />
+          </div>
+          <div>
+            <label>Position (px)</label>
+            <div class="row">
+              <div>
+                <label for="offsetBottom">Bottom</label>
+                <input id="offsetBottom" type="number" min="0" step="1" placeholder="24" />
+              </div>
+              <div>
+                <label for="offsetRight">Right</label>
+                <input id="offsetRight" type="number" min="0" step="1" placeholder="24" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <label for="zebraAutomationEnabled">Enable ZebraAI Automation</label><br />
+          <input id="zebraAutomationEnabled" type="checkbox" />
+        </div>
+        <div class="actions">
+          <button id="savePrefs">Save Preferences</button>
+          <button id="resetPrefs" class="secondary">Reset to Defaults</button>
+        </div>
+        <div id="prefsStatus" class="status" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <header><h2>Items Configuration</h2></header>
+      <div class="content">
+        <div>
+          <label for="itemsJson">Items JSON</label>
+          <textarea id="itemsJson" spellcheck="false" placeholder='[ { "type": "link", "label": "Docs", "url": "https://..." } ]'></textarea>
+          <div id="jsonError" class="error" aria-live="polite"></div>
+        </div>
+        <div class="actions">
+          <input type="file" id="fileInput" accept="application/json" hidden />
+          <button id="saveItems">Save Items</button>
+          <button id="loadFromFile" class="secondary">Import JSON…</button>
+          <button id="exportItems" class="secondary">Export JSON</button>
+          <button id="loadDefault" class="secondary">Load from packaged items.json</button>
+          <button id="clearItems" class="warning">Clear Stored Items</button>
+        </div>
+        <div id="itemsStatus" class="status" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>
