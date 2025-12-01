@@ -1,16 +1,79 @@
+// Expose test function globally FIRST - try both window and top
+try {
+  window.__DH_testTextAreaSearch = function() {
+  console.log("[DH TEST] Manual search triggered");
+  console.log("[DH TEST] Looking for textarea with id: sapTextAreaId");
+  
+  const el = document.getElementById("sapTextAreaId");
+  console.log("[DH TEST] Found element:", el);
+  
+  if (el) {
+    console.log("[DH TEST] Element tag:", el.tagName);
+    console.log("[DH TEST] Element type:", el.type);
+    console.log("[DH TEST] Element value:", el.value);
+    console.log("[DH TEST] Element text:", el.textContent);
+  } else {
+    console.log("[DH TEST] Element with id 'sapTextAreaId' NOT FOUND");
+  }
+  
+  // Search all textareas
+  const allTextareas = document.querySelectorAll("textarea");
+  console.log("[DH TEST] All textareas on page:", allTextareas.length);
+  allTextareas.forEach((ta, i) => {
+    console.log(`[DH TEST] Textarea ${i}:`, {
+      id: ta.id,
+      name: ta.name,
+      className: ta.className,
+      valueLength: (ta.value || "").length,
+      valuePreview: (ta.value || "").substring(0, 100)
+    });
+  });
+  
+  // Also check for elements with similar IDs
+  const allElements = document.querySelectorAll("[id*='sap'], [id*='SAP'], [id*='text'], [id*='area']");
+  console.log("[DH TEST] Elements with sap/text/area in ID:", allElements.length);
+  allElements.forEach((elem, i) => {
+    if (i < 20) { // Limit to first 20
+      console.log(`[DH TEST] Element ${i}:`, {
+        id: elem.id,
+        tag: elem.tagName,
+        type: elem.type
+      });
+    }
+  });
+  
+  return { element: el, totalTextareas: allTextareas.length };
+  };
+  if (window.top && window.top !== window) {
+    try { window.top.__DH_testTextAreaSearch = window.__DH_testTextAreaSearch; } catch (_) {}
+  }
+  console.log("[DH] Test function registered: window.__DH_testTextAreaSearch()");
+} catch (e) {
+  console.error("[DH] Failed to register test function:", e);
+}
+
 (() => {
+  console.log("[DH] Content script loaded on:", window.location.href);
+  console.log("[DH] Script start time:", new Date().toISOString());
+  
   try {
     // Guard against running in iframes
     if (window.top !== window.self) {
+      console.log("[DH] Running in iframe, exiting");
       return;
     }
+
+    console.log("[DH] Main frame detected, continuing initialization");
 
     const CONTAINER_ID = "dh-container";
 
     // Singleton mount: do not mount twice
     if (document.getElementById(CONTAINER_ID)) {
+      console.log("[DH] Container already exists, skipping duplicate mount");
       return;
     }
+
+    console.log("[DH] Starting mount process...");
 
       const mount = async () => {
       if (!document.body) {
@@ -403,8 +466,242 @@
         }
       } catch (_) {}
 
-      console.log("[Dynamics Helper] Floating UI mounted.");
+      console.log("[DH] About to call setupSapTextAreaWatcher()...");
+      setupSapTextAreaWatcher();
+      console.log("[DH] setupSapTextAreaWatcher() completed");
+
+      console.log("[DH] Floating UI mounted successfully!");
     };
+
+    function setupSapTextAreaWatcher() {
+      try {
+        const TARGET_ID = "sapTextAreaId";
+        const KEYWORD = "Azure/Mooncake Support Escalation";
+        const monitoredElements = new WeakSet(); // Track which elements we've set up monitoring for
+        const checkedElements = new WeakMap(); // Track last checked values
+
+        console.log("[DH] SAP TextArea Watcher initialized for dynamic tabs, looking for:", TARGET_ID);
+
+        function highlight(el) {
+          if (!el) return;
+          console.log("[DH] Applying RED highlight to element:", el);
+          el.style.cssText += "; outline: 4px solid #dc2626 !important; outline-offset: 2px !important; background-color: #fef2f2 !important; border: 3px solid #ef4444 !important; box-shadow: 0 0 20px rgba(239, 68, 68, 0.6), inset 0 0 10px rgba(239, 68, 68, 0.2) !important; animation: dh-pulse 2s infinite !important;";
+          try {
+            el.scrollIntoView({ block: "center", behavior: "smooth" });
+          } catch (_) {}
+        }
+
+        const detectedElements = new WeakSet(); // Track elements where keyword was detected
+
+        function checkValue(el) {
+          try {
+            // Skip if already detected for this element
+            if (detectedElements.has(el)) {
+              return true;
+            }
+
+            const value = el.value != null ? String(el.value) : String(el.textContent || "");
+            
+            if (value.includes(KEYWORD)) {
+              console.log("[DH] ✓✓✓ KEYWORD DETECTED! ✓✓✓");
+              detectedElements.add(el); // Mark as detected
+              highlight(el);
+              showNotification(`⚠️ Azure/Mooncake Support Escalation Detected!`);
+              showToast(`Detected "${KEYWORD}"`);
+              return true;
+            }
+            return false;
+          } catch (e) {
+            console.error("[DH] Error checking value:", e);
+            return false;
+          }
+        }
+
+        function setupMonitoring(el) {
+          // Check if we've already set up monitoring for this element
+          if (monitoredElements.has(el)) {
+            console.log("[DH] Already monitoring this element, re-checking value");
+            checkValue(el);
+            return;
+          }
+          
+          monitoredElements.add(el);
+          console.log("[DH] Setting up NEW monitoring on element:", el.id);
+          
+          // Check immediately
+          if (checkValue(el)) return;
+          
+          // Show blue outline to indicate found
+          el.style.outline = "2px dashed #3b82f6";
+          showToast("Monitoring textarea for keyword...");
+          
+          // Listen to multiple events
+          ["input", "change", "blur", "paste", "focus"].forEach(eventType => {
+            el.addEventListener(eventType, function() {
+              console.log(`[DH] Event '${eventType}' triggered on`, el.id);
+              checkValue(el);
+            });
+          });
+          
+          // Poll every 3 seconds while element is in DOM
+          let pollCount = 0;
+          const pollInterval = setInterval(() => {
+            try {
+              // Check if element still in DOM
+              if (!document.contains(el)) {
+                console.log("[DH] Element removed from DOM, stopping poll");
+                clearInterval(pollInterval);
+                return;
+              }
+              
+              // Stop if keyword already detected for this element
+              if (detectedElements.has(el)) {
+                console.log("[DH] Keyword already detected, stopping poll");
+                clearInterval(pollInterval);
+                return;
+              }
+              
+              pollCount++;
+              const currentValue = el.value || "";
+              const lastValue = checkedElements.get(el) || "";
+              
+              if (currentValue !== lastValue) {
+                console.log("[DH] Value changed in poll #" + pollCount);
+                checkedElements.set(el, currentValue);
+                if (checkValue(el)) {
+                  clearInterval(pollInterval);
+                  return;
+                }
+              }
+              
+              if (pollCount >= 100) { // ~5 minutes
+                clearInterval(pollInterval);
+                console.log("[DH] Stopped polling after 100 checks");
+              }
+            } catch (e) {
+              console.error("[DH] Error in poll:", e);
+              clearInterval(pollInterval);
+            }
+          }, 3000);
+        }
+
+        function findTextarea() {
+          let foundAny = false;
+
+          // Method 1: Direct getElementById
+          let el = document.getElementById(TARGET_ID);
+          if (el && el.tagName === "TEXTAREA") {
+            console.log("[DH] ✓ Found via getElementById!");
+            setupMonitoring(el);
+            foundAny = true;
+          }
+
+          // Method 2: Query all textareas and check IDs (might find multiple in different tabs)
+          const allTextareas = document.querySelectorAll("textarea");
+          for (const ta of allTextareas) {
+            if (ta.id === TARGET_ID) {
+              if (!monitoredElements.has(ta)) {
+                console.log("[DH] ✓ Found new instance via querySelectorAll!");
+                setupMonitoring(ta);
+              }
+              foundAny = true;
+            }
+          }
+
+          // Method 3: Check in shadow DOMs
+          const allElements = document.querySelectorAll("*");
+          for (const elem of allElements) {
+            if (elem.shadowRoot) {
+              const shadowTextarea = elem.shadowRoot.getElementById(TARGET_ID);
+              if (shadowTextarea && shadowTextarea.tagName === "TEXTAREA") {
+                if (!monitoredElements.has(shadowTextarea)) {
+                  console.log("[DH] ✓ Found new instance in shadow DOM!");
+                  setupMonitoring(shadowTextarea);
+                }
+                foundAny = true;
+              }
+            }
+          }
+
+          return foundAny;
+        }
+
+        // Try immediately and repeatedly
+        console.log("[DH] Starting continuous search for dynamic tabs...");
+        
+        // Initial attempts with delays (sometimes DOM isn't ready)
+        const initialChecks = [0, 100, 500, 1000, 2000, 3000];
+        initialChecks.forEach(delay => {
+          setTimeout(() => {
+            console.log(`[DH] Initial check at ${delay}ms`);
+            findTextarea();
+          }, delay);
+        });
+
+        // Start mutation observer - throttled to avoid performance issues
+        if (document.body && window.MutationObserver) {
+          let mutationTimeout = null;
+          const observer = new MutationObserver((mutations) => {
+            // Throttle: only check once per 500ms even if many mutations occur
+            if (mutationTimeout) return;
+            
+            mutationTimeout = setTimeout(() => {
+              mutationTimeout = null;
+              findTextarea();
+            }, 500);
+          });
+
+          observer.observe(document.body, { 
+            childList: true, 
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['id', 'aria-selected', 'data-is-focusable']
+          });
+
+          console.log("[DH] MutationObserver started - throttled monitoring for tab changes");
+        }
+
+        // Also watch for tab clicks specifically
+        document.addEventListener('click', function(e) {
+          const target = e.target;
+          if (target && target.getAttribute) {
+            const role = target.getAttribute('role');
+            const ariaLabel = target.getAttribute('aria-label');
+            
+            // Detect tab clicks
+            if (role === 'tab' || target.closest('[role="tab"]')) {
+              console.log("[DH] Tab click detected, searching for textarea...");
+              setTimeout(() => findTextarea(), 100);
+              setTimeout(() => findTextarea(), 500);
+              setTimeout(() => findTextarea(), 1000);
+            }
+            
+            // Detect session-id clicks
+            if (target.id && target.id.includes('session-id')) {
+              console.log("[DH] Session tab detected, searching for textarea...");
+              setTimeout(() => findTextarea(), 100);
+              setTimeout(() => findTextarea(), 500);
+              setTimeout(() => findTextarea(), 1000);
+            }
+          }
+        }, true);
+
+        // Periodic interval check every 5 seconds (keep searching for new tabs)
+        const intervalCheck = setInterval(() => {
+          try {
+            console.log("[DH] Periodic search for textareas...");
+            findTextarea();
+          } catch (e) {
+            console.error("[DH] Error in interval check:", e);
+          }
+        }, 5000);
+
+        console.log("[DH] Continuous monitoring active - will detect textareas in new/switched tabs");
+
+      } catch (e) {
+        console.error("[DH] Error in setupSapTextAreaWatcher:", e);
+      }
+    }
 
     function showToast(text) {
       try {
@@ -428,8 +725,43 @@
       }
     }
 
+    function showNotification(text) {
+      try {
+        const existing = document.querySelector(".dh-notification");
+        if (existing) existing.remove();
+
+        const notification = document.createElement("div");
+        notification.className = "dh-notification";
+        
+        const icon = document.createElement("span");
+        icon.className = "dh-notification-icon";
+        icon.textContent = "⚠️";
+        
+        const message = document.createElement("span");
+        message.textContent = text.replace("⚠️ ", "");
+        
+        notification.appendChild(icon);
+        notification.appendChild(message);
+        document.body.appendChild(notification);
+
+        // Auto-hide after 8 seconds
+        setTimeout(() => {
+          notification.style.opacity = "0";
+          notification.style.transform = "translateX(-50%) translateY(-20px)";
+          notification.style.transition = "opacity 0.4s ease, transform 0.4s ease";
+        }, 8000);
+        setTimeout(() => {
+          notification.remove();
+        }, 8500);
+      } catch (_) {
+        // Non-blocking
+      }
+    }
+
     mount();
+
   } catch (err) {
-    console.warn("[Dynamics Helper] Initialization error:", err);
+    console.error("[DH] Initialization error:", err);
+    console.error("[DH] Error stack:", err.stack);
   }
 })();
