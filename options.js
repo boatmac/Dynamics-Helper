@@ -14,6 +14,7 @@
   let editingItem = null; // { item, parent, index }
   let collapsedFolders = new WeakSet();
   let filterText = '';
+  let draggedData = null; // { item, parent, index }
 
   function mergePrefs(p){
     return {
@@ -70,6 +71,12 @@
     });
   }
 
+  function isDescendant(parentItem, childItem) {
+    if (!parentItem || !parentItem.children) return false;
+    if (parentItem.children.includes(childItem)) return true;
+    return parentItem.children.some(child => isDescendant(child, childItem));
+  }
+
   function renderVisualTree() {
     const container = $('#visualTree');
     if (!container) return;
@@ -86,7 +93,72 @@
 
       const div = document.createElement('div');
       div.className = 'tree-item';
+      div.setAttribute('draggable', 'true');
       
+      // Drag Events
+      div.addEventListener('dragstart', (e) => {
+        e.stopPropagation(); // Prevent parent drag
+        draggedData = { item, parent: parentArray, index };
+        e.dataTransfer.effectAllowed = 'move';
+        // Set a timeout to add class so the drag image isn't affected
+        setTimeout(() => div.classList.add('dragging'), 0);
+      });
+
+      div.addEventListener('dragend', (e) => {
+        e.stopPropagation();
+        div.classList.remove('dragging');
+        draggedData = null;
+        $$('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      });
+
+      div.addEventListener('dragover', (e) => {
+        e.preventDefault(); // Allow drop
+        e.stopPropagation();
+        if (!draggedData) return;
+        // Prevent dropping on itself or its children (if folder)
+        if (draggedData.item === item) return;
+        if (draggedData.item.type === 'folder' && isDescendant(draggedData.item, item)) return;
+        
+        div.classList.add('drag-over');
+        e.dataTransfer.dropEffect = 'move';
+      });
+
+      div.addEventListener('dragleave', (e) => {
+        e.stopPropagation();
+        div.classList.remove('drag-over');
+      });
+
+      div.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        div.classList.remove('drag-over');
+        
+        if (!draggedData) return;
+        if (draggedData.item === item) return;
+        if (draggedData.item.type === 'folder' && isDescendant(draggedData.item, item)) {
+          alert('Cannot move a folder into its own child.');
+          return;
+        }
+
+        // Perform Move
+        // 1. Remove from old location
+        draggedData.parent.splice(draggedData.index, 1);
+        
+        // 2. Calculate new index
+        // If we are moving within the same array, and the old index was before the new index,
+        // we need to decrement the target index because the array shifted.
+        let targetIndex = index;
+        if (draggedData.parent === parentArray && draggedData.index < index) {
+          targetIndex--;
+        }
+        
+        // 3. Insert at new location (before the target item)
+        parentArray.splice(targetIndex, 0, draggedData.item);
+        
+        renderVisualTree();
+        syncToJson();
+      });
+
       const header = document.createElement('div');
       header.className = 'tree-item-header';
       

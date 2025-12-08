@@ -19,7 +19,12 @@
     .card .content { padding: 14px; display: grid; gap: 12px; }
 
     label { font-weight: 600; font-size: 13px; }
-    input[type="text"], input[type="number"], textarea { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid #d1d5db; font-size: 14px; }
+    input[type="text"], input[type="number"], textarea { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid #d1d5db; font-size: 14px; box-sizing: border-box; }
+    
+    /* Limit width of specific inputs in UI Preferences */
+    #buttonText { max-width: 200px; }
+    #offsetBottom, #offsetRight { max-width: 100px; }
+
     input[type="color"] { width: 48px; height: 34px; padding: 0; border: 1px solid #d1d5db; border-radius: 6px; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
@@ -32,12 +37,20 @@
     .error { color: #b91c1c; font-weight: 600; }
     textarea { min-height: 360px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
+    /* Group Box Styles */
+    .group-box { border: 1px solid #e5e7eb; padding: 12px; border-radius: 8px; background: #f9fafb; }
+    .group-title { font-size: 12px; font-weight: 700; color: #6b7280; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 0.5px; }
+
     /* Visual Editor Styles */
     .editor-toggle { margin-bottom: 15px; display: flex; gap: 15px; }
     .hidden { display: none !important; }
     
-    .tree-item { border: 1px solid #e5e7eb; margin: 4px 0; padding: 8px; border-radius: 6px; background: #fff; }
-    .tree-item-header { display: flex; align-items: center; gap: 8px; }
+    .tree-item { border: 1px solid #e5e7eb; margin: 4px 0; padding: 8px; border-radius: 6px; background: #fff; transition: all 0.2s; }
+    .tree-item.dragging { opacity: 0.5; background: #f9fafb; border-style: dashed; }
+    .tree-item.drag-over { border-top: 2px solid #2563eb; }
+    
+    .tree-item-header { display: flex; align-items: center; gap: 8px; cursor: grab; }
+    .tree-item-header:active { cursor: grabbing; }
     .tree-item-label { flex: 1; font-weight: 600; font-size: 14px; }
     .tree-item-type { font-size: 10px; background: #f3f4f6; padding: 2px 6px; border-radius: 4px; color: #6b7280; text-transform: uppercase; font-weight: bold; }
     .tree-children { margin-left: 24px; padding-left: 10px; border-left: 2px solid #e5e7eb; }
@@ -71,16 +84,20 @@
     <section class="card">
       <header><h2>UI Preferences</h2></header>
       <div class="content">
-        <div>
-          <label for="buttonText">Button Text</label>
-          <input id="buttonText" type="text" placeholder="DH" />
-        </div>
-        <div class="row">
-          <div>
-            <label for="primaryColor">Primary Color</label><br />
-            <input id="primaryColor" type="color" value="#2563eb" />
+        
+        <div class="group-box">
+          <div class="group-title">Floating Button Appearance</div>
+          <div class="row">
+            <div>
+              <label for="buttonText">Button Text</label>
+              <input id="buttonText" type="text" placeholder="DH" />
+            </div>
+            <div>
+              <label for="primaryColor">Primary Color</label><br />
+              <input id="primaryColor" type="color" value="#2563eb" />
+            </div>
           </div>
-          <div>
+          <div style="margin-top: 10px;">
             <label>Position (px)</label>
             <div class="row">
               <div>
@@ -94,10 +111,17 @@
             </div>
           </div>
         </div>
-        <div>
-          <label for="zebraAutomationEnabled">Enable ZebraAI Automation</label><br />
-          <input id="zebraAutomationEnabled" type="checkbox" />
+
+        <div class="group-box">
+          <div class="group-title">Automation</div>
+          <div>
+            <label for="zebraAutomationEnabled" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input id="zebraAutomationEnabled" type="checkbox" />
+              Enable ZebraAI Automation
+            </label>
+          </div>
         </div>
+
         <div class="actions">
           <button id="savePrefs">Save Preferences</button>
           <button id="resetPrefs" class="secondary">Reset to Defaults</button>
