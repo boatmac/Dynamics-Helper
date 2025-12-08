@@ -1,5 +1,6 @@
 (function(){
   const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => document.querySelectorAll(sel);
 
   const defaults = {
     buttonText: 'DH',
@@ -8,6 +9,11 @@
     offsetRight: 24,
     zebraAutomationEnabled: true
   };
+
+  let currentItems = [];
+  let editingItem = null; // { item, parent, index }
+  let collapsedFolders = new WeakSet();
+  let filterText = '';
 
   function mergePrefs(p){
     return {
@@ -43,6 +49,199 @@
     try { return JSON.stringify(obj, null, 2); } catch { return ''; }
   }
 
+  // --- Visual Editor Logic ---
+
+  function matchesFilter(item) {
+    if (!filterText) return true;
+    const txt = filterText.toLowerCase();
+    if (item.label && item.label.toLowerCase().includes(txt)) return true;
+    if (item.type === 'folder' && item.children) {
+      return item.children.some(child => matchesFilter(child));
+    }
+    return false;
+  }
+
+  function sortItemsRecursive(items) {
+    items.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    items.forEach(item => {
+      if (item.type === 'folder' && item.children) {
+        sortItemsRecursive(item.children);
+      }
+    });
+  }
+
+  function renderVisualTree() {
+    const container = $('#visualTree');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    if (!currentItems || currentItems.length === 0) {
+      container.innerHTML = '<div style="color:#888; font-style:italic; padding:10px; text-align:center;">No items. Add one below.</div>';
+      return;
+    }
+
+    function createNode(item, parentArray, index) {
+      // Filter check
+      if (!matchesFilter(item)) return null;
+
+      const div = document.createElement('div');
+      div.className = 'tree-item';
+      
+      const header = document.createElement('div');
+      header.className = 'tree-item-header';
+      
+      // Collapse toggle for folders
+      if (item.type === 'folder') {
+        const btnCollapse = document.createElement('button');
+        btnCollapse.className = 'btn-icon';
+        btnCollapse.style.marginRight = '6px';
+        btnCollapse.style.padding = '2px 6px';
+        const isCollapsed = collapsedFolders.has(item) && !filterText; // Force expand when filtering
+        btnCollapse.textContent = isCollapsed ? '▶' : '▼';
+        btnCollapse.onclick = (e) => {
+          e.stopPropagation();
+          if (isCollapsed) collapsedFolders.delete(item);
+          else collapsedFolders.add(item);
+          renderVisualTree();
+        };
+        header.append(btnCollapse);
+      }
+
+      const typeBadge = document.createElement('span');
+      typeBadge.className = 'tree-item-type';
+      typeBadge.textContent = item.type;
+      
+      const label = document.createElement('span');
+      label.className = 'tree-item-label';
+      label.textContent = item.label || '(No Label)';
+      
+      const btnEdit = document.createElement('button');
+      btnEdit.className = 'btn-icon';
+      btnEdit.textContent = 'Edit';
+      btnEdit.onclick = () => openModal(item, parentArray, index);
+      
+      const btnDel = document.createElement('button');
+      btnDel.className = 'btn-icon btn-delete';
+      btnDel.textContent = '✕';
+      btnDel.onclick = () => {
+        if(confirm('Delete this item?')) {
+          parentArray.splice(index, 1);
+          renderVisualTree();
+          syncToJson();
+        }
+      };
+
+      header.append(typeBadge, label, btnEdit, btnDel);
+      div.append(header);
+
+      if (item.type === 'folder') {
+        const isCollapsed = collapsedFolders.has(item) && !filterText;
+        
+        if (!isCollapsed) {
+          const childrenContainer = document.createElement('div');
+          childrenContainer.className = 'tree-children';
+          
+          if (item.children && item.children.length > 0) {
+            item.children.forEach((child, i) => {
+              const childNode = createNode(child, item.children, i);
+              if (childNode) childrenContainer.append(childNode);
+            });
+          }
+          
+          const btnAddChild = document.createElement('button');
+          btnAddChild.className = 'btn-icon btn-add';
+          btnAddChild.style.marginTop = '4px';
+          btnAddChild.textContent = '+ Add Child';
+          btnAddChild.onclick = () => openModal(null, item.children || (item.children = []), -1);
+          
+          childrenContainer.append(btnAddChild);
+          div.append(childrenContainer);
+        }
+      }
+      
+      return div;
+    }
+
+    currentItems.forEach((item, i) => {
+      const node = createNode(item, currentItems, i);
+      if (node) container.append(node);
+    });
+  }
+
+  function openModal(item, parentArray, index) {
+    editingItem = { item, parent: parentArray, index };
+    const modal = $('#itemModal');
+    const title = $('#modalTitle');
+    
+    $('#itemType').value = item ? item.type : 'link';
+    $('#itemLabel').value = item ? item.label : '';
+    $('#itemUrl').value = item ? item.url : '';
+    $('#itemTarget').value = item ? item.target || '_blank' : '_blank';
+    $('#itemContent').value = item ? item.content : '';
+    
+    title.textContent = item ? 'Edit Item' : 'Add Item';
+    
+    updateModalFields();
+    modal.classList.remove('hidden');
+  }
+
+  function updateModalFields() {
+    const type = $('#itemType').value;
+    $$('.type-field').forEach(el => el.classList.add('hidden'));
+    if (type === 'link') $$('.type-link').forEach(el => el.classList.remove('hidden'));
+    if (type === 'markdown') $$('.type-markdown').forEach(el => el.classList.remove('hidden'));
+  }
+
+  function saveModal() {
+    const type = $('#itemType').value;
+    const label = $('#itemLabel').value;
+    
+    const newItem = { type, label };
+    
+    if (type === 'link') {
+      newItem.url = $('#itemUrl').value;
+      newItem.target = $('#itemTarget').value;
+    } else if (type === 'markdown') {
+      newItem.content = $('#itemContent').value;
+    } else if (type === 'folder') {
+      if (editingItem && editingItem.item && editingItem.item.type === 'folder') {
+        newItem.children = editingItem.item.children;
+      } else {
+        newItem.children = [];
+      }
+    }
+
+    if (editingItem && editingItem.index !== -1 && editingItem.item) {
+      editingItem.parent[editingItem.index] = newItem;
+    } else {
+      editingItem.parent.push(newItem);
+    }
+    
+    $('#itemModal').classList.add('hidden');
+    renderVisualTree();
+    syncToJson();
+  }
+
+  function syncToJson() {
+    const $itemsJson = $('#itemsJson');
+    if ($itemsJson) $itemsJson.value = pretty(currentItems);
+  }
+
+  function syncFromJson() {
+    const $itemsJson = $('#itemsJson');
+    try {
+      const parsed = JSON.parse($itemsJson.value || '[]');
+      currentItems = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.items) ? parsed.items : []);
+      renderVisualTree();
+      return true;
+    } catch (e) {
+      alert('Invalid JSON in editor. Please fix it before switching to Visual mode.');
+      return false;
+    }
+  }
+
+  // --- Init ---
+
   async function init(){
     const $buttonText = $('#buttonText');
     const $primaryColor = $('#primaryColor');
@@ -68,10 +267,13 @@
 
     // Items: prefer stored, else packaged
     try{
-      const items = Array.isArray(stored.dh_items) ? stored.dh_items : await loadPackagedItems();
-      if($itemsJson) $itemsJson.value = pretty(items);
+      currentItems = Array.isArray(stored.dh_items) ? stored.dh_items : await loadPackagedItems();
+      if($itemsJson) $itemsJson.value = pretty(currentItems);
+      renderVisualTree();
     }catch(e){
+      currentItems = [];
       if($itemsJson) $itemsJson.value = '[]';
+      renderVisualTree();
     }
 
     // Handlers
@@ -101,30 +303,31 @@
 
     $('#saveItems')?.addEventListener('click', async ()=>{
       $jsonError.textContent = '';
-      let parsed;
-      try{
-        parsed = JSON.parse($itemsJson?.value || '[]');
-        if(!Array.isArray(parsed)){
-          if(parsed && Array.isArray(parsed.items)) parsed = parsed.items; else throw new Error('Root JSON must be an array or an object with .items array');
-        }
-      }catch(e){
-        $jsonError.textContent = 'Invalid JSON: ' + e.message;
-        return;
+      
+      // If in JSON mode, sync to currentItems first
+      const mode = document.querySelector('input[name="editorMode"]:checked').value;
+      if (mode === 'json') {
+        if (!syncFromJson()) return;
       }
-      await chrome.storage.local.set({ dh_items: parsed });
+
+      await chrome.storage.local.set({ dh_items: currentItems });
       show($itemsStatus, 'Items saved to local storage.');
       setTimeout(()=> show($itemsStatus, ''), 1800);
     });
 
     $('#clearItems')?.addEventListener('click', async ()=>{
       await chrome.storage.local.remove('dh_items');
-      show($itemsStatus, 'Stored items cleared. The extension will fall back to packaged items.json.');
+      currentItems = await loadPackagedItems();
+      syncToJson();
+      renderVisualTree();
+      show($itemsStatus, 'Stored items cleared. Reset to packaged defaults.');
       setTimeout(()=> show($itemsStatus, ''), 2200);
     });
 
     $('#loadDefault')?.addEventListener('click', async ()=>{
-      const arr = await loadPackagedItems();
-      $itemsJson.value = pretty(arr);
+      currentItems = await loadPackagedItems();
+      syncToJson();
+      renderVisualTree();
       show($itemsStatus, 'Loaded packaged items.json. Click "Save Items" to persist.');
       setTimeout(()=> show($itemsStatus, ''), 2200);
     });
@@ -141,8 +344,9 @@
         try{
           const text = String(reader.result || '');
           const parsed = JSON.parse(text);
-          const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.items) ? parsed.items : []);
-          $itemsJson.value = pretty(arr);
+          currentItems = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.items) ? parsed.items : []);
+          syncToJson();
+          renderVisualTree();
           $jsonError.textContent = '';
           show($itemsStatus, 'Imported JSON. Click "Save Items" to persist.');
           setTimeout(()=> show($itemsStatus, ''), 2200);
@@ -154,17 +358,12 @@
         $jsonError.textContent = 'Failed to read file.';
       };
       reader.readAsText(f, 'utf-8');
-      // Clear input so user can reselect same file if needed
       $fileInput.value = '';
     });
 
     $('#exportItems')?.addEventListener('click', async ()=>{
-      // Try to use current textarea content if valid, else fallback to stored
-      let text = $itemsJson?.value || '';
-      try { JSON.parse(text); } catch { 
-        const stored2 = await chrome.storage.local.get('dh_items');
-        text = pretty(Array.isArray(stored2.dh_items) ? stored2.dh_items : []);
-      }
+      // Always export currentItems
+      const text = pretty(currentItems);
       const blob = new Blob([text], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -175,6 +374,86 @@
       a.remove();
       URL.revokeObjectURL(url);
     });
+
+    // Visual Editor Handlers
+    $$('input[name="editorMode"]').forEach(el => {
+      el.addEventListener('change', (e) => {
+        const mode = e.target.value;
+        if (mode === 'visual') {
+          if (syncFromJson()) {
+            $('#visualEditorContainer').classList.remove('hidden');
+            $('#jsonEditorContainer').classList.add('hidden');
+          } else {
+            // Revert toggle if JSON is invalid
+            document.querySelector('input[value="json"]').checked = true;
+          }
+        } else {
+          syncToJson();
+          $('#visualEditorContainer').classList.add('hidden');
+          $('#jsonEditorContainer').classList.remove('hidden');
+        }
+      });
+    });
+
+    $('#addRootItem')?.addEventListener('click', () => {
+      openModal(null, currentItems, -1);
+    });
+
+    $('#filterInput')?.addEventListener('input', (e) => {
+      filterText = e.target.value;
+      renderVisualTree();
+    });
+
+    $('#sortBtn')?.addEventListener('click', () => {
+      if(confirm('Sort all items alphabetically? This cannot be undone easily.')) {
+        sortItemsRecursive(currentItems);
+        renderVisualTree();
+        syncToJson();
+      }
+    });
+
+    $('#toggleCollapseBtn')?.addEventListener('click', () => {
+      // If any folder is collapsed, expand all. Otherwise collapse all.
+      // Actually, simpler logic: if we have any collapsed items, clear set (expand all).
+      // If set is empty, find all folders and add to set (collapse all).
+      // But "Collapse All" usually means hide everything.
+      
+      // Let's check if we have any tracked collapsed items.
+      // Since WeakSet is not iterable, we can't check size easily.
+      // We'll use a heuristic or just toggle based on a flag if we had one.
+      // Instead, let's just implement "Collapse All" (add all folders) and "Expand All" (clear set).
+      // We'll toggle the button text or just cycle.
+      
+      // Let's try: If button says "Collapse All", we collapse everything. Then change text to "Expand All".
+      const btn = $('#toggleCollapseBtn');
+      const isExpandAction = btn.textContent === 'Expand All';
+      
+      if (isExpandAction) {
+        collapsedFolders = new WeakSet();
+        btn.textContent = 'Collapse All';
+      } else {
+        // Add all folders to collapsed set
+        function collapseRecursive(items) {
+          items.forEach(item => {
+            if (item.type === 'folder') {
+              collapsedFolders.add(item);
+              if (item.children) collapseRecursive(item.children);
+            }
+          });
+        }
+        collapseRecursive(currentItems);
+        btn.textContent = 'Expand All';
+      }
+      renderVisualTree();
+    });
+
+    $('#itemType')?.addEventListener('change', updateModalFields);
+    
+    $('#cancelModal')?.addEventListener('click', () => {
+      $('#itemModal').classList.add('hidden');
+    });
+    
+    $('#saveModal')?.addEventListener('click', saveModal);
   }
 
   document.addEventListener('DOMContentLoaded', init);

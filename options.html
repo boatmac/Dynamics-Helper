@@ -31,6 +31,36 @@
     .status { font-size: 13px; color: #065f46; }
     .error { color: #b91c1c; font-weight: 600; }
     textarea { min-height: 360px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+    /* Visual Editor Styles */
+    .editor-toggle { margin-bottom: 15px; display: flex; gap: 15px; }
+    .hidden { display: none !important; }
+    
+    .tree-item { border: 1px solid #e5e7eb; margin: 4px 0; padding: 8px; border-radius: 6px; background: #fff; }
+    .tree-item-header { display: flex; align-items: center; gap: 8px; }
+    .tree-item-label { flex: 1; font-weight: 600; font-size: 14px; }
+    .tree-item-type { font-size: 10px; background: #f3f4f6; padding: 2px 6px; border-radius: 4px; color: #6b7280; text-transform: uppercase; font-weight: bold; }
+    .tree-children { margin-left: 24px; padding-left: 10px; border-left: 2px solid #e5e7eb; }
+    
+    .editor-toolbar { display: flex; gap: 10px; margin-bottom: 10px; }
+    .editor-toolbar input { flex: 1; }
+    
+    .btn-icon { padding: 4px 8px; font-size: 12px; background: #fff; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; }
+    .btn-icon:hover { background: #f9fafb; }
+    .btn-add { color: #059669; border-color: #a7f3d0; background: #ecfdf5; }
+    .btn-add:hover { background: #d1fae5; }
+    .btn-delete { color: #dc2626; border-color: #fecaca; background: #fef2f2; }
+    .btn-delete:hover { background: #fee2e2; }
+
+    /* Modal Styles */
+    .modal-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
+    .modal { background: #fff; padding: 24px; border-radius: 12px; width: 450px; max-width: 90%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
+    .modal h3 { margin-top: 0; margin-bottom: 16px; font-size: 18px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; margin-bottom: 6px; font-weight: 500; color: #374151; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+    select { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid #d1d5db; font-size: 14px; background-color: #fff; color: #1f2937; }
+    select option { background-color: #fff; color: #1f2937; }
   </style>
 </head>
 <body>
@@ -79,12 +109,28 @@
     <section class="card">
       <header><h2>Items Configuration</h2></header>
       <div class="content">
-        <div>
+        <div class="editor-toggle">
+          <label><input type="radio" name="editorMode" value="visual" checked> Visual Editor</label>
+          <label><input type="radio" name="editorMode" value="json"> JSON Editor</label>
+        </div>
+
+        <div id="visualEditorContainer">
+          <div class="editor-toolbar">
+            <input type="text" id="filterInput" placeholder="Filter items..." />
+            <button id="sortBtn" class="btn-icon" title="Sort Alphabetically">Sort</button>
+            <button id="toggleCollapseBtn" class="btn-icon" title="Collapse/Expand All">Collapse All</button>
+          </div>
+          <div id="visualTree"></div>
+          <button id="addRootItem" class="btn-icon btn-add" style="margin-top: 12px; width: 100%; padding: 10px;">+ Add Root Item</button>
+        </div>
+
+        <div id="jsonEditorContainer" class="hidden">
           <label for="itemsJson">Items JSON</label>
           <textarea id="itemsJson" spellcheck="false" placeholder='[ { "type": "link", "label": "Docs", "url": "https://..." } ]'></textarea>
           <div id="jsonError" class="error" aria-live="polite"></div>
         </div>
-        <div class="actions">
+
+        <div class="actions" style="margin-top: 16px; border-top: 1px solid #eee; padding-top: 16px;">
           <input type="file" id="fileInput" accept="application/json" hidden />
           <button id="saveItems">Save Items</button>
           <button id="loadFromFile" class="secondary">Import JSON…</button>
@@ -96,6 +142,45 @@
       </div>
     </section>
   </main>
+
+  <!-- Modal Template -->
+  <div id="itemModal" class="modal-backdrop hidden">
+    <div class="modal">
+      <h3 id="modalTitle">Edit Item</h3>
+      <div class="form-group">
+        <label>Type</label>
+        <select id="itemType">
+          <option value="link">Link</option>
+          <option value="folder">Folder</option>
+          <option value="markdown">Markdown</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Label</label>
+        <input type="text" id="itemLabel" placeholder="My Item">
+      </div>
+      <div class="form-group type-field type-link">
+        <label>URL</label>
+        <input type="text" id="itemUrl" placeholder="https://...">
+      </div>
+      <div class="form-group type-field type-link">
+        <label>Target</label>
+        <select id="itemTarget">
+          <option value="_blank">New Tab (_blank)</option>
+          <option value="_self">Same Tab (_self)</option>
+        </select>
+      </div>
+      <div class="form-group type-field type-markdown hidden">
+        <label>Content (Markdown)</label>
+        <textarea id="itemContent" rows="5" placeholder="# Title..."></textarea>
+      </div>
+      <div class="modal-actions">
+        <button id="cancelModal" class="secondary">Cancel</button>
+        <button id="saveModal">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script src="options.js"></script>
 </body>
 </html>
