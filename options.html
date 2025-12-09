@@ -48,10 +48,13 @@
     .tree-item { border: 1px solid #e5e7eb; margin: 4px 0; padding: 8px; border-radius: 6px; background: #fff; transition: all 0.2s; }
     .tree-item.dragging { opacity: 0.5; background: #f9fafb; border-style: dashed; }
     .tree-item.drag-over { border-top: 2px solid #2563eb; }
+    .tree-item.drag-over-inside { background-color: #eff6ff; border: 2px dashed #2563eb; }
     
-    .tree-item-header { display: flex; align-items: center; gap: 8px; cursor: grab; }
+    .tree-item-header { display: flex; align-items: center; gap: 8px; cursor: grab; padding: 4px; border-radius: 4px; }
+    .tree-item-header:hover { background-color: #f3f4f6; }
+    .tree-item-header.selected { background-color: #dbeafe; border: 1px solid #bfdbfe; }
     .tree-item-header:active { cursor: grabbing; }
-    .tree-item-label { flex: 1; font-weight: 600; font-size: 14px; }
+    .tree-item-label { flex: 1; font-weight: 600; font-size: 14px; user-select: none; }
     .tree-item-type { font-size: 10px; background: #f3f4f6; padding: 2px 6px; border-radius: 4px; color: #6b7280; text-transform: uppercase; font-weight: bold; }
     .tree-children { margin-left: 24px; padding-left: 10px; border-left: 2px solid #e5e7eb; }
     

@@ -14,7 +14,8 @@
   let editingItem = null; // { item, parent, index }
   let collapsedFolders = new WeakSet();
   let filterText = '';
-  let draggedData = null; // { item, parent, index }
+  let draggedData = null; // { items: [] } - Array of items being dragged
+  let selectedItems = new Set(); // Set of selected items
 
   function mergePrefs(p){
     return {
@@ -77,6 +78,18 @@
     return parentItem.children.some(child => isDescendant(child, childItem));
   }
 
+  // Helper to find parent array and index of an item
+  function findItemLocation(rootArray, itemToFind) {
+    for (let i = 0; i < rootArray.length; i++) {
+      if (rootArray[i] === itemToFind) return { parent: rootArray, index: i };
+      if (rootArray[i].type === 'folder' && rootArray[i].children) {
+        const result = findItemLocation(rootArray[i].children, itemToFind);
+        if (result) return result;
+      }
+    }
+    return null;
+  }
+
   function renderVisualTree() {
     const container = $('#visualTree');
     if (!container) return;
@@ -98,69 +111,184 @@
       // Drag Events
       div.addEventListener('dragstart', (e) => {
         e.stopPropagation(); // Prevent parent drag
-        draggedData = { item, parent: parentArray, index };
+        
+        // Multi-selection logic for drag
+        if (!selectedItems.has(item)) {
+          // If dragging an unselected item, clear selection and select it
+          selectedItems.clear();
+          selectedItems.add(item);
+          renderVisualTree(); // Re-render to show selection
+        }
+        
+        draggedData = { items: Array.from(selectedItems) };
         e.dataTransfer.effectAllowed = 'move';
-        // Set a timeout to add class so the drag image isn't affected
         setTimeout(() => div.classList.add('dragging'), 0);
       });
 
       div.addEventListener('dragend', (e) => {
         e.stopPropagation();
-        div.classList.remove('dragging');
+        $$('.tree-item.dragging').forEach(el => el.classList.remove('dragging'));
         draggedData = null;
         $$('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        $$('.drag-over-inside').forEach(el => el.classList.remove('drag-over-inside'));
       });
 
       div.addEventListener('dragover', (e) => {
         e.preventDefault(); // Allow drop
         e.stopPropagation();
         if (!draggedData) return;
-        // Prevent dropping on itself or its children (if folder)
-        if (draggedData.item === item) return;
-        if (draggedData.item.type === 'folder' && isDescendant(draggedData.item, item)) return;
         
-        div.classList.add('drag-over');
+        // Validation: Cannot drop into self or descendants
+        for (const draggedItem of draggedData.items) {
+          if (draggedItem === item) return;
+          if (draggedItem.type === 'folder' && isDescendant(draggedItem, item)) return;
+        }
+        
+        // Determine drop zone: Inside Folder vs Insert Before
+        let isInside = false;
+        if (item.type === 'folder') {
+          const rect = div.getBoundingClientRect();
+          // If hovering over the middle 50% of the folder header area, treat as "inside"
+          // Actually, let's use the header element for better precision
+          const headerRect = div.querySelector('.tree-item-header').getBoundingClientRect();
+          const offsetY = e.clientY - headerRect.top;
+          if (offsetY > headerRect.height * 0.25 && offsetY < headerRect.height * 0.75) {
+            isInside = true;
+          }
+        }
+
+        $$('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        $$('.drag-over-inside').forEach(el => el.classList.remove('drag-over-inside'));
+
+        if (isInside) {
+          div.classList.add('drag-over-inside');
+        } else {
+          div.classList.add('drag-over');
+        }
+        
         e.dataTransfer.dropEffect = 'move';
       });
 
       div.addEventListener('dragleave', (e) => {
         e.stopPropagation();
         div.classList.remove('drag-over');
+        div.classList.remove('drag-over-inside');
       });
 
       div.addEventListener('drop', (e) => {
         e.preventDefault();
         e.stopPropagation();
         div.classList.remove('drag-over');
+        div.classList.remove('drag-over-inside');
         
-        if (!draggedData) return;
-        if (draggedData.item === item) return;
-        if (draggedData.item.type === 'folder' && isDescendant(draggedData.item, item)) {
-          alert('Cannot move a folder into its own child.');
-          return;
+        if (!draggedData || !draggedData.items.length) return;
+
+        // Determine drop target
+        let targetParent = parentArray;
+        let targetIndex = index;
+        
+        // Check if we are dropping INSIDE a folder
+        // We need to re-calculate the "isInside" logic because drop event doesn't carry the class state reliably
+        let isInside = false;
+        if (item.type === 'folder') {
+          const headerRect = div.querySelector('.tree-item-header').getBoundingClientRect();
+          const offsetY = e.clientY - headerRect.top;
+          if (offsetY > headerRect.height * 0.25 && offsetY < headerRect.height * 0.75) {
+            isInside = true;
+          }
         }
 
-        // Perform Move
-        // 1. Remove from old location
-        draggedData.parent.splice(draggedData.index, 1);
-        
-        // 2. Calculate new index
-        // If we are moving within the same array, and the old index was before the new index,
-        // we need to decrement the target index because the array shifted.
-        let targetIndex = index;
-        if (draggedData.parent === parentArray && draggedData.index < index) {
-          targetIndex--;
+        if (isInside) {
+          if (!item.children) item.children = [];
+          targetParent = item.children;
+          targetIndex = item.children.length; // Append to end
+          // Expand folder to show dropped items
+          collapsedFolders.delete(item);
         }
+
+        // Validation again
+        for (const draggedItem of draggedData.items) {
+          if (draggedItem === item) return;
+          if (draggedItem.type === 'folder' && isDescendant(draggedItem, item)) {
+            alert('Cannot move a folder into its own child.');
+            return;
+          }
+        }
+
+        // Perform Move for all items
+        // 1. Collect all items and their current locations
+        const moves = [];
+        for (const draggedItem of draggedData.items) {
+          const loc = findItemLocation(currentItems, draggedItem);
+          if (loc) moves.push({ item: draggedItem, ...loc });
+        }
+
+        // 2. Remove all items from old locations
+        // Sort by index descending to avoid shifting issues when removing from same array
+        moves.sort((a, b) => {
+          if (a.parent !== b.parent) return 0;
+          return b.index - a.index;
+        });
         
-        // 3. Insert at new location (before the target item)
-        parentArray.splice(targetIndex, 0, draggedData.item);
+        moves.forEach(m => {
+          m.parent.splice(m.index, 1);
+        });
+
+        // 3. Insert at new location
+        // If targetParent was one of the source arrays, we need to adjust targetIndex
+        // But since we removed items, the targetIndex might point to a different item now.
+        // However, 'item' (the drop target) is still in 'parentArray' (unless we dropped inside it).
+        // If we dropped inside 'item', 'item' wasn't removed (validation ensures we didn't drag 'item').
+        // If we dropped before 'item', we need to find 'item's new index.
         
+        if (!isInside) {
+          // Find the new index of the drop target 'item'
+          const newLoc = findItemLocation(currentItems, item);
+          if (newLoc) {
+            targetIndex = newLoc.index;
+            targetParent = newLoc.parent;
+          } else {
+            // Should not happen unless item was removed (impossible)
+            return;
+          }
+        }
+
+        // Insert items
+        // We want to maintain their relative order if possible, or just insert them in selection order
+        // Let's insert them in the order they are in draggedData.items
+        // We insert them one by one at targetIndex. 
+        // To keep order: insert item[0] at index, item[1] at index+1...
+        draggedData.items.forEach((draggedItem, i) => {
+          targetParent.splice(targetIndex + i, 0, draggedItem);
+        });
+        
+        selectedItems.clear(); // Clear selection after drop
         renderVisualTree();
         syncToJson();
       });
 
       const header = document.createElement('div');
       header.className = 'tree-item-header';
+      if (selectedItems.has(item)) {
+        header.classList.add('selected');
+      }
+      
+      // Selection Click Handler
+      header.addEventListener('click', (e) => {
+        // Ignore clicks on buttons
+        if (e.target.tagName === 'BUTTON') return;
+        
+        if (e.ctrlKey || e.metaKey) {
+          // Toggle selection
+          if (selectedItems.has(item)) selectedItems.delete(item);
+          else selectedItems.add(item);
+        } else {
+          // Single select
+          selectedItems.clear();
+          selectedItems.add(item);
+        }
+        renderVisualTree();
+      });
       
       // Collapse toggle for folders
       if (item.type === 'folder') {
