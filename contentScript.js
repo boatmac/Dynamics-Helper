@@ -75,11 +75,61 @@ try {
 
     console.log("[DH] Starting mount process...");
 
+    // Clipboard monitoring for Azure Resources
+    let lastClipboardContent = "";
+
+    function parseAzureResourceId(text) {
+      // Regex to match Azure Resource ID
+      // /subscriptions/{sub}/resourceGroups/{rg}/providers/{providerNamespace}/{resourceType}/{resourceName}
+      const regex = /subscriptions\/([^\/]+)\/resourceGroups\/([^\/]+)\/providers\/([^\/]+)\/([^\/]+)\/([^\/]+)/i;
+      const match = text.match(regex);
+      
+      if (match) {
+        return {
+          subscription: match[1],
+          resourceGroup: match[2],
+          provider: `${match[3]}/${match[4]}`,
+          resourceName: match[5]
+        };
+      }
+      return null;
+    }
+
+    async function checkClipboard() {
+      if (!document.hasFocus()) return;
+
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && text !== lastClipboardContent) {
+          lastClipboardContent = text;
+          const azureResource = parseAzureResourceId(text);
+          
+          if (azureResource) {
+            const msg = `Azure Resource Detected:\n\nSubscription: ${azureResource.subscription}\nResource Group: ${azureResource.resourceGroup}\nProvider: ${azureResource.provider}\nName: ${azureResource.resourceName}`;
+            showNotification(msg, 'info');
+            console.log("[DH] Azure Resource found in clipboard:", azureResource);
+          }
+        }
+      } catch (err) {
+        // Clipboard access denied or other error
+      }
+    }
+
+    function startClipboardListener() {
+      // Check every 2 seconds
+      setInterval(checkClipboard, 2000);
+      
+      // Also check on window focus
+      window.addEventListener("focus", checkClipboard);
+    }
+
       const mount = async () => {
       if (!document.body) {
         setTimeout(mount, 50);
         return;
       }
+
+      startClipboardListener();
 
       // Container
       const container = document.createElement("div");
@@ -725,17 +775,20 @@ try {
       }
     }
 
-    function showNotification(text) {
+    function showNotification(text, type = 'error') {
       try {
         const existing = document.querySelector(".dh-notification");
         if (existing) existing.remove();
 
         const notification = document.createElement("div");
         notification.className = "dh-notification";
+        if (type === 'info') {
+          notification.classList.add("dh-notification-info");
+        }
         
         const icon = document.createElement("span");
         icon.className = "dh-notification-icon";
-        icon.textContent = "⚠️";
+        icon.textContent = type === 'info' ? "📋" : "⚠️";
         
         const message = document.createElement("span");
         message.textContent = text.replace("⚠️ ", "");

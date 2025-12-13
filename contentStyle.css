@@ -189,8 +189,14 @@
   z-index: 2147483647;
   animation: dh-slide-in 0.4s ease-out;
   max-width: 90%;
-  text-align: center;
+  text-align: left;
+  white-space: pre-wrap;
   border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.dh-notification-info {
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%);
+  box-shadow: 0 10px 40px rgba(37, 99, 235, 0.4), 0 4px 12px rgba(0,0,0,0.2);
 }
 
 .dh-notification-icon {
