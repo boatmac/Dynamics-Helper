@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "Dynamics Helper",
+  "version": "2.0.0",
+  "description": "Productivity tool for Technical Support Engineers",
+  "permissions": [
+    "nativeMessaging",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.dynamics.com/*",
+    "https://*.powerplatform.microsoft.com/*",
+    "https://portal.azure.com/*"
+  ],
+  "background": {
+    "service_worker": "service-worker-loader.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "assets/index.tsx-loader-CjbiU0mX.js"
+      ],
+      "matches": [
+        "https://*.dynamics.com/*",
+        "https://*.powerplatform.microsoft.com/*",
+        "https://portal.azure.com/*"
+      ],
+      "css": [
+        "assets/index-BFGQmG7e.css"
+      ]
+    }
+  ],
+  "action": {
+    "default_popup": "index.html"
+  },
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "https://*.dynamics.com/*",
+        "https://*.powerplatform.microsoft.com/*",
+        "https://portal.azure.com/*"
+      ],
+      "resources": [
+        "assets/index-C1aTXuGP.js",
+        "assets/index.tsx-C7gKQtC5.js"
+      ],
+      "use_dynamic_url": false
+    }
+  ]
+}

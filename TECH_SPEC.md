@@ -70,6 +70,7 @@ The target website uses **Microsoft Fluent UI (React)**. CSS class names are dyn
     ```
 
 3. **Mutation Observers:** The page is a SPA. Use `MutationObserver` to detect when error logs or ticket details are fully rendered before attempting to read.
+4. **Debug/Fallback Mode:** Implement a fallback that dumps a simplified DOM snapshot to the console if React internal keys (`__reactProps$`) are not found. This aids in rapid debugging if the target site updates.
 
 ### 3.2. Native Messaging Protocol
 
@@ -87,12 +88,23 @@ The target website uses **Microsoft Fluent UI (React)**. CSS class names are dyn
     }
     ```
 
-* **Message Structure (Host -> Extension):**
+* **Message Structure (Success Response):**
 
     ```json
     {
       "status": "success",
       "data": "Here is the explanation from GitHub Copilot...",
+      "requestId": "uuid-123"
+    }
+    ```
+
+* **Message Structure (Error Response):**
+
+    ```json
+    {
+      "status": "error",
+      "error": "gh_cli_not_found",
+      "message": "GitHub CLI not found in PATH. Please install it.",
       "requestId": "uuid-123"
     }
     ```
@@ -104,14 +116,16 @@ The target website uses **Microsoft Fluent UI (React)**. CSS class names are dyn
 1. **Directory Setup:** Create `/host`.
 2. **The Wrapper (`start_dhnativehost.bat`):**
     * Must use absolute paths (dynamically derived from `%~dp0`).
-    * **CRITICAL:** Must execute Python with unbuffered IO (pass `-u` flag or set `PYTHONUNBUFFERED=1`).
-    * *Example:* `python -u "%~dp0dh_native_host.py"`
+    * **CRITICAL:** Must execute the **virtual environment's Python executable** explicitly (e.g., `%~dp0venv\Scripts\python.exe`) to ensure dependencies are found.
+    * Must execute Python with unbuffered IO (pass `-u` flag or set `PYTHONUNBUFFERED=1`).
+    * *Example:* `"%~dp0venv\Scripts\python.exe" -u "%~dp0dh_native_host.py"`
 3. **The Logic (`dh_native_host.py`):**
     * Read 4 bytes from `sys.stdin.buffer` (blocking).
     * Decode JSON, verify payload, echo back response.
 4. **The Installer (`register.py` + `install.bat`):**
     * `install.bat`: Creates a local `venv` (optional but recommended) and installs requirements. Then calls `register.py`.
-    * `register.py`: Generates the `host_manifest.json` dynamically with the **exact absolute path** to `start_dhnativehost.bat` and writes the registry key (`HKCU\Software\Google\Chrome\NativeMessagingHosts\...`).
+    * `register.py`: Generates the `host_manifest.json` dynamically with the **exact absolute path** to `start_dhnativehost.bat`.
+    * **Browser Support:** Writes registry keys for **both** Chrome (`HKCU\Software\Google\Chrome\NativeMessagingHosts\...`) and Edge (`HKCU\Software\Microsoft\Edge\NativeMessagingHosts\...`).
 5. **Extension Test:** Verify the extension can verify the "Ping".
 
 ### Phase 2: Extension UI & Fluent UI Adapter
@@ -123,13 +137,16 @@ The target website uses **Microsoft Fluent UI (React)**. CSS class names are dyn
 ### Phase 3: Local AI Integration
 
 1. Update `dh_native_host.py` to handle the `analyze_error` action.
-2. Implement `subprocess` calls to `gh copilot explain`.
-3. *Constraint:* Ensure the environment variables for `gh` CLI are accessible to the script.
+2. **Pre-flight Check:** Implement a startup health check to verify `gh` is in PATH and authenticated (`gh auth status`). Return an error to the UI if this fails.
+3. Implement `subprocess` calls to `gh copilot explain`.
+    * **Security:** Use `subprocess.run(["gh", ...], shell=False)` with an argument list to prevent shell injection. Do not use `os.system` or `shell=True`.
+4. *Constraint:* Ensure the environment variables for `gh` CLI are accessible to the script.
 
 ### Phase 4: Azure Sync (Optional/Later)
 
 1. Create an Azure Function to CRUD Bookmarks.
-2. Connect Extension to Azure AD (optional) or use a simple API Key for now.
+2. Connect Extension to Azure:
+    * **Auth Strategy:** Use a user-configurable API Key (entered in Options page) or Azure AD (MSAL). Do not hardcode API keys.
 
 ## 5. Security & Constraints
 
