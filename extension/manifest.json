@@ -28,6 +28,16 @@
       "js": ["src/content/index.tsx"]
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["items.json"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "options_ui": {
+    "page": "index.html",
+    "open_in_tab": true
+  },
   "action": {
     "default_popup": "index.html"
   }

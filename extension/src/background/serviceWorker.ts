@@ -11,6 +11,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             .catch(error => sendResponse({ status: "error", error: error.message }));
         return true; // Keep channel open for async response
     }
+    
+    if (message.type === "OPEN_OPTIONS") {
+        chrome.runtime.openOptionsPage();
+        return false;
+    }
 });
 
 // Helper to send message to Native Host

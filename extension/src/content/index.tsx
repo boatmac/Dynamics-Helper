@@ -1,7 +1,8 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import FAB from '../components/FAB';
-import '../index.css';
+import { startClipboardListener, setupSapTextAreaWatcher } from '../utils/legacyFeatures';
+import { LEGACY_CSS } from '../components/LegacyStyles';
 
 console.log("[DH] Content Script Loaded");
 
@@ -9,26 +10,56 @@ console.log("[DH] Content Script Loaded");
 const CONTAINER_ID = "dh-extension-root";
 
 function mount() {
+    // 1. Initialize Legacy Features (Global Watchers)
+    try {
+        startClipboardListener();
+        setupSapTextAreaWatcher();
+    } catch (e) {
+        console.error("[DH] Failed to init legacy features:", e);
+    }
+
+    // 2. Mount React App
     if (document.getElementById(CONTAINER_ID)) return;
 
     const container = document.createElement('div');
     container.id = CONTAINER_ID;
+    
+    // The Host Container:
+    // Fixed to viewport, covers entire screen but lets clicks pass through (pointer-events: none).
+    // This allows us to position the FAB absolutely within it.
+    container.style.position = 'fixed';
+    container.style.top = '0';
+    container.style.left = '0';
+    container.style.width = '100vw';
+    container.style.height = '100vh';
+    container.style.zIndex = '2147483647'; // Max z-index
+    container.style.pointerEvents = 'none'; // CRITICAL: Let clicks pass through to the page
+
     document.body.appendChild(container);
 
     const shadowRoot = container.attachShadow({ mode: 'open' });
     
-    // Inject Tailwind styles into Shadow DOM
-    // In production build, we need to manually inject the CSS content
-    // For dev, Vite HMR handles it differently, but for now we'll try a simple approach
-    // Note: With CRXJS, we might need to import the CSS file as a string or use a specific loader
+    // 3. Inject Styles (The Fix)
+    const styleSheet = document.createElement('style');
+    styleSheet.textContent = LEGACY_CSS;
+    shadowRoot.appendChild(styleSheet);
     
-    // Create a style element for our app
-    const styleElement = document.createElement('style');
-    // We will populate this later or rely on CRXJS to inject styles
-    shadowRoot.appendChild(styleElement);
+    // Also inject generic base styles that might be missing in shadow DOM
+    const baseStyle = document.createElement('style');
+    baseStyle.textContent = `
+        :host { all: initial; }
+    `;
+    shadowRoot.appendChild(baseStyle);
 
-    const root = createRoot(shadowRoot);
+    // 4. React Root
+    const reactRoot = document.createElement('div');
+    reactRoot.id = "root";
+    shadowRoot.appendChild(reactRoot);
+
+    const root = createRoot(reactRoot);
     root.render(<FAB />);
+    
+    console.log("[DH] React App Mounted in Shadow DOM with Inline CSS");
 }
 
 // Wait for body

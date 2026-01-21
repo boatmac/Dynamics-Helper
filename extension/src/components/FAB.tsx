@@ -1,10 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { PageReader, ScrapedData } from '../utils/pageReader';
+import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 
 const FAB: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [nativeResponse, setNativeResponse] = useState<string>("");
     const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
+    const [prefs, setPrefs] = useState({
+        primaryColor: "#2563eb",
+        buttonText: "DH",
+        offsetBottom: 24,
+        offsetRight: 24
+    });
+
+    // Menu Logic
+    const { currentItems, canGoBack, navigateTo, navigateBack } = useMenuLogic();
+
+    useEffect(() => {
+        // Load preferences
+        if (chrome?.storage?.local) {
+            chrome.storage.local.get("dh_prefs", (result) => {
+                if (result.dh_prefs) {
+                    setPrefs(prev => ({ ...prev, ...(result.dh_prefs || {}) }));
+                }
+            });
+            
+            // Listen for changes
+            const listener = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
+                if (area === "local" && changes.dh_prefs) {
+                    const newValue = changes.dh_prefs.newValue || {};
+                    setPrefs(prev => ({ ...prev, ...newValue }));
+                }
+            };
+            chrome.storage.onChanged.addListener(listener);
+            return () => chrome.storage.onChanged.removeListener(listener);
+        }
+    }, []);
 
     // Auto-scan when opening
     useEffect(() => {
@@ -48,74 +79,127 @@ const FAB: React.FC = () => {
         }
     };
 
+    const handleOpenOptions = () => {
+        chrome.runtime.sendMessage({ type: "OPEN_OPTIONS" });
+        setIsOpen(false);
+    };
+
+    const handleItemClick = async (item: MenuItem) => {
+        if (item.type === 'folder') {
+            navigateTo(item);
+        } else if (item.type === 'link' && item.url) {
+            const url = await resolveDynamicUrl(item.url);
+            if (url) window.open(url, item.target || '_blank');
+            setIsOpen(false);
+        } else if (item.type === 'markdown') {
+            // TODO: Show markdown modal (simplified alert for now)
+            alert(item.content);
+            setIsOpen(false);
+        }
+    };
+
     return (
-        <div className="fixed bottom-6 right-6 z-[9999] font-sans">
+        <div className="dh-container">
             {isOpen && (
-                <div className="mb-4 w-80 bg-white rounded-lg shadow-xl border border-gray-200 p-4 flex flex-col gap-3">
-                    <div className="flex justify-between items-center border-b pb-2">
-                        <h3 className="font-bold text-gray-800">Dynamics Helper</h3>
+                <div className="dh-menu">
+                    {/* Header */}
+                    <div className="dh-header">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {canGoBack && (
+                                <button 
+                                    onClick={navigateBack}
+                                    className="dh-item"
+                                    data-type="back"
+                                    title="Back"
+                                    style={{ padding: '0', border: 'none', margin: '0', width: 'auto' }}
+                                >
+                                </button>
+                            )}
+                            <h3 className="dh-title">Dynamics Helper</h3>
+                        </div>
+                        <button onClick={handleOpenOptions} title="Settings" className="dh-settings-btn">
+                            ⚙️
+                        </button>
                     </div>
 
-                    {/* Scraped Data Section */}
-                    <div className="bg-blue-50 p-2 rounded border border-blue-100">
-                        <h4 className="text-xs font-semibold text-blue-800 uppercase mb-1">Detected Error</h4>
-                        {scrapedData ? (
-                            <p className="text-xs text-gray-700 line-clamp-3 font-mono">
-                                {scrapedData.errorText}
-                            </p>
-                        ) : (
-                            <p className="text-xs text-gray-500 italic">No error selected or detected.</p>
-                        )}
-                        <div className="mt-2 flex justify-end">
-                            <button 
-                                onClick={() => {
-                                    const data = PageReader.scanForErrors();
-                                    setScrapedData(data);
-                                }}
-                                className="text-xs text-blue-600 hover:underline"
+                    {/* Menu Items */}
+                    <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                        {currentItems.map((item, idx) => (
+                            <button
+                                key={idx}
+                                onClick={() => handleItemClick(item)}
+                                className="dh-item"
+                                data-type={item.type}
                             >
-                                Re-scan
+                                <span className="dh-item-icon">
+                                    {item.type === 'folder' ? '📁' : item.type === 'link' ? '🔗' : '📝'}
+                                </span>
+                                <span className="dh-item-label">{item.label}</span>
+                            </button>
+                        ))}
+                        
+                        {currentItems.length === 0 && (
+                            <div style={{ padding: '12px', textAlign: 'center', color: '#9ca3af', fontSize: '12px' }}>
+                                No items found
+                            </div>
+                        )}
+                    </div>
+
+                    {/* AI Tools Footer */}
+                    <div style={{ borderTop: '1px solid #f0f0f0', padding: '8px 4px 4px 4px', marginTop: '4px' }}>
+                        {scrapedData && scrapedData.errorText && (
+                            <div style={{ marginBottom: '8px', padding: '8px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px' }}>
+                                <p style={{ margin: '0', fontSize: '10px', color: '#991b1b', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical' }}>
+                                    {scrapedData.errorText}
+                                </p>
+                            </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                             <button 
+                                onClick={handlePing}
+                                style={{ 
+                                    flex: 1, 
+                                    padding: '4px 8px', 
+                                    background: '#fff', 
+                                    border: '1px solid #d1d5db', 
+                                    color: '#4b5563', 
+                                    fontSize: '11px', 
+                                    borderRadius: '4px',
+                                    cursor: 'pointer' 
+                                }}
+                            >
+                                Ping
+                            </button>
+                            <button 
+                                onClick={handleAnalyze}
+                                disabled={!scrapedData?.errorText}
+                                style={{
+                                    flex: 1,
+                                    padding: '4px 8px',
+                                    fontSize: '11px',
+                                    borderRadius: '4px',
+                                    border: 'none',
+                                    color: '#fff',
+                                    background: scrapedData?.errorText ? '#2563eb' : '#d1d5db',
+                                    cursor: scrapedData?.errorText ? 'pointer' : 'not-allowed'
+                                }}
+                            >
+                                Analyze
                             </button>
                         </div>
                     </div>
-
-                    <div className="flex gap-2">
-                        <button 
-                            onClick={handlePing}
-                            className="flex-1 px-3 py-1 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-sm transition-colors"
-                        >
-                            Ping Host
-                        </button>
-                        <button 
-                            onClick={handleAnalyze}
-                            disabled={!scrapedData}
-                            className={`flex-1 px-3 py-1 rounded text-white text-sm transition-colors ${
-                                scrapedData ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-300 cursor-not-allowed'
-                            }`}
-                        >
-                            Analyze Error
-                        </button>
-                    </div>
-
-                    {nativeResponse && (
-                        <div className="mt-2">
-                            <h4 className="text-xs font-semibold text-gray-500 mb-1">Host Response:</h4>
-                            <pre className="text-xs bg-gray-900 text-green-400 p-2 rounded overflow-auto max-h-48 whitespace-pre-wrap">
-                                {nativeResponse}
-                            </pre>
-                        </div>
-                    )}
                 </div>
             )}
             
             <button
                 onClick={() => setIsOpen(!isOpen)}
-                className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg flex items-center justify-center transition-all hover:scale-105 active:scale-95"
+                className="dh-btn"
+                style={{ backgroundColor: prefs.primaryColor }}
             >
                 {isOpen ? (
-                    <span className="text-xl font-bold">×</span>
+                    <span style={{ fontSize: '24px', fontWeight: 'bold' }}>×</span>
                 ) : (
-                    <span className="text-xl font-bold">DH</span>
+                    <span style={{ fontSize: '18px', fontWeight: 'bold' }}>{prefs.buttonText}</span>
                 )}
             </button>
         </div>

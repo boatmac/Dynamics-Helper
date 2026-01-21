@@ -21,22 +21,25 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.tsx-loader-CjbiU0mX.js"
+        "assets/index.tsx-loader-DSSN63wT.js"
       ],
       "matches": [
         "https://*.dynamics.com/*",
         "https://*.powerplatform.microsoft.com/*",
         "https://portal.azure.com/*"
-      ],
-      "css": [
-        "assets/index-BFGQmG7e.css"
       ]
     }
   ],
-  "action": {
-    "default_popup": "index.html"
-  },
   "web_accessible_resources": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "resources": [
+        "items.json"
+      ],
+      "use_dynamic_url": false
+    },
     {
       "matches": [
         "https://*.dynamics.com/*",
@@ -44,10 +47,17 @@
         "https://portal.azure.com/*"
       ],
       "resources": [
-        "assets/index-C1aTXuGP.js",
-        "assets/index.tsx-C7gKQtC5.js"
+        "assets/index-CEymAP8w.js",
+        "assets/index.tsx-Baq9vbUj.js"
       ],
       "use_dynamic_url": false
     }
-  ]
+  ],
+  "options_ui": {
+    "page": "index.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_popup": "index.html"
+  }
 }
