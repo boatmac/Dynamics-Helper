@@ -12,7 +12,7 @@ const CONTAINER_ID = "dh-extension-root";
 function mount() {
     // 1. Initialize Legacy Features (Global Watchers)
     try {
-        startClipboardListener();
+        // startClipboardListener(); // Disabled to prevent permission popups during local testing
         setupSapTextAreaWatcher();
     } catch (e) {
         console.error("[DH] Failed to init legacy features:", e);

@@ -5,10 +5,10 @@ import winreg
 import platform
 
 HOST_NAME = "com.dynamics.helper.native"
+# IMPORTANT: Update these IDs with your actual Extension ID
+# Go to chrome://extensions/ to find the ID of the loaded "Dynamics Helper" extension
 ALLOWED_ORIGINS = [
-    "chrome-extension://ReplaceWithYourActualExtensionID/",
-    "extension://ReplaceWithYourActualExtensionID/",
-    # TODO: Update this with the real ID after Phase 2 (Extension Setup)
+    "chrome-extension://aiimcjfjmibedicmckpphgbddankgdln/",
 ]
 
 

@@ -1,11 +1,107 @@
 import React, { useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 
+// Non-blocking Result Popover Component
+const ResultPopover: React.FC<{ 
+    isOpen: boolean; 
+    onClose: () => void; 
+    content: string; 
+    filePath?: string;
+}> = ({ isOpen, onClose, content, filePath }) => {
+    if (!isOpen) return null;
+
+    return (
+        <div style={{
+            position: 'fixed',
+            bottom: '90px', // Align with top of FAB roughly
+            right: '100px', // Push to the left of the FAB
+            width: '400px',
+            maxWidth: 'calc(100vw - 120px)',
+            maxHeight: '600px',
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+            display: 'flex',
+            flexDirection: 'column',
+            zIndex: 2147483647,
+            pointerEvents: 'auto', // CRITICAL: Re-enable clicks since parent container has pointer-events: none
+            border: '1px solid #e5e7eb',
+            fontFamily: "'Segoe UI', system-ui, sans-serif"
+        }}>
+            {/* Header */}
+            <div style={{ 
+                padding: '12px 16px', 
+                borderBottom: '1px solid #f3f4f6', 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                background: '#f9fafb',
+                borderTopLeftRadius: '12px',
+                borderTopRightRadius: '12px'
+            }}>
+                <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#111827' }}>🤖 Copilot Analysis</h3>
+                <button 
+                    onClick={onClose} 
+                    style={{ 
+                        border: 'none', 
+                        background: 'none', 
+                        cursor: 'pointer', 
+                        fontSize: '18px', 
+                        color: '#6b7280',
+                        padding: '4px',
+                        lineHeight: 1
+                    }}
+                    title="Close"
+                >
+                    ×
+                </button>
+            </div>
+
+            {/* Content Area */}
+            <div style={{ 
+                padding: '16px', 
+                overflowY: 'auto', 
+                flex: 1, 
+                fontSize: '13px', 
+                lineHeight: '1.6', 
+                color: '#374151',
+                // whiteSpace: 'pre-wrap' // Removed since ReactMarkdown handles this
+            }}>
+                {content ? (
+                    <ReactMarkdown>{content}</ReactMarkdown>
+                ) : (
+                    "No analysis content received."
+                )}
+            </div>
+
+            {/* Footer with Path */}
+            {filePath && (
+                <div style={{ 
+                    padding: '10px 16px', 
+                    background: '#f8fafc', 
+                    borderTop: '1px solid #f3f4f6', 
+                    fontSize: '11px', 
+                    color: '#64748b',
+                    borderBottomLeftRadius: '12px',
+                    borderBottomRightRadius: '12px'
+                }}>
+                    <div style={{ fontWeight: '600', marginBottom: '2px' }}>Saved report:</div>
+                    <div style={{ wordBreak: 'break-all', fontFamily: 'monospace' }}>{filePath}</div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 const FAB: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
-    const [nativeResponse, setNativeResponse] = useState<string>("");
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
+    const [analysisResult, setAnalysisResult] = useState<{ content: string; path?: string } | null>(null);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    
     const [prefs, setPrefs] = useState({
         primaryColor: "#2563eb",
         buttonText: "DH",
@@ -42,6 +138,7 @@ const FAB: React.FC = () => {
         if (isOpen) {
             const data = PageReader.scanForErrors();
             setScrapedData(data);
+            setErrorMsg(null); // Clear previous errors
         }
     }, [isOpen]);
 
@@ -51,31 +148,68 @@ const FAB: React.FC = () => {
                 type: "NATIVE_MSG",
                 payload: { action: "ping", requestId: crypto.randomUUID() }
             });
-            setNativeResponse(JSON.stringify(response, null, 2));
+            alert(JSON.stringify(response, null, 2));
         } catch (e: any) {
-            setNativeResponse(`Error: ${e.message}`);
+            alert(`Error: ${e.message}`);
         }
     };
 
     const handleAnalyze = async () => {
         if (!scrapedData?.errorText) return;
 
-        setNativeResponse("Analyzing...");
+        setIsAnalyzing(true);
+        setErrorMsg(null);
+        
         try {
+            // Construct a richer payload
+            const fullContext = `
+Title: ${scrapedData.ticketTitle || 'N/A'}
+Product: ${scrapedData.productCategory || 'N/A'}
+Description/Error: ${scrapedData.errorText}
+            `.trim();
+
             const response = await chrome.runtime.sendMessage({
                 type: "NATIVE_MSG",
                 payload: { 
                     action: "analyze_error", 
                     payload: {
-                        text: scrapedData.errorText,
-                        context: scrapedData.source || "Unknown Context"
+                        text: fullContext,
+                        context: scrapedData.source || "Unknown Context",
+                        timestamp: new Date().toLocaleString()
                     },
                     requestId: crypto.randomUUID() 
                 }
             });
-            setNativeResponse(JSON.stringify(response, null, 2));
+            
+            // Format response to be user friendly
+            if (response.status === 'success') {
+                const nativeResp = response.data;
+                
+                // Check Native Host wrapper status
+                if (nativeResp && nativeResp.status === 'success') {
+                    const analysisData = nativeResp.data;
+                    
+                    // Check Analysis function result
+                    if (analysisData && !analysisData.error) {
+                        setAnalysisResult({
+                            content: analysisData.markdown || JSON.stringify(analysisData, null, 2),
+                            path: analysisData.saved_to
+                        });
+                    } else {
+                        const errMsg = analysisData?.error || "Unknown analysis error";
+                        setErrorMsg(`Analysis Error: ${errMsg}`);
+                    }
+                } else {
+                    const hostError = nativeResp?.message || nativeResp?.error || "Unknown native host error";
+                    setErrorMsg(`Host Error: ${hostError}`);
+                }
+            } else {
+                setErrorMsg(`Error: ${response.message || 'Unknown error'}`);
+            }
         } catch (e: any) {
-            setNativeResponse(`Error: ${e.message}`);
+            setErrorMsg(`Error: ${e.message}`);
+        } finally {
+            setIsAnalyzing(false);
         }
     };
 
@@ -92,7 +226,6 @@ const FAB: React.FC = () => {
             if (url) window.open(url, item.target || '_blank');
             setIsOpen(false);
         } else if (item.type === 'markdown') {
-            // TODO: Show markdown modal (simplified alert for now)
             alert(item.content);
             setIsOpen(false);
         }
@@ -100,6 +233,14 @@ const FAB: React.FC = () => {
 
     return (
         <div className="dh-container">
+            {/* Analysis Result Popover */}
+            <ResultPopover 
+                isOpen={!!analysisResult} 
+                onClose={() => setAnalysisResult(null)} 
+                content={analysisResult?.content || ""}
+                filePath={analysisResult?.path}
+            />
+
             {isOpen && (
                 <div className="dh-menu">
                     {/* Header */}
@@ -147,13 +288,22 @@ const FAB: React.FC = () => {
 
                     {/* AI Tools Footer */}
                     <div style={{ borderTop: '1px solid #f0f0f0', padding: '8px 4px 4px 4px', marginTop: '4px' }}>
-                        {scrapedData && scrapedData.errorText && (
+                        {/* Context Preview Box */}
+                        {(scrapedData?.errorText || scrapedData?.productCategory) && (
                             <div style={{ marginBottom: '8px', padding: '8px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px' }}>
-                                <p style={{ margin: '0', fontSize: '10px', color: '#991b1b', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical' }}>
-                                    {scrapedData.errorText}
-                                </p>
+                                {scrapedData.productCategory && (
+                                    <div style={{ fontSize: '10px', color: '#dc2626', fontWeight: 'bold', marginBottom: '4px' }}>
+                                        SAP Path: {scrapedData.productCategory}
+                                    </div>
+                                )}
+                                {scrapedData.errorText && (
+                                    <p style={{ margin: '0', fontSize: '10px', color: '#991b1b', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical' }}>
+                                        {scrapedData.errorText}
+                                    </p>
+                                )}
                             </div>
                         )}
+                        
                         <div style={{ display: 'flex', gap: '8px' }}>
                              <button 
                                 onClick={handlePing}
@@ -172,7 +322,7 @@ const FAB: React.FC = () => {
                             </button>
                             <button 
                                 onClick={handleAnalyze}
-                                disabled={!scrapedData?.errorText}
+                                disabled={!scrapedData?.errorText || isAnalyzing}
                                 style={{
                                     flex: 1,
                                     padding: '4px 8px',
@@ -180,13 +330,18 @@ const FAB: React.FC = () => {
                                     borderRadius: '4px',
                                     border: 'none',
                                     color: '#fff',
-                                    background: scrapedData?.errorText ? '#2563eb' : '#d1d5db',
-                                    cursor: scrapedData?.errorText ? 'pointer' : 'not-allowed'
+                                    background: isAnalyzing ? '#9ca3af' : (scrapedData?.errorText ? '#2563eb' : '#d1d5db'),
+                                    cursor: (!isAnalyzing && scrapedData?.errorText) ? 'pointer' : 'not-allowed'
                                 }}
                             >
-                                Analyze
+                                {isAnalyzing ? 'Analyzing...' : 'Analyze'}
                             </button>
                         </div>
+                        {errorMsg && (
+                            <div style={{ marginTop: '8px', padding: '8px', background: '#fee2e2', color: '#991b1b', borderRadius: '4px', fontSize: '10px' }}>
+                                {errorMsg}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

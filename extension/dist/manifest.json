@@ -21,12 +21,13 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.tsx-loader-DSSN63wT.js"
+        "assets/index.tsx-loader-0UVbVwdA.js"
       ],
       "matches": [
         "https://*.dynamics.com/*",
         "https://*.powerplatform.microsoft.com/*",
-        "https://portal.azure.com/*"
+        "https://portal.azure.com/*",
+        "<all_urls>"
       ]
     }
   ],
@@ -42,13 +43,14 @@
     },
     {
       "matches": [
+        "<all_urls>",
         "https://*.dynamics.com/*",
         "https://*.powerplatform.microsoft.com/*",
         "https://portal.azure.com/*"
       ],
       "resources": [
         "assets/index-CEymAP8w.js",
-        "assets/index.tsx-Baq9vbUj.js"
+        "assets/index.tsx-CCFZgwvI.js"
       ],
       "use_dynamic_url": false
     }

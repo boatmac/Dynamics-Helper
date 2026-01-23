@@ -4,6 +4,15 @@ import struct
 import os
 import subprocess
 import shutil
+import logging
+
+# Setup basic file logging
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug.log")
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.DEBUG,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 # Native messaging definition
 # https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging
@@ -17,12 +26,18 @@ def get_message():
     try:
         raw_length = sys.stdin.buffer.read(4)
         if len(raw_length) == 0:
+            logging.info("Stdin closed (0 bytes read for length)")
             return None
         message_length = struct.unpack("@I", raw_length)[0]
         message = sys.stdin.buffer.read(message_length).decode("utf-8")
+        logging.debug(f"Received message: {message}")
         return json.loads(message)
     except AttributeError:
         # Fallback for testing outside of native messaging context (if needed)
+        logging.error("AttributeError reading stdin (testing mode?)")
+        return None
+    except Exception as e:
+        logging.error(f"Error reading message: {e}")
         return None
 
 
@@ -31,7 +46,9 @@ def send_message(message_content):
     Send a message to stdout.
     The message is serialized as a 32-bit integer (length) followed by the JSON string.
     """
+    logging.debug(f"Sending message: {json.dumps(message_content)}")
     encoded_content = json.dumps(message_content).encode("utf-8")
+
     encoded_length = struct.pack("@I", len(encoded_content))
     sys.stdout.buffer.write(encoded_length)
     sys.stdout.buffer.write(encoded_content)
@@ -75,7 +92,115 @@ def check_gh_auth(gh_path):
 def run_gh_copilot(text, context):
     """
     Runs 'gh copilot explain' with the provided error text.
+    Fallback: If 'gh copilot' is deprecated, tries the new standalone 'copilot' CLI.
     """
+
+    # 1. Try finding the new standalone 'copilot' CLI first (preferred if installed via npm/system)
+    copilot_path = shutil.which("copilot")
+    if copilot_path:
+        logging.info(f"Found standalone Copilot CLI at: {copilot_path}")
+        try:
+            # Construct the query
+            query = f"{text}\nContext: {context}" if context else text
+
+            # Sanitize query for command line execution (newlines break cmd/batch args)
+            # Also escape double quotes to avoid breaking the --prompt "..." argument
+            query = query.replace("\n", " ").replace("\r", "").replace('"', '\\"')
+
+            # Use the new CLI syntax: copilot --prompt "..." --silent
+            # We explicitly use 'cmd /c' on Windows to avoid issues with .cmd/.bat execution via subprocess
+            if os.name == "nt" and (
+                copilot_path.lower().endswith(".cmd")
+                or copilot_path.lower().endswith(".bat")
+            ):
+                command = [
+                    "cmd",
+                    "/c",
+                    copilot_path,
+                    "--prompt",
+                    query,
+                    "--silent",
+                    "--no-ask-user",
+                    "--allow-all-tools",
+                ]
+            else:
+                command = [
+                    copilot_path,
+                    "--prompt",
+                    query,
+                    "--silent",
+                    "--no-ask-user",
+                    "--allow-all-tools",
+                ]
+
+            # On Windows, we might need to invoke it via shell=True if it's a batch file
+            # but shutil.which returned the .cmd/.bat. However, subprocess usually handles .cmd fine
+            # if we pass the full path. Let's try shell=False first for security.
+            # CRITICAL: Set stdin=subprocess.DEVNULL to prevent the subprocess from interfering
+            # with the Native Messaging stdin pipe (which causes hangs).
+
+            # Note: We use shell=False even with 'cmd /c' because we are invoking cmd explicitly as the executable.
+
+            logging.info(f"Running command: {command}")
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                shell=False,
+                stdin=subprocess.DEVNULL,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+            logging.info(f"Command stdout: {result.stdout}")
+            logging.info(f"Command stderr: {result.stderr}")
+            logging.info(f"Command return code: {result.returncode}")
+
+            if result.returncode == 0:
+                # 3. Save the explanation to a file in a user-accessible location
+                # We'll put it in the "Downloads" folder or similar to make it easy to find.
+                # For now, let's use the user's Downloads directory.
+                if os.name == "nt":
+                    downloads_path = os.path.join(
+                        os.environ["USERPROFILE"], "Downloads"
+                    )
+                else:
+                    downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+
+                output_file = os.path.join(downloads_path, "dh_error_analysis.md")
+
+                # Timestamp for the file content
+                import datetime
+
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                with open(output_file, "w", encoding="utf-8") as f:
+                    f.write(f"# Dynamics Helper - Error Analysis\n\n")
+                    f.write(f"**Timestamp:** {timestamp}\n\n")
+                    f.write(f"## Original Error\n{text}\n\n")
+                    if context:
+                        f.write(f"## Context\n{context}\n\n")
+                    f.write(f"## AI Explanation\n{result.stdout.strip()}\n")
+
+                # Return success with the path to the saved file
+                return {
+                    "success": True,
+                    "markdown": result.stdout.strip(),
+                    "saved_to": output_file,
+                }
+            else:
+                logging.warning(f"Standalone Copilot CLI failed: {result.stderr}")
+                # Fall through to try 'gh copilot' as backup?
+                # Or return error? Let's return error because if they have the new CLI, they likely intend to use it.
+                return {
+                    "error": f"Copilot CLI Error: {result.stderr.strip() or result.stdout.strip()}"
+                }
+
+        except Exception as e:
+            logging.error(f"Error running standalone Copilot CLI: {e}")
+            # Fall through to 'gh copilot' logic below
+
+    # 2. Fallback to 'gh copilot' (Legacy/Deprecated)
     is_installed, gh_path_or_msg = check_gh_availability()
     if not is_installed:
         return {"error": gh_path_or_msg}
@@ -86,11 +211,20 @@ def run_gh_copilot(text, context):
 
     try:
         # Construct the query. We include the context if available.
+        # The new GitHub Copilot CLI uses a different command structure:
+        # 'gh copilot explain "<query>"' is now handled by the 'gh-copilot' extension which is deprecated.
+        # However, for this project we must rely on what is installed.
+        #
+        # Note: If the user has the NEW 'github/copilot-cli' installed, the command might be different.
+        # But 'gh copilot explain' was the standard for the extension.
+        #
+        # Given the deprecation message, we might need to fallback or check for the new CLI.
+        # For now, we will stick to the 'gh copilot explain' command as implemented,
+        # but be aware it might return the deprecation notice as "success" (stdout).
+
         query = f"{text}\nContext: {context}" if context else text
 
         # Security: shell=False is used to prevent injection.
-        # Note: 'gh copilot explain' might require the extension to be installed: 'gh extension install github/gh-copilot'
-        # We assume standard setup.
         command = [gh_path_or_msg, "copilot", "explain", query]
 
         result = subprocess.run(
@@ -102,13 +236,41 @@ def run_gh_copilot(text, context):
             errors="replace",
         )
 
-        if result.returncode != 0:
-            # gh copilot might write help text or errors to stderr
+        # Check for deprecation message in stdout
+        if "The gh-copilot extension has been deprecated" in result.stdout:
             return {
-                "error": f"AI Error: {result.stderr.strip() or result.stdout.strip()}"
+                "error": "The installed 'gh-copilot' extension is deprecated. Please install the new GitHub Copilot CLI (npm install -g @githubnext/github-copilot-cli) or check for updates."
             }
 
-        return {"success": True, "markdown": result.stdout.strip()}
+        # 3. Save the explanation to a file in a user-accessible location
+        # We'll put it in the "Downloads" folder or similar to make it easy to find.
+        # For now, let's use the user's Downloads directory.
+        if os.name == "nt":
+            downloads_path = os.path.join(os.environ["USERPROFILE"], "Downloads")
+        else:
+            downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+
+        output_file = os.path.join(downloads_path, "dh_error_analysis.md")
+
+        # Timestamp for the file content
+        import datetime
+
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(f"# Dynamics Helper - Error Analysis\n\n")
+            f.write(f"**Timestamp:** {timestamp}\n\n")
+            f.write(f"## Original Error\n{text}\n\n")
+            if context:
+                f.write(f"## Context\n{context}\n\n")
+            f.write(f"## AI Explanation\n{result.stdout.strip()}\n")
+
+        # Return success with the path to the saved file
+        return {
+            "success": True,
+            "markdown": result.stdout.strip(),
+            "saved_to": output_file,
+        }
 
     except Exception as e:
         return {"error": f"Execution Error: {str(e)}"}
@@ -119,14 +281,12 @@ def handle_analyze_error(payload):
     context = payload.get("context", "Unknown")
 
     if not text:
-        return "Error: No text provided for analysis."
+        return {"error": "No text provided for analysis."}
 
     result = run_gh_copilot(text, context)
 
-    if "error" in result:
-        return f"Error: {result['error']}"
-
-    return result["markdown"]
+    # Return the full result (which includes 'success', 'markdown', 'saved_to', or 'error')
+    return result
 
 
 def handle_health_check():
@@ -185,4 +345,5 @@ def main():
 
 
 if __name__ == "__main__":
+    logging.info("Host process started")
     main()

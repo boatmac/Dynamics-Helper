@@ -1,3 +1,5 @@
-# Requirements for Dynamics Helper Native Host
-# Currently empty as we use standard library for Phase 1
-# Will add 'requests' or 'azure-functions' client libs later if needed
+certifi==2026.1.4
+charset-normalizer==3.4.4
+idna==3.11
+requests==2.32.5
+urllib3==2.6.3
