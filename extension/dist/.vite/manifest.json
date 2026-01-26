@@ -9,12 +9,12 @@
     "file": "assets/index-CEymAP8w.js",
     "name": "index"
   },
-  "_index.tsx-loader-0UVbVwdA.js": {
-    "file": "assets/index.tsx-loader-0UVbVwdA.js",
-    "src": "_index.tsx-loader-0UVbVwdA.js"
+  "_index.tsx-loader-D6xHlcQM.js": {
+    "file": "assets/index.tsx-loader-D6xHlcQM.js",
+    "src": "_index.tsx-loader-D6xHlcQM.js"
   },
   "index.html": {
-    "file": "assets/index.html-Ai64-ieu.js",
+    "file": "assets/index.html-DwuiOmr9.js",
     "name": "index.html",
     "src": "index.html",
     "isEntry": true,
@@ -22,7 +22,7 @@
       "_index-CEymAP8w.js"
     ],
     "css": [
-      "assets/index-DGpXURSI.css"
+      "assets/index-UX26cSQl.css"
     ]
   },
   "src/background/serviceWorker.ts": {
@@ -32,7 +32,7 @@
     "isEntry": true
   },
   "src/content/index.tsx": {
-    "file": "assets/index.tsx-CCFZgwvI.js",
+    "file": "assets/index.tsx-sLzIDM0Q.js",
     "name": "index.tsx",
     "src": "src/content/index.tsx",
     "isEntry": true,

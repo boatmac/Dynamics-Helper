@@ -289,20 +289,48 @@ Description/Error: ${scrapedData.errorText}
                     {/* AI Tools Footer */}
                     <div style={{ borderTop: '1px solid #f0f0f0', padding: '8px 4px 4px 4px', marginTop: '4px' }}>
                         {/* Context Preview Box */}
-                        {(scrapedData?.errorText || scrapedData?.productCategory) && (
-                            <div style={{ marginBottom: '8px', padding: '8px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px' }}>
-                                {scrapedData.productCategory && (
-                                    <div style={{ fontSize: '10px', color: '#dc2626', fontWeight: 'bold', marginBottom: '4px' }}>
-                                        SAP Path: {scrapedData.productCategory}
-                                    </div>
-                                )}
-                                {scrapedData.errorText && (
-                                    <p style={{ margin: '0', fontSize: '10px', color: '#991b1b', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical' }}>
-                                        {scrapedData.errorText}
-                                    </p>
-                                )}
-                            </div>
-                        )}
+                        <div style={{ marginBottom: '8px', padding: '8px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px' }}>
+                            <textarea
+                                value={
+                                    scrapedData
+                                        ? (() => {
+                                            // Check if we already have the formatted text in errorText (from previous edits)
+                                            // If so, just return it. Otherwise, build the initial format.
+                                            if (scrapedData.errorText && scrapedData.errorText.startsWith('## Case Title')) {
+                                                return scrapedData.errorText;
+                                            }
+
+                                            return [
+                                                `## Case Title\n\n${scrapedData.ticketTitle || '<Captured Title>'}`,
+                                                `## SAP\n\n${scrapedData.productCategory || '<Captured Support Area Path>'}`,
+                                                `## Description\n\n${scrapedData.errorText || '<Captured textarea value>'}`
+                                            ].join('\n\n');
+                                        })()
+                                        : ''
+                                }
+                                onChange={(e) => {
+                                    setScrapedData(prev => ({ 
+                                        ...(prev || {}), 
+                                        ticketTitle: '', // Clear individual fields so we don't re-template on next render
+                                        productCategory: '',
+                                        errorText: e.target.value 
+                                    }));
+                                }}
+                                style={{
+                                    width: '100%',
+                                    minHeight: '80px',
+                                    fontSize: '11px',
+                                    padding: '4px',
+                                    borderRadius: '4px',
+                                    border: '1px solid #d1d5db',
+                                    color: '#374151',
+                                    resize: 'vertical',
+                                    fontFamily: 'inherit',
+                                    whiteSpace: 'pre-wrap'
+                                }}
+                                placeholder="Context will appear here..."
+                            />
+                        </div>
                         
                         <div style={{ display: 'flex', gap: '8px' }}>
                              <button 

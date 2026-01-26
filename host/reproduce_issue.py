@@ -41,9 +41,9 @@ def reproduce_issue():
         return
 
     # User provided input
-    scraped_title = "My Open CasesOpen popup to change view."
-    scraped_product = "N/A"
-    scraped_error = "My Open CasesOpen popup to change view."
+    scraped_title = "Case #12345: Solution Import Failed"
+    scraped_product = "Dynamics 365 Sales"
+    scraped_error = "Error code: 80040216. An unexpected error occurred. Dependency calculation failed for solution 'SalesPatch_1_0_0_0'. Missing dependency: 'Entity: account' (Id: 70816501-edb9-4740-a16c-6a5efbc05d84)"
     
     full_context_string = f"""
 Title: {scraped_title}

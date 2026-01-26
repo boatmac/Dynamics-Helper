@@ -21,7 +21,7 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.tsx-loader-0UVbVwdA.js"
+        "assets/index.tsx-loader-D6xHlcQM.js"
       ],
       "matches": [
         "https://*.dynamics.com/*",
@@ -50,7 +50,7 @@
       ],
       "resources": [
         "assets/index-CEymAP8w.js",
-        "assets/index.tsx-CCFZgwvI.js"
+        "assets/index.tsx-sLzIDM0Q.js"
       ],
       "use_dynamic_url": false
     }

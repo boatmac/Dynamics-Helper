@@ -87,18 +87,25 @@ export class PageReader {
              const descSelectors = [
                 '[data-automation-id="ticket-description"]',
                 '[data-test-id="case-description"]',
-                '.ticket-description-body'
+                '.ticket-description-body',
+                'textarea[aria-label="Customer Statement"]'
             ];
             
             for (const sel of descSelectors) {
                 const el = document.querySelector(sel);
                 if (el) {
-                    const props = getReactProps(el);
-                    if (props && props.children) {
-                        data.description = this.extractTextFromChildren(props.children);
+                    // Check if it's a textarea/input to get value, otherwise use textContent/React props
+                    if ((el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) && el.value) {
+                         data.description = el.value.trim();
                     } else {
-                         data.description = el.textContent || "";
+                        const props = getReactProps(el);
+                        if (props && props.children) {
+                            data.description = this.extractTextFromChildren(props.children);
+                        } else {
+                             data.description = el.textContent || "";
+                        }
                     }
+
                     if (data.description) break;
                 }
             }

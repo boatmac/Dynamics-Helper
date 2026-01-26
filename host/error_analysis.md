@@ -83,3 +83,24 @@ Similar to other Azure database services, enabling Private Link updates the publ
 2. **Verify Private Link**: If using Private Link, ensure the **Private DNS Zone** (`privatelink.mysql.database.chinacloudapi.cn`) is linked to your VNet.
 3. **Allow Public Access**: If you need public access, check "Allow public access from any Azure service" or add your specific Client IP in the "Connection security" blade.
 4. **SSL Configuration**: Ensure `ssl-mode=REQUIRED` (or equivalent) is set and the path to the CA certificate is correct.
+
+# Analysis of Power BI Error: Group Permission Propagation Delay (21Vianet)
+
+## Error Details
+- **Description**: Users added to a group with Power BI asset permissions do not get access within the expected timeframe.
+- **Product**: Power BI / Azure / 21Vianet China
+- **Symptom**: Permissions are not effective even after 24 hours of adding a user to the group.
+
+## Explanation
+In the Azure China (21Vianet) environment, the synchronization of Group/RBAC changes from Azure AD to Power BI can experience significant latency compared to global regions. While up to 24 hours can be observed, persistence beyond this period indicates a potential issue or stuck synchronization.
+
+## Root Causes
+1. **Region-Specific Latency**: Known sync delays in the 21Vianet environment (up to 24 hours is often cited as a maximum expected delay, but can be longer).
+2. **Token Caching**: The user's existing access token does not reflect the new group membership.
+3. **Synchronization Failure**: The background sync process between Azure AD and Power BI might be stalled for that specific object.
+
+## Resolution Steps
+1. **Force Token Refresh**: Ask the user to sign out and sign back in to refresh their claims and tokens.
+2. **Direct Assignment Workaround**: Temporarily assign permissions directly to the user (instead of the group) to validate access and provide immediate relief.
+3. **Trigger Sync**: Remove the user from the group, wait 15 minutes, and add them back to force a re-synchronization event.
+4. **Escalate**: If the issue persists beyond 24 hours and workarounds fail, this requires backend investigation by Microsoft Support.

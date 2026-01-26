@@ -82,7 +82,11 @@ async function loadItems(): Promise<MenuItem[]> {
         const url = chrome.runtime.getURL("items.json");
         const res = await fetch(url);
         if (res.ok) {
-            const data = await res.json();
+            const text = await res.text();
+            if (text.trim().startsWith("<")) {
+                throw new Error("Received HTML instead of JSON");
+            }
+            const data = JSON.parse(text);
             return Array.isArray(data) ? data : (data.items || []);
         }
     } catch (e) {

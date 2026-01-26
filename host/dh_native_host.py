@@ -1,349 +1,384 @@
+import asyncio
+import threading
 import sys
-import json
 import struct
-import os
-import subprocess
-import shutil
+import json
 import logging
+import os
+import datetime
+import shutil
 
-# Setup basic file logging
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug.log")
+# Import the SDK from the correct package name we discovered: 'copilot'
+from copilot import CopilotClient
+from copilot.types import CopilotClientOptions, MessageOptions, SessionConfig
+
+# Import PII Scrubber
+from pii_scrubber import PiiScrubber
+
+
+# Setup User Data Directory (Cross-platform)
+if os.name == "nt":
+    USER_DATA_DIR = os.path.join(
+        os.environ.get("APPDATA", os.path.expanduser("~")), "DynamicsHelper"
+    )
+else:
+    USER_DATA_DIR = os.path.join(os.path.expanduser("~"), ".config", "dynamics_helper")
+
+# Ensure user data dir exists
+os.makedirs(USER_DATA_DIR, exist_ok=True)
+
+# Setup logging to User Data Directory (avoiding permission issues in Program Files)
+LOG_FILE = os.path.join(USER_DATA_DIR, "native_host.log")
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.DEBUG,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-# Native messaging definition
-# https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging
 
+class NativeHost:
+    def __init__(self):
+        self.input_queue = asyncio.Queue()
+        self.client = None
+        self.session = None
+        self.running = True
+        self.loop = None
+        self.scrubber = PiiScrubber()
 
-def get_message():
-    """
-    Read a message from stdin.
-    The message is serialized as a 32-bit integer (length) followed by the JSON string.
-    """
-    try:
-        raw_length = sys.stdin.buffer.read(4)
-        if len(raw_length) == 0:
-            logging.info("Stdin closed (0 bytes read for length)")
-            return None
-        message_length = struct.unpack("@I", raw_length)[0]
-        message = sys.stdin.buffer.read(message_length).decode("utf-8")
-        logging.debug(f"Received message: {message}")
-        return json.loads(message)
-    except AttributeError:
-        # Fallback for testing outside of native messaging context (if needed)
-        logging.error("AttributeError reading stdin (testing mode?)")
-        return None
-    except Exception as e:
-        logging.error(f"Error reading message: {e}")
-        return None
-
-
-def send_message(message_content):
-    """
-    Send a message to stdout.
-    The message is serialized as a 32-bit integer (length) followed by the JSON string.
-    """
-    logging.debug(f"Sending message: {json.dumps(message_content)}")
-    encoded_content = json.dumps(message_content).encode("utf-8")
-
-    encoded_length = struct.pack("@I", len(encoded_content))
-    sys.stdout.buffer.write(encoded_length)
-    sys.stdout.buffer.write(encoded_content)
-    sys.stdout.buffer.flush()
-
-
-def check_gh_availability():
-    """
-    Checks if 'gh' CLI is installed and in PATH.
-    """
-    gh_path = shutil.which("gh")
-    if not gh_path:
-        return (
-            False,
-            "GitHub CLI ('gh') not found in PATH. Please install it: https://cli.github.com/",
+        # Log startup location
+        logging.info(
+            f"Host started. Installation Dir: {os.path.dirname(os.path.abspath(__file__))}"
         )
-    return True, gh_path
+        logging.info(f"User Data Dir: {USER_DATA_DIR}")
 
-
-def check_gh_auth(gh_path):
-    """
-    Checks if 'gh' CLI is authenticated.
-    """
-    try:
-        # 'gh auth status' returns 0 if logged in, non-zero otherwise.
-        # It prints to stderr/stdout, so we capture it to keep the native host protocol clean.
-        result = subprocess.run(
-            [gh_path, "auth", "status"], capture_output=True, text=True, shell=False
-        )
-        if result.returncode == 0:
-            return True, "Authenticated"
-        else:
-            return (
-                False,
-                "GitHub CLI is not authenticated. Please run 'gh auth login' in your terminal.",
-            )
-    except Exception as e:
-        return False, f"Failed to check auth status: {str(e)}"
-
-
-def run_gh_copilot(text, context):
-    """
-    Runs 'gh copilot explain' with the provided error text.
-    Fallback: If 'gh copilot' is deprecated, tries the new standalone 'copilot' CLI.
-    """
-
-    # 1. Try finding the new standalone 'copilot' CLI first (preferred if installed via npm/system)
-    copilot_path = shutil.which("copilot")
-    if copilot_path:
-        logging.info(f"Found standalone Copilot CLI at: {copilot_path}")
-        try:
-            # Construct the query
-            query = f"{text}\nContext: {context}" if context else text
-
-            # Sanitize query for command line execution (newlines break cmd/batch args)
-            # Also escape double quotes to avoid breaking the --prompt "..." argument
-            query = query.replace("\n", " ").replace("\r", "").replace('"', '\\"')
-
-            # Use the new CLI syntax: copilot --prompt "..." --silent
-            # We explicitly use 'cmd /c' on Windows to avoid issues with .cmd/.bat execution via subprocess
-            if os.name == "nt" and (
-                copilot_path.lower().endswith(".cmd")
-                or copilot_path.lower().endswith(".bat")
-            ):
-                command = [
-                    "cmd",
-                    "/c",
-                    copilot_path,
-                    "--prompt",
-                    query,
-                    "--silent",
-                    "--no-ask-user",
-                    "--allow-all-tools",
-                ]
-            else:
-                command = [
-                    copilot_path,
-                    "--prompt",
-                    query,
-                    "--silent",
-                    "--no-ask-user",
-                    "--allow-all-tools",
-                ]
-
-            # On Windows, we might need to invoke it via shell=True if it's a batch file
-            # but shutil.which returned the .cmd/.bat. However, subprocess usually handles .cmd fine
-            # if we pass the full path. Let's try shell=False first for security.
-            # CRITICAL: Set stdin=subprocess.DEVNULL to prevent the subprocess from interfering
-            # with the Native Messaging stdin pipe (which causes hangs).
-
-            # Note: We use shell=False even with 'cmd /c' because we are invoking cmd explicitly as the executable.
-
-            logging.info(f"Running command: {command}")
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                shell=False,
-                stdin=subprocess.DEVNULL,
-                encoding="utf-8",
-                errors="replace",
-            )
-
-            logging.info(f"Command stdout: {result.stdout}")
-            logging.info(f"Command stderr: {result.stderr}")
-            logging.info(f"Command return code: {result.returncode}")
-
-            if result.returncode == 0:
-                # 3. Save the explanation to a file in a user-accessible location
-                # We'll put it in the "Downloads" folder or similar to make it easy to find.
-                # For now, let's use the user's Downloads directory.
-                if os.name == "nt":
-                    downloads_path = os.path.join(
-                        os.environ["USERPROFILE"], "Downloads"
-                    )
-                else:
-                    downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
-
-                output_file = os.path.join(downloads_path, "dh_error_analysis.md")
-
-                # Timestamp for the file content
-                import datetime
-
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                with open(output_file, "w", encoding="utf-8") as f:
-                    f.write(f"# Dynamics Helper - Error Analysis\n\n")
-                    f.write(f"**Timestamp:** {timestamp}\n\n")
-                    f.write(f"## Original Error\n{text}\n\n")
-                    if context:
-                        f.write(f"## Context\n{context}\n\n")
-                    f.write(f"## AI Explanation\n{result.stdout.strip()}\n")
-
-                # Return success with the path to the saved file
-                return {
-                    "success": True,
-                    "markdown": result.stdout.strip(),
-                    "saved_to": output_file,
-                }
-            else:
-                logging.warning(f"Standalone Copilot CLI failed: {result.stderr}")
-                # Fall through to try 'gh copilot' as backup?
-                # Or return error? Let's return error because if they have the new CLI, they likely intend to use it.
-                return {
-                    "error": f"Copilot CLI Error: {result.stderr.strip() or result.stdout.strip()}"
-                }
-
-        except Exception as e:
-            logging.error(f"Error running standalone Copilot CLI: {e}")
-            # Fall through to 'gh copilot' logic below
-
-    # 2. Fallback to 'gh copilot' (Legacy/Deprecated)
-    is_installed, gh_path_or_msg = check_gh_availability()
-    if not is_installed:
-        return {"error": gh_path_or_msg}
-
-    is_authed, auth_msg = check_gh_auth(gh_path_or_msg)
-    if not is_authed:
-        return {"error": auth_msg}
-
-    try:
-        # Construct the query. We include the context if available.
-        # The new GitHub Copilot CLI uses a different command structure:
-        # 'gh copilot explain "<query>"' is now handled by the 'gh-copilot' extension which is deprecated.
-        # However, for this project we must rely on what is installed.
-        #
-        # Note: If the user has the NEW 'github/copilot-cli' installed, the command might be different.
-        # But 'gh copilot explain' was the standard for the extension.
-        #
-        # Given the deprecation message, we might need to fallback or check for the new CLI.
-        # For now, we will stick to the 'gh copilot explain' command as implemented,
-        # but be aware it might return the deprecation notice as "success" (stdout).
-
-        query = f"{text}\nContext: {context}" if context else text
-
-        # Security: shell=False is used to prevent injection.
-        command = [gh_path_or_msg, "copilot", "explain", query]
-
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            shell=False,
-            encoding="utf-8",
-            errors="replace",
-        )
-
-        # Check for deprecation message in stdout
-        if "The gh-copilot extension has been deprecated" in result.stdout:
-            return {
-                "error": "The installed 'gh-copilot' extension is deprecated. Please install the new GitHub Copilot CLI (npm install -g @githubnext/github-copilot-cli) or check for updates."
-            }
-
-        # 3. Save the explanation to a file in a user-accessible location
-        # We'll put it in the "Downloads" folder or similar to make it easy to find.
-        # For now, let's use the user's Downloads directory.
+    def find_copilot_cli(self):
+        """Finds the Copilot CLI executable path."""
+        # On Windows, try to find the node-based CLI explicitly first to avoid
+        # batch file wrapper issues that might confuse the SDK process management
         if os.name == "nt":
-            downloads_path = os.path.join(os.environ["USERPROFILE"], "Downloads")
-        else:
-            downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+            appdata = os.environ.get("APPDATA", "")
+            # Try npm global install first (standard)
+            # Use 'copilot' without extension to let shell resolve it if possible
+            # But here we look for specific file
+            npm_path_cmd = os.path.join(appdata, "npm", "copilot.cmd")
+            if os.path.exists(npm_path_cmd):
+                logging.info(f"Found Copilot CLI at npm location: {npm_path_cmd}")
+                return npm_path_cmd
 
-        output_file = os.path.join(downloads_path, "dh_error_analysis.md")
+        # Fallback to generic 'copilot' in PATH
+        copilot_path = shutil.which("copilot")
 
-        # Timestamp for the file content
-        import datetime
+        if copilot_path:
+            logging.info(f"Found Copilot CLI in PATH: {copilot_path}")
+            return copilot_path
 
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return None
 
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(f"# Dynamics Helper - Error Analysis\n\n")
-            f.write(f"**Timestamp:** {timestamp}\n\n")
-            f.write(f"## Original Error\n{text}\n\n")
-            if context:
-                f.write(f"## Context\n{context}\n\n")
-            f.write(f"## AI Explanation\n{result.stdout.strip()}\n")
-
-        # Return success with the path to the saved file
-        return {
-            "success": True,
-            "markdown": result.stdout.strip(),
-            "saved_to": output_file,
-        }
-
-    except Exception as e:
-        return {"error": f"Execution Error: {str(e)}"}
-
-
-def handle_analyze_error(payload):
-    text = payload.get("text")
-    context = payload.get("context", "Unknown")
-
-    if not text:
-        return {"error": "No text provided for analysis."}
-
-    result = run_gh_copilot(text, context)
-
-    # Return the full result (which includes 'success', 'markdown', 'saved_to', or 'error')
-    return result
-
-
-def handle_health_check():
-    is_installed, gh_msg = check_gh_availability()
-    if not is_installed:
-        return {"status": "missing", "message": gh_msg}
-
-    is_authed, auth_msg = check_gh_auth(gh_msg)
-    if not is_authed:
-        return {"status": "unauthenticated", "message": auth_msg}
-
-    return {"status": "healthy", "message": "GitHub CLI is ready."}
-
-
-def process_message(message):
-    action = message.get("action")
-    payload = message.get("payload", {})
-    request_id = message.get("requestId")
-
-    response = {"requestId": request_id, "status": "success", "data": None}
-
-    try:
-        if action == "ping":
-            response["data"] = "pong"
-        elif action == "health_check":
-            response["data"] = handle_health_check()
-        elif action == "analyze_error":
-            # This might take a few seconds, which is fine for native messaging
-            # as long as the browser keeps the port open.
-            response["data"] = handle_analyze_error(payload)
-        else:
-            response["status"] = "error"
-            response["error"] = "unknown_action"
-            response["message"] = f"Unknown action: {action}"
-    except Exception as e:
-        response["status"] = "error"
-        response["error"] = "internal_error"
-        response["message"] = str(e)
-
-    return response
-
-
-def main():
-    while True:
+    async def initialize_sdk(self):
+        """Initializes the Copilot Client and Session."""
         try:
-            message = get_message()
-            if message is None:
+            logging.info("Initializing Copilot Client...")
+
+            cli_path = self.find_copilot_cli()
+            options: CopilotClientOptions = {}
+            if cli_path:
+                options["cli_path"] = cli_path
+
+            self.client = CopilotClient(options if options else None)
+
+            # Load configuration from User Data Directory (USER_DATA_DIR/config.json)
+            # We look in USER_DATA_DIR first (user customization), then fallback to Installation Dir (defaults)
+            session_config: SessionConfig = {}
+
+            # 1. User-specific config (APPDATA/DynamicsHelper/config.json)
+            user_config_path = os.path.join(USER_DATA_DIR, "config.json")
+
+            # 2. Default/bundled config (beside the executable/script)
+            install_dir = os.path.dirname(os.path.abspath(__file__))
+            default_config_path = os.path.join(install_dir, "config.json")
+
+            # Determine which config to use (User overrides Default)
+            config_path = (
+                user_config_path
+                if os.path.exists(user_config_path)
+                else default_config_path
+            )
+
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, "r") as f:
+                        config_data = json.load(f)
+
+                    # Handle skill_directories (resolve relative paths)
+                    if "skill_directories" in config_data:
+                        resolved_skills = []
+                        for path in config_data["skill_directories"]:
+                            if not os.path.isabs(path):
+                                # Resolve relative to the CONFIG FILE location
+                                resolved_path = os.path.abspath(
+                                    os.path.join(os.path.dirname(config_path), path)
+                                )
+                                resolved_skills.append(resolved_path)
+                            else:
+                                resolved_skills.append(path)
+                        config_data["skill_directories"] = resolved_skills
+
+                    session_config.update(config_data)  # type: ignore
+                    logging.info(f"Loaded configuration from {config_path}")
+                except Exception as e:
+                    logging.error(f"Failed to load config.json: {e}")
+            else:
+                logging.info(
+                    "No config.json found (checked User and Install dirs). Using default session."
+                )
+
+            # Load custom instructions (copilot-instructions.md)
+            user_instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
+            default_instr_path = os.path.join(install_dir, "copilot-instructions.md")
+
+            instr_path = (
+                user_instr_path
+                if os.path.exists(user_instr_path)
+                else default_instr_path
+            )
+
+            if os.path.exists(instr_path):
+                try:
+                    with open(instr_path, "r", encoding="utf-8") as f:
+                        instructions_content = f.read()
+
+                    if instructions_content.strip():
+                        # Append instructions to existing system message if configured, or create new one
+                        # We use 'append' mode to preserve the CLI's foundation instructions
+                        session_config["system_message"] = {
+                            "mode": "append",
+                            "content": instructions_content,
+                        }
+                        logging.info(f"Loaded system instructions from {instr_path}")
+                except Exception as e:
+                    logging.error(f"Failed to load instructions from {instr_path}: {e}")
+
+            # Create a persistent session for this host instance
+            self.session = await self.client.create_session(session_config)
+            logging.info("Copilot Session created successfully.")
+        except Exception as e:
+            logging.error(f"Failed to initialize SDK: {e}")
+            self.session = None  # Ensure it's None on failure
+
+    def start_input_thread(self):
+        """Starts a daemon thread to read stdin without blocking the async loop."""
+        t = threading.Thread(target=self._read_stdin_loop, daemon=True)
+        t.start()
+        logging.info("Input thread started.")
+
+    def _read_stdin_loop(self):
+        """Blocking loop that reads Native Messaging format from stdin."""
+        while self.running and self.loop:
+            try:
+                # Read 4 bytes length
+                # sys.stdin.buffer.read is blocking
+                raw_length = sys.stdin.buffer.read(4)
+                if len(raw_length) == 0:
+                    logging.info("Stdin closed. Stopping.")
+                    self.running = False
+                    # Signal the main loop to exit
+                    self.loop.call_soon_threadsafe(self.input_queue.put_nowait, None)
+                    break
+
+                message_length = struct.unpack("@I", raw_length)[0]
+                message_data = sys.stdin.buffer.read(message_length).decode("utf-8")
+
+                if not message_data:
+                    continue
+
+                message = json.loads(message_data)
+                # Thread-safe put into async queue
+                self.loop.call_soon_threadsafe(self.input_queue.put_nowait, message)
+
+            except Exception as e:
+                logging.error(f"Error in input thread: {e}")
+                self.running = False
                 break
 
-            response = process_message(message)
-            send_message(response)
+    def send_message(self, message_content):
+        """Writes a message to stdout in Native Messaging format."""
+        try:
+            logging.debug(f"Sending message: {json.dumps(message_content)}")
+            encoded_content = json.dumps(message_content).encode("utf-8")
+            encoded_length = struct.pack("@I", len(encoded_content))
+
+            sys.stdout.buffer.write(encoded_length)
+            sys.stdout.buffer.write(encoded_content)
+            sys.stdout.buffer.flush()
         except Exception as e:
-            # In case of catastrophic failure, try to send an error message
-            # but usually stdin/stdout closure ends the loop
-            break
+            logging.error(f"Error sending message: {e}")
+
+    async def handle_analyze_error(self, payload):
+        """Uses the Copilot SDK to analyze the error."""
+        text = payload.get("text")
+        context = payload.get("context", "Unknown")
+
+        if not text:
+            return {"error": "No text provided for analysis."}
+
+        if not self.session:
+            return {"error": "Copilot session not initialized."}
+
+        try:
+            # Scrub PII from text and context
+            scrubbed_text = self.scrubber.scrub(text)
+            scrubbed_context = self.scrubber.scrub(context) if context else ""
+
+            prompt = (
+                f"{scrubbed_text}\nContext: {scrubbed_context}"
+                if scrubbed_context
+                else scrubbed_text
+            )
+            logging.debug(f"Scrubbed Prompt content: {prompt}")
+            logging.info(f"Sending prompt to Copilot (length: {len(prompt)})")
+
+            # Accumulate the response
+            full_response = ""
+
+            # Sanitize prompt to avoid breaking CLI IPC on Windows
+            # Empirical evidence shows double quotes " cause hangs.
+            # Single quotes also seem to cause hangs.
+            # Newlines cause command injection issues if not handled by JSON-RPC.
+            # We replace them with spaces to preserve word boundaries.
+
+            safe_prompt = (
+                prompt.replace('"', " ")
+                .replace("'", " ")
+                .replace("\n", " ")
+                .replace("\r", "")
+            )
+            logging.info(f"Sanitized prompt length: {len(safe_prompt)}")
+
+            # Use send_and_wait (send_messages is not available)
+            message_options: MessageOptions = {"prompt": safe_prompt}
+
+            # Increase timeout significantly as initial analysis might be slow
+            # The error we saw was "Timeout after 60.0s"
+            timeout_seconds = 180.0
+
+            logging.debug(f"Calling send_and_wait with options: {message_options}")
+            try:
+                response_event = await self.session.send_and_wait(
+                    message_options, timeout=timeout_seconds
+                )
+                logging.debug(f"Returned from send_and_wait. Event: {response_event}")
+
+                full_response = ""
+                if response_event and response_event.data:
+                    if response_event.data.content:
+                        full_response = response_event.data.content
+                    else:
+                        full_response = "No content in response event."
+                        logging.warning(f"Response event data: {response_event.data}")
+                else:
+                    full_response = "No response event received."
+
+            except asyncio.TimeoutError:
+                logging.error(
+                    f"Copilot request timed out after {timeout_seconds} seconds."
+                )
+                return {"error": "Copilot request timed out."}
+
+            logging.info("Received full response from Copilot.")
+
+            # Save to Downloads (matching old behavior)
+            if os.name == "nt":
+                downloads_path = os.path.join(os.environ["USERPROFILE"], "Downloads")
+            else:
+                downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+
+            output_file = os.path.join(downloads_path, "dh_error_analysis.md")
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(f"# Dynamics Helper - Error Analysis\n\n")
+                f.write(f"**Timestamp:** {timestamp}\n\n")
+                f.write(f"## Original Error\n{text}\n\n")
+                if context:
+                    f.write(f"## Context\n{context}\n\n")
+                f.write(f"## AI Explanation\n{full_response}\n")
+
+            return {"success": True, "markdown": full_response, "saved_to": output_file}
+
+        except Exception as e:
+            logging.error(f"SDK Error: {e}")
+            return {"error": f"SDK Error: {str(e)}"}
+
+    async def process_message(self, message):
+        """Dispatches messages to handlers."""
+        action = message.get("action")
+        payload = message.get("payload", {})
+        request_id = message.get("requestId")
+
+        response = {"requestId": request_id, "status": "success", "data": None}
+
+        try:
+            if action == "ping":
+                response["data"] = "pong"
+
+            elif action == "health_check":
+                # With the SDK, existence of self.client/session implies health
+                if self.client and self.session:
+                    response["data"] = {
+                        "status": "healthy",
+                        "message": "Copilot SDK Active",
+                    }
+                else:
+                    response["data"] = {
+                        "status": "error",
+                        "message": "SDK not initialized",
+                    }
+
+            elif action == "analyze_error":
+                response["data"] = await self.handle_analyze_error(payload)
+
+            else:
+                response["status"] = "error"
+                response["error"] = "unknown_action"
+                response["message"] = f"Unknown action: {action}"
+
+        except Exception as e:
+            response["status"] = "error"
+            response["error"] = "internal_error"
+            response["message"] = str(e)
+
+        self.send_message(response)
+
+    async def run(self):
+        """Main async loop."""
+        self.loop = asyncio.get_running_loop()
+
+        # Use proactor loop on Windows for subprocess support if not already set
+        # (Though usually asyncio.run handles this in Py 3.8+)
+        logging.debug(f"Using proactor: {self.loop.__class__.__name__}")
+
+        await self.initialize_sdk()
+        self.start_input_thread()
+
+        logging.info("Event loop running. Waiting for messages...")
+
+        while self.running:
+            # Wait for next message from the input thread
+            message = await self.input_queue.get()
+
+            if message is None:
+                logging.info("Received exit signal.")
+                break
+
+            await self.process_message(message)
 
 
 if __name__ == "__main__":
-    logging.info("Host process started")
-    main()
+    host = NativeHost()
+    try:
+        # Standard entry point for asyncio
+        asyncio.run(host.run())
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        logging.critical(f"Fatal error: {e}")
