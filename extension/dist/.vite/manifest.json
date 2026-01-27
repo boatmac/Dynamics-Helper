@@ -1,17 +1,21 @@
 {
   "../../../../@crx/manifest": {
-    "file": "assets/crx-manifest.js-DAasKKuB.js",
+    "file": "assets/crx-manifest.js-UYIQ5jNU.js",
     "name": "crx-manifest.js",
     "src": "../../../../@crx/manifest",
     "isEntry": true
+  },
+  "_constants-BFJtfVSk.js": {
+    "file": "assets/constants-BFJtfVSk.js",
+    "name": "constants"
   },
   "_index-CEymAP8w.js": {
     "file": "assets/index-CEymAP8w.js",
     "name": "index"
   },
-  "_index.tsx-loader-D6xHlcQM.js": {
-    "file": "assets/index.tsx-loader-D6xHlcQM.js",
-    "src": "_index.tsx-loader-D6xHlcQM.js"
+  "_index.tsx-loader-B0zTMurm.js": {
+    "file": "assets/index.tsx-loader-B0zTMurm.js",
+    "src": "_index.tsx-loader-B0zTMurm.js"
   },
   "index.html": {
     "file": "assets/index.html-DwuiOmr9.js",
@@ -26,18 +30,22 @@
     ]
   },
   "src/background/serviceWorker.ts": {
-    "file": "assets/serviceWorker.ts-CnzplYnN.js",
+    "file": "assets/serviceWorker.ts-DTVSB2HO.js",
     "name": "serviceWorker.ts",
     "src": "src/background/serviceWorker.ts",
-    "isEntry": true
+    "isEntry": true,
+    "imports": [
+      "_constants-BFJtfVSk.js"
+    ]
   },
   "src/content/index.tsx": {
-    "file": "assets/index.tsx-sLzIDM0Q.js",
+    "file": "assets/index.tsx-CNnaSnlV.js",
     "name": "index.tsx",
     "src": "src/content/index.tsx",
     "isEntry": true,
     "imports": [
-      "_index-CEymAP8w.js"
+      "_index-CEymAP8w.js",
+      "_constants-BFJtfVSk.js"
     ]
   }
 }

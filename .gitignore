@@ -1,2 +1,22 @@
 items.json
 zberaaiautomation.js
+.github
+.opencode
+.shared
+
+# Node / Frontend
+node_modules/
+.env
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+.ruff_cache/
+local.settings.json
+
+# Build & Artifacts
+build/
+legacy_backup/
+dist/

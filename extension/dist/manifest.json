@@ -12,7 +12,13 @@
   "host_permissions": [
     "https://*.dynamics.com/*",
     "https://*.powerplatform.microsoft.com/*",
-    "https://portal.azure.com/*"
+    "https://portal.azure.com/*",
+    "https://*.monitor.azure.com/*",
+    "https://dc.services.visualstudio.com/*",
+    "https://browser.events.data.microsoft.com/*",
+    "https://browser.pipe.aria.microsoft.com/*",
+    "https://us-mobile.events.data.microsoft.com/*",
+    "https://*.applicationinsights.azure.com/*"
   ],
   "background": {
     "service_worker": "service-worker-loader.js",
@@ -21,7 +27,7 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.tsx-loader-D6xHlcQM.js"
+        "assets/index.tsx-loader-B0zTMurm.js"
       ],
       "matches": [
         "https://*.dynamics.com/*",
@@ -50,7 +56,8 @@
       ],
       "resources": [
         "assets/index-CEymAP8w.js",
-        "assets/index.tsx-sLzIDM0Q.js"
+        "assets/constants-BFJtfVSk.js",
+        "assets/index.tsx-CNnaSnlV.js"
       ],
       "use_dynamic_url": false
     }

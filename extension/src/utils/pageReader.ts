@@ -4,6 +4,7 @@ export interface ScrapedData {
     errorText?: string;
     ticketTitle?: string;
     productCategory?: string;
+    caseNumber?: string; // New field for Case Number
     description?: string;
     context?: string;
     timestamp?: string;
@@ -44,7 +45,70 @@ export class PageReader {
             }
         }
 
-        // 3. Try to find Product Category
+        // 3. Try to find Case Number
+        // Based on user screenshot, it's often near header controls or has specific 16-digit format
+        // We look for elements containing the label "Case number" or matching the pattern
+        const caseNumSelectors = [
+             // Specific ID from screenshot/DOM inspection (best guess based on structure)
+            '[id^="headerControlsList_"]', 
+            // Generic search for text "Case number" siblings
+            'div' 
+        ];
+
+        // Regex for 16-digit case number (e.g. 2601190030003106)
+        const caseNumRegex = /\b\d{16}\b/;
+
+        // Strategy A: Check specific header container if it exists
+        const headerControls = document.querySelector('[id^="headerControlsList_"]');
+        if (headerControls) {
+             const text = headerControls.textContent || '';
+             const match = text.match(caseNumRegex);
+             if (match) {
+                 data.caseNumber = match[0];
+             }
+        }
+
+        // Strategy B: If not found, scan all divs that might contain "Case number" text label
+        if (!data.caseNumber) {
+            // Find elements containing "Case number" text (case insensitive)
+            // XPath is cleaner for text content search
+            const iterator = document.evaluate(
+                "//*[contains(text(), 'Case number')]", 
+                document, 
+                null, 
+                XPathResult.ANY_TYPE, 
+                null
+            );
+            
+            let node = iterator.iterateNext();
+            while (node) {
+                // The number is often in a SIBLING or PARENT's other child
+                // Check parent's text content for the 16 digit pattern
+                const parent = node.parentElement;
+                if (parent && parent.parentElement) {
+                     // Check specific parent hierarchy text (broader context)
+                     const containerText = parent.parentElement.textContent || '';
+                     const match = containerText.match(caseNumRegex);
+                     if (match) {
+                         data.caseNumber = match[0];
+                         break;
+                     }
+                }
+                node = iterator.iterateNext();
+            }
+        }
+        
+        // Strategy C: Direct Regex scan on header container (most robust if ID is stable)
+        if (!data.caseNumber) {
+            const headerContainer = document.querySelector('[id^="headerContainer"]'); // or outerHeaderContainer_
+             if (headerContainer && headerContainer.textContent) {
+                 const match = headerContainer.textContent.match(caseNumRegex);
+                 if (match) data.caseNumber = match[0];
+             }
+        }
+
+
+        // 4. Try to find Product Category
         // This is often in a specific field or breadcrumb
         const categorySelectors = [
             '#sapTextAreaId', // Specific textarea for Support Area Path
@@ -137,7 +201,7 @@ export class PageReader {
         }
 
         // Return data if we found *something* useful
-        if (data.errorText || data.ticketTitle || data.description || data.productCategory) {
+        if (data.errorText || data.ticketTitle || data.description || data.productCategory || data.caseNumber) {
             // Consolidate "errorText" for the analyze function if description is better
             if (!data.errorText && data.description) {
                 data.errorText = data.description;

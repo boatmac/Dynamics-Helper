@@ -1,47 +1,100 @@
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
+import { trackEvent, trackException } from '../utils/telemetry';
 
 // Non-blocking Result Popover Component
 const ResultPopover: React.FC<{ 
     isOpen: boolean; 
     onClose: () => void; 
+    title?: string;
     content: string; 
     filePath?: string;
-}> = ({ isOpen, onClose, content, filePath }) => {
+}> = ({ isOpen, onClose, title, content, filePath }) => {
+    // State for position and dragging
+    const [position, setPosition] = useState({ x: Math.max(0, window.innerWidth - 550), y: 100 });
+    const [isDragging, setIsDragging] = useState(false);
+    const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
+    // Handle Dragging
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent) => {
+            if (isDragging) {
+                setPosition({
+                    x: e.clientX - dragOffset.x,
+                    y: e.clientY - dragOffset.y
+                });
+            }
+        };
+        const handleMouseUp = () => {
+            setIsDragging(false);
+        };
+
+        if (isDragging) {
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp);
+        }
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [isDragging, dragOffset]);
+
+    const handleMouseDown = (e: React.MouseEvent) => {
+        // Only trigger drag if clicking the header background, not buttons
+        if ((e.target as HTMLElement).tagName === 'BUTTON') return;
+        
+        setIsDragging(true);
+        setDragOffset({
+            x: e.clientX - position.x,
+            y: e.clientY - position.y
+        });
+    };
+
     if (!isOpen) return null;
 
     return (
         <div style={{
             position: 'fixed',
-            bottom: '90px', // Align with top of FAB roughly
-            right: '100px', // Push to the left of the FAB
+            left: `${position.x}px`,
+            top: `${position.y}px`,
             width: '400px',
-            maxWidth: 'calc(100vw - 120px)',
-            maxHeight: '600px',
+            height: '500px', // Fixed initial height to support resize
+            minWidth: '300px',
+            minHeight: '200px',
+            maxWidth: '90vw',
+            maxHeight: '90vh',
             backgroundColor: 'white',
             borderRadius: '12px',
             boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
             display: 'flex',
             flexDirection: 'column',
             zIndex: 2147483647,
-            pointerEvents: 'auto', // CRITICAL: Re-enable clicks since parent container has pointer-events: none
+            pointerEvents: 'auto',
             border: '1px solid #e5e7eb',
-            fontFamily: "'Segoe UI', system-ui, sans-serif"
+            fontFamily: "'Segoe UI', system-ui, sans-serif",
+            resize: 'both',
+            overflow: 'hidden' // Required for resize handle
         }}>
-            {/* Header */}
-            <div style={{ 
-                padding: '12px 16px', 
-                borderBottom: '1px solid #f3f4f6', 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center',
-                background: '#f9fafb',
-                borderTopLeftRadius: '12px',
-                borderTopRightRadius: '12px'
-            }}>
-                <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#111827' }}>🤖 Copilot Analysis</h3>
+            {/* Header - Draggable Area */}
+            <div 
+                onMouseDown={handleMouseDown}
+                style={{ 
+                    padding: '12px 16px', 
+                    borderBottom: '1px solid #f3f4f6', 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center',
+                    background: '#f9fafb',
+                    borderTopLeftRadius: '12px',
+                    borderTopRightRadius: '12px',
+                    cursor: isDragging ? 'grabbing' : 'grab',
+                    userSelect: 'none'
+                }}
+            >
+                <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#111827' }}>{title || '🤖 Copilot Analysis'}</h3>
                 <button 
                     onClick={onClose} 
                     style={{ 
@@ -70,7 +123,7 @@ const ResultPopover: React.FC<{
                 // whiteSpace: 'pre-wrap' // Removed since ReactMarkdown handles this
             }}>
                 {content ? (
-                    <ReactMarkdown>{content}</ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
                 ) : (
                     "No analysis content received."
                 )}
@@ -99,7 +152,12 @@ const FAB: React.FC = () => {
     const [isOpen, setIsOpen] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
-    const [analysisResult, setAnalysisResult] = useState<{ content: string; path?: string } | null>(null);
+    const [resultPopover, setResultPopover] = useState<{ 
+        isOpen: boolean;
+        title: string;
+        content: string; 
+        path?: string 
+    }>({ isOpen: false, title: '', content: '' });
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     
     const [prefs, setPrefs] = useState({
@@ -108,11 +166,20 @@ const FAB: React.FC = () => {
         offsetBottom: 24,
         offsetRight: 24
     });
+    
+    // UI States
+    const [isContextExpanded, setIsContextExpanded] = useState(false);
 
     // Menu Logic
     const { currentItems, canGoBack, navigateTo, navigateBack } = useMenuLogic();
 
     useEffect(() => {
+        // Track when the FAB component (and thus the extension) loads
+        // Wait 1 second to ensure the extension is fully loaded
+        setTimeout(() => {
+            trackEvent('Extension Loaded', { url: window.location.href });
+        }, 1000);
+
         // Load preferences
         if (chrome?.storage?.local) {
             chrome.storage.local.get("dh_prefs", (result) => {
@@ -143,19 +210,36 @@ const FAB: React.FC = () => {
     }, [isOpen]);
 
     const handlePing = async () => {
+        trackEvent('Ping Clicked');
         try {
             const response = await chrome.runtime.sendMessage({
                 type: "NATIVE_MSG",
                 payload: { action: "ping", requestId: crypto.randomUUID() }
             });
-            alert(JSON.stringify(response, null, 2));
+            // Show result in popover instead of alert
+            setResultPopover({
+                isOpen: true,
+                title: '⚡ Ping Result',
+                content: "```json\n" + JSON.stringify(response, null, 2) + "\n```"
+            });
+            // Also close menu to show result clearly? Optional.
+            // setIsOpen(false); 
         } catch (e: any) {
-            alert(`Error: ${e.message}`);
+            setResultPopover({
+                isOpen: true,
+                title: '❌ Ping Error',
+                content: `Error: ${e.message}`
+            });
         }
     };
 
     const handleAnalyze = async () => {
         if (!scrapedData?.errorText) return;
+
+        trackEvent('Analyze Clicked', { 
+            hasContext: !!scrapedData.source,
+            product: scrapedData.productCategory || 'Unknown'
+        });
 
         setIsAnalyzing(true);
         setErrorMsg(null);
@@ -191,10 +275,13 @@ Description/Error: ${scrapedData.errorText}
                     
                     // Check Analysis function result
                     if (analysisData && !analysisData.error) {
-                        setAnalysisResult({
+                        setResultPopover({
+                            isOpen: true,
+                            title: '🤖 Copilot Analysis',
                             content: analysisData.markdown || JSON.stringify(analysisData, null, 2),
                             path: analysisData.saved_to
                         });
+                        setIsOpen(false); // Close menu to show result
                     } else {
                         const errMsg = analysisData?.error || "Unknown analysis error";
                         setErrorMsg(`Analysis Error: ${errMsg}`);
@@ -222,11 +309,18 @@ Description/Error: ${scrapedData.errorText}
         if (item.type === 'folder') {
             navigateTo(item);
         } else if (item.type === 'link' && item.url) {
+            trackEvent('Bookmark Link Clicked', { label: item.label, url: item.url });
             const url = await resolveDynamicUrl(item.url);
             if (url) window.open(url, item.target || '_blank');
             setIsOpen(false);
         } else if (item.type === 'markdown') {
-            alert(item.content);
+            trackEvent('Bookmark Note Clicked', { label: item.label });
+            // Show markdown content in the result popover
+            setResultPopover({
+                isOpen: true,
+                title: item.label || '📝 Note',
+                content: item.content || ''
+            });
             setIsOpen(false);
         }
     };
@@ -235,10 +329,11 @@ Description/Error: ${scrapedData.errorText}
         <div className="dh-container">
             {/* Analysis Result Popover */}
             <ResultPopover 
-                isOpen={!!analysisResult} 
-                onClose={() => setAnalysisResult(null)} 
-                content={analysisResult?.content || ""}
-                filePath={analysisResult?.path}
+                isOpen={resultPopover.isOpen} 
+                onClose={() => setResultPopover(prev => ({ ...prev, isOpen: false }))} 
+                title={resultPopover.title}
+                content={resultPopover.content}
+                filePath={resultPopover.path}
             />
 
             {isOpen && (
@@ -289,47 +384,72 @@ Description/Error: ${scrapedData.errorText}
                     {/* AI Tools Footer */}
                     <div style={{ borderTop: '1px solid #f0f0f0', padding: '8px 4px 4px 4px', marginTop: '4px' }}>
                         {/* Context Preview Box */}
-                        <div style={{ marginBottom: '8px', padding: '8px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px' }}>
-                            <textarea
-                                value={
-                                    scrapedData
-                                        ? (() => {
-                                            // Check if we already have the formatted text in errorText (from previous edits)
-                                            // If so, just return it. Otherwise, build the initial format.
-                                            if (scrapedData.errorText && scrapedData.errorText.startsWith('## Case Title')) {
-                                                return scrapedData.errorText;
-                                            }
-
-                                            return [
-                                                `## Case Title\n\n${scrapedData.ticketTitle || '<Captured Title>'}`,
-                                                `## SAP\n\n${scrapedData.productCategory || '<Captured Support Area Path>'}`,
-                                                `## Description\n\n${scrapedData.errorText || '<Captured textarea value>'}`
-                                            ].join('\n\n');
-                                        })()
-                                        : ''
-                                }
-                                onChange={(e) => {
-                                    setScrapedData(prev => ({ 
-                                        ...(prev || {}), 
-                                        ticketTitle: '', // Clear individual fields so we don't re-template on next render
-                                        productCategory: '',
-                                        errorText: e.target.value 
-                                    }));
-                                }}
+                        <div style={{ marginBottom: '8px', border: '1px solid #fecaca', borderRadius: '4px', overflow: 'hidden' }}>
+                            {/* Header / Toggle */}
+                            <div 
+                                onClick={() => setIsContextExpanded(!isContextExpanded)}
                                 style={{
-                                    width: '100%',
-                                    minHeight: '80px',
+                                    padding: '6px 8px',
+                                    background: '#fef2f2',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
                                     fontSize: '11px',
-                                    padding: '4px',
-                                    borderRadius: '4px',
-                                    border: '1px solid #d1d5db',
-                                    color: '#374151',
-                                    resize: 'vertical',
-                                    fontFamily: 'inherit',
-                                    whiteSpace: 'pre-wrap'
+                                    color: '#991b1b',
+                                    fontWeight: '600'
                                 }}
-                                placeholder="Context will appear here..."
-                            />
+                            >
+                                <span>Case Context</span>
+                                <span>{isContextExpanded ? '▼' : '▶'}</span>
+                            </div>
+
+                            {/* Collapsible Content */}
+                            {isContextExpanded && (
+                                <div style={{ padding: '8px', background: '#fff' }}>
+                                    <textarea
+                                        value={
+                                            scrapedData
+                                                ? (() => {
+                                                    // Check if we already have the formatted text in errorText (from previous edits)
+                                                    // If so, just return it. Otherwise, build the initial format.
+                                                    if (scrapedData.errorText && scrapedData.errorText.startsWith('## Case Title')) {
+                                                        return scrapedData.errorText;
+                                                    }
+
+                                                    return [
+                                                        `## Case Number\n\n${scrapedData.caseNumber || '<Captured Case Number>'}`,
+                                                        `## Case Title\n\n${scrapedData.ticketTitle || '<Captured Title>'}`,
+                                                        `## SAP\n\n${scrapedData.productCategory || '<Captured Support Area Path>'}`,
+                                                        `## Description\n\n${scrapedData.errorText || '<Captured textarea value>'}`
+                                                    ].join('\n\n');
+                                                })()
+                                                : ''
+                                        }
+                                        onChange={(e) => {
+                                            setScrapedData(prev => ({ 
+                                                ...(prev || {}), 
+                                                ticketTitle: '', 
+                                                productCategory: '',
+                                                errorText: e.target.value 
+                                            }));
+                                        }}
+                                        style={{
+                                            width: '100%',
+                                            minHeight: '120px',
+                                            fontSize: '11px',
+                                            padding: '4px',
+                                            borderRadius: '4px',
+                                            border: '1px solid #d1d5db',
+                                            color: '#374151',
+                                            resize: 'vertical',
+                                            fontFamily: 'inherit',
+                                            whiteSpace: 'pre-wrap'
+                                        }}
+                                        placeholder="Context will appear here..."
+                                    />
+                                </div>
+                            )}
                         </div>
                         
                         <div style={{ display: 'flex', gap: '8px' }}>
