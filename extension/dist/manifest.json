@@ -27,7 +27,7 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.tsx-loader-B0zTMurm.js"
+        "assets/index.tsx-loader-CmsZaA2M.js"
       ],
       "matches": [
         "https://*.dynamics.com/*",
@@ -55,9 +55,9 @@
         "https://portal.azure.com/*"
       ],
       "resources": [
-        "assets/index-CEymAP8w.js",
+        "assets/settings-DVhygX-d.js",
         "assets/constants-BFJtfVSk.js",
-        "assets/index.tsx-CNnaSnlV.js"
+        "assets/index.tsx-mpbtJWAH.js"
       ],
       "use_dynamic_url": false
     }

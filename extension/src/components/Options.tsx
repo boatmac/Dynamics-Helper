@@ -1,6 +1,31 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
+import { 
+    Settings, 
+    Save, 
+    RotateCcw, 
+    Upload, 
+    Download, 
+    Maximize2, 
+    Minimize2, 
+    Plus, 
+    Folder, 
+    Link as LinkIcon, 
+    FileText, 
+    Edit2, 
+    Trash2, 
+    MoreHorizontal,
+    FolderOpen,
+    Type
+} from 'lucide-react';
+import clsx from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+// Helper
+function cn(...inputs: (string | undefined | null | false)[]) {
+  return twMerge(clsx(inputs));
+}
 
 // --- Types ---
 interface MenuItem {
@@ -23,7 +48,7 @@ interface Preferences {
 
 const DEFAULT_PREFS: Preferences = {
     buttonText: "DH",
-    primaryColor: "#2563eb",
+    primaryColor: "#0D9488", // Teal-600 to match design system
     offsetBottom: 24,
     offsetRight: 24
 };
@@ -70,57 +95,67 @@ const ItemEditor: React.FC<{
     };
 
     return (
-        <div className="border p-4 rounded bg-gray-50 mb-4 animate-fade-in-up">
-            <h4 className="font-bold text-sm mb-2 text-gray-700">Edit Item</h4>
+        <div className="border border-slate-200 p-4 rounded-lg bg-slate-50 mb-3 animate-fade-in-up shadow-sm">
+            <h4 className="font-bold text-sm mb-3 text-slate-800 flex items-center gap-2">
+                <Edit2 size={14} /> Edit Item
+            </h4>
             
-            <div className="space-y-3">
-                <div>
-                    <label className="block text-xs font-semibold text-gray-600">Label</label>
-                    <input 
-                        className="w-full border p-1 text-sm rounded"
-                        value={draft.label} 
-                        onChange={e => handleChange('label', e.target.value)} 
-                    />
-                </div>
-                
-                <div>
-                    <label className="block text-xs font-semibold text-gray-600">Type</label>
-                    <select 
-                        className="w-full border p-1 text-sm rounded"
-                        value={draft.type} 
-                        onChange={e => handleChange('type', e.target.value)}
-                    >
-                        <option value="link">Link</option>
-                        <option value="folder">Folder</option>
-                        <option value="markdown">Markdown Note</option>
-                    </select>
+            <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">Label</label>
+                        <input 
+                            className="w-full border border-slate-300 p-2 text-sm rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all"
+                            value={draft.label} 
+                            onChange={e => handleChange('label', e.target.value)} 
+                            placeholder="Menu Label"
+                        />
+                    </div>
+                    
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">Type</label>
+                        <select 
+                            className="w-full border border-slate-300 p-2 text-sm rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none bg-white"
+                            value={draft.type} 
+                            onChange={e => handleChange('type', e.target.value)}
+                        >
+                            <option value="link">Link</option>
+                            <option value="folder">Folder</option>
+                            <option value="markdown">Markdown Note</option>
+                        </select>
+                    </div>
                 </div>
 
                 {draft.type === 'link' && (
                     <div>
-                        <label className="block text-xs font-semibold text-gray-600">URL</label>
-                        <input 
-                            className="w-full border p-1 text-sm rounded"
-                            value={draft.url || ''} 
-                            onChange={e => handleChange('url', e.target.value)} 
-                        />
+                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">URL</label>
+                        <div className="relative">
+                            <span className="absolute left-3 top-2.5 text-slate-400"><LinkIcon size={14} /></span>
+                            <input 
+                                className="w-full border border-slate-300 pl-9 p-2 text-sm rounded-md focus:ring-2 focus:ring-teal-500 outline-none font-mono text-slate-600"
+                                value={draft.url || ''} 
+                                onChange={e => handleChange('url', e.target.value)} 
+                                placeholder="https://..."
+                            />
+                        </div>
                     </div>
                 )}
 
                 {draft.type === 'markdown' && (
                     <div>
-                        <label className="block text-xs font-semibold text-gray-600">Content</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">Content</label>
                         <textarea 
-                            className="w-full border p-1 text-sm rounded h-20"
+                            className="w-full border border-slate-300 p-2 text-sm rounded-md h-24 focus:ring-2 focus:ring-teal-500 outline-none font-mono text-slate-600"
                             value={draft.content || ''} 
                             onChange={e => handleChange('content', e.target.value)} 
+                            placeholder="# Markdown content here..."
                         />
                     </div>
                 )}
 
-                <div className="flex justify-end gap-2 mt-2">
-                    <button onClick={onCancel} className="text-xs px-2 py-1 bg-gray-200 rounded">Cancel</button>
-                    <button onClick={() => onSave(draft)} className="text-xs px-2 py-1 bg-blue-600 text-white rounded">Save</button>
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
+                    <button onClick={onCancel} className="text-xs px-3 py-1.5 bg-white border border-slate-300 text-slate-600 rounded-md hover:bg-slate-50 font-medium">Cancel</button>
+                    <button onClick={() => onSave(draft)} className="text-xs px-3 py-1.5 bg-teal-600 text-white rounded-md hover:bg-teal-700 shadow-sm font-medium">Save Changes</button>
                 </div>
             </div>
         </div>
@@ -186,8 +221,6 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
         }),
         hover: (draggedItem, monitor) => {
             if (!ref.current) return;
-            // Standard re-ordering logic can go here for smoother UX, 
-            // but for tree structures, explicit drops are often safer/clearer.
         },
         drop: (draggedItem, monitor) => {
              if (monitor.didDrop()) return; // Already handled by child
@@ -220,10 +253,10 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     drag(drop(ref));
 
     const opacity = isDragging ? 0.4 : 1;
-    const bgClass = isOver && canDrop ? (item.type === 'folder' ? 'bg-blue-100 ring-2 ring-blue-400' : 'bg-green-100 ring-2 ring-green-400') : 'hover:bg-gray-50';
+    const bgClass = isOver && canDrop ? (item.type === 'folder' ? 'bg-teal-50 ring-2 ring-teal-400 ring-inset' : 'bg-green-50 ring-2 ring-green-400 ring-inset') : 'hover:bg-slate-50';
 
     return (
-        <li ref={ref} className={`group mb-1 rounded transition-all duration-200 ${bgClass}`} style={{ opacity }}>
+        <li ref={ref} className={cn("group mb-1 rounded-lg transition-all duration-200", bgClass)} style={{ opacity }}>
              {isEditing ? (
                 <ItemEditor 
                     item={item} 
@@ -234,9 +267,9 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                     onCancel={() => setEditingItemPath(null)}
                 />
             ) : (
-                <div className="flex items-center justify-between p-2 rounded cursor-grab active:cursor-grabbing">
+                <div className="flex items-center justify-between p-2.5 rounded-lg border border-transparent hover:border-slate-200 cursor-grab active:cursor-grabbing">
                     <div 
-                        className="flex items-center gap-2 flex-1"
+                        className="flex items-center gap-3 flex-1 min-w-0"
                         onClick={() => {
                             if (item.type === 'folder') {
                                 // Toggle collapse
@@ -245,11 +278,13 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                             }
                         }}
                     >
-                        <span className="text-xl">
-                            {item.type === 'folder' ? (item.collapsed ? '📁' : '📂') : item.type === 'link' ? '🔗' : '📝'}
+                        <span className={cn("p-1.5 rounded-md", item.type === 'folder' ? "bg-amber-100 text-amber-600" : item.type === 'link' ? "bg-blue-100 text-blue-600" : "bg-purple-100 text-purple-600")}>
+                            {item.type === 'folder' ? (item.collapsed ? <Folder size={16} /> : <FolderOpen size={16} />) : item.type === 'link' ? <LinkIcon size={16} /> : <FileText size={16} />}
                         </span>
-                        <span className="font-medium text-gray-700">{item.label}</span>
-                        {item.url && <span className="text-xs text-gray-400 truncate max-w-[200px]">{item.url}</span>}
+                        <div className="flex flex-col min-w-0">
+                            <span className="font-medium text-slate-700 text-sm truncate">{item.label}</span>
+                            {item.url && <span className="text-xs text-slate-400 truncate font-mono">{item.url}</span>}
+                        </div>
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         {item.type === 'folder' && (
@@ -259,9 +294,9 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                      const newItem: MenuItem = { type: 'link', label: 'New Link', url: 'https://' };
                                      setItems(prev => addItemAt(currentPath, newItem, prev));
                                 }}
-                                className="p-1 text-green-600 hover:bg-green-100 rounded" title="Add Child"
+                                className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors" title="Add Child"
                             >
-                                ➕
+                                <Plus size={14} />
                             </button>
                         )}
                         <button 
@@ -269,9 +304,9 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                 e.stopPropagation();
                                 setEditingItemPath(currentPath);
                             }}
-                            className="p-1 text-blue-600 hover:bg-blue-100 rounded" title="Edit"
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Edit"
                         >
-                            ✏️
+                            <Edit2 size={14} />
                         </button>
                         <button 
                             onClick={(e) => {
@@ -280,9 +315,9 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                     setItems(prev => deleteItemAt(currentPath, prev));
                                 }
                             }}
-                            className="p-1 text-red-600 hover:bg-red-100 rounded" title="Delete"
+                            className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete"
                         >
-                            🗑️
+                            <Trash2 size={14} />
                         </button>
                     </div>
                 </div>
@@ -290,7 +325,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
             
             {/* Children */}
             {item.children && item.children.length > 0 && !item.collapsed && (
-                <div className="ml-6 pl-2 border-l-2 border-gray-100">
+                <div className="ml-5 pl-2 border-l-2 border-slate-100 mt-1 space-y-1">
                     {renderList(item.children, currentPath)}
                 </div>
             )}
@@ -312,11 +347,36 @@ const Options: React.FC = () => {
     useEffect(() => {
         // Load Prefs
         chrome.storage.local.get("dh_prefs", (result) => {
-            if (result.dh_prefs) setPrefs({ ...DEFAULT_PREFS, ...result.dh_prefs });
+            if (result.dh_prefs) {
+                // Auto-migrate old default blue to new teal if user hasn't changed it
+                const loadedPrefs = result.dh_prefs as Preferences; // Cast to Preferences type
+                if (loadedPrefs.primaryColor === "#2563eb") { // Old default blue
+                    loadedPrefs.primaryColor = "#0D9488"; // New default teal
+                }
+                setPrefs({ ...DEFAULT_PREFS, ...loadedPrefs });
+            }
         });
 
-        // Load Items
-        loadItems().then(setItems);
+        // Load Items and ensure collapsed by default
+        loadItems().then(loadedItems => {
+            const collapseFolders = (list: MenuItem[]): MenuItem[] => {
+                return list.map(item => {
+                    if (item.type === 'folder') {
+                        return {
+                            ...item,
+                            // Default to collapsed if undefined, or force collapsed if desired? 
+                            // User request: "make it collapsed by default". 
+                            // I'll default to true if it's not explicitly false (or maybe just force it true on initial load for cleaner look).
+                            // Let's set it to true if undefined.
+                            collapsed: item.collapsed ?? true, 
+                            children: item.children ? collapseFolders(item.children) : []
+                        };
+                    }
+                    return item;
+                });
+            };
+            setItems(collapseFolders(loadedItems));
+        });
     }, []);
 
     // --- Prefs Handlers ---
@@ -330,7 +390,7 @@ const Options: React.FC = () => {
 
     const handleSave = () => {
         chrome.storage.local.set({ dh_prefs: prefs, dh_items: items }, () => {
-            setStatus("Saved successfully!");
+            setStatus("Settings saved successfully!");
             setTimeout(() => setStatus(""), 2000);
         });
     };
@@ -346,7 +406,6 @@ const Options: React.FC = () => {
     };
 
     // --- Item Handlers (Recursive) ---
-    
     // Helper to get item at path
     const getItemAt = (path: number[], list: MenuItem[]): MenuItem | null => {
         let current = list[path[0]];
@@ -421,19 +480,7 @@ const Options: React.FC = () => {
         if (!itemToMove) return;
 
         // 2. Remove it from old location
-        // Note: If we remove first, indices might shift. 
-        // We need to be careful if dragPath and hoverPath are in the same parent.
-        // It's safer to clone the tree, remove, then insert.
-        
         let newItems = [...items];
-        
-        // Helper to remove without index shifting issues impacting insertion:
-        // Actually, let's just do it in two passes. 
-        // If we remove 'dragPath', 'hoverPath' might become invalid if it was after 'dragPath' in same array.
-        // So we need to calculate 'insertPath' before removing, adjusting if necessary.
-        
-        // Simpler strategy: Use a unique ID? We don't have one.
-        // Let's rely on the fact that we can walk the tree.
         
         // Deep clone first to avoid mutation issues
         const cloneDeep = (items: MenuItem[]) => JSON.parse(JSON.stringify(items));
@@ -456,10 +503,6 @@ const Options: React.FC = () => {
         if (!removed) return;
         
         // 3. Insert at new location
-        // We need to adjust hoverPath if it was affected by removal.
-        // If dragPath and hoverPath share the same parent, and dragIndex < hoverIndex,
-        // then hoverIndex needs to be decremented.
-        
         let finalInsertPath = [...hoverPath];
         
         // Check if same parent
@@ -564,7 +607,7 @@ const Options: React.FC = () => {
             <ul className="space-y-1">
                 {list.map((item, idx) => (
                     <DraggableItem 
-                        key={idx} // Note: Index as key is risky for dnd but simple for this tree structure
+                        key={idx} 
                         item={item}
                         index={idx}
                         path={pathPrefix}
@@ -584,153 +627,189 @@ const Options: React.FC = () => {
 
     return (
         <DndProvider backend={HTML5Backend}>
-            <div className="min-h-screen bg-gray-50 py-8 px-4">
-                <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="min-h-screen bg-slate-50 py-10 px-6 font-[family-name:var(--font-jakarta)]">
+                <style dangerouslySetInnerHTML={{__html: `@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'); :root { --font-jakarta: 'Plus Jakarta Sans', sans-serif; } body { font-family: var(--font-jakarta); }`}} />
+                
+                <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden">
                     {/* Header */}
-                    <div className="bg-blue-600 p-6 text-white flex justify-between items-center">
-                        <div>
-                            <h1 className="text-2xl font-bold">Dynamics Helper</h1>
-                            <p className="opacity-80 text-sm">Configuration & Bookmarks</p>
+                    <div className="bg-white border-b border-slate-100 p-6 flex justify-between items-center sticky top-0 z-10">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-teal-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-sm">
+                                {prefs.buttonText.slice(0, 2)}
+                            </div>
+                            <div>
+                                <h1 className="text-xl font-bold text-slate-800 tracking-tight">Dynamics Helper</h1>
+                                <p className="text-slate-500 text-xs font-medium uppercase tracking-wider">Configuration & Bookmarks</p>
+                            </div>
                         </div>
                         <div className="flex gap-3">
-                             <button onClick={handleReset} className="px-4 py-2 bg-blue-700 hover:bg-blue-800 rounded text-sm transition-colors">
-                                Reset
+                             <button onClick={handleReset} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-800 rounded-lg text-sm font-medium transition-colors">
+                                <RotateCcw size={16} /> Reset
                             </button>
-                            <button onClick={handleSave} className="px-4 py-2 bg-white text-blue-600 font-bold rounded shadow hover:bg-gray-100 text-sm transition-colors">
-                                Save Changes
+                            <button onClick={handleSave} className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white font-medium rounded-lg shadow-sm hover:bg-teal-700 text-sm transition-colors ring-offset-2 focus:ring-2 ring-teal-500">
+                                <Save size={16} /> Save Changes
                             </button>
                         </div>
                     </div>
 
                     {status && (
-                        <div className="bg-green-100 text-green-800 text-center py-2 font-medium text-sm">
+                        <div className="bg-emerald-50 text-emerald-700 text-center py-3 font-medium text-sm border-b border-emerald-100 flex items-center justify-center gap-2 animate-fade-in-down">
+                            <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
                             {status}
                         </div>
                     )}
 
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-0">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
                         
                         {/* Sidebar: Visual Settings */}
-                        <div className="p-6 border-r border-gray-100 bg-gray-50/50">
-                            <h2 className="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Appearance</h2>
+                        <div className="lg:col-span-4 p-8 border-r border-slate-100 bg-slate-50/30">
+                            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
+                                <Settings size={14} /> Appearance
+                            </h2>
                             
-                            <div className="space-y-6">
+                            <div className="space-y-8">
                                 {/* Preview */}
-                                <div className="flex items-center justify-center p-6 bg-white border border-dashed border-gray-300 rounded-lg">
-                                    <div 
-                                        className="w-16 h-16 rounded-full shadow-lg flex items-center justify-center text-white font-bold text-2xl"
-                                        style={{ backgroundColor: prefs.primaryColor }}
-                                    >
-                                        {prefs.buttonText}
+                                <div className="space-y-2">
+                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Live Preview</label>
+                                    <div className="flex items-center justify-center h-32 bg-white border border-dashed border-slate-300 rounded-xl relative overflow-hidden group">
+                                        <div className="absolute inset-0 bg-slate-50 pattern-grid-lg opacity-20"></div>
+                                        <div 
+                                            className="w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-white font-bold text-lg transform group-hover:scale-110 transition-transform duration-300"
+                                            style={{ backgroundColor: prefs.primaryColor, boxShadow: `0 10px 15px -3px ${prefs.primaryColor}40` }}
+                                        >
+                                            {prefs.buttonText}
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Button Text</label>
-                                    <input
-                                        type="text"
-                                        name="buttonText"
-                                        value={prefs.buttonText}
-                                        onChange={handlePrefChange}
-                                        maxLength={3}
-                                        className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                                    />
-                                </div>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Button Label</label>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-2.5 text-slate-400"><Type size={14} /></span>
+                                            <input
+                                                type="text"
+                                                name="buttonText"
+                                                value={prefs.buttonText}
+                                                onChange={handlePrefChange}
+                                                maxLength={3}
+                                                className="w-full pl-9 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-medium"
+                                                placeholder="DH"
+                                            />
+                                        </div>
+                                    </div>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Color</label>
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="color"
-                                            name="primaryColor"
-                                            value={prefs.primaryColor}
-                                            onChange={handlePrefChange}
-                                            className="h-10 w-16 p-1 border rounded cursor-pointer"
-                                        />
-                                        <input
-                                            type="text"
-                                            name="primaryColor"
-                                            value={prefs.primaryColor}
-                                            onChange={handlePrefChange}
-                                            className="flex-1 px-3 py-2 border rounded outline-none uppercase font-mono text-sm"
-                                        />
-                                    </div>
-                                </div>
-                                
-                                <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-xs font-medium text-gray-700 mb-1">Bottom (px)</label>
-                                        <input
-                                            type="number"
-                                            name="offsetBottom"
-                                            value={prefs.offsetBottom}
-                                            onChange={handlePrefChange}
-                                            className="w-full px-2 py-1 border rounded text-sm"
-                                        />
+                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Brand Color</label>
+                                        <div className="flex gap-2">
+                                            <div className="relative w-10 h-10 rounded-lg overflow-hidden shadow-sm border border-slate-200 shrink-0 hover:scale-105 transition-transform">
+                                                <input
+                                                    type="color"
+                                                    name="primaryColor"
+                                                    value={prefs.primaryColor}
+                                                    onChange={handlePrefChange}
+                                                    className="absolute -top-2 -left-2 w-16 h-16 cursor-pointer p-0 border-0"
+                                                />
+                                            </div>
+                                            <input
+                                                type="text"
+                                                name="primaryColor"
+                                                value={prefs.primaryColor}
+                                                onChange={handlePrefChange}
+                                                className="flex-1 px-3 py-2 border border-slate-200 rounded-lg outline-none uppercase font-mono text-sm text-slate-600 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all"
+                                            />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-gray-700 mb-1">Right (px)</label>
-                                        <input
-                                            type="number"
-                                            name="offsetRight"
-                                            value={prefs.offsetRight}
-                                            onChange={handlePrefChange}
-                                            className="w-full px-2 py-1 border rounded text-sm"
-                                        />
+                                    
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Bottom Offset (px)</label>
+                                            <input
+                                                type="number"
+                                                name="offsetBottom"
+                                                value={prefs.offsetBottom}
+                                                onChange={handlePrefChange}
+                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Right Offset (px)</label>
+                                            <input
+                                                type="number"
+                                                name="offsetRight"
+                                                value={prefs.offsetRight}
+                                                onChange={handlePrefChange}
+                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
                         {/* Main Content: Bookmarks Editor */}
-                        <div className="col-span-2 p-6">
-                            <div className="flex justify-between items-center mb-4 border-b pb-2 flex-wrap gap-2">
-                                <h2 className="text-lg font-bold text-gray-800">Bookmarks</h2>
+                        <div className="lg:col-span-8 p-8">
+                            <div className="flex justify-between items-center mb-6">
+                                <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                    <Folder size={14} /> Bookmark Manager
+                                </h2>
                                 <div className="flex gap-2">
-                                    <label className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded cursor-pointer border border-gray-300">
-                                        Import
+                                    <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 text-xs font-medium rounded-lg cursor-pointer border border-slate-200 transition-colors shadow-sm">
+                                        <Upload size={12} /> Import
                                         <input type="file" className="hidden" accept=".json" onChange={handleImport} />
                                     </label>
                                     <button 
                                         onClick={handleExport}
-                                        className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded border border-gray-300"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 text-xs font-medium rounded-lg border border-slate-200 transition-colors shadow-sm"
                                     >
-                                        Export
+                                        <Download size={12} /> Export
                                     </button>
-                                    <button 
-                                        onClick={() => collapseAll(true)}
-                                        className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded border border-gray-300"
-                                    >
-                                        Collapse All
-                                    </button>
-                                    <button 
-                                        onClick={() => collapseAll(false)}
-                                        className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs rounded border border-gray-300"
-                                    >
-                                        Expand All
-                                    </button>
-                                    <button 
+                                </div>
+                            </div>
+
+                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[600px]">
+                                {/* Toolbar */}
+                                <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex gap-2">
+                                     <button 
                                         onClick={() => {
                                             const newItem: MenuItem = { type: 'link', label: 'New Item', url: 'https://' };
                                             setItems(prev => [...prev, newItem]);
                                         }}
-                                        className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition-colors"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 text-white text-xs font-bold rounded-md hover:bg-teal-700 transition-colors shadow-sm"
                                     >
-                                        + Add Root
+                                        <Plus size={14} strokeWidth={3} /> Add Root Item
+                                    </button>
+                                    <div className="h-full w-px bg-slate-200 mx-1"></div>
+                                    <button 
+                                        onClick={() => collapseAll(true)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:bg-slate-200 text-xs font-medium rounded-md transition-colors"
+                                        title="Collapse All Folders"
+                                    >
+                                        <Minimize2 size={14} /> Collapse All
+                                    </button>
+                                    <button 
+                                        onClick={() => collapseAll(false)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:bg-slate-200 text-xs font-medium rounded-md transition-colors"
+                                        title="Expand All Folders"
+                                    >
+                                        <Maximize2 size={14} /> Expand All
                                     </button>
                                 </div>
-                            </div>
-                            
-                            <div className="bg-white rounded-lg border border-gray-200 min-h-[400px]">
-                                {items.length === 0 ? (
-                                    <div className="text-center p-10 text-gray-400">
-                                        No items found. Click "Reset" or "Add Root Item" to start.
-                                    </div>
-                                ) : (
-                                    <div className="p-4">
-                                        {renderList(items)}
-                                    </div>
-                                )}
+                                
+                                {/* Scrollable List */}
+                                <div className="flex-1 overflow-y-auto p-4 bg-slate-50/30">
+                                    {items.length === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                                            <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                                                <Folder size={32} className="opacity-50" />
+                                            </div>
+                                            <p className="font-medium">No bookmarks yet</p>
+                                            <p className="text-xs mt-1 max-w-[200px] text-center opacity-70">Click "Add Root Item" to start building your menu.</p>
+                                        </div>
+                                    ) : (
+                                        renderList(items)
+                                    )}
+                                </div>
                             </div>
                         </div>
 
@@ -742,4 +821,5 @@ const Options: React.FC = () => {
 };
 
 export default Options;
+
 

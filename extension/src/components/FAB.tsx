@@ -4,6 +4,26 @@ import remarkGfm from 'remark-gfm';
 import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 import { trackEvent, trackException } from '../utils/telemetry';
+import { 
+    X, 
+    Settings, 
+    ArrowLeft, 
+    Folder, 
+    Link, 
+    FileText, 
+    ChevronRight, 
+    ChevronDown, 
+    Activity, 
+    Zap,
+    AlertCircle
+} from 'lucide-react';
+import clsx from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+// Helper for class merging
+function cn(...inputs: (string | undefined | null | false)[]) {
+  return twMerge(clsx(inputs));
+}
 
 // Non-blocking Result Popover Component
 const ResultPopover: React.FC<{ 
@@ -44,7 +64,7 @@ const ResultPopover: React.FC<{
 
     const handleMouseDown = (e: React.MouseEvent) => {
         // Only trigger drag if clicking the header background, not buttons
-        if ((e.target as HTMLElement).tagName === 'BUTTON') return;
+        if ((e.target as HTMLElement).tagName === 'BUTTON' || (e.target as HTMLElement).closest('button')) return;
         
         setIsDragging(true);
         setDragOffset({
@@ -60,21 +80,20 @@ const ResultPopover: React.FC<{
             position: 'fixed',
             left: `${position.x}px`,
             top: `${position.y}px`,
-            width: '400px',
-            height: '500px', // Fixed initial height to support resize
-            minWidth: '300px',
+            width: '450px',
+            height: '600px', // Fixed initial height to support resize
+            minWidth: '320px',
             minHeight: '200px',
             maxWidth: '90vw',
             maxHeight: '90vh',
             backgroundColor: 'white',
-            borderRadius: '12px',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+            borderRadius: '16px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0,0,0,0.05)',
             display: 'flex',
             flexDirection: 'column',
             zIndex: 2147483647,
             pointerEvents: 'auto',
-            border: '1px solid #e5e7eb',
-            fontFamily: "'Segoe UI', system-ui, sans-serif",
+            fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
             resize: 'both',
             overflow: 'hidden' // Required for resize handle
         }}>
@@ -82,66 +101,101 @@ const ResultPopover: React.FC<{
             <div 
                 onMouseDown={handleMouseDown}
                 style={{ 
-                    padding: '12px 16px', 
-                    borderBottom: '1px solid #f3f4f6', 
+                    padding: '16px 20px', 
+                    borderBottom: '1px solid #F1F5F9', 
                     display: 'flex', 
                     justifyContent: 'space-between', 
                     alignItems: 'center',
-                    background: '#f9fafb',
-                    borderTopLeftRadius: '12px',
-                    borderTopRightRadius: '12px',
+                    background: '#F8FAFC',
                     cursor: isDragging ? 'grabbing' : 'grab',
                     userSelect: 'none'
                 }}
             >
-                <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#111827' }}>{title || '🤖 Copilot Analysis'}</h3>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: '#0F172A', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {title || '🤖 Copilot Analysis'}
+                </h3>
                 <button 
                     onClick={onClose} 
                     style={{ 
                         border: 'none', 
-                        background: 'none', 
+                        background: 'transparent', 
                         cursor: 'pointer', 
-                        fontSize: '18px', 
-                        color: '#6b7280',
+                        color: '#64748B',
                         padding: '4px',
-                        lineHeight: 1
+                        borderRadius: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
                     }}
                     title="Close"
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#E2E8F0')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                 >
-                    ×
+                    <X size={18} />
                 </button>
             </div>
 
             {/* Content Area */}
             <div style={{ 
-                padding: '16px', 
+                padding: '20px', 
                 overflowY: 'auto', 
                 flex: 1, 
-                fontSize: '13px', 
+                fontSize: '14px', 
                 lineHeight: '1.6', 
-                color: '#374151',
-                // whiteSpace: 'pre-wrap' // Removed since ReactMarkdown handles this
+                color: '#334155',
             }}>
                 {content ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                    <ReactMarkdown 
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                            h1: ({node, ...props}) => <h1 style={{ fontSize: '1.5em', fontWeight: '700', margin: '0.67em 0', color: '#0F172A' }} {...props} />,
+                            h2: ({node, ...props}) => <h2 style={{ fontSize: '1.25em', fontWeight: '600', margin: '0.5em 0', color: '#1E293B' }} {...props} />,
+                            h3: ({node, ...props}) => <h3 style={{ fontSize: '1.1em', fontWeight: '600', margin: '0.5em 0', color: '#334155' }} {...props} />,
+                            code: ({node, inline, className, children, ...props}: any) => {
+                                const match = /language-(\w+)/.exec(className || '')
+                                return !inline ? (
+                                    <div style={{ background: '#F1F5F9', padding: '12px', borderRadius: '8px', overflowX: 'auto', margin: '12px 0' }}>
+                                        <code style={{ fontFamily: 'monospace', fontSize: '13px' }} {...props}>
+                                            {children}
+                                        </code>
+                                    </div>
+                                ) : (
+                                    <code style={{ background: '#F1F5F9', padding: '2px 4px', borderRadius: '4px', fontFamily: 'monospace', fontSize: '13px' }} {...props}>
+                                        {children}
+                                    </code>
+                                )
+                            },
+                            a: ({node, ...props}) => <a style={{ color: '#0D9488', textDecoration: 'underline' }} {...props} />,
+                            ul: ({node, ...props}) => <ul style={{ paddingLeft: '1.5em', margin: '1em 0' }} {...props} />,
+                            li: ({node, ...props}) => <li style={{ marginBottom: '0.5em' }} {...props} />,
+                            blockquote: ({node, ...props}) => <blockquote style={{ borderLeft: '4px solid #E2E8F0', paddingLeft: '1em', margin: '1em 0', color: '#64748B' }} {...props} />
+                        }}
+                    >
+                        {content}
+                    </ReactMarkdown>
                 ) : (
-                    "No analysis content received."
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94A3B8' }}>
+                         <Activity size={48} style={{ opacity: 0.2, marginBottom: '16px' }} />
+                         <p>No analysis content received.</p>
+                    </div>
                 )}
             </div>
 
             {/* Footer with Path */}
             {filePath && (
                 <div style={{ 
-                    padding: '10px 16px', 
-                    background: '#f8fafc', 
-                    borderTop: '1px solid #f3f4f6', 
-                    fontSize: '11px', 
-                    color: '#64748b',
-                    borderBottomLeftRadius: '12px',
-                    borderBottomRightRadius: '12px'
+                    padding: '12px 20px', 
+                    background: '#F8FAFC', 
+                    borderTop: '1px solid #F1F5F9', 
+                    fontSize: '12px', 
+                    color: '#64748B',
                 }}>
-                    <div style={{ fontWeight: '600', marginBottom: '2px' }}>Saved report:</div>
-                    <div style={{ wordBreak: 'break-all', fontFamily: 'monospace' }}>{filePath}</div>
+                    <div style={{ fontWeight: '600', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Folder size={12} /> Saved report:
+                    </div>
+                    <div style={{ wordBreak: 'break-all', fontFamily: 'monospace', background: '#FFFFFF', padding: '6px 8px', borderRadius: '4px', border: '1px solid #E2E8F0' }}>
+                        {filePath}
+                    </div>
                 </div>
             )}
         </div>
@@ -161,7 +215,7 @@ const FAB: React.FC = () => {
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     
     const [prefs, setPrefs] = useState({
-        primaryColor: "#2563eb",
+        primaryColor: "#0D9488",
         buttonText: "DH",
         offsetBottom: 24,
         offsetRight: 24
@@ -340,21 +394,20 @@ Description/Error: ${scrapedData.errorText}
                 <div className="dh-menu">
                     {/* Header */}
                     <div className="dh-header">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
                             {canGoBack && (
                                 <button 
                                     onClick={navigateBack}
-                                    className="dh-item"
-                                    data-type="back"
+                                    className="dh-back-btn"
                                     title="Back"
-                                    style={{ padding: '0', border: 'none', margin: '0', width: 'auto' }}
                                 >
+                                    <ArrowLeft size={16} />
                                 </button>
                             )}
                             <h3 className="dh-title">Dynamics Helper</h3>
                         </div>
                         <button onClick={handleOpenOptions} title="Settings" className="dh-settings-btn">
-                            ⚙️
+                            <Settings size={16} />
                         </button>
                     </div>
 
@@ -368,46 +421,43 @@ Description/Error: ${scrapedData.errorText}
                                 data-type={item.type}
                             >
                                 <span className="dh-item-icon">
-                                    {item.type === 'folder' ? '📁' : item.type === 'link' ? '🔗' : '📝'}
+                                    {item.type === 'folder' ? <Folder size={18} /> : 
+                                     item.type === 'link' ? <Link size={18} /> : 
+                                     <FileText size={18} />}
                                 </span>
                                 <span className="dh-item-label">{item.label}</span>
                             </button>
                         ))}
                         
                         {currentItems.length === 0 && (
-                            <div style={{ padding: '12px', textAlign: 'center', color: '#9ca3af', fontSize: '12px' }}>
-                                No items found
+                            <div style={{ padding: '24px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>
+                                <Folder size={32} style={{ opacity: 0.3, marginBottom: '8px' }} />
+                                <div>No items found</div>
                             </div>
                         )}
                     </div>
 
                     {/* AI Tools Footer */}
-                    <div style={{ borderTop: '1px solid #f0f0f0', padding: '8px 4px 4px 4px', marginTop: '4px' }}>
+                    <div className="dh-footer">
                         {/* Context Preview Box */}
-                        <div style={{ marginBottom: '8px', border: '1px solid #fecaca', borderRadius: '4px', overflow: 'hidden' }}>
+                        <div className="dh-context-box">
                             {/* Header / Toggle */}
                             <div 
                                 onClick={() => setIsContextExpanded(!isContextExpanded)}
-                                style={{
-                                    padding: '6px 8px',
-                                    background: '#fef2f2',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center',
-                                    fontSize: '11px',
-                                    color: '#991b1b',
-                                    fontWeight: '600'
-                                }}
+                                className="dh-context-header"
                             >
-                                <span>Case Context</span>
-                                <span>{isContextExpanded ? '▼' : '▶'}</span>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <Activity size={14} color={scrapedData?.errorText ? '#0D9488' : '#94A3B8'} />
+                                    Case Context
+                                </span>
+                                {isContextExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                             </div>
 
                             {/* Collapsible Content */}
                             {isContextExpanded && (
-                                <div style={{ padding: '8px', background: '#fff' }}>
+                                <div style={{ borderTop: '1px solid #E2E8F0' }}>
                                     <textarea
+                                        className="dh-textarea"
                                         value={
                                             scrapedData
                                                 ? (() => {
@@ -434,18 +484,6 @@ Description/Error: ${scrapedData.errorText}
                                                 errorText: e.target.value 
                                             }));
                                         }}
-                                        style={{
-                                            width: '100%',
-                                            minHeight: '120px',
-                                            fontSize: '11px',
-                                            padding: '4px',
-                                            borderRadius: '4px',
-                                            border: '1px solid #d1d5db',
-                                            color: '#374151',
-                                            resize: 'vertical',
-                                            fontFamily: 'inherit',
-                                            whiteSpace: 'pre-wrap'
-                                        }}
                                         placeholder="Context will appear here..."
                                     />
                                 </div>
@@ -455,39 +493,23 @@ Description/Error: ${scrapedData.errorText}
                         <div style={{ display: 'flex', gap: '8px' }}>
                              <button 
                                 onClick={handlePing}
-                                style={{ 
-                                    flex: 1, 
-                                    padding: '4px 8px', 
-                                    background: '#fff', 
-                                    border: '1px solid #d1d5db', 
-                                    color: '#4b5563', 
-                                    fontSize: '11px', 
-                                    borderRadius: '4px',
-                                    cursor: 'pointer' 
-                                }}
+                                className="dh-action-btn dh-btn-secondary"
                             >
-                                Ping
+                                <Activity size={14} /> Ping
                             </button>
                             <button 
                                 onClick={handleAnalyze}
                                 disabled={!scrapedData?.errorText || isAnalyzing}
-                                style={{
-                                    flex: 1,
-                                    padding: '4px 8px',
-                                    fontSize: '11px',
-                                    borderRadius: '4px',
-                                    border: 'none',
-                                    color: '#fff',
-                                    background: isAnalyzing ? '#9ca3af' : (scrapedData?.errorText ? '#2563eb' : '#d1d5db'),
-                                    cursor: (!isAnalyzing && scrapedData?.errorText) ? 'pointer' : 'not-allowed'
-                                }}
+                                className="dh-action-btn dh-btn-primary"
                             >
+                                <Zap size={14} fill={isAnalyzing ? "none" : "currentColor"} />
                                 {isAnalyzing ? 'Analyzing...' : 'Analyze'}
                             </button>
                         </div>
                         {errorMsg && (
-                            <div style={{ marginTop: '8px', padding: '8px', background: '#fee2e2', color: '#991b1b', borderRadius: '4px', fontSize: '10px' }}>
-                                {errorMsg}
+                            <div className="dh-error-msg">
+                                <AlertCircle size={14} style={{ flexShrink: 0, marginTop: '2px' }} />
+                                <span>{errorMsg}</span>
                             </div>
                         )}
                     </div>
@@ -497,10 +519,9 @@ Description/Error: ${scrapedData.errorText}
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className="dh-btn"
-                style={{ backgroundColor: prefs.primaryColor }}
             >
                 {isOpen ? (
-                    <span style={{ fontSize: '24px', fontWeight: 'bold' }}>×</span>
+                    <X size={32} strokeWidth={2.5} />
                 ) : (
                     <span style={{ fontSize: '18px', fontWeight: 'bold' }}>{prefs.buttonText}</span>
                 )}
@@ -510,3 +531,4 @@ Description/Error: ${scrapedData.errorText}
 };
 
 export default FAB;
+
