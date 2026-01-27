@@ -176,7 +176,7 @@ interface DraggableItemProps {
     item: MenuItem;
     index: number;
     path: number[];
-    moveItem: (dragPath: number[], hoverPath: number[], intoFolder?: boolean) => void;
+    moveItem: (dragPath: number[], hoverPath: number[], placement: 'before' | 'after' | 'inside') => void;
     renderList: (list: MenuItem[], pathPrefix: number[]) => React.ReactNode;
     setItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
     setEditingItemPath: React.Dispatch<React.SetStateAction<number[] | null>>;
@@ -184,6 +184,8 @@ interface DraggableItemProps {
     updateItemAt: (path: number[], newItem: MenuItem, list: MenuItem[]) => MenuItem[];
     deleteItemAt: (path: number[], list: MenuItem[]) => MenuItem[];
     addItemAt: (path: number[] | null, newItem: MenuItem, list: MenuItem[]) => MenuItem[];
+    selectedPath: number[] | null;
+    setSelectedPath: (path: number[] | null) => void;
 }
 
 const DraggableItem: React.FC<DraggableItemProps> = ({ 
@@ -197,11 +199,17 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     editingItemPath, 
     updateItemAt, 
     deleteItemAt, 
-    addItemAt
+    addItemAt,
+    selectedPath,
+    setSelectedPath
 }) => {
-    const ref = useRef<HTMLLIElement>(null);
+    const ref = useRef<HTMLDivElement>(null);
     const currentPath = [...path, index];
     const isEditing = editingItemPath && editingItemPath.join('.') === currentPath.join('.');
+    const isSelected = selectedPath && selectedPath.join('.') === currentPath.join('.');
+
+    // Visual State for Drag
+    const [dragPosition, setDragPosition] = useState<'top' | 'bottom' | 'inside' | null>(null);
 
     // Drag Logic
     const [{ isDragging }, drag] = useDrag({
@@ -212,6 +220,19 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
         }),
     });
 
+    // Helper to determine position
+    const getHoverPosition = (hoverBoundingRect: DOMRect, clientOffset: { x: number, y: number }, itemType: string) => {
+        const hoverClientY = clientOffset.y - hoverBoundingRect.top;
+        const isFolder = itemType === 'folder';
+        // 35% Top, 30% Middle, 35% Bottom
+        const threshold = hoverBoundingRect.height * (isFolder ? 0.35 : 0.5);
+        
+        if (hoverClientY < threshold) return 'top';
+        if (hoverClientY > (hoverBoundingRect.height - threshold)) return 'bottom';
+        if (isFolder) return 'inside';
+        return 'bottom'; // Fallback for non-folders middle -> bottom
+    };
+
     // Drop Logic
     const [{ isOver, canDrop }, drop] = useDrop<DragItem, void, { isOver: boolean; canDrop: boolean }>({
         accept: ItemType.ITEM,
@@ -220,10 +241,28 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
             canDrop: monitor.canDrop(),
         }),
         hover: (draggedItem, monitor) => {
-            if (!ref.current) return;
+            if (!ref.current || !monitor.isOver({ shallow: true })) {
+                if (dragPosition !== null) setDragPosition(null);
+                return;
+            }
+
+            const hoverBoundingRect = ref.current.getBoundingClientRect();
+            const clientOffset = monitor.getClientOffset();
+            if (!clientOffset) return;
+
+            // Prevent self-drop feedback
+            if (draggedItem.path.join('.') === currentPath.join('.')) {
+                 setDragPosition(null);
+                 return;
+            }
+
+            const newPos = getHoverPosition(hoverBoundingRect, clientOffset, item.type);
+            if (newPos !== dragPosition) {
+                setDragPosition(newPos);
+            }
         },
         drop: (draggedItem, monitor) => {
-             if (monitor.didDrop()) return; // Already handled by child
+             if (monitor.didDrop()) return; 
 
              // Prevent dropping on self or children
              const isChild = (parent: number[], child: number[]) => {
@@ -234,29 +273,62 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                  return;
              }
 
-             // Check if dropping INTO a folder vs re-ordering
-             const hoverBoundingRect = ref.current?.getBoundingClientRect();
-             if (!hoverBoundingRect) return;
-             
-             const isInside = item.type === 'folder' && monitor.isOver({ shallow: true });
-             
-             // If dropping ON a folder, we move INSIDE.
-             if (isInside) {
-                 moveItem(draggedItem.path, currentPath, true);
+             if (!ref.current) return;
+             const hoverBoundingRect = ref.current.getBoundingClientRect();
+             const clientOffset = monitor.getClientOffset();
+             if (!clientOffset) return;
+
+             const pos = getHoverPosition(hoverBoundingRect, clientOffset, item.type);
+
+             if (pos === 'inside') {
+                 moveItem(draggedItem.path, currentPath, 'inside');
+             } else if (pos === 'top') {
+                 moveItem(draggedItem.path, currentPath, 'before');
              } else {
-                 // Insert BEFORE this item
-                 moveItem(draggedItem.path, currentPath, false);
+                 moveItem(draggedItem.path, currentPath, 'after');
              }
+             setDragPosition(null);
         }
     });
+
+    // Reset drag position when not over
+    useEffect(() => {
+        if (!isOver) {
+            setDragPosition(null);
+        }
+    }, [isOver]);
 
     drag(drop(ref));
 
     const opacity = isDragging ? 0.4 : 1;
-    const bgClass = isOver && canDrop ? (item.type === 'folder' ? 'bg-teal-50 ring-2 ring-teal-400 ring-inset' : 'bg-green-50 ring-2 ring-green-400 ring-inset') : 'hover:bg-slate-50';
+    
+    // Dynamic Styles based on dragPosition
+    let containerClass = "group rounded-lg transition-all duration-200 relative ";
+    if (isOver && canDrop) {
+        if (dragPosition === 'inside') {
+            containerClass += "bg-teal-50 ring-2 ring-teal-400 ring-inset";
+        } else {
+            // No background change for insert, just the line (handled below)
+            // But we might want a subtle highlight to show it's active
+            containerClass += "bg-slate-50"; 
+        }
+    } else if (isSelected) {
+        containerClass += "bg-teal-50 ring-1 ring-teal-200";
+    } else {
+        containerClass += "hover:bg-slate-50";
+    }
 
     return (
-        <li ref={ref} className={cn("group mb-1 rounded-lg transition-all duration-200", bgClass)} style={{ opacity }}>
+        <li className="mb-1">
+            <div ref={ref} className={containerClass} style={{ opacity }}>
+             {/* Insert Indicators */}
+             {isOver && canDrop && dragPosition === 'top' && (
+                 <div className="absolute top-0 left-0 right-0 h-0.5 bg-blue-500 shadow-sm z-20 rounded-full pointer-events-none transform -translate-y-[2px]"></div>
+             )}
+             {isOver && canDrop && dragPosition === 'bottom' && (
+                 <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500 shadow-sm z-20 rounded-full pointer-events-none transform translate-y-[2px]"></div>
+             )}
+
              {isEditing ? (
                 <ItemEditor 
                     item={item} 
@@ -267,15 +339,30 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                     onCancel={() => setEditingItemPath(null)}
                 />
             ) : (
-                <div className="flex items-center justify-between p-2.5 rounded-lg border border-transparent hover:border-slate-200 cursor-grab active:cursor-grabbing">
+                <div 
+                    className="flex items-center justify-between p-2.5 rounded-lg border border-transparent hover:border-slate-200 cursor-grab active:cursor-grabbing"
+                    onClick={(e) => {
+                        e.stopPropagation(); // Prevent bubbling
+                        if (item.type === 'folder') {
+                            setSelectedPath(isSelected ? null : currentPath);
+                        } else {
+                            setSelectedPath(null);
+                        }
+                    }}
+                >
                     <div 
                         className="flex items-center gap-3 flex-1 min-w-0"
-                        onClick={() => {
-                            if (item.type === 'folder') {
-                                // Toggle collapse
-                                const newItem = { ...item, collapsed: !item.collapsed };
-                                setItems(prev => updateItemAt(currentPath, newItem, prev));
-                            }
+                        onClick={(e) => {
+                             e.stopPropagation();
+                             if (item.type === 'folder') {
+                                 // Toggle collapse
+                                 const newItem = { ...item, collapsed: !item.collapsed };
+                                 setItems(prev => updateItemAt(currentPath, newItem, prev));
+                                 // Also select it
+                                 setSelectedPath(currentPath);
+                             } else {
+                                 setSelectedPath(null);
+                             }
                         }}
                     >
                         <span className={cn("p-1.5 rounded-md", item.type === 'folder' ? "bg-amber-100 text-amber-600" : item.type === 'link' ? "bg-blue-100 text-blue-600" : "bg-purple-100 text-purple-600")}>
@@ -283,7 +370,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                         </span>
                         <div className="flex flex-col min-w-0">
                             <span className="font-medium text-slate-700 text-sm truncate">{item.label}</span>
-                            {item.url && <span className="text-xs text-slate-400 truncate font-mono">{item.url}</span>}
+                            {item.type === 'link' && item.url && <span className="text-xs text-slate-400 truncate font-mono">{item.url}</span>}
                         </div>
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -322,6 +409,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                     </div>
                 </div>
             )}
+            </div>
             
             {/* Children */}
             {item.children && item.children.length > 0 && !item.collapsed && (
@@ -330,6 +418,36 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                 </div>
             )}
         </li>
+    );
+};
+
+// --- Empty Drop Zone Component ---
+const EmptyDropZone: React.FC<{
+    moveItem: (dragPath: number[], hoverPath: number[], placement: 'before' | 'after' | 'inside') => void;
+    itemsLength: number;
+}> = ({ moveItem, itemsLength }) => {
+    const [{ isOver, canDrop }, drop] = useDrop({
+        accept: ItemType.ITEM,
+        drop: (draggedItem: DragItem) => {
+            // Drop at the end of the root list
+            moveItem(draggedItem.path, [itemsLength], 'before');
+        },
+        collect: (monitor) => ({
+            isOver: monitor.isOver(),
+            canDrop: monitor.canDrop(),
+        }),
+    });
+
+    return (
+        <div 
+            ref={drop as any} 
+            className={cn(
+                "h-16 mt-2 rounded-lg border-2 border-dashed flex items-center justify-center transition-all",
+                isOver && canDrop ? "border-teal-400 bg-teal-50 text-teal-600" : "border-transparent text-transparent hover:border-slate-200 hover:text-slate-400"
+            )}
+        >
+            <span className="text-xs font-medium">Drop to move to root end</span>
+        </div>
     );
 };
 
@@ -342,6 +460,7 @@ const Options: React.FC = () => {
     
     // Editor State
     const [editingItemPath, setEditingItemPath] = useState<number[] | null>(null); // path of indices
+    const [selectedPath, setSelectedPath] = useState<number[] | null>(null); // path of currently selected folder
 
     // Initial Load
     useEffect(() => {
@@ -416,6 +535,12 @@ const Options: React.FC = () => {
         return current;
     };
 
+    const getSelectedFolderName = () => {
+        if (!selectedPath) return null;
+        const item = getItemAt(selectedPath, items);
+        return item && item.type === 'folder' ? item.label : null;
+    };
+
     // Helper to update item at path
     const updateItemAt = (path: number[], newItem: MenuItem, list: MenuItem[]): MenuItem[] => {
         const newList = [...list];
@@ -472,7 +597,7 @@ const Options: React.FC = () => {
     };
 
     // Move Item Logic
-    const moveItem = (dragPath: number[], hoverPath: number[], intoFolder: boolean = false) => {
+    const moveItem = (dragPath: number[], hoverPath: number[], placement: 'before' | 'after' | 'inside') => {
         if (dragPath.join('.') === hoverPath.join('.')) return;
 
         // 1. Get the item to move
@@ -505,34 +630,43 @@ const Options: React.FC = () => {
         // 3. Insert at new location
         let finalInsertPath = [...hoverPath];
         
-        // Check if same parent
+        // Adjust indices if we removed an item from the same parent and it was before the target
+        // Only if the paths share the same parent prefix
         const dragParentPath = dragPath.slice(0, -1);
         const hoverParentPath = hoverPath.slice(0, -1);
         
-        if (dragParentPath.join('.') === hoverParentPath.join('.')) {
+        const sameParent = dragParentPath.join('.') === hoverParentPath.join('.');
+        
+        if (sameParent) {
             const dragIndex = dragPath[dragPath.length - 1];
             const hoverIndex = hoverPath[hoverPath.length - 1];
+            
+            // If we removed an item before the target, the target index shifts down by 1
             if (dragIndex < hoverIndex) {
-                finalInsertPath[finalInsertPath.length - 1]--;
+                 finalInsertPath[finalInsertPath.length - 1]--;
             }
         }
         
         // Insert function
-        const insertOp = (path: number[], item: MenuItem, currentList: MenuItem[], inside: boolean): MenuItem[] => {
+        const insertOp = (path: number[], item: MenuItem, currentList: MenuItem[], place: 'before' | 'after' | 'inside'): MenuItem[] => {
              // If insert at root
              if (path.length === 1) {
                  const idx = path[0];
                  const res = [...currentList];
-                 if (inside) {
+                 
+                 if (place === 'inside') {
                      // Insert inside the item at idx
                      const target = res[idx];
                      if (target.type === 'folder') {
                          target.children = [...(target.children || []), item];
                          target.collapsed = false; // Expand
                      }
-                 } else {
+                 } else if (place === 'before') {
                      // Insert before the item at idx
                      res.splice(idx, 0, item);
+                 } else if (place === 'after') {
+                     // Insert after the item at idx
+                     res.splice(idx + 1, 0, item);
                  }
                  return res;
              }
@@ -540,13 +674,13 @@ const Options: React.FC = () => {
              const [h, ...t] = path;
              return currentList.map((itm, i) => {
                  if (i === h) {
-                     return { ...itm, children: insertOp(t, item, itm.children || [], inside) };
+                     return { ...itm, children: insertOp(t, item, itm.children || [], place) };
                  }
                  return itm;
              });
         };
         
-        const finalItems = insertOp(finalInsertPath, removed, itemsAfterRemoval, intoFolder);
+        const finalItems = insertOp(finalInsertPath, removed, itemsAfterRemoval, placement);
         setItems(finalItems);
     };
 
@@ -619,6 +753,8 @@ const Options: React.FC = () => {
                         updateItemAt={updateItemAt}
                         deleteItemAt={deleteItemAt}
                         addItemAt={addItemAt}
+                        selectedPath={selectedPath}
+                        setSelectedPath={setSelectedPath}
                     />
                 ))}
             </ul>
@@ -769,16 +905,32 @@ const Options: React.FC = () => {
 
                             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[600px]">
                                 {/* Toolbar */}
-                                <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex gap-2">
+                                <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex gap-2 items-center">
                                      <button 
                                         onClick={() => {
                                             const newItem: MenuItem = { type: 'link', label: 'New Item', url: 'https://' };
-                                            setItems(prev => [...prev, newItem]);
+                                            if (selectedPath) {
+                                                setItems(prev => addItemAt(selectedPath, newItem, prev));
+                                            } else {
+                                                setItems(prev => [...prev, newItem]);
+                                            }
                                         }}
                                         className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 text-white text-xs font-bold rounded-md hover:bg-teal-700 transition-colors shadow-sm"
                                     >
-                                        <Plus size={14} strokeWidth={3} /> Add Root Item
+                                        <Plus size={14} strokeWidth={3} /> 
+                                        {selectedPath ? `Add to "${getSelectedFolderName()}"` : "Add Root Item"}
                                     </button>
+                                    
+                                    {selectedPath && (
+                                        <button 
+                                            onClick={() => setSelectedPath(null)}
+                                            className="text-xs text-slate-500 hover:text-slate-700 px-2"
+                                            title="Clear Selection"
+                                        >
+                                            (Clear Selection)
+                                        </button>
+                                    )}
+
                                     <div className="h-full w-px bg-slate-200 mx-1"></div>
                                     <button 
                                         onClick={() => collapseAll(true)}
@@ -804,10 +956,14 @@ const Options: React.FC = () => {
                                                 <Folder size={32} className="opacity-50" />
                                             </div>
                                             <p className="font-medium">No bookmarks yet</p>
-                                            <p className="text-xs mt-1 max-w-[200px] text-center opacity-70">Click "Add Root Item" to start building your menu.</p>
+                                            <p className="text-xs mt-1 max-w-[200px] text-center opacity-70">Click "Add Item" to start building your menu.</p>
                                         </div>
                                     ) : (
-                                        renderList(items)
+                                        <div onClick={() => setSelectedPath(null)} className="min-h-full pb-12">
+                                            {renderList(items)}
+                                            {/* Root Empty Drop Zone */}
+                                            <EmptyDropZone moveItem={moveItem} itemsLength={items.length} />
+                                        </div>
                                     )}
                                 </div>
                             </div>
