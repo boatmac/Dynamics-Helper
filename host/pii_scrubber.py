@@ -31,8 +31,44 @@ class PiiScrubber:
         # Handles: (123) 456-7890, 123-456-7890, 123.456.7890, 123 456 7890
         # Optional +1 country code
         # Relaxed constraint on exchange code (middle 3 digits) to allow dummy data like 555-0123 or 555-123-4567
+        #
+        # IMPROVEMENT for Case Numbers (long digits):
+        # The previous regex `(?:\+?1[-. ]?)?\(?[2-9][0-9]{2}\)?[-. ]?\d{3,4}[-. ]?\d{4}` was too greedy for long numeric strings like case numbers.
+        # A case number 2601220030001652 was being partially matched.
+        #
+        # We add lookaround checks to ensure we are matching a standalone phone number structure,
+        # OR we tighten the delimiters.
+        #
+        # Valid separators: [-. ]
+        # Structure:
+        #   (Optional +1)
+        #   (Area Code: 3 digits) - optional parens
+        #   (Separator)
+        #   (Exchange: 3 digits)
+        #   (Separator)
+        #   (Subscriber: 4 digits)
+        #
+        # We explicitly require separators to distinguish from long ID numbers.
+        # A pure 10-digit number `1234567890` is arguably a phone number, but in IT contexts it's often an ID.
+        # We will ONLY redact 10-digit numbers if they have separators OR if they are formatted like (123) 456-7890.
+        # Pure 10+ digit integers will be IGNORED to preserve Case IDs/Ticket Numbers.
+
         self.phone_pattern = re.compile(
-            r"(?:\+?1[-. ]?)?\(?[2-9][0-9]{2}\)?[-. ]?\d{3,4}[-. ]?\d{4}"
+            r"(?:\+?1\s*(?:[-.]\s*)?)?"  # Optional Country Code +1 with optional separator
+            r"(?:"
+            r"(?:\(\d{3}\))"  # (123)
+            r"\s*(?:[-.]\s*)?"  # Optional separator after parens
+            r"\d{3}"  # 456
+            r"\s*(?:[-.]\s*)?"  # Optional separator
+            r"\d{4}"  # 7890
+            r"|"
+            r"\d{3}"  # 123
+            r"\s*[-.]\s*"  # REQUIRED separator (dash or dot) to avoid matching pure IDs
+            r"\d{3}"  # 456
+            r"\s*[-.]\s*"  # REQUIRED separator
+            r"\d{4}"  # 7890
+            r")"
+            r"(?!\d)"  # Negative lookahead: Ensure it doesn't continue with more digits
         )
 
     def scrub(self, text: str) -> str:

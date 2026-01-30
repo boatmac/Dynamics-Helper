@@ -27,13 +27,10 @@
   "content_scripts": [
     {
       "js": [
-        "assets/index.tsx-loader-CmsZaA2M.js"
+        "assets/index.tsx-loader-BIdiZ75h.js"
       ],
       "matches": [
-        "https://*.dynamics.com/*",
-        "https://*.powerplatform.microsoft.com/*",
-        "https://portal.azure.com/*",
-        "<all_urls>"
+        "https://onesupport.crm.dynamics.com/*"
       ]
     }
   ],
@@ -49,15 +46,12 @@
     },
     {
       "matches": [
-        "<all_urls>",
-        "https://*.dynamics.com/*",
-        "https://*.powerplatform.microsoft.com/*",
-        "https://portal.azure.com/*"
+        "https://onesupport.crm.dynamics.com/*"
       ],
       "resources": [
-        "assets/settings-DVhygX-d.js",
+        "assets/bundle-mjs-CMYGHwn2.js",
         "assets/constants-BFJtfVSk.js",
-        "assets/index.tsx-mpbtJWAH.js"
+        "assets/index.tsx-BXJr4hGa.js"
       ],
       "use_dynamic_url": false
     }

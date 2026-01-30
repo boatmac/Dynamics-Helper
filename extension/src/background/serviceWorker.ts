@@ -66,6 +66,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
     }
 
+    if (message.action === "update_host_config") {
+         sendNativeMessage({ 
+             action: "update_config", 
+             payload: message.payload 
+         })
+            .then(response => sendResponse({ status: "success", data: response }))
+            .catch(error => sendResponse({ status: "error", error: error.message }));
+        return true;
+    }
+
     if (message.type === "TELEMETRY_EVENT") {
         trackBackgroundEvent(message.payload.name, message.payload.properties);
         return false;
@@ -86,6 +96,11 @@ function sendNativeMessage(message: any): Promise<any> {
                 message,
                 (response) => {
                     if (chrome.runtime.lastError) {
+                        // The timeout error usually comes from here if the Native Host doesn't reply in time
+                        // But native messaging in Chrome doesn't have a strict timeout for 'sendNativeMessage' itself unless the channel closes?
+                        // Actually, Chrome documentation says: "If the native messaging host fails to start, writes to stderr, or violates the communication protocol, Chrome writes an error message to the console"
+                        // But if it just takes long, the callback might hang. 
+                        // However, we are wrapping it in a Promise.
                         reject(new Error(chrome.runtime.lastError.message));
                     } else {
                         resolve(response);

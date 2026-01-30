@@ -27,10 +27,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://*.dynamics.com/*", 
-        "https://*.powerplatform.microsoft.com/*",
-        "https://portal.azure.com/*",
-        "<all_urls>"
+        "https://onesupport.crm.dynamics.com/*"
       ],
       "js": ["src/content/index.tsx"]
     }

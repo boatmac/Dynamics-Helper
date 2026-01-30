@@ -248,6 +248,13 @@ export const LEGACY_CSS = `
     background: #F8FAFC;
 }
 
+/* Action Buttons Container - ensures proper spacing */
+.dh-actions-row {
+    display: flex;
+    gap: 8px;
+    position: relative; /* important for tooltip positioning contexts */
+}
+
 /* Action Buttons */
 .dh-action-btn {
     flex: 1;
@@ -308,5 +315,41 @@ export const LEGACY_CSS = `
     display: flex;
     gap: 6px;
     align-items: flex-start;
+}
+
+/* Status Bubble for Main FAB */
+.dh-status-bubble {
+    position: absolute;
+    bottom: 72px; /* Similar to menu bottom */
+    right: 0;
+    background: #1E293B;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 2147483646; /* Just below menu/popover */
+}
+
+.dh-status-bubble.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.dh-status-bubble.success {
+    background: #0D9488; /* Teal */
+}
+
+.dh-status-bubble.error {
+    background: #DC2626; /* Red */
 }
 `;

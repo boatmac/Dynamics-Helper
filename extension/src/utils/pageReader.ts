@@ -5,6 +5,8 @@ export interface ScrapedData {
     ticketTitle?: string;
     productCategory?: string;
     caseNumber?: string; // New field for Case Number
+    severity?: string; // New field for Severity
+    statusReason?: string; // New field for Status Reason
     description?: string;
     context?: string;
     timestamp?: string;
@@ -12,6 +14,83 @@ export interface ScrapedData {
 }
 
 export class PageReader {
+    /**
+     * Helper to find value associated with a label that appears AFTER the value in DOM (common in this UI)
+     */
+    private static findValueForLabel(labelText: string, validationRegex?: RegExp): string | undefined {
+        // Find all elements containing the label
+        const iterator = document.evaluate(
+            `//*[text()='${labelText}']`, // Start with exact match priority
+            document,
+            null,
+            XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+            null
+        );
+
+        for (let i = 0; i < iterator.snapshotLength; i++) {
+            const labelNode = iterator.snapshotItem(i) as HTMLElement;
+            if (!labelNode) continue;
+
+            // Strategy 1: Check immediate previous sibling
+            // DOM: <ValueDiv>...</ValueDiv> <LabelDiv>Label</LabelDiv>
+            let value = this.extractValueFromNode(labelNode.previousElementSibling);
+            if (value && (!validationRegex || validationRegex.test(value))) {
+                console.log(`[DH] Found ${labelText} (Strategy 1):`, value);
+                return value;
+            }
+
+            // Strategy 2: Check Parent's previous sibling
+            // DOM: <Wrapper><ValueDiv>...</ValueDiv></Wrapper> <Wrapper><LabelDiv>Label</LabelDiv></Wrapper>
+            if (labelNode.parentElement) {
+                value = this.extractValueFromNode(labelNode.parentElement.previousElementSibling);
+                if (value && (!validationRegex || validationRegex.test(value))) {
+                    console.log(`[DH] Found ${labelText} (Strategy 2):`, value);
+                    return value;
+                }
+            }
+        }
+        
+        // Fallback: Try contains if exact match failed
+        const looseIterator = document.evaluate(
+            `//*[contains(text(), '${labelText}')]`,
+            document,
+            null,
+            XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+            null
+        );
+
+        for (let i = 0; i < looseIterator.snapshotLength; i++) {
+            const labelNode = looseIterator.snapshotItem(i) as HTMLElement;
+            if (!labelNode) continue;
+            
+             // Skip if it's too long (likely a sentence containing the word, not a label)
+            if (labelNode.textContent && labelNode.textContent.length > 50) continue;
+
+            // Strategy 1 (Loose)
+            let value = this.extractValueFromNode(labelNode.previousElementSibling);
+            if (value && (!validationRegex || validationRegex.test(value))) {
+                return value;
+            }
+             // Strategy 2 (Loose)
+             if (labelNode.parentElement) {
+                value = this.extractValueFromNode(labelNode.parentElement.previousElementSibling);
+                if (value && (!validationRegex || validationRegex.test(value))) {
+                    return value;
+                }
+            }
+        }
+
+        return undefined;
+    }
+
+    private static extractValueFromNode(node: Element | null): string | undefined {
+        if (!node) return undefined;
+        // Get text, clean it up
+        const text = (node.textContent || "").trim();
+        // Ignore empty or structural characters if necessary, but usually trim() is enough
+        return text || undefined;
+    }
+
     /**
      * Attempts to find error logs or relevant support ticket details on the page.
      * Prioritizes Fluent UI specific selectors and React Props.
@@ -45,35 +124,36 @@ export class PageReader {
             }
         }
 
-        // 3. Try to find Case Number
+        // 3. Try to find Case Number / Ticket ID
         // Based on user screenshot, it's often near header controls or has specific 16-digit format
         // We look for elements containing the label "Case number" or matching the pattern
-        const caseNumSelectors = [
-             // Specific ID from screenshot/DOM inspection (best guess based on structure)
-            '[id^="headerControlsList_"]', 
-            // Generic search for text "Case number" siblings
-            'div' 
-        ];
+        // Expanded to include Work Order Number, Incident Number, etc.
+        const idLabels = ['Case number', 'Work Order Number', 'Incident Number', 'Ticket Number'];
+        
+        // Regex for 16-digit case number (e.g. 2601190030003106) OR common formats like WO-12345, INC-1234, CAS-01234-A1B2
+        // \b[A-Z]{2,10}  -> Starts with 2-10 uppercase letters (e.g. WO, INC, CAS)
+        // -?             -> Optional dash
+        // \d{3,}         -> At least 3 digits
+        // [-\w]*         -> Optional trailing dashes or alphanumeric chars
+        const idRegex = /(\b\d{16}\b)|(\b[A-Z]{2,10}-?\d{3,}[-\w]*\b)/;
 
-        // Regex for 16-digit case number (e.g. 2601190030003106)
-        const caseNumRegex = /\b\d{16}\b/;
-
-        // Strategy A: Check specific header container if it exists
+        // Strategy A: Check specific header container if it exists (Case Number specific)
         const headerControls = document.querySelector('[id^="headerControlsList_"]');
         if (headerControls) {
              const text = headerControls.textContent || '';
-             const match = text.match(caseNumRegex);
+             const match = text.match(idRegex);
              if (match) {
                  data.caseNumber = match[0];
              }
         }
 
-        // Strategy B: If not found, scan all divs that might contain "Case number" text label
+        // Strategy B: Generic Label Search for various ID types
         if (!data.caseNumber) {
-            // Find elements containing "Case number" text (case insensitive)
-            // XPath is cleaner for text content search
+            // Construct XPath to search for any of the labels
+            const labelsXPath = idLabels.map(l => `contains(text(), '${l}')`).join(' or ');
+            
             const iterator = document.evaluate(
-                "//*[contains(text(), 'Case number')]", 
+                `//*[${labelsXPath}]`, 
                 document, 
                 null, 
                 XPathResult.ANY_TYPE, 
@@ -82,15 +162,16 @@ export class PageReader {
             
             let node = iterator.iterateNext();
             while (node) {
-                // The number is often in a SIBLING or PARENT's other child
-                // Check parent's text content for the 16 digit pattern
+                // Check parent hierarchy for the value
                 const parent = node.parentElement;
                 if (parent && parent.parentElement) {
-                     // Check specific parent hierarchy text (broader context)
                      const containerText = parent.parentElement.textContent || '';
-                     const match = containerText.match(caseNumRegex);
-                     if (match) {
-                         data.caseNumber = match[0];
+                     // Look for numbers or ID-like patterns
+                     // Relaxed regex for this search: just look for the label's value which might be a simple number or string
+                     // We use the helper logic to find the value next to the label
+                     const value = this.findValueForLabel(node.textContent || '', undefined); // Pass strict regex if needed
+                     if (value && value.length > 3) { // Basic length check
+                         data.caseNumber = value;
                          break;
                      }
                 }
@@ -98,14 +179,37 @@ export class PageReader {
             }
         }
         
-        // Strategy C: Direct Regex scan on header container (most robust if ID is stable)
+        // Strategy C: Direct Regex scan on header container
         if (!data.caseNumber) {
             const headerContainer = document.querySelector('[id^="headerContainer"]'); // or outerHeaderContainer_
              if (headerContainer && headerContainer.textContent) {
-                 const match = headerContainer.textContent.match(caseNumRegex);
+                 const match = headerContainer.textContent.match(idRegex);
                  if (match) data.caseNumber = match[0];
              }
         }
+
+        // Strategy D: Last Resort - Check Ticket Title for ID
+        // Often titles are formatted like "CAS-12345: Error message" or "Incident #9999"
+        if (!data.caseNumber && data.ticketTitle) {
+            const titleMatch = data.ticketTitle.match(idRegex);
+            if (titleMatch) {
+                console.log("[DH] Found ID in Title:", titleMatch[0]);
+                data.caseNumber = titleMatch[0];
+            }
+        }
+
+        // 3.1 Try to find Severity (New)
+        // Look for "Severity" label and get its sibling/value
+        // Severity values: 1/A/B/C
+        // Screenshot implies the value is physically ABOVE or BEFORE the label "Severity" in the visual layout, 
+        // which often corresponds to being a previous sibling in Flexbox column-reverse or just standard stacked divs
+        
+        // Use helper with regex for 1, A, B, C
+        data.severity = this.findValueForLabel('Severity', /^[1ABC]$/i);
+
+        // 3.2 Try to find Status Reason (New)
+        // Use helper with basic length validation
+        data.statusReason = this.findValueForLabel('Status reason');
 
 
         // 4. Try to find Product Category
@@ -201,7 +305,7 @@ export class PageReader {
         }
 
         // Return data if we found *something* useful
-        if (data.errorText || data.ticketTitle || data.description || data.productCategory || data.caseNumber) {
+        if (data.errorText || data.ticketTitle || data.description || data.productCategory || data.caseNumber || data.severity || data.statusReason) {
             // Consolidate "errorText" for the analyze function if description is better
             if (!data.errorText && data.description) {
                 data.errorText = data.description;

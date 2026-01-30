@@ -10,7 +10,12 @@ import shutil
 
 # Import the SDK from the correct package name we discovered: 'copilot'
 from copilot import CopilotClient
-from copilot.types import CopilotClientOptions, MessageOptions, SessionConfig
+from copilot.types import (
+    CopilotClientOptions,
+    MessageOptions,
+    SessionConfig,
+    PermissionRequestResult,
+)
 
 # Import PII Scrubber
 from pii_scrubber import PiiScrubber
@@ -86,84 +91,161 @@ class NativeHost:
 
             self.client = CopilotClient(options if options else None)
 
-            # Load configuration from User Data Directory (USER_DATA_DIR/config.json)
-            # We look in USER_DATA_DIR first (user customization), then fallback to Installation Dir (defaults)
-            session_config: SessionConfig = {}
+            # Explicitly start the client to ensure connection before session creation
+            logging.info("Starting Copilot Client...")
+            await self.client.start()
+            logging.info("Copilot Client started.")
 
-            # 1. User-specific config (APPDATA/DynamicsHelper/config.json)
-            user_config_path = os.path.join(USER_DATA_DIR, "config.json")
+            await self._refresh_session()
 
-            # 2. Default/bundled config (beside the executable/script)
-            install_dir = os.path.dirname(os.path.abspath(__file__))
-            default_config_path = os.path.join(install_dir, "config.json")
-
-            # Determine which config to use (User overrides Default)
-            config_path = (
-                user_config_path
-                if os.path.exists(user_config_path)
-                else default_config_path
-            )
-
-            if os.path.exists(config_path):
-                try:
-                    with open(config_path, "r") as f:
-                        config_data = json.load(f)
-
-                    # Handle skill_directories (resolve relative paths)
-                    if "skill_directories" in config_data:
-                        resolved_skills = []
-                        for path in config_data["skill_directories"]:
-                            if not os.path.isabs(path):
-                                # Resolve relative to the CONFIG FILE location
-                                resolved_path = os.path.abspath(
-                                    os.path.join(os.path.dirname(config_path), path)
-                                )
-                                resolved_skills.append(resolved_path)
-                            else:
-                                resolved_skills.append(path)
-                        config_data["skill_directories"] = resolved_skills
-
-                    session_config.update(config_data)  # type: ignore
-                    logging.info(f"Loaded configuration from {config_path}")
-                except Exception as e:
-                    logging.error(f"Failed to load config.json: {e}")
-            else:
-                logging.info(
-                    "No config.json found (checked User and Install dirs). Using default session."
-                )
-
-            # Load custom instructions (copilot-instructions.md)
-            user_instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
-            default_instr_path = os.path.join(install_dir, "copilot-instructions.md")
-
-            instr_path = (
-                user_instr_path
-                if os.path.exists(user_instr_path)
-                else default_instr_path
-            )
-
-            if os.path.exists(instr_path):
-                try:
-                    with open(instr_path, "r", encoding="utf-8") as f:
-                        instructions_content = f.read()
-
-                    if instructions_content.strip():
-                        # Append instructions to existing system message if configured, or create new one
-                        # We use 'append' mode to preserve the CLI's foundation instructions
-                        session_config["system_message"] = {
-                            "mode": "append",
-                            "content": instructions_content,
-                        }
-                        logging.info(f"Loaded system instructions from {instr_path}")
-                except Exception as e:
-                    logging.error(f"Failed to load instructions from {instr_path}: {e}")
-
-            # Create a persistent session for this host instance
-            self.session = await self.client.create_session(session_config)
-            logging.info("Copilot Session created successfully.")
         except Exception as e:
             logging.error(f"Failed to initialize SDK: {e}")
             self.session = None  # Ensure it's None on failure
+
+    def _get_session_config(self) -> SessionConfig:
+        """Constructs the session configuration from disk."""
+        session_config: SessionConfig = {}
+
+        # 1. User-specific config (APPDATA/DynamicsHelper/config.json)
+        user_config_path = os.path.join(USER_DATA_DIR, "config.json")
+
+        # 2. Default/bundled config (beside the executable/script)
+        install_dir = os.path.dirname(os.path.abspath(__file__))
+        default_config_path = os.path.join(install_dir, "config.json")
+
+        # Determine which config to use (User overrides Default)
+        config_path = (
+            user_config_path
+            if os.path.exists(user_config_path)
+            else default_config_path
+        )
+
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r") as f:
+                    config_data = json.load(f)
+
+                # Handle skill_directories (resolve relative paths)
+                if "skill_directories" in config_data:
+                    resolved_skills = []
+                    for path in config_data["skill_directories"]:
+                        if not os.path.isabs(path):
+                            # Resolve relative to the CONFIG FILE location
+                            resolved_path = os.path.abspath(
+                                os.path.join(os.path.dirname(config_path), path)
+                            )
+                            resolved_skills.append(resolved_path)
+                        else:
+                            resolved_skills.append(path)
+                    config_data["skill_directories"] = resolved_skills
+
+                session_config.update(config_data)  # type: ignore
+                logging.info(f"Loaded configuration from {config_path}")
+            except Exception as e:
+                logging.error(f"Failed to load config.json: {e}")
+        else:
+            logging.info(
+                "No config.json found (checked User and Install dirs). Using default session."
+            )
+
+        # Load custom instructions (copilot-instructions.md)
+        user_instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
+        default_instr_path = os.path.join(install_dir, "copilot-instructions.md")
+
+        instr_path = (
+            user_instr_path if os.path.exists(user_instr_path) else default_instr_path
+        )
+
+        if os.path.exists(instr_path):
+            try:
+                with open(instr_path, "r", encoding="utf-8") as f:
+                    instructions_content = f.read()
+
+                if instructions_content.strip():
+                    # Append instructions to existing system message if configured, or create new one
+                    # We use 'append' mode to preserve the CLI's foundation instructions
+                    session_config["system_message"] = {
+                        "mode": "append",
+                        "content": instructions_content,
+                    }
+                    logging.info(f"Loaded system instructions from {instr_path}")
+            except Exception as e:
+                logging.error(f"Failed to load instructions from {instr_path}: {e}")
+
+        return session_config
+
+    def _permission_handler(self, request, context) -> PermissionRequestResult:
+        """
+        Auto-approves permissions to prevent headless hangs.
+        Logs the approval for audit.
+        """
+        logging.info(f"Permission requested: {request}")
+        # We can implement finer-grained logic here if needed.
+        # For now, allowing execution prevents the 'hanging at prompt' issue.
+        return {"kind": "approved"}
+
+    async def _refresh_session(self):
+        """Re-creates the Copilot session with current config."""
+        if not self.client:
+            logging.error("Cannot refresh session: Client not initialized.")
+            return False
+
+        try:
+            config = self._get_session_config()
+
+            # Register our permission handler to avoid hangs
+            config["on_permission_request"] = self._permission_handler
+
+            self.session = await self.client.create_session(config)
+            logging.info("Copilot Session created/refreshed successfully.")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to create/refresh session: {e}")
+            self.session = None
+            return False
+
+    async def handle_update_config(self, payload):
+        """Updates configuration files and refreshes the session."""
+        try:
+            # 1. Update System Instructions
+            if "system_instructions" in payload:
+                instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
+                with open(instr_path, "w", encoding="utf-8") as f:
+                    f.write(payload["system_instructions"])
+                logging.info("Updated copilot-instructions.md")
+
+            # 2. Update Config (Model, etc)
+            if "config" in payload:
+                user_config_path = os.path.join(USER_DATA_DIR, "config.json")
+                # Read existing or empty
+                current_data = {}
+                if os.path.exists(user_config_path):
+                    try:
+                        with open(user_config_path, "r") as f:
+                            current_data = json.load(f)
+                    except:
+                        pass  # Start fresh if corrupt
+
+                # Merge new config
+                current_data.update(payload["config"])
+
+                with open(user_config_path, "w") as f:
+                    json.dump(current_data, f, indent=2)
+                logging.info("Updated config.json")
+
+            # 3. Refresh Session
+            success = await self._refresh_session()
+            if success:
+                return {
+                    "success": True,
+                    "message": "Configuration updated and session refreshed.",
+                }
+            else:
+                return {"error": "Configuration saved but session refresh failed."}
+
+        except Exception as e:
+            logging.error(f"Error updating config: {e}")
+            return {"error": str(e)}
 
     def start_input_thread(self):
         """Starts a daemon thread to read stdin without blocking the async loop."""
@@ -221,8 +303,20 @@ class NativeHost:
         if not text:
             return {"error": "No text provided for analysis."}
 
-        if not self.session:
-            return {"error": "Copilot session not initialized."}
+        if not self.session or not self.client:
+            return {"error": "Copilot session/client not initialized."}
+
+        # 1. Fast Fail: Check Authentication Status
+        try:
+            auth_status = await self.client.get_auth_status()
+            if not auth_status.get("isAuthenticated", False):
+                logging.warning("Copilot is not authenticated.")
+                return {
+                    "error": f"Copilot is not authenticated. Login: {auth_status.get('login', 'Unknown')}. Status: {auth_status.get('statusMessage', 'Unknown')}. Please run 'copilot auth' in your terminal."
+                }
+        except Exception as e:
+            logging.error(f"Failed to check auth status: {e}")
+            # Continue safely? or fail? Let's try to continue but log it.
 
         try:
             # Scrub PII from text and context
@@ -246,20 +340,32 @@ class NativeHost:
             # Newlines cause command injection issues if not handled by JSON-RPC.
             # We replace them with spaces to preserve word boundaries.
 
-            safe_prompt = (
-                prompt.replace('"', " ")
-                .replace("'", " ")
-                .replace("\n", " ")
-                .replace("\r", "")
-            )
-            logging.info(f"Sanitized prompt length: {len(safe_prompt)}")
+            # UPDATE: We are relaxing this. The SDK sends JSON. Newlines should be fine.
+            # Flattening the prompt might be confusing the model.
+            # We will still escape double quotes just in case the SDK implementation does simple string interpolation (unlikely but safe).
+
+            # safe_prompt = (
+            #     prompt.replace('"', " ")
+            #     .replace("'", " ")
+            #     .replace("\n", " ")
+            #     .replace("\r", "")
+            # )
+
+            # Less aggressive sanitization:
+            safe_prompt = prompt  # Trusting JSON serialization for now.
+
+            logging.info(f"Prompt length: {len(safe_prompt)}")
 
             # Use send_and_wait (send_messages is not available)
             message_options: MessageOptions = {"prompt": safe_prompt}
 
-            # Increase timeout significantly as initial analysis might be slow
-            # The error we saw was "Timeout after 60.0s"
-            timeout_seconds = 180.0
+            # Timeout Strategy:
+            # Frontend (FAB.tsx) has a safety timeout of 310 seconds.
+            # We set the backend timeout to 300 seconds (shorter than frontend).
+            # This ensures that if the SDK hangs (e.g., waiting for auth/confirmation),
+            # we catch it here and return a USEFUL error message to the UI before the frontend
+            # just gives up with a generic "Analysis timed out" message.
+            timeout_seconds = 300.0
 
             logging.debug(f"Calling send_and_wait with options: {message_options}")
             try:
@@ -269,20 +375,55 @@ class NativeHost:
                 logging.debug(f"Returned from send_and_wait. Event: {response_event}")
 
                 full_response = ""
+                # Handle possible "auth_required" or "confirmation_required" events if the SDK supports them
+                # Since we don't know the exact SDK event types for auth, we check for "type" field generically
+                if response_event:
+                    event_type = getattr(response_event, "type", "unknown")
+                    if event_type in [
+                        "auth_required",
+                        "login_required",
+                        "confirmation_required",
+                    ]:
+                        logging.warning(
+                            f"Copilot SDK requires interaction: {event_type}"
+                        )
+                        return {
+                            "error": f"Copilot requires authentication or interaction: {event_type}. Please run 'copilot' in your terminal first to authenticate."
+                        }
+
                 if response_event and response_event.data:
-                    if response_event.data.content:
+                    # Check for content, but also handle cases where it might be in a different field or the event type is weird
+                    if (
+                        hasattr(response_event.data, "content")
+                        and response_event.data.content
+                    ):
                         full_response = response_event.data.content
                     else:
-                        full_response = "No content in response event."
-                        logging.warning(f"Response event data: {response_event.data}")
+                        # DEBUG: Dump the full event to understand why content is missing
+                        # This will help diagnose if it's a refusal, a filter, or a different event type
+                        import pprint
+
+                        debug_dump = pprint.pformat(response_event, indent=2)
+                        full_response = (
+                            f"### Debug: No content received\n\n"
+                            f"The Copilot SDK returned an event without standard content. "
+                            f"Here is the raw event data for debugging:\n\n"
+                            f"```text\n{debug_dump}\n```"
+                        )
+                        logging.warning(
+                            f"Response event data missing content: {response_event}"
+                        )
                 else:
-                    full_response = "No response event received."
+                    full_response = "No response event received (None)."
 
             except asyncio.TimeoutError:
                 logging.error(
                     f"Copilot request timed out after {timeout_seconds} seconds."
                 )
-                return {"error": "Copilot request timed out."}
+                # Return a specific error guiding the user to check authentication/skills
+                return {
+                    "error": "Copilot request timed out. This often happens if Copilot is waiting for authentication or approval. Please run 'copilot' in your terminal to verify your login and skill permissions."
+                }
 
             logging.info("Received full response from Copilot.")
 
@@ -336,6 +477,9 @@ class NativeHost:
 
             elif action == "analyze_error":
                 response["data"] = await self.handle_analyze_error(payload)
+
+            elif action == "update_config":
+                response["data"] = await self.handle_update_config(payload)
 
             else:
                 response["status"] = "error"

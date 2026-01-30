@@ -44,13 +44,21 @@ interface Preferences {
     primaryColor: string;
     offsetBottom: number;
     offsetRight: number;
+    systemInstructions?: string;
+    userPrompt?: string;
+    autoAnalyzeMode?: 'disabled' | 'critical' | 'always';
+    enableStatusBubble?: boolean;
 }
 
 const DEFAULT_PREFS: Preferences = {
     buttonText: "DH",
     primaryColor: "#0D9488", // Teal-600 to match design system
     offsetBottom: 24,
-    offsetRight: 24
+    offsetRight: 24,
+    systemInstructions: "",
+    userPrompt: "",
+    autoAnalyzeMode: 'disabled',
+    enableStatusBubble: true
 };
 
 // --- Helpers ---
@@ -509,6 +517,25 @@ const Options: React.FC = () => {
 
     const handleSave = () => {
         chrome.storage.local.set({ dh_prefs: prefs, dh_items: items }, () => {
+            // Also notify the Host via Service Worker if instructions changed
+            // We use a fire-and-forget message pattern here
+             if (prefs.systemInstructions !== undefined) {
+                 chrome.runtime.sendMessage({
+                     action: "update_host_config",
+                     payload: {
+                         system_instructions: prefs.systemInstructions
+                     }
+                 }, (response) => {
+                     // Check for runtime errors (like if host isn't connected yet)
+                     if (chrome.runtime.lastError) {
+                         console.warn("Could not update host immediately:", chrome.runtime.lastError.message);
+                         // This is fine, the host loads the file on startup anyway
+                     } else {
+                         console.log("Host config updated response:", response);
+                     }
+                 });
+             }
+
             setStatus("Settings saved successfully!");
             setTimeout(() => setStatus(""), 2000);
         });
@@ -879,6 +906,72 @@ const Options: React.FC = () => {
                                             />
                                         </div>
                                     </div>
+                                    
+                                    <div className="pt-6 border-t border-slate-200">
+                                         <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                            <Maximize2 size={14} /> Copilot AI Settings
+                                        </h2>
+                                        
+                                        <div>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">System Instructions (Prompt)</label>
+                                            <p className="text-[10px] text-slate-500 mb-2">
+                                                These instructions are appended to the Copilot System Prompt. Use this to customize how the AI responds (e.g., "You are a helpful expert in Dynamics 365...").
+                                            </p>
+                                            <textarea
+                                                value={prefs.systemInstructions || ""}
+                                                onChange={(e) => setPrefs(prev => ({ ...prev, systemInstructions: e.target.value }))}
+                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-40 resize-y"
+                                                placeholder="Enter custom system instructions here..."
+                                            />
+                                        </div>
+
+                                        <div className="mt-4">
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Default User Prompt</label>
+                                            <p className="text-[10px] text-slate-500 mb-2">
+                                                This text is automatically appended to the "Case Context" description when scanning a page. Use this to add standard questions or instructions for every analysis (e.g., "Please provide a root cause analysis and mitigation steps.").
+                                            </p>
+                                            <textarea
+                                                value={prefs.userPrompt || ""}
+                                                onChange={(e) => setPrefs(prev => ({ ...prev, userPrompt: e.target.value }))}
+                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-24 resize-y"
+                                                placeholder="Enter default user prompt here..."
+                                            />
+                                        </div>
+
+                                        <div className="mt-4">
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Automatic Analyze</label>
+                                            <p className="text-[10px] text-slate-500 mb-2">
+                                                Choose when to automatically trigger the AI analysis upon opening the menu.
+                                            </p>
+                                            <select
+                                                name="autoAnalyzeMode"
+                                                value={prefs.autoAnalyzeMode || 'disabled'}
+                                                onChange={(e) => setPrefs(prev => ({ ...prev, autoAnalyzeMode: e.target.value as any }))}
+                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
+                                            >
+                                                <option value="disabled">Disabled (Manual trigger only)</option>
+                                                <option value="critical">Critical Cases Only (Sev A/1 + Initial Pending)</option>
+                                                <option value="always">Always (On every scan)</option>
+                                            </select>
+                                        </div>
+
+                                        <div className="mt-4 flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                id="enableStatusBubble"
+                                                checked={prefs.enableStatusBubble !== false}
+                                                onChange={(e) => setPrefs(prev => ({ ...prev, enableStatusBubble: e.target.checked }))}
+                                                className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
+                                            />
+                                            <label htmlFor="enableStatusBubble" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
+                                                Show Status Bubble
+                                            </label>
+                                        </div>
+                                        <p className="text-[10px] text-slate-500 ml-6">
+                                            Show the small floating notification bubble during analysis.
+                                        </p>
+                                    </div>
+
                                 </div>
                             </div>
                         </div>

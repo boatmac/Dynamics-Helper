@@ -1,36 +1,36 @@
 {
   "../../../../@crx/manifest": {
-    "file": "assets/crx-manifest.js-UYIQ5jNU.js",
+    "file": "assets/crx-manifest.js-B9Z3hewh.js",
     "name": "crx-manifest.js",
     "src": "../../../../@crx/manifest",
     "isEntry": true
+  },
+  "_bundle-mjs-CMYGHwn2.js": {
+    "file": "assets/bundle-mjs-CMYGHwn2.js",
+    "name": "bundle-mjs"
   },
   "_constants-BFJtfVSk.js": {
     "file": "assets/constants-BFJtfVSk.js",
     "name": "constants"
   },
-  "_index.tsx-loader-CmsZaA2M.js": {
-    "file": "assets/index.tsx-loader-CmsZaA2M.js",
-    "src": "_index.tsx-loader-CmsZaA2M.js"
-  },
-  "_settings-DVhygX-d.js": {
-    "file": "assets/settings-DVhygX-d.js",
-    "name": "settings"
+  "_index.tsx-loader-BIdiZ75h.js": {
+    "file": "assets/index.tsx-loader-BIdiZ75h.js",
+    "src": "_index.tsx-loader-BIdiZ75h.js"
   },
   "index.html": {
-    "file": "assets/index.html-CtXyrZtl.js",
+    "file": "assets/index.html-DgIaboKw.js",
     "name": "index.html",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_settings-DVhygX-d.js"
+      "_bundle-mjs-CMYGHwn2.js"
     ],
     "css": [
-      "assets/index-DNxhKVOH.css"
+      "assets/index-Ciy4Jkuk.css"
     ]
   },
   "src/background/serviceWorker.ts": {
-    "file": "assets/serviceWorker.ts-DTVSB2HO.js",
+    "file": "assets/serviceWorker.ts-OyZqqyV8.js",
     "name": "serviceWorker.ts",
     "src": "src/background/serviceWorker.ts",
     "isEntry": true,
@@ -39,12 +39,12 @@
     ]
   },
   "src/content/index.tsx": {
-    "file": "assets/index.tsx-mpbtJWAH.js",
+    "file": "assets/index.tsx-BXJr4hGa.js",
     "name": "index.tsx",
     "src": "src/content/index.tsx",
     "isEntry": true,
     "imports": [
-      "_settings-DVhygX-d.js",
+      "_bundle-mjs-CMYGHwn2.js",
       "_constants-BFJtfVSk.js"
     ]
   }
