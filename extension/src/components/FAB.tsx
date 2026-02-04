@@ -993,33 +993,20 @@ const FAB: React.FC = () => {
                         </div>
 
                         {/* Unified Status Bar */}
-                        {(() => {
-                            if (errorMsg) {
-                                return (
-                                    <div className="dh-status-bar error">
-                                        <AlertCircle size={14} style={{ flexShrink: 0 }} />
-                                        <span>{errorMsg}</span>
-                                    </div>
-                                );
-                            }
-                            if (isAnalyzing) {
-                                return (
-                                    <div className="dh-status-bar running">
-                                        <Zap size={14} className="animate-pulse" style={{ flexShrink: 0 }} />
-                                        <span>Analysis in progress...</span>
-                                    </div>
-                                );
-                            }
-                            if (lastDuration) {
-                                return (
-                                    <div className="dh-status-bar info">
-                                        <Activity size={14} style={{ flexShrink: 0 }} />
-                                        <span>Last run: {lastDuration}</span>
-                                    </div>
-                                );
-                            }
-                            return null;
-                        })()}
+                        {/* {(() => {
+                             // ... existing logic ...
+                        })()} */}
+                        
+                        {/* Version Info */}
+                        <div style={{ 
+                            textAlign: 'center', 
+                            fontSize: '10px', 
+                            color: '#CBD5E1', 
+                            marginTop: '8px',
+                            marginBottom: '-4px' 
+                        }}>
+                            v{chrome.runtime.getManifest().version}
+                        </div>
                     </div>
                 </div>
             )}
