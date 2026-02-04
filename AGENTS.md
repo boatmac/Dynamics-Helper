@@ -128,13 +128,25 @@ Since you cannot see the browser or console:
 *   **Format:** Responses should be in Markdown.
 *   **Safety:** Do not output real customer PII in the final report.
 
-## 7. Common Tasks
-*   **Adding a new UI Button:**
-    1.  Add icon to `lucide-react` imports in `FAB.tsx`.
-    2.  Add handler function (e.g., `handleNewAction`).
-    3.  Add button to JSX.
-    4.  Add `trackEvent` call.
-*   **Adding a new Backend Action:**
-    1.  Update `process_message` in `dh_native_host.py` to handle new `action`.
-    2.  Implement handler method (e.g., `handle_new_action`).
-    3.  Ensure it returns a JSON-serializable response.
+## 8. Release Workflow
+*   **Automation:** The project uses `release_helper.py` to automate version bumping, building, and publishing.
+*   **Create a New Release:**
+    1.  Ensure all changes are committed (except version bumps, which the script handles).
+    2.  Run the release script from the root directory:
+        ```bash
+        # Syntax: python release_helper.py <NEW_VERSION> --publish
+        python release_helper.py 2.0.5 --publish
+        ```
+    3.  **What happens automatically:**
+        *   Updates `extension/package.json`.
+        *   Updates `extension/manifest.json`.
+        *   Updates `VERSION` constant in `host/dh_native_host.py`.
+        *   Runs `npm run build` in `extension/`.
+        *   Creates a release zip in `releases/`.
+        *   Creates a GitHub Release and uploads the zip asset (via `gh` CLI).
+
+*   **Manual Build (No Publish):**
+    *   If you just want to build a version zip locally for testing:
+        ```bash
+        python release_helper.py 2.0.5
+        ```
