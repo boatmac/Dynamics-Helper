@@ -87,6 +87,7 @@ class NativeHost:
         self.scrubber = PiiScrubber()
         self.current_request_id = None  # Track current request for progress updates
         self.root_path = None  # Store root path from config
+        self.last_update_check = 0  # Track last update check time
 
         # Log startup location
         logging.info(
@@ -94,9 +95,15 @@ class NativeHost:
         )
         logging.info(f"User Data Dir: {USER_DATA_DIR}")
 
-    async def check_for_updates(self):
+    async def check_for_updates(self, force=False):
         """Checks for updates from GitHub Releases."""
         try:
+            # Rate limit: Check at most once per hour unless forced
+            now = time.time()
+            if not force and (now - self.last_update_check) < 3600:
+                return
+
+            self.last_update_check = now
             VERSION = "2.0.4"
             url = "https://api.github.com/repos/boatmac/Dynamics-Helper/releases/latest"
 
@@ -809,6 +816,9 @@ class NativeHost:
 
             elif action == "health_check":
                 self.send_progress("Checking health...")
+                # Trigger update check (respects cache timeout)
+                self.loop.create_task(self.check_for_updates())
+
                 # With the SDK, existence of self.client/session implies health
                 if self.client and self.session:
                     response["data"] = {
@@ -820,6 +830,10 @@ class NativeHost:
                         "status": "error",
                         "message": "SDK not initialized",
                     }
+
+            elif action == "check_updates":
+                self.loop.create_task(self.check_for_updates(force=True))
+                response["data"] = "Update check initiated"
 
             elif action == "analyze_error":
                 response["data"] = await self.handle_analyze_error(payload)
