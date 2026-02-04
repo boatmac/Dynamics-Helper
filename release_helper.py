@@ -8,12 +8,14 @@ import sys
 
 # Configuration
 # Run from root of repo
-EXT_DIR = os.path.join(os.getcwd(), "extension")
-HOST_DIR = os.path.join(os.getcwd(), "host")
+ROOT_DIR = os.getcwd()
+EXT_DIR = os.path.join(ROOT_DIR, "extension")
+HOST_DIR = os.path.join(ROOT_DIR, "host")
 PACKAGE_JSON = os.path.join(EXT_DIR, "package.json")
 MANIFEST_JSON = os.path.join(EXT_DIR, "manifest.json")
 HOST_FILE = os.path.join(HOST_DIR, "dh_native_host.py")
-DIST_DIR = os.path.join(EXT_DIR, "dist")
+EXT_DIST_DIR = os.path.join(EXT_DIR, "dist")
+INSTALL_SCRIPT = os.path.join(ROOT_DIR, "install.ps1")
 
 
 def update_json_version(file_path, new_version):
@@ -50,10 +52,8 @@ def update_python_version(file_path, new_version):
         content = f.read()
 
     # Regex to find VERSION = "x.y.z"
-    # We look for VERSION = "..." or VERSION='...'
     pattern = r'(VERSION\s*=\s*)(["\'])([^"\']+)(["\'])'
 
-    # Check if we find it first
     match = re.search(pattern, content)
     if not match:
         print(
@@ -66,7 +66,6 @@ def update_python_version(file_path, new_version):
         print(f"  Version already {new_version} in {os.path.basename(file_path)}")
         return
 
-    # Replace group 3 with new version
     new_content = re.sub(pattern, f"\\g<1>\\g<2>{new_version}\\g<4>", content)
 
     print(f"  Writing {new_version}...")
@@ -79,7 +78,6 @@ def update_python_version(file_path, new_version):
 def build_extension():
     print("\n--- Building Extension ---")
     try:
-        # Use shell=True for windows to find npm
         subprocess.run("npm run build", cwd=EXT_DIR, check=True, shell=True)
         print("Extension build successful.")
     except subprocess.CalledProcessError as e:
@@ -87,20 +85,77 @@ def build_extension():
         sys.exit(1)
 
 
+def build_host():
+    print("\n--- Building Native Host ---")
+    try:
+        # Check for pyinstaller
+        subprocess.run(
+            "pyinstaller --version", check=True, shell=True, stdout=subprocess.DEVNULL
+        )
+
+        # Build command: pyinstaller --onefile --name dh_native_host host/dh_native_host.py
+        # We run from root, so path is host/dh_native_host.py
+        cmd = (
+            "pyinstaller --onefile --clean --name dh_native_host host/dh_native_host.py"
+        )
+        print(f"Executing: {cmd}")
+        subprocess.run(cmd, cwd=ROOT_DIR, check=True, shell=True)
+        print("Host build successful.")
+    except subprocess.CalledProcessError as e:
+        print(f"Host build failed: {e}")
+        sys.exit(1)
+
+
 def create_zip(version):
     print("\n--- Creating Release Zip ---")
     zip_name = f"DynamicsHelper_v{version}"
-    output_dir = os.path.join(os.getcwd(), "releases")
+    output_dir = os.path.join(ROOT_DIR, "releases")
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    output_path = os.path.join(output_dir, zip_name)
-    zip_file_path = f"{output_path}.zip"
+    # Temporary staging directory for zip content
+    stage_dir = os.path.join(output_dir, "temp_stage")
+    if os.path.exists(stage_dir):
+        shutil.rmtree(stage_dir)
+    os.makedirs(stage_dir)
 
-    # Zip the dist folder
-    print(f"Zipping {DIST_DIR} to {zip_file_path}...")
-    shutil.make_archive(output_path, "zip", DIST_DIR)
+    # 1. Copy Extension (dist -> extension)
+    print("Copying Extension...")
+    shutil.copytree(EXT_DIST_DIR, os.path.join(stage_dir, "extension"))
+
+    # 2. Copy Host (dist/dh_native_host.exe -> host/)
+    print("Copying Host...")
+    host_stage_dir = os.path.join(stage_dir, "host")
+    os.makedirs(host_stage_dir)
+
+    # PyInstaller output is in dist/dh_native_host.exe (relative to where we ran it)
+    # We ran from ROOT, so output is ROOT/dist/dh_native_host.exe
+    host_exe_src = os.path.join(ROOT_DIR, "dist", "dh_native_host.exe")
+    if not os.path.exists(host_exe_src):
+        print(f"Error: Host executable not found at {host_exe_src}")
+        sys.exit(1)
+
+    shutil.copy2(host_exe_src, host_stage_dir)
+
+    # Copy other host files (config.json, copilot-instructions.md)
+    # They are in host/ source folder
+    shutil.copy2(os.path.join(HOST_DIR, "config.json"), host_stage_dir)
+    shutil.copy2(os.path.join(HOST_DIR, "copilot-instructions.md"), host_stage_dir)
+
+    # 3. Copy Installer Script
+    print("Copying Installer...")
+    shutil.copy2(INSTALL_SCRIPT, stage_dir)
+
+    # 4. Zip it up
+    zip_file_base = os.path.join(output_dir, zip_name)
+    print(f"Zipping to {zip_file_base}.zip...")
+    shutil.make_archive(zip_file_base, "zip", stage_dir)
+
+    # Cleanup
+    shutil.rmtree(stage_dir)
+
+    zip_file_path = f"{zip_file_base}.zip"
     print(f"Zip created: {zip_file_path}")
     return zip_file_path
 
@@ -108,7 +163,6 @@ def create_zip(version):
 def publish_to_github(version, zip_path):
     print(f"\n--- Publishing v{version} to GitHub ---")
 
-    # Check if gh is installed
     try:
         subprocess.run(
             "gh --version", check=True, shell=True, stdout=subprocess.DEVNULL
@@ -121,10 +175,8 @@ def publish_to_github(version, zip_path):
 
     tag = f"v{version}"
     title = f"v{version}"
-    notes = f"Release {tag}"
+    notes = f"Release {tag}\n\n## Installation\n1. Download and extract the zip file.\n2. Right-click `install.ps1` and select 'Run with PowerShell'.\n3. Follow the on-screen instructions."
 
-    # Command to create release and upload asset
-    # gh release create <tag> <files>... --title <title> --notes <notes>
     cmd = f'gh release create {tag} "{zip_path}" --title "{title}" --notes "{notes}"'
 
     print(f"Executing: {cmd}")
@@ -156,14 +208,13 @@ def main():
     zip_path = None
     if not args.no_build:
         build_extension()
+        build_host()  # Build the Python Host too!
         zip_path = create_zip(args.version)
 
     if args.publish and zip_path:
         publish_to_github(args.version, zip_path)
     elif args.publish and not zip_path:
-        print(
-            "Error: Cannot publish without building (missing zip path). Remove --no-build or remove --publish."
-        )
+        print("Error: Cannot publish without building.")
 
     print("\nRelease Process Complete!")
 
