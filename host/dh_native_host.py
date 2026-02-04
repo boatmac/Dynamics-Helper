@@ -97,7 +97,7 @@ class NativeHost:
     async def check_for_updates(self):
         """Checks for updates from GitHub Releases."""
         try:
-            VERSION = "2.0.1"
+            VERSION = "2.0.3"
             url = "https://api.github.com/repos/boatmac/Dynamics-Helper/releases/latest"
 
             # Run blocking I/O in a thread
