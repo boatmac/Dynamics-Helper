@@ -3,10 +3,9 @@
 
 $ErrorActionPreference = "Stop"
 $AppName = "DynamicsHelper"
-# Use LOCALAPPDATA for binaries/installation (Standard practice and matches previous installer)
-$DestDir = "$env:LOCALAPPDATA\$AppName"
+# Revert to APPDATA (Roaming) as that was the legacy standard and likely where users have it
+$DestDir = "$env:APPDATA\$AppName"
 $HostName = "com.microsoft.dynamics.helper"
-$RoamingDir = "$env:APPDATA\$AppName"
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "   Dynamics Helper Installer / Updater" -ForegroundColor Cyan
@@ -20,16 +19,6 @@ if ($Process) {
     Write-Host "    Stopping dh_native_host.exe..." -ForegroundColor Yellow
     Stop-Process -Name "dh_native_host" -Force
     Start-Sleep -Seconds 1
-}
-
-# 1.5 Cleanup Roaming if it exists (Fix for previous version inconsistency)
-if (Test-Path $RoamingDir) {
-    Write-Host "[*] Cleaning up old Roaming installation..." -ForegroundColor Yellow
-    try {
-        Remove-Item $RoamingDir -Recurse -Force -ErrorAction SilentlyContinue
-    } catch {
-        Write-Warning "Could not fully remove $RoamingDir. You may need to delete it manually."
-    }
 }
 
 # 2. Prepare Destination
@@ -86,9 +75,17 @@ $ManifestPath = "$DestDir\manifest.json"
 $IsUpdate = Test-Path $ManifestPath
 
 if ($IsUpdate) {
+    Write-Host "SUCCESS: Installation/Update Complete!" -ForegroundColor Green
     Write-Host ""
-    Write-Host "SUCCESS: Update Complete!" -ForegroundColor Green
-    Write-Host "Please reload the extension in Chrome (chrome://extensions)."
+    Write-Host "IMPORTANT: Ensure your browser is loading the extension from:" -ForegroundColor Yellow
+    Write-Host "   $ExtDest" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "If you see the old version after reloading:"
+    Write-Host "1. Go to chrome://extensions"
+    Write-Host "2. Remove 'Dynamics Helper'"
+    Write-Host "3. Click 'Load unpacked' and select the folder above."
+    Write-Host "   (This is a one-time setup for auto-updates)"
+    Write-Host ""
 } else {
     Write-Host ""
     Write-Host "NEW INSTALLATION DETECTED" -ForegroundColor Yellow
