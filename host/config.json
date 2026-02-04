@@ -1,0 +1,13 @@
+{
+  "skill_directories": [
+    "./skills"
+  ],
+  "mcp_servers": {
+    "fetch": {
+      "type": "local",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "tools": ["*"]
+    }
+  }
+}

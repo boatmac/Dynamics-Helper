@@ -1,0 +1,9 @@
+{
+  "name": "com.dynamics.helper.native",
+  "description": "Dynamics Helper Native Host",
+  "path": "C:\\MyWorkbench\\Repository\\Dynamics Helper\\host\\start_dhnativehost.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://aiimcjfjmibedicmckpphgbddankgdln/"
+  ]
+}
