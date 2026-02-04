@@ -96,11 +96,43 @@ def create_zip(version):
         os.makedirs(output_dir)
 
     output_path = os.path.join(output_dir, zip_name)
+    zip_file_path = f"{output_path}.zip"
 
     # Zip the dist folder
-    print(f"Zipping {DIST_DIR} to {output_path}.zip...")
+    print(f"Zipping {DIST_DIR} to {zip_file_path}...")
     shutil.make_archive(output_path, "zip", DIST_DIR)
-    print(f"Zip created: {output_path}.zip")
+    print(f"Zip created: {zip_file_path}")
+    return zip_file_path
+
+
+def publish_to_github(version, zip_path):
+    print(f"\n--- Publishing v{version} to GitHub ---")
+
+    # Check if gh is installed
+    try:
+        subprocess.run(
+            "gh --version", check=True, shell=True, stdout=subprocess.DEVNULL
+        )
+    except subprocess.CalledProcessError:
+        print(
+            "Error: 'gh' CLI not found. Please install GitHub CLI to publish releases."
+        )
+        return
+
+    tag = f"v{version}"
+    title = f"v{version}"
+    notes = f"Release {tag}"
+
+    # Command to create release and upload asset
+    # gh release create <tag> <files>... --title <title> --notes <notes>
+    cmd = f'gh release create {tag} "{zip_path}" --title "{title}" --notes "{notes}"'
+
+    print(f"Executing: {cmd}")
+    try:
+        subprocess.run(cmd, check=True, shell=True)
+        print("GitHub Release created successfully!")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to create GitHub Release: {e}")
 
 
 def main():
@@ -109,6 +141,9 @@ def main():
     )
     parser.add_argument("version", help="New version number (e.g., 2.0.4)")
     parser.add_argument("--no-build", action="store_true", help="Skip build step")
+    parser.add_argument(
+        "--publish", action="store_true", help="Publish release to GitHub using gh CLI"
+    )
 
     args = parser.parse_args()
 
@@ -118,9 +153,17 @@ def main():
     update_json_version(MANIFEST_JSON, args.version)
     update_python_version(HOST_FILE, args.version)
 
+    zip_path = None
     if not args.no_build:
         build_extension()
-        create_zip(args.version)
+        zip_path = create_zip(args.version)
+
+    if args.publish and zip_path:
+        publish_to_github(args.version, zip_path)
+    elif args.publish and not zip_path:
+        print(
+            "Error: Cannot publish without building (missing zip path). Remove --no-build or remove --publish."
+        )
 
     print("\nRelease Process Complete!")
 
