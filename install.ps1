@@ -3,8 +3,10 @@
 
 $ErrorActionPreference = "Stop"
 $AppName = "DynamicsHelper"
-$DestDir = "$env:APPDATA\$AppName"
+# Use LOCALAPPDATA for binaries/installation (Standard practice and matches previous installer)
+$DestDir = "$env:LOCALAPPDATA\$AppName"
 $HostName = "com.microsoft.dynamics.helper"
+$RoamingDir = "$env:APPDATA\$AppName"
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "   Dynamics Helper Installer / Updater" -ForegroundColor Cyan
@@ -18,6 +20,16 @@ if ($Process) {
     Write-Host "    Stopping dh_native_host.exe..." -ForegroundColor Yellow
     Stop-Process -Name "dh_native_host" -Force
     Start-Sleep -Seconds 1
+}
+
+# 1.5 Cleanup Roaming if it exists (Fix for previous version inconsistency)
+if (Test-Path $RoamingDir) {
+    Write-Host "[*] Cleaning up old Roaming installation..." -ForegroundColor Yellow
+    try {
+        Remove-Item $RoamingDir -Recurse -Force -ErrorAction SilentlyContinue
+    } catch {
+        Write-Warning "Could not fully remove $RoamingDir. You may need to delete it manually."
+    }
 }
 
 # 2. Prepare Destination
