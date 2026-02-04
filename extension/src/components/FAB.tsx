@@ -244,6 +244,25 @@ const FAB: React.FC = () => {
     // Concurrency Control
     const latestRequestId = React.useRef<string | null>(null);
 
+    // Initial Health Check to wake up Host and check for updates
+    useEffect(() => {
+        const checkHealth = async () => {
+            try {
+                // We don't need to show UI for this, just wake up the host
+                // This ensures check_for_updates() runs immediately
+                await chrome.runtime.sendMessage({
+                    type: "NATIVE_MSG",
+                    payload: { action: "health_check", requestId: crypto.randomUUID() }
+                });
+            } catch (e) {
+                // Ignore errors on initial wake-up
+                console.debug("[DH] Initial wake-up failed (host might be missing)", e);
+            }
+        };
+        // Small delay to ensure listeners are ready
+        setTimeout(checkHealth, 1000);
+    }, []);
+
     // Progress Listener Effect
     useEffect(() => {
         const handleProgress = (e: any) => {
