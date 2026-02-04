@@ -104,7 +104,7 @@ class NativeHost:
                 return
 
             self.last_update_check = now
-            VERSION = "2.0.5"
+            VERSION = "2.0.7"
             url = "https://api.github.com/repos/boatmac/Dynamics-Helper/releases/latest"
 
             # Run blocking I/O in a thread
