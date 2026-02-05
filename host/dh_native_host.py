@@ -12,7 +12,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.11"
+VERSION = "2.0.12"
 
 # Setup User Data Directory (Cross-platform)
 if os.name == "nt":
@@ -133,9 +133,22 @@ class NativeHost:
                     logging.warning(f"Update check network error: {e}")
                 return None
 
+            if not self.loop:
+                return
+
             data = await self.loop.run_in_executor(None, fetch)
 
             if not data:
+                if force:
+                    self.send_message(
+                        {
+                            "action": "update_error",
+                            "payload": {"error": "Failed to fetch update data."},
+                        }
+                    )
+                return
+
+            if not self.loop:
                 return
 
             tag_name = data.get("tag_name", "").lstrip("v")
@@ -158,11 +171,28 @@ class NativeHost:
                             },
                         }
                     )
+                elif force:
+                    logging.info(
+                        f"No update available (Remote: {tag_name}, Local: {VERSION})"
+                    )
+                    self.send_message(
+                        {
+                            "action": "update_not_available",
+                            "payload": {"version": VERSION},
+                        }
+                    )
             except Exception as e:
                 logging.warning(f"Version parsing failed: {e}")
 
         except Exception as e:
             logging.error(f"Failed to check for updates: {e}")
+            if force:
+                self.send_message(
+                    {
+                        "action": "update_error",
+                        "payload": {"error": str(e)},
+                    }
+                )
 
     def find_copilot_cli(self):
         """Finds the Copilot CLI executable path."""
@@ -830,7 +860,8 @@ class NativeHost:
             elif action == "health_check":
                 self.send_progress("Checking health...")
                 # Trigger update check (respects cache timeout)
-                self.loop.create_task(self.check_for_updates())
+                if self.loop:
+                    self.loop.create_task(self.check_for_updates())
 
                 # With the SDK, existence of self.client/session implies health
                 if self.client and self.session:
@@ -847,7 +878,8 @@ class NativeHost:
                     }
 
             elif action == "check_updates":
-                self.loop.create_task(self.check_for_updates(force=True))
+                if self.loop:
+                    self.loop.create_task(self.check_for_updates(force=True))
                 response["data"] = "Update check initiated"
 
             elif action == "analyze_error":
@@ -870,21 +902,25 @@ class NativeHost:
                         upd = Updater(sys.executable)
 
                         self.send_progress("Downloading update...")
-                        zip_path = await self.loop.run_in_executor(
-                            None, upd.download_update, url
-                        )
+                        if self.loop:
+                            zip_path = await self.loop.run_in_executor(
+                                None, upd.download_update, url
+                            )
 
-                        self.send_progress(
-                            "Applying update (this will restart the host)..."
-                        )
-                        # Apply update (extract and swap)
-                        await self.loop.run_in_executor(
-                            None, upd.apply_update, zip_path
-                        )
+                            self.send_progress(
+                                "Applying update (this will restart the host)..."
+                            )
+                            # Apply update (extract and swap)
+                            await self.loop.run_in_executor(
+                                None, upd.apply_update, zip_path
+                            )
 
-                        response["data"] = {
-                            "message": "Update applied successfully. Please reload."
-                        }
+                            response["data"] = {
+                                "message": "Update applied successfully. Please reload."
+                            }
+                        else:
+                            response["status"] = "error"
+                            response["error"] = "Event loop not available"
                     except Exception as e:
                         logging.error(f"Update failed: {e}")
                         response["status"] = "error"

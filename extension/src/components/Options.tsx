@@ -641,20 +641,43 @@ const Options: React.FC = () => {
 
     // Listen for updates
     useEffect(() => {
-        const handleUpdateMsg = (e: any) => {
-            if (e.detail && e.detail.version) {
-                setUpdateAvailable(e.detail);
+        const handleRuntimeMsg = (message: any) => {
+            if (message.type === "NATIVE_UPDATE_AVAILABLE") {
+                console.log("[Options] Received update available:", message.payload);
+                setUpdateAvailable(message.payload);
+            }
+            
+            if (message.type === "NATIVE_UPDATE_NOT_AVAILABLE") {
+                setStatus("You are up to date!");
+                setTimeout(() => setStatus(""), 3000);
+            }
+
+            if (message.type === "NATIVE_UPDATE_ERROR") {
+                setStatus(`Check failed: ${message.payload.error}`);
+                setTimeout(() => setStatus(""), 5000);
             }
         };
-        window.addEventListener('dh-update-available', handleUpdateMsg);
+
+        chrome.runtime.onMessage.addListener(handleRuntimeMsg);
         
-        // Trigger check on load
+        // Trigger check on load (fire and forget, legacy hosts might ignore 'check_updates')
         chrome.runtime.sendMessage({ 
             type: "NATIVE_MSG", 
             payload: { action: "check_updates" } 
         });
 
-        return () => window.removeEventListener('dh-update-available', handleUpdateMsg);
+        return () => chrome.runtime.onMessage.removeListener(handleRuntimeMsg);
+    }, []);
+
+    // Check persistent storage for pending updates on mount
+    useEffect(() => {
+        chrome.storage.local.get("pending_update", (data) => {
+            const pending = data.pending_update as {version: string, url: string} | undefined;
+            if (pending && pending.version && pending.url) {
+                console.log("[Options] Found pending update in storage:", pending);
+                setUpdateAvailable(pending);
+            }
+        });
     }, []);
 
     const handleUpdate = () => {
@@ -694,7 +717,12 @@ const Options: React.FC = () => {
             type: "NATIVE_MSG", 
             payload: { action: "check_updates" } 
         });
-        setTimeout(() => setStatus(""), 2000);
+        
+        // Safety timeout (15s) in case host doesn't respond
+        setTimeout(() => {
+            setStatus(prev => prev === "Checking for updates..." ? "Check timed out." : prev);
+            setTimeout(() => setStatus(prev => prev === "Check timed out." ? "" : prev), 3000);
+        }, 15000);
     };
 
     // --- Item Handlers (Recursive) ---

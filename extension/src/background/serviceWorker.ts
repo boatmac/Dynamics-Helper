@@ -89,6 +89,19 @@ function connectToNativeHost() {
             // Handle Update Available
             if (msg.action === "update_available") {
                 console.log("[DH-SW] Update Available:", msg.payload);
+                
+                // Persist state so UI can pick it up later if not open
+                chrome.storage.local.set({ pending_update: msg.payload });
+
+                // 1. Notify Runtime (Options Page, Popup)
+                chrome.runtime.sendMessage({
+                    type: "NATIVE_UPDATE_AVAILABLE",
+                    payload: msg.payload
+                }).catch(() => {
+                    // No runtime listeners (Options page closed), ignore
+                });
+
+                // 2. Notify Active Tabs (Content Scripts)
                 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
                     if (tabs[0]?.id) {
                         chrome.tabs.sendMessage(tabs[0].id, {
@@ -97,6 +110,30 @@ function connectToNativeHost() {
                         }).catch(() => {});
                     }
                 });
+                return;
+            }
+
+            // Handle Update Error
+            if (msg.action === "update_error") {
+                console.warn("[DH-SW] Update Check Failed:", msg.payload);
+                chrome.runtime.sendMessage({
+                    type: "NATIVE_UPDATE_ERROR",
+                    payload: msg.payload
+                }).catch(() => {});
+                return;
+            }
+
+            // Handle Update Not Available
+            if (msg.action === "update_not_available") {
+                console.log("[DH-SW] Update Not Available (User is up to date)");
+                
+                // Clear pending update since we are valid
+                chrome.storage.local.remove("pending_update");
+
+                chrome.runtime.sendMessage({
+                    type: "NATIVE_UPDATE_NOT_AVAILABLE",
+                    payload: msg.payload
+                }).catch(() => {});
                 return;
             }
 
