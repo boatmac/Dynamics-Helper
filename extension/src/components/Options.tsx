@@ -17,7 +17,8 @@ import {
     Trash2, 
     MoreHorizontal,
     FolderOpen,
-    Type
+    Type,
+    RefreshCw
 } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -469,6 +470,9 @@ const Options: React.FC = () => {
     const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
     const [items, setItems] = useState<MenuItem[]>([]);
     const [status, setStatus] = useState<string>("");
+    const [hostVersion, setHostVersion] = useState<string>("");
+    const [updateAvailable, setUpdateAvailable] = useState<{version: string, url: string} | null>(null);
+    const [isUpdating, setIsUpdating] = useState(false);
     
     // Editor State
     const [editingItemPath, setEditingItemPath] = useState<number[] | null>(null); // path of indices
@@ -497,6 +501,10 @@ const Options: React.FC = () => {
                 if (response && response.status === "success" && response.data) {
                     const hostConfig = response.data;
                     console.log("[Options] Synced config from Host:", hostConfig);
+
+                    if (hostConfig.host_version) {
+                        setHostVersion(hostConfig.host_version);
+                    }
 
                     setPrefs(prev => {
                         const newPrefs = { ...prev };
@@ -629,6 +637,64 @@ const Options: React.FC = () => {
                 setStatus("Reset complete.");
             });
         }
+    };
+
+    // Listen for updates
+    useEffect(() => {
+        const handleUpdateMsg = (e: any) => {
+            if (e.detail && e.detail.version) {
+                setUpdateAvailable(e.detail);
+            }
+        };
+        window.addEventListener('dh-update-available', handleUpdateMsg);
+        
+        // Trigger check on load
+        chrome.runtime.sendMessage({ 
+            type: "NATIVE_MSG", 
+            payload: { action: "check_updates" } 
+        });
+
+        return () => window.removeEventListener('dh-update-available', handleUpdateMsg);
+    }, []);
+
+    const handleUpdate = () => {
+        if (!updateAvailable) return;
+        if (!confirm(`Update to version ${updateAvailable.version}? This will restart the extension.`)) return;
+
+        setIsUpdating(true);
+        setStatus("Downloading update...");
+
+        chrome.runtime.sendMessage({
+            type: "NATIVE_MSG",
+            payload: { 
+                action: "perform_update", 
+                payload: { url: updateAvailable.url } 
+            }
+        }, (response) => {
+            setIsUpdating(false);
+            if (chrome.runtime.lastError) {
+                setStatus("Error: " + chrome.runtime.lastError.message);
+                return;
+            }
+            
+            if (response && response.status === "success") {
+                setStatus("Update success! Restarting...");
+                setTimeout(() => {
+                    chrome.runtime.reload();
+                }, 1000);
+            } else {
+                setStatus("Update failed: " + (response?.error || "Unknown error"));
+            }
+        });
+    };
+
+    const handleCheckUpdates = () => {
+        setStatus("Checking for updates...");
+        chrome.runtime.sendMessage({ 
+            type: "NATIVE_MSG", 
+            payload: { action: "check_updates" } 
+        });
+        setTimeout(() => setStatus(""), 2000);
     };
 
     // --- Item Handlers (Recursive) ---
@@ -882,10 +948,30 @@ const Options: React.FC = () => {
                             </div>
                             <div>
                                 <h1 className="text-xl font-bold text-slate-800 tracking-tight">Dynamics Helper</h1>
-                                <p className="text-slate-500 text-xs font-medium uppercase tracking-wider">Configuration & Bookmarks</p>
+                                <div className="flex gap-3 text-xs text-slate-500 font-medium uppercase tracking-wider items-center">
+                                    <span>Extension v{chrome.runtime.getManifest().version}</span>
+                                    {hostVersion && <span>• Host v{hostVersion}</span>}
+                                    <button 
+                                        onClick={handleCheckUpdates} 
+                                        className="ml-1 p-1 hover:text-teal-600 hover:bg-teal-50 rounded-full transition-colors" 
+                                        title="Check for updates"
+                                    >
+                                        <RefreshCw size={12} />
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <div className="flex gap-3">
+                            {updateAvailable && (
+                                <button 
+                                    onClick={handleUpdate} 
+                                    disabled={isUpdating}
+                                    className="flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg text-sm font-medium transition-colors animate-pulse"
+                                >
+                                    {isUpdating ? <RotateCcw size={16} className="animate-spin" /> : <Download size={16} />}
+                                    {isUpdating ? "Updating..." : "Update Now"}
+                                </button>
+                            )}
                              <button onClick={handleReset} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-800 rounded-lg text-sm font-medium transition-colors">
                                 <RotateCcw size={16} /> Reset
                             </button>

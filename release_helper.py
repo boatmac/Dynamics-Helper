@@ -16,6 +16,7 @@ MANIFEST_JSON = os.path.join(EXT_DIR, "manifest.json")
 HOST_FILE = os.path.join(HOST_DIR, "dh_native_host.py")
 EXT_DIST_DIR = os.path.join(EXT_DIR, "dist")
 INSTALL_SCRIPT = os.path.join(ROOT_DIR, "install.ps1")
+INSTALL_WRAPPER = os.path.join(ROOT_DIR, "install.bat")
 
 
 def update_json_version(file_path, new_version):
@@ -146,6 +147,7 @@ def create_zip(version):
     # 3. Copy Installer Script
     print("Copying Installer...")
     shutil.copy2(INSTALL_SCRIPT, stage_dir)
+    shutil.copy2(INSTALL_WRAPPER, stage_dir)
 
     # 4. Zip it up
     zip_file_base = os.path.join(output_dir, zip_name)
@@ -175,7 +177,7 @@ def publish_to_github(version, zip_path):
 
     tag = f"v{version}"
     title = f"v{version}"
-    notes = f"Release {tag}\n\n## Installation\n1. Download and extract the zip file.\n2. Right-click `install.ps1` and select 'Run with PowerShell'.\n3. Follow the on-screen instructions."
+    notes = f"Release {tag}\n\n## Installation\n1. Download and extract the zip file.\n2. Double-click `install.bat` (Safely bypasses PowerShell restrictions).\n3. Follow the on-screen instructions."
 
     cmd = f'gh release create {tag} "{zip_path}" --title "{title}" --notes "{notes}"'
 
@@ -185,6 +187,26 @@ def publish_to_github(version, zip_path):
         print("GitHub Release created successfully!")
     except subprocess.CalledProcessError as e:
         print(f"Failed to create GitHub Release: {e}")
+
+
+def clean_releases_folder(release_folder):
+    """
+    Cleans up the releases/ folder by deleting old zip files and folders.
+    Keeps the release folder itself.
+    """
+    if os.path.exists(release_folder):
+        print(f"Cleaning up {release_folder}...")
+        for item in os.listdir(release_folder):
+            item_path = os.path.join(release_folder, item)
+            try:
+                if os.path.isfile(item_path) or os.path.islink(item_path):
+                    os.unlink(item_path)
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+            except Exception as e:
+                print(f"Failed to delete {item_path}. Reason: {e}")
+    else:
+        os.makedirs(release_folder)
 
 
 def main():
@@ -198,6 +220,10 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # 0. Clean Releases Folder
+    releases_dir = os.path.join(ROOT_DIR, "releases")
+    clean_releases_folder(releases_dir)
 
     print(f"Start Release Process: v{args.version}\n")
 

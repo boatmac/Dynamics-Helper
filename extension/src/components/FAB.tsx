@@ -279,7 +279,7 @@ const FAB: React.FC = () => {
 
         const handleUpdate = (e: any) => {
             setUpdateAvailable(e.detail);
-            showStatusBubble(`Update Available: ${e.detail.version}`, 'success', 0); // Keep persistent or long duration?
+            showStatusBubble(`Update Available: ${e.detail.version}`, 'success', 10000); // Keep persistent or long duration?
         };
 
         window.addEventListener('dh-native-progress', handleProgress);

@@ -12,10 +12,15 @@ import re
 import traceback
 import urllib.request
 
+VERSION = "2.0.11"
+
 # Setup User Data Directory (Cross-platform)
 if os.name == "nt":
+    # User feedback indicates preference for LOCAL AppData for self-contained install
+    # and preventing split-brain between Roaming (Data) and Local (Binaries).
+    # We now default to LOCALAPPDATA to match the installer.
     USER_DATA_DIR = os.path.join(
-        os.environ.get("APPDATA", os.path.expanduser("~")), "DynamicsHelper"
+        os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "DynamicsHelper"
     )
 else:
     USER_DATA_DIR = os.path.join(os.path.expanduser("~"), ".config", "dynamics_helper")
@@ -70,10 +75,11 @@ except Exception as e:
 # Import PII Scrubber
 try:
     from pii_scrubber import PiiScrubber
+    import updater  # Import the new updater module
 
-    logging.info("Successfully imported PiiScrubber.")
+    logging.info("Successfully imported PiiScrubber and Updater.")
 except ImportError as e:
-    logging.critical(f"Failed to import PiiScrubber: {e}")
+    logging.critical(f"Failed to import PiiScrubber or Updater: {e}")
     sys.exit(1)
 
 
@@ -95,6 +101,14 @@ class NativeHost:
         )
         logging.info(f"User Data Dir: {USER_DATA_DIR}")
 
+        # Cleanup old version if exists (Atomic Update)
+        try:
+            from updater import Updater
+
+            Updater.cleanup_old_version(sys.executable)
+        except Exception as e:
+            logging.error(f"Failed to cleanup old version: {e}")
+
     async def check_for_updates(self, force=False):
         """Checks for updates from GitHub Releases."""
         try:
@@ -104,7 +118,6 @@ class NativeHost:
                 return
 
             self.last_update_check = now
-            VERSION = "2.0.8"
             url = "https://api.github.com/repos/boatmac/Dynamics-Helper/releases/latest"
 
             # Run blocking I/O in a thread
@@ -824,11 +837,13 @@ class NativeHost:
                     response["data"] = {
                         "status": "healthy",
                         "message": "Copilot SDK Active",
+                        "host_version": VERSION,
                     }
                 else:
                     response["data"] = {
                         "status": "error",
                         "message": "SDK not initialized",
+                        "host_version": VERSION,
                     }
 
             elif action == "check_updates":
@@ -842,11 +857,46 @@ class NativeHost:
                 self.send_progress("Updating configuration...")
                 response["data"] = await self.handle_update_config(payload)
 
+            elif action == "perform_update":
+                self.send_progress("Starting update process...")
+                url = payload.get("url")
+                if not url:
+                    response["status"] = "error"
+                    response["error"] = "No update URL provided"
+                else:
+                    try:
+                        from updater import Updater
+
+                        upd = Updater(sys.executable)
+
+                        self.send_progress("Downloading update...")
+                        zip_path = await self.loop.run_in_executor(
+                            None, upd.download_update, url
+                        )
+
+                        self.send_progress(
+                            "Applying update (this will restart the host)..."
+                        )
+                        # Apply update (extract and swap)
+                        await self.loop.run_in_executor(
+                            None, upd.apply_update, zip_path
+                        )
+
+                        response["data"] = {
+                            "message": "Update applied successfully. Please reload."
+                        }
+                    except Exception as e:
+                        logging.error(f"Update failed: {e}")
+                        response["status"] = "error"
+                        response["error"] = str(e)
+
             elif action == "get_config":
                 # Return the effective configuration (merging defaults + user + workspace)
                 session_config = self._get_session_config()
                 # Cast to dict for JSON serialization
-                response["data"] = dict(session_config)
+                data = dict(session_config)
+                data["host_version"] = VERSION
+                response["data"] = data
 
             else:
                 response["status"] = "error"
