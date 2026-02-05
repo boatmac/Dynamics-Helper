@@ -15,6 +15,7 @@ The project consists of three main components:
 *   **`src/components/FAB.tsx`**: The main UI component. It contains the "Analyze" logic and the safety timeout configuration (currently 600s).
 *   **`src/utils/pageReader.ts`**: Logic for scraping Dynamics/Azure Portal pages to extract case numbers, error text, and context.
 *   **`manifest.json`**: Defines permissions (`nativeMessaging`) and background scripts.
+*   **`dist/`**: The build output directory. Load the extension from here (`extension/dist`).
 
 ### `host/` (Backend)
 *   **`dh_native_host.py`**: The core backend script.
@@ -37,7 +38,7 @@ The project consists of three main components:
 *   **Check:** Is the Host running? Chrome spawns it automatically.
 *   **Log:** Check `%APPDATA%\DynamicsHelper\native_host.log`.
 *   **Common Cause:** Python path issues or Registry key mismatches.
-*   **Fix:** Re-run `install.bat` as Administrator. Check `register.py` has the correct Extension ID.
+*   **Fix:** Re-run `install.bat` as Administrator. Check `register.py` has the correct Extension ID (`fkemelmlolmdnldpofiahmnhngmhonno`).
 
 ### 2. "Analysis Timeout"
 *   **Check:** Does the log show `Copilot request timed out after X seconds`?

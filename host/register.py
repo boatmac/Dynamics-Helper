@@ -9,6 +9,7 @@ HOST_NAME = "com.dynamics.helper.native"
 # Go to chrome://extensions/ to find the ID of the loaded "Dynamics Helper" extension
 ALLOWED_ORIGINS = [
     "chrome-extension://aiimcjfjmibedicmckpphgbddankgdln/",
+    "chrome-extension://fkemelmlolmdnldpofiahmnhngmhonno/",
 ]
 
 

@@ -8,6 +8,17 @@ This file defines the operational rules, development workflows, and coding stand
 *   **Backend:** Python Native Host (Asyncio, Native Messaging, PyInstaller).
 *   **Communication:** Standard Input/Output (Native Messaging protocol) with length-prefixed JSON.
 
+### Directory Structure & Runtime
+*   `extension/`: Source code AND build output for the frontend.
+*   `host/`: Source code for the backend.
+*   `dist/`: Contains the compiled Python executable (`dh_native_host.exe`) used for releases.
+
+### Critical Runtime Instructions
+*   **Extension (Frontend):** Load unpacked in Chrome from **`extension/dist/`**.
+*   **Host (Backend):** 
+    *   **Development:** Chrome launches `host/dh_native_host.py` via `host/start_dhnativehost.bat`.
+    *   **Production:** The installer uses the compiled `dh_native_host.exe`.
+
 ## 2. Build, Test, and Lint Commands
 
 ### Extension (`extension/`)
@@ -15,12 +26,12 @@ This file defines the operational rules, development workflows, and coding stand
     ```bash
     cd extension && npm install
     ```
-*   **Build (Production):**
+*   **Build:**
     ```bash
     cd extension && npm run build
     ```
     *   Outputs to `extension/dist`.
-    *   **Important:** After building, reload the extension in `chrome://extensions`.
+    *   **Action:** Reload the extension in `chrome://extensions` (pointing to `extension/dist`) after building.
 *   **Dev Server:**
     ```bash
     cd extension && npm run dev
@@ -127,6 +138,22 @@ Since you cannot see the browser or console:
 *   **Tools:** It has access to `kusto_mcp`, `filesystem`, `workiq`.
 *   **Format:** Responses should be in Markdown.
 *   **Safety:** Do not output real customer PII in the final report.
+
+## 7. Troubleshooting & Known Issues
+
+### 1. "Native Host disconnected unexpectedly"
+This error means the Host process crashed during startup or failed to establish the communication pipe.
+*   **Cause 1: Stdout Corruption**
+    *   **Reason:** Native Messaging relies on `stdout` for JSON communication. Any `print()` statement (from libraries or debug code) will corrupt the stream.
+    *   **Fix:** `dh_native_host.py` has a protection block at the very top that redirects `sys.stdout` to `sys.stderr`. **DO NOT REMOVE IT.** Ensure `import sys` happens *before* this block or immediately within it.
+*   **Cause 2: Extension ID Mismatch**
+    *   **Reason:** Chrome refuses to talk to a Native Host that doesn't explicitly allow the extension's ID in its manifest.
+    *   **Dev ID:** `fkemelmlolmdnldpofiahmnhngmhonno`
+    *   **Fix:** Ensure `host/register.py` includes this ID in `ALLOWED_ORIGINS`. Run `python host/register.py` to update the registry.
+
+### 2. Changes not reflecting
+*   **Runtime Source:** The extension loads from `dist/extension` (not `extension/dist` or `extension/src`).
+*   **Fix:** After building (`npm run build`), you must sync artifacts or rely on `release_helper.py` to do it.
 
 ## 8. Release Workflow
 *   **Automation:** The project uses `release_helper.py` to automate version bumping, building, and publishing.

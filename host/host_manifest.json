@@ -4,6 +4,7 @@
   "path": "C:\\MyWorkbench\\Repository\\Dynamics Helper\\host\\start_dhnativehost.bat",
   "type": "stdio",
   "allowed_origins": [
-    "chrome-extension://aiimcjfjmibedicmckpphgbddankgdln/"
+    "chrome-extension://aiimcjfjmibedicmckpphgbddankgdln/",
+    "chrome-extension://fkemelmlolmdnldpofiahmnhngmhonno/"
   ]
 }

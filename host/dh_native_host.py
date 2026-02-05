@@ -1,6 +1,21 @@
+# --- STDOUT PROTECTION ---
+# Native Messaging requires STDOUT to be exclusively used for length-prefixed JSON.
+# Any library that uses 'print()' will corrupt the stream and cause Chrome to disconnect.
+# We save the original binary stdout for messaging, and redirect 'sys.stdout' to 'sys.stderr'.
+import sys
+
+try:
+    # Save the binary stdout for our use
+    NATIVE_STDOUT = sys.stdout.buffer
+
+    # Redirect standard print() calls to stderr (logs to Chrome console or file if redirected)
+    sys.stdout = sys.stderr
+except Exception as e:
+    # Fallback if something is weird (e.g. pythonw)
+    NATIVE_STDOUT = sys.stdout.buffer
+
 import asyncio
 import threading
-import sys
 import struct
 import json
 import logging
@@ -12,7 +27,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.12"
+VERSION = "2.0.13"
 
 # Setup User Data Directory (Cross-platform)
 if os.name == "nt":
@@ -159,15 +174,30 @@ class NativeHost:
 
                 if remote_ver > local_ver:
                     logging.info(f"Update available: {tag_name}")
+
+                    # Find the .zip asset URL
+                    assets = data.get("assets", [])
+                    zip_url = None
+                    for asset in assets:
+                        if asset.get("name", "").endswith(".zip"):
+                            zip_url = asset.get("browser_download_url")
+                            break
+
+                    final_url = (
+                        zip_url
+                        if zip_url
+                        else data.get(
+                            "html_url",
+                            "https://github.com/boatmac/Dynamics-Helper/releases/latest",
+                        )
+                    )
+
                     self.send_message(
                         {
                             "action": "update_available",
                             "payload": {
                                 "version": tag_name,
-                                "url": data.get(
-                                    "html_url",
-                                    "https://github.com/boatmac/Dynamics-Helper/releases/latest",
-                                ),
+                                "url": final_url,
                             },
                         }
                     )
@@ -567,9 +597,9 @@ class NativeHost:
             encoded_content = json.dumps(message_content).encode("utf-8")
             encoded_length = struct.pack("@I", len(encoded_content))
 
-            sys.stdout.buffer.write(encoded_length)
-            sys.stdout.buffer.write(encoded_content)
-            sys.stdout.buffer.flush()
+            NATIVE_STDOUT.write(encoded_length)
+            NATIVE_STDOUT.write(encoded_content)
+            NATIVE_STDOUT.flush()
         except Exception as e:
             logging.error(f"Error sending message: {e}")
 
