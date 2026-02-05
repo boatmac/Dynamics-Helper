@@ -22,6 +22,29 @@ export class PageReader {
     }
 
     /**
+     * Checks neighbors of a label node to find a value.
+     * Strategies: Previous Sibling, Parent's Previous Sibling.
+     */
+    private static extractValueFromNeighbors(labelNode: Element, validationRegex?: RegExp): string | undefined {
+        // Strategy 1: Check immediate previous sibling
+        // DOM: <ValueDiv>...</ValueDiv> <LabelDiv>Label</LabelDiv>
+        let value = this.extractValueFromNode(labelNode.previousElementSibling);
+        if (value && (!validationRegex || validationRegex.test(value))) {
+            return value;
+        }
+
+        // Strategy 2: Check Parent's previous sibling
+        // DOM: <Wrapper><ValueDiv>...</ValueDiv></Wrapper> <Wrapper><LabelDiv>Label</LabelDiv></Wrapper>
+        if (labelNode.parentElement) {
+            value = this.extractValueFromNode(labelNode.parentElement.previousElementSibling);
+            if (value && (!validationRegex || validationRegex.test(value))) {
+                return value;
+            }
+        }
+        return undefined;
+    }
+
+    /**
      * Helper to find value associated with a label that appears AFTER the value in DOM (common in this UI)
      */
     private static async findValueForLabel(labelText: string, validationRegex?: RegExp, contextNode: Node = document): Promise<string | undefined> {
@@ -46,21 +69,8 @@ export class PageReader {
             const labelNode = iterator.snapshotItem(i) as HTMLElement;
             if (!labelNode) continue;
 
-            // Strategy 1: Check immediate previous sibling
-            // DOM: <ValueDiv>...</ValueDiv> <LabelDiv>Label</LabelDiv>
-            let value = this.extractValueFromNode(labelNode.previousElementSibling);
-            if (value && (!validationRegex || validationRegex.test(value))) {
-                return value;
-            }
-
-            // Strategy 2: Check Parent's previous sibling
-            // DOM: <Wrapper><ValueDiv>...</ValueDiv></Wrapper> <Wrapper><LabelDiv>Label</LabelDiv></Wrapper>
-            if (labelNode.parentElement) {
-                value = this.extractValueFromNode(labelNode.parentElement.previousElementSibling);
-                if (value && (!validationRegex || validationRegex.test(value))) {
-                    return value;
-                }
-            }
+            const value = this.extractValueFromNeighbors(labelNode, validationRegex);
+            if (value) return value;
         }
         
         await this.yieldToMain();
@@ -86,18 +96,8 @@ export class PageReader {
              // Skip if it's too long (likely a sentence containing the word, not a label)
             if (labelNode.textContent && labelNode.textContent.length > 50) continue;
 
-            // Strategy 1 (Loose)
-            let value = this.extractValueFromNode(labelNode.previousElementSibling);
-            if (value && (!validationRegex || validationRegex.test(value))) {
-                return value;
-            }
-             // Strategy 2 (Loose)
-             if (labelNode.parentElement) {
-                value = this.extractValueFromNode(labelNode.parentElement.previousElementSibling);
-                if (value && (!validationRegex || validationRegex.test(value))) {
-                    return value;
-                }
-            }
+            const value = this.extractValueFromNeighbors(labelNode, validationRegex);
+            if (value) return value;
         }
 
         return undefined;
@@ -197,8 +197,11 @@ export class PageReader {
                 if (parent && parent.parentElement) {
                      // Look for numbers or ID-like patterns
                      // Relaxed regex for this search: just look for the label's value which might be a simple number or string
-                     // We use the helper logic to find the value next to the label
-                     const value = await this.findValueForLabel(node.textContent || '', undefined, contextNode); 
+                     
+                     // OPTIMIZED: Use extractValueFromNeighbors directly on the node we just found
+                     // instead of recursively searching the entire tree again with findValueForLabel.
+                     const value = this.extractValueFromNeighbors(node as Element);
+                     
                      if (value && value.length > 3) { // Basic length check
                          data.caseNumber = value;
                          break;
