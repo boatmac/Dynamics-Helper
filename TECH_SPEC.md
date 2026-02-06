@@ -39,17 +39,17 @@ The system consists of three distinct parts:
 * **Tech:** Azure Functions (Python V2 Model) + Azure Cosmos DB + App Insights.
 * **Responsibility:**
   * **Store:** User bookmarks, prompt templates, and tags.
-  *   **Telemetry:** Track feature usage (e.g., "Analyze Error" clicked 50 times) via Azure Application Insights.
-  *   **Privacy Rule:** NEVER send PII or raw customer ticket data to Azure. Only metadata.
+  * **Telemetry:** Track feature usage (e.g., "Analyze Error" clicked 50 times) via Azure Application Insights.
+  * **Privacy Rule:** NEVER send PII or raw customer ticket data to Azure. Only metadata.
 
 ### Part D: Monitoring & Telemetry
 
 * **Tooling:** Azure Application Insights (npm package `@microsoft/applicationinsights-web`).
 * **Implementation:**
-    * Initialized in the Extension frontend.
-    * Uses a configurable or hardcoded Instrumentation Key / Connection String.
-    * Tracks: Page Views (Extension Loads), Custom Events (Button Clicks, Feature Usage), Exceptions.
-    * **CSP Compliance:** `manifest.json` must allow connections to `https://*.monitor.azure.com`.
+  * Initialized in the Extension frontend.
+  * Uses a configurable or hardcoded Instrumentation Key / Connection String.
+  * Tracks: Page Views (Extension Loads), Custom Events (Button Clicks, Feature Usage), Exceptions.
+  * **CSP Compliance:** `manifest.json` must allow connections to `https://*.monitor.azure.com`.
 
 ## 3. Critical Technical Strategies
 

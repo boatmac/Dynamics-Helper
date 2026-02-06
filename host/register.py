@@ -26,7 +26,7 @@ def get_host_manifest(host_path):
 def install_host():
     # 1. Determine paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    batch_file_path = os.path.join(script_dir, "start_dhnativehost.bat")
+    batch_file_path = os.path.join(script_dir, "launch_host.bat")
     manifest_path = os.path.join(script_dir, "host_manifest.json")
 
     # 2. Write the Native Messaging Manifest file

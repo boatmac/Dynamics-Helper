@@ -27,9 +27,10 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.17"
+VERSION = "2.0.18"
 
 # Setup User Data Directory (Cross-platform)
+
 if os.name == "nt":
     # User feedback indicates preference for LOCAL AppData for self-contained install
     # and preventing split-brain between Roaming (Data) and Local (Binaries).

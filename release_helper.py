@@ -162,7 +162,7 @@ def create_zip(version):
     return zip_file_path
 
 
-def publish_to_github(version, zip_path):
+def publish_to_github(version, zip_path, prerelease=False):
     print(f"\n--- Publishing v{version} to GitHub ---")
 
     try:
@@ -179,9 +179,11 @@ def publish_to_github(version, zip_path):
     title = f"v{version}"
     notes = f"Release {tag}\n\n## Installation\n1. Download and extract the zip file.\n2. Double-click `install.bat` (Safely bypasses PowerShell restrictions).\n3. Follow the on-screen instructions."
 
-    cmd = f'gh release create {tag} "{zip_path}" --title "{title}" --notes "{notes}"'
+    prerelease_flag = "--prerelease" if prerelease else ""
+    cmd = f'gh release create {tag} "{zip_path}" --title "{title}" --notes "{notes}" {prerelease_flag}'
 
     print(f"Executing: {cmd}")
+
     try:
         subprocess.run(cmd, check=True, shell=True)
         print("GitHub Release created successfully!")
@@ -218,6 +220,9 @@ def main():
     parser.add_argument(
         "--publish", action="store_true", help="Publish release to GitHub using gh CLI"
     )
+    parser.add_argument(
+        "--prerelease", action="store_true", help="Mark as pre-release on GitHub"
+    )
 
     args = parser.parse_args()
 
@@ -231,6 +236,28 @@ def main():
     update_json_version(MANIFEST_JSON, args.version)
     update_python_version(HOST_FILE, args.version)
 
+    # Git Commit and Tag
+    if not args.no_build:  # usually we want to commit if we are building a release
+        try:
+            print("\n--- Git Operations ---")
+            subprocess.run(["git", "add", "."], check=True)
+            commit_msg = f"chore: release v{args.version}"
+            subprocess.run(["git", "commit", "-m", commit_msg], check=True)
+            print(f"Committed: {commit_msg}")
+
+            subprocess.run(["git", "tag", f"v{args.version}"], check=True)
+            print(f"Tagged: v{args.version}")
+
+            if args.publish:
+                print("Pushing changes and tags...")
+                subprocess.run(["git", "push"], check=True)
+                subprocess.run(["git", "push", "--tags"], check=True)
+
+        except subprocess.CalledProcessError as e:
+            print(f"Git operation failed: {e}")
+            if input("Continue anyway? (y/n) ").lower() != "y":
+                sys.exit(1)
+
     zip_path = None
     if not args.no_build:
         build_extension()
@@ -238,7 +265,7 @@ def main():
         zip_path = create_zip(args.version)
 
     if args.publish and zip_path:
-        publish_to_github(args.version, zip_path)
+        publish_to_github(args.version, zip_path, args.prerelease)
     elif args.publish and not zip_path:
         print("Error: Cannot publish without building.")
 
