@@ -165,13 +165,9 @@ if ($IsUpdate) {
     Write-Host "   $ExtDest" -ForegroundColor Cyan
     Write-Host ""
     
-    $DefaultId = "fkemelmlolmdnldpofiahmnhngmhonno"
-    $ExtId = Read-Host "Paste the 'ID' of the extension here (Press Enter to use default: $DefaultId)"
-    
-    if ([string]::IsNullOrWhiteSpace($ExtId)) {
-        $ExtId = $DefaultId
-        Write-Host "Using default ID: $ExtId" -ForegroundColor Gray
-    }
+    # Auto-configure with fixed ID
+    $ExtId = "fkemelmlolmdnldpofiahmnhngmhonno"
+    Write-Host "Auto-configuring for Extension ID: $ExtId" -ForegroundColor Gray
     
     # Create Manifest
     $ManifestContent = @{
