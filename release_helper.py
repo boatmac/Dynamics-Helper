@@ -241,12 +241,32 @@ def main():
         try:
             print("\n--- Git Operations ---")
             subprocess.run(["git", "add", "."], check=True)
-            commit_msg = f"chore: release v{args.version}"
-            subprocess.run(["git", "commit", "-m", commit_msg], check=True)
-            print(f"Committed: {commit_msg}")
 
-            subprocess.run(["git", "tag", f"v{args.version}"], check=True)
-            print(f"Tagged: v{args.version}")
+            # Check if there are changes to commit
+            status_result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            if status_result.stdout.strip():
+                commit_msg = f"chore: release v{args.version}"
+                subprocess.run(["git", "commit", "-m", commit_msg], check=True)
+                print(f"Committed: {commit_msg}")
+            else:
+                print("Nothing to commit. Proceeding to tag...")
+
+            # Check if tag exists locally
+            tag_check = subprocess.run(
+                ["git", "tag", "-l", f"v{args.version}"], capture_output=True, text=True
+            )
+
+            if f"v{args.version}" not in tag_check.stdout:
+                subprocess.run(["git", "tag", f"v{args.version}"], check=True)
+                print(f"Tagged: v{args.version}")
+            else:
+                print(f"Tag v{args.version} already exists. Skipping.")
 
             if args.publish:
                 print("Pushing changes and tags...")
