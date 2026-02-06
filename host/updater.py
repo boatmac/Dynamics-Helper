@@ -5,6 +5,7 @@ import zipfile
 import urllib.request
 import tempfile
 import sys
+import time
 
 
 class Updater:
@@ -70,6 +71,47 @@ class Updater:
             # 4. Swap Host Binary
             logging.info("Swapping host binary...")
             self._swap_host_binary(new_host_src)
+
+            # 5. Update Config & Instructions (Safe Mode)
+            logging.info("Updating configuration files...")
+
+            # copilot-instructions.md: Safe Backup and Overwrite
+            new_instr_src = os.path.join(
+                temp_extract_dir, "host", "copilot-instructions.md"
+            )
+            dest_instr = os.path.join(self.host_dir, "copilot-instructions.md")
+
+            if os.path.exists(new_instr_src):
+                # If destination exists, backup first
+                if os.path.exists(dest_instr):
+                    # Create unique backup name with timestamp
+                    timestamp = int(time.time())
+                    backup_path = f"{dest_instr}.{timestamp}.bak"
+                    try:
+                        shutil.copy2(dest_instr, backup_path)
+                        logging.info(
+                            f"Backed up existing instructions to {os.path.basename(backup_path)}"
+                        )
+                    except Exception as e:
+                        logging.error(f"Failed to backup instructions: {e}")
+
+                # Overwrite/Create
+                try:
+                    shutil.copy2(new_instr_src, dest_instr)
+                    logging.info("Updated copilot-instructions.md")
+                except Exception as e:
+                    logging.error(f"Failed to update copilot-instructions.md: {e}")
+
+            # config.json: Create Only (Do not overwrite user settings)
+            new_config_src = os.path.join(temp_extract_dir, "host", "config.json")
+            dest_config = os.path.join(self.host_dir, "config.json")
+
+            if os.path.exists(new_config_src) and not os.path.exists(dest_config):
+                try:
+                    shutil.copy2(new_config_src, dest_config)
+                    logging.info("Created default config.json")
+                except Exception as e:
+                    logging.error(f"Failed to create config.json: {e}")
 
             return True
 
