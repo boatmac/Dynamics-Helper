@@ -45,7 +45,7 @@ interface Preferences {
     primaryColor: string;
     offsetBottom: number;
     offsetRight: number;
-    systemInstructions?: string;
+    userInstructions?: string; // Was systemInstructions
     userPrompt?: string;
     rootPath?: string;
     skillDirectories?: string;
@@ -58,7 +58,7 @@ const DEFAULT_PREFS: Preferences = {
     primaryColor: "#0D9488", // Teal-600 to match design system
     offsetBottom: 24,
     offsetRight: 24,
-    systemInstructions: "",
+    userInstructions: "",
     userPrompt: "",
     rootPath: "",
     skillDirectories: "~/.copilot/skills",
@@ -530,11 +530,18 @@ const Options: React.FC = () => {
                             }
                         }
 
-                        // 3. System Instructions
-                        // Host returns { mode: 'append', content: '...' }
-                        if (hostConfig.system_message && hostConfig.system_message.content) {
-                            if (hostConfig.system_message.content !== prev.systemInstructions) {
-                                newPrefs.systemInstructions = hostConfig.system_message.content;
+                        // 3. User Instructions (Split Prompt)
+                        // Host now returns _user_instructions_raw for the editable part
+                        // Fallback to system_message if raw is missing (legacy host)
+                        if (hostConfig._user_instructions_raw !== undefined) {
+                            if (hostConfig._user_instructions_raw !== prev.userInstructions) {
+                                newPrefs.userInstructions = hostConfig._user_instructions_raw;
+                                changed = true;
+                            }
+                        } else if (hostConfig.system_message && hostConfig.system_message.content) {
+                            // Legacy fallback
+                            if (hostConfig.system_message.content !== prev.userInstructions) {
+                                newPrefs.userInstructions = hostConfig.system_message.content;
                                 changed = true;
                             }
                         }
@@ -598,11 +605,11 @@ const Options: React.FC = () => {
         chrome.storage.local.set({ dh_prefs: prefs, dh_items: items }, () => {
             // Also notify the Host via Service Worker if instructions changed
              // We use a fire-and-forget message pattern here
-             if (prefs.systemInstructions !== undefined) {
+             if (prefs.userInstructions !== undefined) {
                  chrome.runtime.sendMessage({
                      action: "update_host_config",
                      payload: {
-                         system_instructions: prefs.systemInstructions,
+                         user_instructions: prefs.userInstructions,
                         config: {
                             root_path: prefs.rootPath,
                             skill_directories: prefs.skillDirectories ? prefs.skillDirectories.split(',').map(s => s.trim()).filter(Boolean) : [],
@@ -1168,17 +1175,17 @@ const Options: React.FC = () => {
                                             />
                                         </div>
 
-                                        {/* 4. System Instructions */}
+                                        {/* 4. User Instructions */}
                                         <div className="mt-4">
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">System Instructions (Prompt)</label>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Custom User Instructions</label>
                                             <p className="text-[10px] text-slate-500 mb-2">
-                                                These instructions are appended to the Copilot System Prompt. Use this to customize how the AI responds (e.g., "You are a helpful expert in Dynamics 365...").
+                                                These instructions are appended to the core System Prompt. Use this to add your own rules (e.g., "Always use bullet points", "Focus on technical details").
                                             </p>
                                             <textarea
-                                                value={prefs.systemInstructions || ""}
-                                                onChange={(e) => setPrefs(prev => ({ ...prev, systemInstructions: e.target.value }))}
+                                                value={prefs.userInstructions || ""}
+                                                onChange={(e) => setPrefs(prev => ({ ...prev, userInstructions: e.target.value }))}
                                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
-                                                placeholder="Enter custom system instructions here..."
+                                                placeholder="Enter your custom instructions here..."
                                             />
                                         </div>
 

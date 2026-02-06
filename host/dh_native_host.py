@@ -27,7 +27,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.19"
+VERSION = "2.0.20"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -396,43 +396,58 @@ class NativeHost:
                 except Exception as e:
                     logging.error(f"Failed to load workspace config: {e}")
 
-        # --- System Instructions ---
+        # --- System Instructions (Split Prompt Architecture) ---
 
-        default_instr_path = os.path.join(install_dir, "copilot-instructions.md")
-        user_instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
+        system_instr_path = os.path.join(install_dir, "copilot-instructions.md")
+        user_instr_path = os.path.join(USER_DATA_DIR, "user-instructions.md")
+        legacy_user_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
 
-        final_instr_content = ""
-        source_path = ""
+        # 1. Migration: If legacy user file exists but new one doesn't, migrate it.
+        # This preserves user edits from previous versions.
+        if os.path.exists(legacy_user_path) and not os.path.exists(user_instr_path):
+            try:
+                logging.info(
+                    f"Migrating legacy instructions from {legacy_user_path} to {user_instr_path}"
+                )
+                shutil.move(legacy_user_path, user_instr_path)
+            except Exception as e:
+                logging.error(f"Failed to migrate legacy instructions: {e}")
 
-        # 1. Try User Instructions first
+        # 2. Load System Instructions (Managed by Installer)
+        sys_content = ""
+        if os.path.exists(system_instr_path):
+            try:
+                with open(system_instr_path, "r", encoding="utf-8") as f:
+                    sys_content = f.read()
+            except Exception as e:
+                logging.error(f"Failed to read system instructions: {e}")
+
+        # 3. Load User Instructions (Managed by User)
+        user_content = ""
         if os.path.exists(user_instr_path):
             try:
                 with open(user_instr_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    if content.strip():
-                        final_instr_content = content
-                        source_path = user_instr_path
+                    user_content = f.read()
             except Exception as e:
                 logging.error(f"Failed to read user instructions: {e}")
 
-        # 2. Fallback to Default Instructions if user provided nothing
-        if not final_instr_content and os.path.exists(default_instr_path):
-            try:
-                with open(default_instr_path, "r", encoding="utf-8") as f:
-                    final_instr_content = f.read()
-                    source_path = default_instr_path
-            except Exception as e:
-                logging.error(f"Failed to read default instructions: {e}")
+        # 4. Combine
+        final_content = sys_content
+        if user_content.strip():
+            final_content += "\n\n" + user_content
 
-        # Apply Base/User Instructions
-        if final_instr_content.strip():
+        # Apply
+        if final_content.strip():
             session_config["system_message"] = {
                 "mode": "append",
-                "content": final_instr_content,
+                "content": final_content,
             }
-            logging.info(f"Loaded system instructions from {source_path}")
+            logging.info("Loaded system instructions (System + User).")
 
-        # 3. Append Workspace Instructions (.github/copilot-instructions.md)
+        # Store raw user content in config for the UI to retrieve
+        session_config["_user_instructions_raw"] = user_content
+
+        # 5. Append Workspace Instructions (.github/copilot-instructions.md)
         if self.root_path and os.path.exists(self.root_path):
             ws_instr_path = os.path.join(
                 self.root_path, ".github", "copilot-instructions.md"
@@ -516,12 +531,17 @@ class NativeHost:
     async def handle_update_config(self, payload):
         """Updates configuration files and refreshes the session."""
         try:
-            # 1. Update System Instructions
-            if "system_instructions" in payload:
-                instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
+            # 1. Update User Instructions
+            # Support both 'user_instructions' (new) and 'system_instructions' (legacy/mapped)
+            new_instr = payload.get("user_instructions") or payload.get(
+                "system_instructions"
+            )
+
+            if new_instr is not None:
+                instr_path = os.path.join(USER_DATA_DIR, "user-instructions.md")
                 with open(instr_path, "w", encoding="utf-8") as f:
-                    f.write(payload["system_instructions"])
-                logging.info("Updated copilot-instructions.md")
+                    f.write(new_instr)
+                logging.info("Updated user-instructions.md")
 
             # 2. Update Config (Model, etc)
             if "config" in payload:
