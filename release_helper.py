@@ -15,7 +15,7 @@ PACKAGE_JSON = os.path.join(EXT_DIR, "package.json")
 MANIFEST_JSON = os.path.join(EXT_DIR, "manifest.json")
 HOST_FILE = os.path.join(HOST_DIR, "dh_native_host.py")
 EXT_DIST_DIR = os.path.join(EXT_DIR, "dist")
-INSTALL_SCRIPT = os.path.join(ROOT_DIR, "install.ps1")
+INSTALL_SCRIPT = os.path.join(ROOT_DIR, "installer_core.ps1")
 INSTALL_WRAPPER = os.path.join(ROOT_DIR, "install.bat")
 
 
