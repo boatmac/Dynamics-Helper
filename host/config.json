@@ -1,7 +1,5 @@
 {
-  "skill_directories": [
-    "./skills"
-  ],
+  "skill_directories": [],
   "mcp_servers": {
     "fetch": {
       "type": "local",

@@ -27,7 +27,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.23"
+VERSION = "2.0.24"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -534,6 +534,20 @@ class NativeHost:
             self.session = None
             return False
 
+    def _resolve_skills(self, directories, base_path):
+        """Helper to resolve a list of skill directories relative to a base path."""
+        resolved = []
+        for path in directories:
+            expanded = os.path.expanduser(path)
+            if not os.path.isabs(expanded):
+                # Resolve relative to the CONFIG FILE location (base_path)
+                resolved_path = os.path.abspath(os.path.join(base_path, expanded))
+                resolved.append(os.path.normpath(resolved_path))
+            else:
+                # Normalize path (fix slashes on Windows)
+                resolved.append(os.path.normpath(expanded))
+        return resolved
+
     async def handle_update_config(self, payload):
         """Updates configuration files and refreshes the session."""
         try:
@@ -561,6 +575,87 @@ class NativeHost:
                     except:
                         pass  # Start fresh if corrupt
 
+                # --- SANITIZE SKILLS ---
+                # The payload contains "effective" skills (User + Default + Workspace).
+                # We must NOT save Default or Workspace skills into the User Config.
+                if "skill_directories" in payload["config"]:
+                    incoming_skills = payload["config"]["skill_directories"]
+                    system_skills = set()
+
+                    # A. Resolve Default Config Skills
+                    if getattr(sys, "frozen", False):
+                        install_dir = os.path.dirname(sys.executable)
+                    else:
+                        install_dir = os.path.dirname(os.path.abspath(__file__))
+
+                    default_config_path = os.path.join(install_dir, "config.json")
+                    if os.path.exists(default_config_path):
+                        try:
+                            with open(default_config_path, "r") as f:
+                                d_data = json.load(f)
+                                if "skill_directories" in d_data:
+                                    resolved = self._resolve_skills(
+                                        d_data["skill_directories"], install_dir
+                                    )
+                                    system_skills.update(resolved)
+                        except Exception as e:
+                            logging.warning(
+                                f"Failed to load default config for sanitization: {e}"
+                            )
+
+                    # B. Resolve Workspace Config Skills
+                    if self.root_path and os.path.exists(self.root_path):
+                        ws_config_path = os.path.join(
+                            self.root_path, ".github", "copilot.config.json"
+                        )
+                        if os.path.exists(ws_config_path):
+                            try:
+                                with open(ws_config_path, "r") as f:
+                                    ws_data = json.load(f)
+                                    if "skill_directories" in ws_data:
+                                        # Handle relative paths in workspace config
+                                        # Note: .github folder is inside root_path, but relative paths in config are usually relative to config location (.github)
+                                        # But let's check how _get_session_config does it.
+                                        # It joins self.root_path + path if not absolute.
+                                        # Wait, _get_session_config logic for workspace:
+                                        # os.path.abspath(os.path.join(self.root_path, path))
+                                        # So it assumes paths are relative to ROOT, not .github/
+
+                                        # Let's match that logic here manually because _resolve_skills uses base_path
+                                        resolved = []
+                                        for p in ws_data["skill_directories"]:
+                                            expanded = os.path.expanduser(p)
+                                            if not os.path.isabs(expanded):
+                                                resolved.append(
+                                                    os.path.normpath(
+                                                        os.path.abspath(
+                                                            os.path.join(
+                                                                self.root_path, expanded
+                                                            )
+                                                        )
+                                                    )
+                                                )
+                                            else:
+                                                resolved.append(
+                                                    os.path.normpath(expanded)
+                                                )
+                                        system_skills.update(resolved)
+                            except Exception as e:
+                                logging.warning(
+                                    f"Failed to load workspace config for sanitization: {e}"
+                                )
+
+                    # C. Filter Incoming
+                    filtered_skills = []
+                    for s in incoming_skills:
+                        if os.path.normpath(s) not in system_skills:
+                            filtered_skills.append(s)
+
+                    logging.info(
+                        f"Sanitized skills: {len(incoming_skills)} -> {len(filtered_skills)} (Removed {len(incoming_skills) - len(filtered_skills)} system skills)"
+                    )
+                    payload["config"]["skill_directories"] = filtered_skills
+
                 # Merge new config
                 current_data.update(payload["config"])
 
@@ -570,6 +665,7 @@ class NativeHost:
 
             # 3. Refresh Session
             success = await self._refresh_session()
+
             if success:
                 return {
                     "success": True,

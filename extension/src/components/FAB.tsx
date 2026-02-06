@@ -278,8 +278,20 @@ const FAB: React.FC = () => {
         };
 
         const handleUpdate = (e: any) => {
+            // Check if available update is NEWER than current
+            // If we just updated, current version == available version, so don't show it.
+            const currentVer = chrome.runtime.getManifest().version;
+            const availableVer = e.detail.version;
+            
+            // Simple semver compare (assuming x.y.z)
+            // If available == current, we are up to date
+            if (availableVer === currentVer) {
+                setUpdateAvailable(null);
+                return;
+            }
+
             setUpdateAvailable(e.detail);
-            showStatusBubble(`Update Available: ${e.detail.version}`, 'success', 10000); // Keep persistent or long duration?
+            showStatusBubble(`Update Available: ${e.detail.version}`, 'success', 10000); 
         };
 
         window.addEventListener('dh-native-progress', handleProgress);
@@ -861,6 +873,9 @@ const FAB: React.FC = () => {
                                 </button>
                             )}
                             <h3 className="dh-title">Dynamics Helper</h3>
+                            <span style={{ fontSize: '10px', color: '#94A3B8', marginLeft: '6px', fontWeight: 'normal' }}>
+                                v{chrome.runtime.getManifest().version}
+                            </span>
                         </div>
                         <button onClick={handleOpenOptions} title="Settings" className="dh-settings-btn">
                             <Settings size={16} />
@@ -996,17 +1011,6 @@ const FAB: React.FC = () => {
                         {/* {(() => {
                              // ... existing logic ...
                         })()} */}
-                        
-                        {/* Version Info */}
-                        <div style={{ 
-                            textAlign: 'center', 
-                            fontSize: '10px', 
-                            color: '#CBD5E1', 
-                            marginTop: '8px',
-                            marginBottom: '-4px' 
-                        }}>
-                            v{chrome.runtime.getManifest().version}
-                        </div>
                     </div>
                 </div>
             )}
