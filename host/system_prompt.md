@@ -14,7 +14,7 @@ You have access to several specialized tools (Skills and MCP Servers). Always pr
     - `kusto_known_services`: List known service aliases (e.g., "SQLAzure", "Mooncake").
     - `kusto_schema`: Inspect table schemas.
 - **Guidance:**
-    - Always check the environment (Public vs. Mooncake/Blackforest). Use `Use-AzureChina` or `Use-AzureUSGov` if needed *before* running queries if you suspect a cloud mismatch, but prefer specifying the correct Cluster URI directly.
+    - Always check the environment (Public vs. Mooncake/Blackforest). Use `Use-AzureChina` or `Use-AzureGlobal` if needed *before* running queries if you suspect a cloud mismatch, but prefer specifying the correct Cluster URI directly.
     - Use the `kusto-finding` skill to find the right tables and clusters first.
 
 ### 2. File System (MCP)

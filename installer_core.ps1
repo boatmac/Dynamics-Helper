@@ -81,9 +81,9 @@ if (-not (Test-Path "$DestDir\config.json")) {
 }
 
 # Force update instructions
-if (Test-Path "$HostSrc\copilot-instructions.md") {
-    Copy-Item "$HostSrc\copilot-instructions.md" -Destination "$DestDir\" -Force
-    Write-Host "    - copilot-instructions.md updated."
+if (Test-Path "$HostSrc\system_prompt.md") {
+    Copy-Item "$HostSrc\system_prompt.md" -Destination "$DestDir\" -Force
+    Write-Host "    - system_prompt.md updated."
 }
 
 # 4. Copy Extension Files

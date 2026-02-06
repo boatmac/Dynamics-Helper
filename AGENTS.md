@@ -193,6 +193,8 @@ This error means the Host process crashed during startup or failed to establish 
 
 ## 8. Release Workflow (Updated)
 
+**CRITICAL RULE:** Do not automatically publish a release to GitHub without the user's explicit approval or confirmation. Always ask before running the script with the `--publish` flag.
+
 ### Automation Script (`release_helper.py`)
 
 This script automates version bumping, git operations, building, and publishing.

@@ -27,7 +27,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.22"
+VERSION = "2.0.23"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -279,7 +279,13 @@ class NativeHost:
         user_config_path = os.path.join(USER_DATA_DIR, "config.json")
 
         # 2. Default/bundled config (beside the executable/script)
-        install_dir = os.path.dirname(os.path.abspath(__file__))
+        if getattr(sys, "frozen", False):
+            # PyInstaller OneFile: Look beside the .exe
+            install_dir = os.path.dirname(sys.executable)
+        else:
+            # Dev Mode: Look beside the script
+            install_dir = os.path.dirname(os.path.abspath(__file__))
+
         default_config_path = os.path.join(install_dir, "config.json")
 
         # --- Helper to load and resolve paths for a single config file ---
@@ -398,7 +404,7 @@ class NativeHost:
 
         # --- System Instructions (Split Prompt Architecture) ---
 
-        system_instr_path = os.path.join(install_dir, "copilot-instructions.md")
+        system_instr_path = os.path.join(install_dir, "system_prompt.md")
         user_instr_path = os.path.join(USER_DATA_DIR, "user-instructions.md")
         legacy_user_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
 

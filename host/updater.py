@@ -75,11 +75,9 @@ class Updater:
             # 5. Update Config & Instructions (Safe Mode)
             logging.info("Updating configuration files...")
 
-            # copilot-instructions.md: Safe Backup and Overwrite
-            new_instr_src = os.path.join(
-                temp_extract_dir, "host", "copilot-instructions.md"
-            )
-            dest_instr = os.path.join(self.host_dir, "copilot-instructions.md")
+            # system_prompt.md: Safe Backup and Overwrite
+            new_instr_src = os.path.join(temp_extract_dir, "host", "system_prompt.md")
+            dest_instr = os.path.join(self.host_dir, "system_prompt.md")
 
             if os.path.exists(new_instr_src):
                 # If destination exists, backup first
@@ -98,9 +96,9 @@ class Updater:
                 # Overwrite/Create
                 try:
                     shutil.copy2(new_instr_src, dest_instr)
-                    logging.info("Updated copilot-instructions.md")
+                    logging.info("Updated system_prompt.md")
                 except Exception as e:
-                    logging.error(f"Failed to update copilot-instructions.md: {e}")
+                    logging.error(f"Failed to update system_prompt.md: {e}")
 
             # config.json: Create Only (Do not overwrite user settings)
             new_config_src = os.path.join(temp_extract_dir, "host", "config.json")
