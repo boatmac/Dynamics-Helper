@@ -165,10 +165,12 @@ if ($IsUpdate) {
     Write-Host "   $ExtDest" -ForegroundColor Cyan
     Write-Host ""
     
-    $ExtId = Read-Host "Paste the 'ID' of the extension here"
+    $DefaultId = "fkemelmlolmdnldpofiahmnhngmhonno"
+    $ExtId = Read-Host "Paste the 'ID' of the extension here (Press Enter to use default: $DefaultId)"
     
     if ([string]::IsNullOrWhiteSpace($ExtId)) {
-        Write-Error "Extension ID is required."
+        $ExtId = $DefaultId
+        Write-Host "Using default ID: $ExtId" -ForegroundColor Gray
     }
     
     # Create Manifest
