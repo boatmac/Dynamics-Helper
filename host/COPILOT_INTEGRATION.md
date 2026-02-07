@@ -73,13 +73,13 @@ with open(system_instr_path, "r", encoding="utf-8") as f:
 ```
 
 ### Layer 2: User Instructions (Customizable)
-*   **Source:** `%LOCALAPPDATA%\DynamicsHelper\user-instructions.md`.
+*   **Source:** `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`.
 *   **Managed By:** The User via the Extension Options Page.
 
 ```python
 # host/dh_native_host.py
 
-user_instr_path = os.path.join(USER_DATA_DIR, "user-instructions.md")
+user_instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
 with open(user_instr_path, "r", encoding="utf-8") as f:
     user_content = f.read()
 
@@ -180,7 +180,7 @@ To set up your own workflow:
 1.  Open the Dynamics Helper extension.
 2.  Go to **Options** -> **Prompt**.
 3.  Edit the **User Instructions**.
-4.  Click **Save**. This updates `user-instructions.md` and instantly refreshes the Copilot session.
+4.  Click **Save**. This updates `copilot-instructions.md` and instantly refreshes the Copilot session.
 
 ### B. Workspace-Specific Rules
 1.  Set your **Root Path** in the extension (e.g., `C:\MyWorkbench\Repository\ProjectX`).
