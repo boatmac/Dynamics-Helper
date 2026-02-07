@@ -780,45 +780,12 @@ class NativeHost:
             scrubbed_text = self.scrubber.scrub(text)
             scrubbed_context = self.scrubber.scrub(context) if context else ""
 
-            # Performance Optimization: Heuristic Check
-            # If the user isn't explicitly asking for external data (emails, tickets, history),
-            # we instruct the model to skip expensive tool searches (WorkIQ).
-            combined_lower = (scrubbed_text + scrubbed_context).lower()
-            expensive_keywords = [
-                "email",
-                "ticket",
-                "case",
-                "workiq",
-                "history",
-                "conversation",
-                "thread",
-                "customer",
-                "search",
-                "lookup",
-            ]
-
-            is_simple_analysis = not any(
-                k in combined_lower for k in expensive_keywords
-            )
-
-            base_prompt = (
+            # Construct the prompt
+            prompt = (
                 f"{scrubbed_text}\nContext: {scrubbed_context}"
                 if scrubbed_context
                 else scrubbed_text
             )
-
-            if is_simple_analysis:
-                logging.info(
-                    "Optimizing: Simple analysis detected. Appending anti-search instructions."
-                )
-                prompt = (
-                    f"{base_prompt}\n\n"
-                    "IMPORTANT: Analyze this error purely based on the text provided above. "
-                    "DO NOT search WorkIQ, Kusto, or external sources. "
-                    "Provide a solution based on your knowledge base only."
-                )
-            else:
-                prompt = base_prompt
 
             logging.debug(f"Scrubbed Prompt content: {prompt}")
             logging.info(f"Sending prompt to Copilot (length: {len(prompt)})")

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { useTranslation, LanguageCode } from '../utils/i18n';
 
 // Helper
 function cn(...inputs: (string | undefined | null | false)[]) {
@@ -51,6 +52,7 @@ interface Preferences {
     skillDirectories?: string;
     autoAnalyzeMode?: 'disabled' | 'critical' | 'always' | 'new_cases';
     enableStatusBubble?: boolean;
+    language?: LanguageCode;
 }
 
 const DEFAULT_PREFS: Preferences = {
@@ -63,7 +65,8 @@ const DEFAULT_PREFS: Preferences = {
     rootPath: "",
     skillDirectories: "~/.copilot/skills",
     autoAnalyzeMode: 'disabled',
-    enableStatusBubble: true
+    enableStatusBubble: true,
+    language: 'auto'
 };
 
 // --- Helpers ---
@@ -101,6 +104,7 @@ const ItemEditor: React.FC<{
     onSave: (newItem: MenuItem) => void;
     onCancel: () => void;
 }> = ({ item, onSave, onCancel }) => {
+    const { t } = useTranslation();
     const [draft, setDraft] = useState<MenuItem>({ ...item });
 
     const handleChange = (field: keyof MenuItem, value: any) => {
@@ -110,23 +114,23 @@ const ItemEditor: React.FC<{
     return (
         <div className="border border-slate-200 p-4 rounded-lg bg-slate-50 mb-3 animate-fade-in-up shadow-sm">
             <h4 className="font-bold text-sm mb-3 text-slate-800 flex items-center gap-2">
-                <Edit2 size={14} /> Edit Item
+                <Edit2 size={14} /> {t('editItem')}
             </h4>
             
             <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">Label</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">{t('label')}</label>
                         <input 
                             className="w-full border border-slate-300 p-2 text-sm rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all"
                             value={draft.label} 
                             onChange={e => handleChange('label', e.target.value)} 
-                            placeholder="Menu Label"
+                            placeholder={t('label')}
                         />
                     </div>
                     
                     <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">Type</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">{t('type')}</label>
                         <select 
                             className="w-full border border-slate-300 p-2 text-sm rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none bg-white"
                             value={draft.type} 
@@ -141,7 +145,7 @@ const ItemEditor: React.FC<{
 
                 {draft.type === 'link' && (
                     <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">URL</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">{t('url')}</label>
                         <div className="relative">
                             <span className="absolute left-3 top-2.5 text-slate-400"><LinkIcon size={14} /></span>
                             <input 
@@ -156,7 +160,7 @@ const ItemEditor: React.FC<{
 
                 {draft.type === 'markdown' && (
                     <div>
-                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">Content</label>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wider">{t('content')}</label>
                         <textarea 
                             className="w-full border border-slate-300 p-2 text-sm rounded-md h-24 focus:ring-2 focus:ring-teal-500 outline-none font-mono text-slate-600"
                             value={draft.content || ''} 
@@ -167,8 +171,8 @@ const ItemEditor: React.FC<{
                 )}
 
                 <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
-                    <button onClick={onCancel} className="text-xs px-3 py-1.5 bg-white border border-slate-300 text-slate-600 rounded-md hover:bg-slate-50 font-medium">Cancel</button>
-                    <button onClick={() => onSave(draft)} className="text-xs px-3 py-1.5 bg-teal-600 text-white rounded-md hover:bg-teal-700 shadow-sm font-medium">Save Changes</button>
+                    <button onClick={onCancel} className="text-xs px-3 py-1.5 bg-white border border-slate-300 text-slate-600 rounded-md hover:bg-slate-50 font-medium">{t('cancel')}</button>
+                    <button onClick={() => onSave(draft)} className="text-xs px-3 py-1.5 bg-teal-600 text-white rounded-md hover:bg-teal-700 shadow-sm font-medium">{t('saveChanges')}</button>
                 </div>
             </div>
         </div>
@@ -439,6 +443,7 @@ const EmptyDropZone: React.FC<{
     moveItem: (dragPath: number[], hoverPath: number[], placement: 'before' | 'after' | 'inside') => void;
     itemsLength: number;
 }> = ({ moveItem, itemsLength }) => {
+    const { t } = useTranslation();
     const [{ isOver, canDrop }, drop] = useDrop({
         accept: ItemType.ITEM,
         drop: (draggedItem: DragItem) => {
@@ -459,7 +464,7 @@ const EmptyDropZone: React.FC<{
                 isOver && canDrop ? "border-teal-400 bg-teal-50 text-teal-600" : "border-transparent text-transparent hover:border-slate-200 hover:text-slate-400"
             )}
         >
-            <span className="text-xs font-medium">Drop to move to root end</span>
+            <span className="text-xs font-medium">{t('dropToMove')}</span>
         </div>
     );
 };
@@ -467,6 +472,7 @@ const EmptyDropZone: React.FC<{
 // --- Main Options Component ---
 const Options: React.FC = () => {
     // State
+    const { t } = useTranslation();
     const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
     const [items, setItems] = useState<MenuItem[]>([]);
     const [status, setStatus] = useState<string>("");
@@ -631,13 +637,13 @@ const Options: React.FC = () => {
                  });
              }
 
-            setStatus("Settings saved successfully!");
+            setStatus(t('savedSuccess'));
             setTimeout(() => setStatus(""), 2000);
         });
     };
 
     const handleReset = () => {
-        if (confirm("Reset everything to default? This will clear your custom bookmarks.")) {
+        if (confirm(t('resetConfirm'))) {
             setPrefs(DEFAULT_PREFS);
             chrome.storage.local.remove(["dh_prefs", "dh_items"], () => {
                 loadItems().then(setItems);
@@ -982,14 +988,14 @@ const Options: React.FC = () => {
                                 {prefs.buttonText.slice(0, 2)}
                             </div>
                             <div>
-                                <h1 className="text-xl font-bold text-slate-800 tracking-tight">Dynamics Helper</h1>
+                                    <h1 className="text-xl font-bold text-slate-800 tracking-tight">{t('appName')}</h1>
                                 <div className="flex gap-3 text-xs text-slate-500 font-medium uppercase tracking-wider items-center">
                                     <span>Extension v{chrome.runtime.getManifest().version}</span>
-                                    {hostVersion && <span>• Host v{hostVersion}</span>}
+                                    {hostVersion && <span>• {t('hostVersion')} v{hostVersion}</span>}
                                     <button 
                                         onClick={handleCheckUpdates} 
                                         className="ml-1 p-1 hover:text-teal-600 hover:bg-teal-50 rounded-full transition-colors" 
-                                        title="Check for updates"
+                                        title={t('updateAvailable')}
                                     >
                                         <RefreshCw size={12} />
                                     </button>
@@ -1004,14 +1010,14 @@ const Options: React.FC = () => {
                                     className="flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg text-sm font-medium transition-colors animate-pulse"
                                 >
                                     {isUpdating ? <RotateCcw size={16} className="animate-spin" /> : <Download size={16} />}
-                                    {isUpdating ? "Updating..." : "Update Now"}
+                                    {isUpdating ? t('updating') : t('updateNow')}
                                 </button>
                             )}
                              <button onClick={handleReset} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-800 rounded-lg text-sm font-medium transition-colors">
-                                <RotateCcw size={16} /> Reset
+                                <RotateCcw size={16} /> {t('reset')}
                             </button>
                             <button onClick={handleSave} className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white font-medium rounded-lg shadow-sm hover:bg-teal-700 text-sm transition-colors ring-offset-2 focus:ring-2 ring-teal-500">
-                                <Save size={16} /> Save Changes
+                                <Save size={16} /> {t('saveChanges')}
                             </button>
                         </div>
                     </div>
@@ -1019,7 +1025,7 @@ const Options: React.FC = () => {
                     {status && (
                         <div className="bg-emerald-50 text-emerald-700 text-center py-3 font-medium text-sm border-b border-emerald-100 flex items-center justify-center gap-2 animate-fade-in-down">
                             <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-                            {status}
+                            {t('savedSuccess') === status || t('savedSuccess') === status ? status : status}
                         </div>
                     )}
 
@@ -1028,13 +1034,13 @@ const Options: React.FC = () => {
                         {/* Sidebar: Visual Settings */}
                         <div className="lg:col-span-5 p-8 border-r border-slate-100 bg-slate-50/30">
                             <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
-                                <Settings size={14} /> Appearance
+                                <Settings size={14} /> {t('appearance')}
                             </h2>
                             
                             <div className="space-y-8">
                                 {/* Preview */}
                                 <div className="space-y-2">
-                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Live Preview</label>
+                                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('livePreview')}</label>
                                     <div className="flex items-center justify-center h-32 bg-white border border-dashed border-slate-300 rounded-xl relative overflow-hidden group">
                                         <div className="absolute inset-0 bg-slate-50 pattern-grid-lg opacity-20"></div>
                                         <div 
@@ -1047,8 +1053,23 @@ const Options: React.FC = () => {
                                 </div>
 
                                 <div className="space-y-4">
+                                    {/* Language Selector */}
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Button Label</label>
+                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('language')}</label>
+                                        <select
+                                            name="language"
+                                            value={prefs.language || 'auto'}
+                                            onChange={(e) => setPrefs(prev => ({ ...prev, language: e.target.value as LanguageCode }))}
+                                            className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
+                                        >
+                                            <option value="auto">{t('auto')}</option>
+                                            <option value="en">English</option>
+                                            <option value="zh">中文 (Chinese)</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('buttonLabel')}</label>
                                         <div className="relative">
                                             <span className="absolute left-3 top-2.5 text-slate-400"><Type size={14} /></span>
                                             <input
@@ -1064,7 +1085,7 @@ const Options: React.FC = () => {
                                     </div>
 
                                     <div>
-                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">Brand Color</label>
+                                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('brandColor')}</label>
                                         <div className="flex gap-2">
                                             <div className="relative w-10 h-10 rounded-lg overflow-hidden shadow-sm border border-slate-200 shrink-0 hover:scale-105 transition-transform">
                                                 <input
@@ -1087,7 +1108,7 @@ const Options: React.FC = () => {
                                     
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Bottom Offset (px)</label>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('offsetBottom')}</label>
                                             <input
                                                 type="number"
                                                 name="offsetBottom"
@@ -1097,7 +1118,7 @@ const Options: React.FC = () => {
                                             />
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Right Offset (px)</label>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('offsetRight')}</label>
                                             <input
                                                 type="number"
                                                 name="offsetRight"
@@ -1110,14 +1131,14 @@ const Options: React.FC = () => {
                                     
                                     <div className="pt-6 border-t border-slate-200">
                                          <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                            <Maximize2 size={14} /> Copilot AI Settings
+                                            <Maximize2 size={14} /> {t('behavior')}
                                         </h2>
                                         
                                         {/* 1. Automatic Analyze with Status Bubble */}
                                         <div>
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Automatic Analyze</label>
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('autoAnalyze')}</label>
                                             <p className="text-[10px] text-slate-500 mb-2">
-                                                Choose when to automatically trigger the AI analysis upon opening the menu.
+                                                {t('autoAnalyzeDesc')}
                                             </p>
                                             <select
                                                 name="autoAnalyzeMode"
@@ -1125,10 +1146,10 @@ const Options: React.FC = () => {
                                                 onChange={(e) => setPrefs(prev => ({ ...prev, autoAnalyzeMode: e.target.value as any }))}
                                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
                                             >
-                                                <option value="disabled">Disabled (Manual trigger only)</option>
-                                                <option value="critical">New Critical Case Only</option>
-                                                <option value="new_cases">New Cases</option>
-                                                <option value="always">Always (On every scan)</option>
+                                                <option value="disabled">{t('modeDisabled')}</option>
+                                                <option value="critical">{t('modeCritical')}</option>
+                                                <option value="new_cases">{t('modeNew')}</option>
+                                                <option value="always">{t('modeAlways')}</option>
                                             </select>
                                         </div>
 
@@ -1141,66 +1162,72 @@ const Options: React.FC = () => {
                                                 className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
                                             />
                                             <label htmlFor="enableStatusBubble" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
-                                                Show Status Bubble during analysis
+                                                {t('statusBubble')}
                                             </label>
                                         </div>
+                                        
+                                        <div className="mt-6 pt-6 border-t border-slate-200">
+                                            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                                <FileText size={14} /> {t('copilotConfig')}
+                                            </h2>
 
-                                        {/* 2. Workbench Directory */}
-                                        <div className="mt-4">
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Workbench Directory</label>
-                                            <p className="text-[10px] text-slate-500 mb-2">
-                                                Local directory for case files (e.g., C:\MyCases).
-                                            </p>
-                                            <input
-                                                type="text"
-                                                value={prefs.rootPath || ""}
-                                                onChange={(e) => setPrefs(prev => ({ ...prev, rootPath: e.target.value }))}
-                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
-                                                placeholder="C:\MyCases"
-                                            />
-                                        </div>
+                                            {/* 2. Workbench Directory */}
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('rootPath')}</label>
+                                                <p className="text-[10px] text-slate-500 mb-2">
+                                                    {t('rootPathDesc')}
+                                                </p>
+                                                <input
+                                                    type="text"
+                                                    value={prefs.rootPath || ""}
+                                                    onChange={(e) => setPrefs(prev => ({ ...prev, rootPath: e.target.value }))}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
+                                                    placeholder="C:\MyCases"
+                                                />
+                                            </div>
 
-                                        {/* 3. Skills Directory */}
-                                        <div className="mt-4">
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Skills Directory</label>
-                                            <p className="text-[10px] text-slate-500 mb-2">
-                                                Comma-separated list of directories containing custom skills (e.g., ~/.copilot/skills).
-                                            </p>
-                                            <input
-                                                type="text"
-                                                value={prefs.skillDirectories || ""}
-                                                onChange={(e) => setPrefs(prev => ({ ...prev, skillDirectories: e.target.value }))}
-                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
-                                                placeholder="~/.copilot/skills"
-                                            />
-                                        </div>
+                                            {/* 3. Skills Directory */}
+                                            <div className="mt-4">
+                                                <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('skillDirectories')}</label>
+                                                <p className="text-[10px] text-slate-500 mb-2">
+                                                    {t('skillDirectoriesDesc')}
+                                                </p>
+                                                <input
+                                                    type="text"
+                                                    value={prefs.skillDirectories || ""}
+                                                    onChange={(e) => setPrefs(prev => ({ ...prev, skillDirectories: e.target.value }))}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
+                                                    placeholder="~/.copilot/skills"
+                                                />
+                                            </div>
 
-                                        {/* 4. User Instructions */}
-                                        <div className="mt-4">
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Custom User Instructions</label>
-                                            <p className="text-[10px] text-slate-500 mb-2">
-                                                These instructions are appended to the core System Prompt. Use this to add your own rules (e.g., "Always use bullet points", "Focus on technical details").
-                                            </p>
-                                            <textarea
-                                                value={prefs.userInstructions || ""}
-                                                onChange={(e) => setPrefs(prev => ({ ...prev, userInstructions: e.target.value }))}
-                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
-                                                placeholder="Enter your custom instructions here..."
-                                            />
-                                        </div>
+                                            {/* 4. User Instructions */}
+                                            <div className="mt-4">
+                                                <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('userInstructions')}</label>
+                                                <p className="text-[10px] text-slate-500 mb-2">
+                                                    {t('userInstructionsDesc')}
+                                                </p>
+                                                <textarea
+                                                    value={prefs.userInstructions || ""}
+                                                    onChange={(e) => setPrefs(prev => ({ ...prev, userInstructions: e.target.value }))}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
+                                                    placeholder="Enter your custom instructions here..."
+                                                />
+                                            </div>
 
-                                        {/* 5. Default User Prompt */}
-                                        <div className="mt-4">
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">Default User Prompt</label>
-                                            <p className="text-[10px] text-slate-500 mb-2">
-                                                This text is automatically appended to the "Case Context" description when scanning a page. Use this to add standard questions or instructions for every analysis (e.g., "Please provide a root cause analysis and mitigation steps.").
-                                            </p>
-                                            <textarea
-                                                value={prefs.userPrompt || ""}
-                                                onChange={(e) => setPrefs(prev => ({ ...prev, userPrompt: e.target.value }))}
-                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
-                                                placeholder="Enter default user prompt here..."
-                                            />
+                                            {/* 5. Default User Prompt */}
+                                            <div className="mt-4">
+                                                <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('userPrompt')}</label>
+                                                <p className="text-[10px] text-slate-500 mb-2">
+                                                    {t('userPromptDesc')}
+                                                </p>
+                                                <textarea
+                                                    value={prefs.userPrompt || ""}
+                                                    onChange={(e) => setPrefs(prev => ({ ...prev, userPrompt: e.target.value }))}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
+                                                    placeholder={t('userPromptPlaceholder')}
+                                                />
+                                            </div>
                                         </div>
                                     </div>
 
@@ -1212,18 +1239,18 @@ const Options: React.FC = () => {
                         <div className="lg:col-span-7 p-8">
                             <div className="flex justify-between items-center mb-6">
                                 <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                                    <Folder size={14} /> Bookmark Manager
+                                    <Folder size={14} /> {t('menuEditor')}
                                 </h2>
                                 <div className="flex gap-2">
                                     <label className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 text-xs font-medium rounded-lg cursor-pointer border border-slate-200 transition-colors shadow-sm">
-                                        <Upload size={12} /> Import
+                                        <Upload size={12} /> {t('import')}
                                         <input type="file" className="hidden" accept=".json" onChange={handleImport} />
                                     </label>
                                     <button 
                                         onClick={handleExport}
                                         className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 text-xs font-medium rounded-lg border border-slate-200 transition-colors shadow-sm"
                                     >
-                                        <Download size={12} /> Export
+                                        <Download size={12} /> {t('export')}
                                     </button>
                                 </div>
                             </div>
@@ -1243,7 +1270,7 @@ const Options: React.FC = () => {
                                         className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 text-white text-xs font-bold rounded-md hover:bg-teal-700 transition-colors shadow-sm"
                                     >
                                         <Plus size={14} strokeWidth={3} /> 
-                                        {selectedPath ? `Add to "${getSelectedFolderName()}"` : "Add Root Item"}
+                                        {selectedPath ? `${t('addTo')} "${getSelectedFolderName()}"` : t('addRootItem')}
                                     </button>
                                     
                                     {selectedPath && (
@@ -1252,7 +1279,7 @@ const Options: React.FC = () => {
                                             className="text-xs text-slate-500 hover:text-slate-700 px-2"
                                             title="Clear Selection"
                                         >
-                                            (Clear Selection)
+                                            {t('clearSelection')}
                                         </button>
                                     )}
 
@@ -1260,16 +1287,16 @@ const Options: React.FC = () => {
                                     <button 
                                         onClick={() => collapseAll(true)}
                                         className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:bg-slate-200 text-xs font-medium rounded-md transition-colors"
-                                        title="Collapse All Folders"
+                                        title={t('collapseAll')}
                                     >
-                                        <Minimize2 size={14} /> Collapse All
+                                        <Minimize2 size={14} /> {t('collapseAll')}
                                     </button>
                                     <button 
                                         onClick={() => collapseAll(false)}
                                         className="flex items-center gap-1.5 px-3 py-1.5 text-slate-600 hover:bg-slate-200 text-xs font-medium rounded-md transition-colors"
-                                        title="Expand All Folders"
+                                        title={t('expandAll')}
                                     >
-                                        <Maximize2 size={14} /> Expand All
+                                        <Maximize2 size={14} /> {t('expandAll')}
                                     </button>
                                 </div>
                                 
@@ -1280,8 +1307,8 @@ const Options: React.FC = () => {
                                             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
                                                 <Folder size={32} className="opacity-50" />
                                             </div>
-                                            <p className="font-medium">No bookmarks yet</p>
-                                            <p className="text-xs mt-1 max-w-[200px] text-center opacity-70">Click "Add Item" to start building your menu.</p>
+                                            <p className="font-medium">{t('noBookmarks')}</p>
+                                            <p className="text-xs mt-1 max-w-[200px] text-center opacity-70">{t('startBuilding')}</p>
                                         </div>
                                     ) : (
                                         <div onClick={() => setSelectedPath(null)} className="min-h-full pb-12">

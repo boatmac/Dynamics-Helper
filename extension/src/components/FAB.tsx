@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
+import { useTranslation } from '../utils/i18n';
 import { trackEvent, trackException } from '../utils/telemetry';
 import { 
     X, 
@@ -36,6 +37,7 @@ const ResultPopover: React.FC<{
     filePath?: string;
     duration?: string;
 }> = ({ isOpen, onClose, title, content, filePath, duration }) => {
+    const { t } = useTranslation();
     // State for position and dragging
     const [position, setPosition] = useState({ x: Math.max(0, window.innerWidth - 550), y: 100 });
     const [isDragging, setIsDragging] = useState(false);
@@ -115,10 +117,10 @@ const ResultPopover: React.FC<{
                 }}
             >
                 <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: '#0F172A', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {title || '🤖 Copilot Analysis'}
+                    {title || `🤖 Copilot ${t('analyze')}`}
                 </h3>
                 <button 
-                    onClick={onClose} 
+                    onClick={onClose}
                     style={{ 
                         border: 'none', 
                         background: 'transparent', 
@@ -130,7 +132,7 @@ const ResultPopover: React.FC<{
                         alignItems: 'center',
                         justifyContent: 'center'
                     }}
-                    title="Close"
+                    title={t('close')}
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#E2E8F0')}
                     onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                 >
@@ -179,7 +181,7 @@ const ResultPopover: React.FC<{
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94A3B8' }}>
                          <Activity size={48} style={{ opacity: 0.2, marginBottom: '16px' }} />
-                         <p>No analysis content received.</p>
+                         <p>{t('noContent')}</p>
                     </div>
                 )}
             </div>
@@ -199,14 +201,14 @@ const ResultPopover: React.FC<{
                     {duration && (
                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <Activity size={12} />
-                            <span>Analysis took: <b>{duration}</b></span>
+                            <span>{t('analysisTook')}: <b>{duration}</b></span>
                         </div>
                     )}
                     
                     {filePath && (
                         <div>
                             <div style={{ fontWeight: '600', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <Folder size={12} /> Saved report:
+                                <Folder size={12} /> {t('savedReport')}:
                             </div>
                             <div style={{ wordBreak: 'break-all', fontFamily: 'monospace', background: '#FFFFFF', padding: '6px 8px', borderRadius: '4px', border: '1px solid #E2E8F0' }}>
                                 {filePath}
@@ -220,6 +222,7 @@ const ResultPopover: React.FC<{
 };
 
 const FAB: React.FC = () => {
+    const { t } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
@@ -291,16 +294,31 @@ const FAB: React.FC = () => {
             }
 
             setUpdateAvailable(e.detail);
-            showStatusBubble(`Update Available: ${e.detail.version}`, 'success', 10000); 
+            showStatusBubble(`${t('updateAvailable')}: ${e.detail.version}`, 'success', 10000); 
+        };
+
+        const handleNotification = (e: any) => {
+            const { text, type } = e.detail;
+            showStatusBubble(text, type || 'default', 5000);
+        };
+        
+        const handleToast = (e: any) => {
+             showStatusBubble(e.detail.text, 'default', 3000);
         };
 
         window.addEventListener('dh-native-progress', handleProgress);
         window.addEventListener('dh-update-available', handleUpdate);
+        window.addEventListener('DH_NOTIFICATION', handleNotification);
+        window.addEventListener('DH_TOAST', handleToast);
+        
         return () => {
             window.removeEventListener('dh-native-progress', handleProgress);
             window.removeEventListener('dh-update-available', handleUpdate);
+            window.removeEventListener('DH_NOTIFICATION', handleNotification);
+            window.removeEventListener('DH_TOAST', handleToast);
         };
     }, []);
+
 
     const showStatusBubble = (text: string, type: 'default' | 'success' | 'error' = 'default', autoHideDuration = 3000) => {
         if (!prefs.enableStatusBubble) return;
@@ -597,7 +615,7 @@ const FAB: React.FC = () => {
                     setHasAutoAnalyzed(true); // Mark as handled immediately to prevent double-fire
                     // Immediate feedback: Set analyzing state so UI reflects it instantly
                     setIsAnalyzing(true);
-                    showStatusBubble("Analyzing...", 'default', 0); // Show analyzing status persistently until done
+                    showStatusBubble(t('analyzing'), 'default', 0); // Show analyzing status persistently until done
                     setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
             }
         } else if (prefs.autoAnalyzeMode === 'critical') {
@@ -614,7 +632,7 @@ const FAB: React.FC = () => {
                 setHasAutoAnalyzed(true);
                 // Immediate feedback: Set analyzing state so UI reflects it instantly
                 setIsAnalyzing(true);
-                showStatusBubble("Analyzing Critical Case...", 'default', 0);
+                showStatusBubble(t('analyzing'), 'default', 0);
                 setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
             }
         } else if (prefs.autoAnalyzeMode === 'new_cases') {
@@ -627,7 +645,7 @@ const FAB: React.FC = () => {
              if (isInitialPending && hasValidIdentifier && rawContent.length > 20) {
                  setHasAutoAnalyzed(true);
                  setIsAnalyzing(true);
-                 showStatusBubble("Analyzing New Case...", 'default', 0);
+                 showStatusBubble(t('analyzing'), 'default', 0);
                  setTimeout(() => handleAnalyze(scrapedData), 100);
              }
         }
@@ -655,7 +673,7 @@ const FAB: React.FC = () => {
             // Show result in popover instead of alert
             setResultPopover({
                 isOpen: true,
-                title: '⚡ Ping Result',
+                title: `⚡ ${t('pingResult')}`,
                 content: "```json\n" + JSON.stringify(response, null, 2) + "\n```"
             });
             // Also close menu to show result clearly? Optional.
@@ -663,7 +681,7 @@ const FAB: React.FC = () => {
         } catch (e: any) {
             setResultPopover({
                 isOpen: true,
-                title: '❌ Ping Error',
+                title: `❌ ${t('pingError')}`,
                 content: `Error: ${e.message}`
             });
         }
@@ -691,8 +709,8 @@ const FAB: React.FC = () => {
         const timeoutId = setTimeout(() => {
             setIsAnalyzing(prev => {
                 if (prev) {
-                    setErrorMsg("Analysis timed out. Please try again.");
-                    showStatusBubble("Analysis timed out", 'error', 5000);
+                    setErrorMsg(t('analysisFailed'));
+                    showStatusBubble(t('analysisFailed'), 'error', 5000);
                     trackEvent('Analyze Timeout');
                     return false;
                 }
@@ -713,7 +731,7 @@ const FAB: React.FC = () => {
 
             // Only show bubble if we initiated manually and it wasn't already shown by auto-analyze logic
             if (!statusBubble.visible) {
-                 showStatusBubble("Analyzing...", 'default', 0);
+                 showStatusBubble(t('analyzing'), 'default', 0);
             }
 
             const requestId = crypto.randomUUID();
@@ -761,11 +779,11 @@ const FAB: React.FC = () => {
                         const duration = (Date.now() - startTime) / 1000;
                         trackEvent('Analyze Success', { durationSeconds: duration });
                         setLastDuration(`${duration.toFixed(1)}s`);
-                        showStatusBubble(`Analysis Complete (${duration.toFixed(1)}s)`, 'success', 3000);
+                        showStatusBubble(`${t('analysisComplete')} (${duration.toFixed(1)}s)`, 'success', 3000);
 
                         setResultPopover({
                             isOpen: true,
-                            title: '🤖 Copilot Analysis',
+                            title: `🤖 Copilot ${t('analyze')}`,
                             content: analysisData.markdown || JSON.stringify(analysisData, null, 2),
                             path: analysisData.saved_to,
                             duration: `${duration.toFixed(1)}s`
@@ -773,23 +791,23 @@ const FAB: React.FC = () => {
                         setIsOpen(false); // Close menu to show result
                     } else {
                         const errMsg = analysisData?.error || "Unknown analysis error";
-                        setErrorMsg(`Analysis Error: ${errMsg}`);
-                        showStatusBubble("Analysis Failed", 'error', 4000);
+                        setErrorMsg(`${t('analysisFailed')}: ${errMsg}`);
+                        showStatusBubble(t('analysisFailed'), 'error', 4000);
                         trackEvent('Analyze Failed', { error: errMsg });
                     }
                 } else {
                     const hostError = nativeResp?.message || nativeResp?.error || "Unknown native host error";
                     setErrorMsg(`Host Error: ${hostError}`);
-                    showStatusBubble("Host Error", 'error', 4000);
+                    showStatusBubble(t('analysisFailed'), 'error', 4000);
                     trackEvent('Analyze Host Error', { error: hostError });
                 }
             } else {
                 setErrorMsg(`Error: ${response.error || response.message || 'Unknown error'}`);
-                showStatusBubble("Communication Error", 'error', 4000);
+                showStatusBubble(t('analysisFailed'), 'error', 4000);
             }
         } catch (e: any) {
             setErrorMsg(`Error: ${e.message}`);
-            showStatusBubble("Error", 'error', 4000);
+            showStatusBubble(t('analysisFailed'), 'error', 4000);
             trackEvent('Analyze Exception', { error: e.message });
         } finally {
             setIsAnalyzing(false);
@@ -867,12 +885,12 @@ const FAB: React.FC = () => {
                                 <button 
                                     onClick={navigateBack}
                                     className="dh-back-btn"
-                                    title="Back"
+                                    title={t('back')}
                                 >
                                     <ArrowLeft size={16} />
                                 </button>
                             )}
-                            <h3 className="dh-title">Dynamics Helper</h3>
+                            <h3 className="dh-title">{t('appName')}</h3>
                             <span style={{ fontSize: '10px', color: '#94A3B8', marginLeft: '6px', fontWeight: 'normal' }}>
                                 v{chrome.runtime.getManifest().version}
                             </span>
@@ -895,8 +913,8 @@ const FAB: React.FC = () => {
                                     <Download size={18} />
                                 </span>
                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                                    <span className="dh-item-label" style={{ color: '#15803D' }}>Update Available</span>
-                                    <span style={{ fontSize: '11px', color: '#16A34A' }}>Version {updateAvailable.version}</span>
+                                    <span className="dh-item-label" style={{ color: '#15803D' }}>{t('updateAvailable')}</span>
+                                    <span style={{ fontSize: '11px', color: '#16A34A' }}>{t('version')} {updateAvailable.version}</span>
                                 </div>
                             </button>
                         )}
@@ -920,7 +938,7 @@ const FAB: React.FC = () => {
                         {currentItems.length === 0 && (
                             <div style={{ padding: '24px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>
                                 <Folder size={32} style={{ opacity: 0.3, marginBottom: '8px' }} />
-                                <div>No items found</div>
+                                <div>{t('noItems')}</div>
                             </div>
                         )}
                     </div>
@@ -939,7 +957,7 @@ const FAB: React.FC = () => {
                                     onClick={() => setIsContextExpanded(!isContextExpanded)}
                                 >
                                     <Activity size={14} color={scrapedData?.errorText ? '#0D9488' : '#94A3B8'} />
-                                    <span>Case Context</span>
+                                    <span>{t('caseContext')}</span>
                                     {isContextExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                                 </div>
                                 <button 
@@ -993,7 +1011,7 @@ const FAB: React.FC = () => {
                                 onClick={handlePing}
                                 className="dh-action-btn dh-btn-secondary"
                             >
-                                <Activity size={14} /> Ping
+                                <Activity size={14} /> {t('ping')}
                             </button>
                             
                             {/* Analyze Button */}
@@ -1003,7 +1021,7 @@ const FAB: React.FC = () => {
                                 className="dh-action-btn dh-btn-primary"
                             >
                                 <Zap size={14} fill={isAnalyzing ? "none" : "currentColor"} />
-                                Analyze
+                                {t('analyze')}
                             </button>
                         </div>
 

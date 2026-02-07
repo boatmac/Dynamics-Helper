@@ -1,6 +1,32 @@
 
 // Ported from legacy_backup/contentScript.js
 
+import { getTranslation, resolveLanguage, LanguageCode } from './translations';
+
+let currentLang: 'en' | 'zh' = 'en';
+
+// Helper to keep language in sync
+function updateLanguage() {
+    chrome.storage.local.get("dh_prefs", (result) => {
+        const prefs = result.dh_prefs as any;
+        const prefLang = (prefs && prefs.language) ? (prefs.language as LanguageCode) : 'auto';
+        currentLang = resolveLanguage(prefLang);
+    });
+}
+// Initial load
+updateLanguage();
+
+// Listen for changes
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.dh_prefs) {
+        updateLanguage();
+    }
+});
+
+function t(key: string): string {
+    return getTranslation(key, currentLang);
+}
+
 // --- Types ---
 interface AzureResource {
     subscription: string;
@@ -56,10 +82,10 @@ export async function checkClipboard() {
             const azureResource = parseAzureResourceId(text);
 
             if (azureResource) {
-                const msg = `Azure Resource Detected:\n\nSubscription: ${azureResource.subscription}\nResource Group: ${azureResource.resourceGroup}\nProvider: ${azureResource.provider}\nName: ${azureResource.resourceName}`;
+                const msg = `${t('azureResourceDetected')}:\n\n${t('subscription')}: ${azureResource.subscription}\n${t('resourceGroup')}: ${azureResource.resourceGroup}\n${t('provider')}: ${azureResource.provider}\n${t('name')}: ${azureResource.resourceName}`;
                 showNotification(msg, 'info');
                 // Also trigger a toast
-                showToast("Azure Resource detected in clipboard");
+                showToast(t('clipboardToast'));
             }
         }
     } catch (err) {
@@ -132,8 +158,8 @@ function checkValue(el: HTMLElement): boolean {
             console.log("[DH] ✓✓✓ KEYWORD DETECTED! ✓✓✓");
             detectedElements.add(el);
             highlight(el);
-            showNotification(`⚠️ Azure/Mooncake Support Escalation Detected!`);
-            showToast(`Detected "${KEYWORD}"`);
+            showNotification(`⚠️ ${t('escalationDetected')}`);
+            showToast(`${t('escalationToast')} "${KEYWORD}"`);
             return true;
         }
         return false;
@@ -142,6 +168,7 @@ function checkValue(el: HTMLElement): boolean {
         return false;
     }
 }
+
 
 function setupMonitoring(el: HTMLElement) {
     if (monitoredElements.has(el)) {

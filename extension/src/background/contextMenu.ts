@@ -1,15 +1,36 @@
 import { PageReader } from '../utils/pageReader';
+import { getTranslation, resolveLanguage, LanguageCode } from '../utils/translations';
+
+async function getMenuTitle(): Promise<string> {
+    const result = await chrome.storage.local.get("dh_prefs");
+    const prefs = result.dh_prefs as any;
+    const prefLang = (prefs && prefs.language) ? (prefs.language as LanguageCode) : 'auto';
+    const lang = resolveLanguage(prefLang);
+    return getTranslation('analyzeError', lang);
+}
 
 /**
  * Sets up the context menu items for the extension.
  */
 export function setupContextMenu() {
-    chrome.runtime.onInstalled.addListener(() => {
+    chrome.runtime.onInstalled.addListener(async () => {
+        const title = await getMenuTitle();
         chrome.contextMenus.create({
             id: "dh-analyze-selection",
-            title: "Analyze Error",
+            title: title,
             contexts: ["selection"]
         });
+    });
+
+    // Update title when language changes
+    chrome.storage.onChanged.addListener(async (changes, area) => {
+        if (area === 'local' && changes.dh_prefs) {
+            const title = await getMenuTitle();
+            chrome.contextMenus.update("dh-analyze-selection", { title: title }, () => {
+                // Ignore error if item doesn't exist yet
+                const err = chrome.runtime.lastError; 
+            });
+        }
     });
 
     chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -24,6 +45,7 @@ export function setupContextMenu() {
  * Injects a script to scrape the page (or use selection) and then sends the analyze message.
  */
 async function handleContextMenuClick(info: chrome.contextMenus.OnClickData, tab: chrome.tabs.Tab) {
+
     if (!tab.id) return;
 
     // We need to get the full context, not just the selection text.
