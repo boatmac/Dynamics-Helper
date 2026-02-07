@@ -431,19 +431,7 @@ class NativeHost:
             except Exception as e:
                 logging.error(f"Failed to read user instructions: {e}")
         else:
-            # Fallback: Check for legacy 'user-instructions.md'
-            legacy_path = os.path.join(USER_DATA_DIR, "user-instructions.md")
-            if os.path.exists(legacy_path):
-                try:
-                    with open(legacy_path, "r", encoding="utf-8") as f:
-                        user_content = f.read()
-                    logging.info(f"Loaded legacy user instructions from {legacy_path}")
-                except Exception as e:
-                    logging.error(f"Failed to read legacy user instructions: {e}")
-            else:
-                logging.info(
-                    f"User instructions file not found at: {user_instr_path} or {legacy_path}"
-                )
+            logging.info(f"User instructions file not found at: {user_instr_path}")
 
         # 4. Combine
         final_content = sys_content
