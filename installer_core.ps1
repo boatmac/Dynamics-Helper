@@ -143,10 +143,32 @@ function Set-RegistryKeys {
 # Auto-configure with fixed IDs
 # 1. Main Chrome/Edge ID (with key)
 # 2. Legacy/Dev ID (just in case)
+$DefaultId = "fkemelmlolmdnldpofiahmnhngmhonno"
 $ExtIds = @(
-    "fkemelmlolmdnldpofiahmnhngmhonno",
+    $DefaultId,
     "aiimcjfjmibedicmckpphgbddankgdln"
 )
+
+Write-Host "--------------------------------------------------"
+Write-Host "EXTENSION ID VERIFICATION" -ForegroundColor Cyan
+Write-Host "--------------------------------------------------"
+Write-Host "The Native Host requires your specific Extension ID to allow connections."
+Write-Host "1. Open your browser extensions page (chrome://extensions or edge://extensions)."
+Write-Host "2. Find 'Dynamics Helper'."
+Write-Host "3. Look for the ID (e.g., ID: $DefaultId)."
+Write-Host ""
+Write-Host "Expected ID: $DefaultId" -ForegroundColor Green
+Write-Host ""
+$UserResponse = Read-Host "Press ENTER if the ID matches. If it is different, paste it here"
+
+if (-not [string]::IsNullOrWhiteSpace($UserResponse)) {
+    $UserResponse = $UserResponse.Trim()
+    Write-Host "Adding custom ID: $UserResponse" -ForegroundColor Yellow
+    $ExtIds += $UserResponse
+} else {
+    Write-Host "Using default ID."
+}
+Write-Host ""
 
 Write-Host "Configuring Native Host Manifest..." -ForegroundColor Gray
 
