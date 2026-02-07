@@ -210,22 +210,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
     }
 
-    if (message.action === "update_host_config") {
-         sendNativeMessage({ 
-             action: "update_config", 
-             payload: message.payload 
-         })
-            .then(response => sendResponse({ status: "success", data: response }))
-            .catch(error => sendResponse({ status: "error", error: error.message }));
-        return true;
-    }
-
-    if (message.action === "get_host_config") {
-        sendNativeMessage({ action: "get_config" })
-           .then(response => sendResponse(response))
-           .catch(error => sendResponse({ status: "error", error: error.message }));
-       return true;
-   }
 
     if (message.type === "TELEMETRY_EVENT") {
         trackBackgroundEvent(message.payload.name, message.payload.properties);

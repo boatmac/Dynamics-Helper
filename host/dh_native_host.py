@@ -27,7 +27,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.32"
+VERSION = "2.0.33"
 
 # Setup User Data Directory (Cross-platform)
 

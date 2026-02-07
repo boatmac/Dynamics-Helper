@@ -517,7 +517,10 @@ const Options: React.FC = () => {
             }
 
             // Sync with Native Host (Source of Truth for backend config)
-            chrome.runtime.sendMessage({ action: "get_host_config" }, (response) => {
+            chrome.runtime.sendMessage({ 
+                type: "NATIVE_MSG",
+                payload: { action: "get_config" } 
+            }, (response) => {
                 if (chrome.runtime.lastError) {
                      console.warn("Could not sync with host:", chrome.runtime.lastError.message);
                      return;
@@ -632,21 +635,24 @@ const Options: React.FC = () => {
              // We use a fire-and-forget message pattern here
              if (prefs.userInstructions !== undefined) {
                  chrome.runtime.sendMessage({
-                     action: "update_host_config",
+                     type: "NATIVE_MSG",
                      payload: {
-                         user_instructions: prefs.userInstructions,
-                        config: {
-                            root_path: prefs.rootPath,
-                            skill_directories: prefs.skillDirectories ? prefs.skillDirectories.split(',').map(s => s.trim()).filter(Boolean) : [],
-                            extension_preferences: {
-                                auto_analyze_mode: prefs.autoAnalyzeMode,
-                                user_prompt: prefs.userPrompt,
-                                enable_status_bubble: prefs.enableStatusBubble,
-                                language: prefs.language,
-                                primaryColor: prefs.primaryColor,
-                                buttonText: prefs.buttonText,
-                                offsetBottom: prefs.offsetBottom,
-                                offsetRight: prefs.offsetRight
+                        action: "update_config",
+                        payload: {
+                            user_instructions: prefs.userInstructions,
+                            config: {
+                                root_path: prefs.rootPath,
+                                skill_directories: prefs.skillDirectories ? prefs.skillDirectories.split(',').map(s => s.trim()).filter(Boolean) : [],
+                                extension_preferences: {
+                                    auto_analyze_mode: prefs.autoAnalyzeMode,
+                                    user_prompt: prefs.userPrompt,
+                                    enable_status_bubble: prefs.enableStatusBubble,
+                                    language: prefs.language,
+                                    primaryColor: prefs.primaryColor,
+                                    buttonText: prefs.buttonText,
+                                    offsetBottom: prefs.offsetBottom,
+                                    offsetRight: prefs.offsetRight
+                                }
                             }
                         }
                      }
