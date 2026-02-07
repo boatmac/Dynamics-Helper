@@ -36,6 +36,10 @@ if (Test-Path $MistakeDir) {
     # Rescue Instructions
     if (Test-Path "$MistakeDir\copilot-instructions.md") {
         Copy-Item "$MistakeDir\copilot-instructions.md" -Destination "$DestDir\" -Force
+    } elseif (Test-Path "$MistakeDir\user-instructions.md") {
+        # Rescue Legacy Name -> New Name
+        Copy-Item "$MistakeDir\user-instructions.md" -Destination "$DestDir\copilot-instructions.md" -Force
+        Write-Host "    - user-instructions.md rescued and renamed to copilot-instructions.md."
     }
     
     # Nuke the Roaming folder to prevent split-brain
