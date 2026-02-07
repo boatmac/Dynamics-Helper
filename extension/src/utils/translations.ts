@@ -27,6 +27,16 @@ export const translations: TranslationDictionary = {
     language: { en: "Language", zh: "语言" },
     auto: { en: "Auto (System)", zh: "自动 (跟随系统)" },
     
+    // --- Auto Analyze ---
+    autoAnalyze: { en: "Auto Analyze", zh: "自动分析" },
+    autoAnalyzeDesc: { 
+        en: "Automatically send page content to Copilot when opening a case.", 
+        zh: "打开案例页面时自动将内容发送给 Copilot 进行分析。" 
+    },
+    modeDisabled: { en: "Disabled", zh: "禁用" },
+    modeCritical: { en: "Critical Only (Severity A)", zh: "仅严重案例 (Severity A)" },
+    modeNew: { en: "New Cases Only", zh: "仅新案例" },
+    modeAlways: { en: "Always", zh: "总是启用" },
     
     behavior: { en: "Behavior", zh: "行为设置" },
     copilotConfig: { en: "Copilot Configuration", zh: "Copilot 配置" },
