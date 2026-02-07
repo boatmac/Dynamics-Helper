@@ -27,7 +27,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.31"
+VERSION = "2.0.32"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -329,7 +329,11 @@ class NativeHost:
         default_data = load_config_file(default_config_path)
 
         # B. Load User Config (Override)
-        user_data = load_config_file(user_config_path)
+        if os.path.exists(user_config_path):
+            user_data = load_config_file(user_config_path)
+        else:
+            logging.info(f"User config file not found at: {user_config_path}")
+            user_data = {}
 
         # C. Merge Logic
         # Start with default data
@@ -426,6 +430,8 @@ class NativeHost:
                     user_content = f.read()
             except Exception as e:
                 logging.error(f"Failed to read user instructions: {e}")
+        else:
+            logging.info(f"User instructions file not found at: {user_instr_path}")
 
         # 4. Combine
         final_content = sys_content
