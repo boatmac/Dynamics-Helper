@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dynamics Helper",
-  "version": "2.0.27",
+  "version": "2.0.28",
   "description": "Productivity tool for Technical Support Engineers",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlgj9K6xqR3H7eGmpKpGoM4YTNgetfpv6hJRQqCGKwPF3o+Q10QYNZbO/BKm8pcQVr0SuAJbTI0lIB0DdjUpJ++Ol89N+97YEwYxa6B47h4m8JkEofsgd7VSqX/m/N7jtFJ9EkBPATZJLTCNpjp7JhwIqkI6BG6iofzixBBRvgKYx5M2oe1k5qFz2+8/9Pc0kfkGLfYkgnauyGc3QBTOCZaGWbLT2pjWKzBKpMGD0XB4T6zxL4SAccSofC0qzAIBd4eQ9ttKvRSrAP2pbq+PR3h9/ovrPULrtOH0gc2diijca4S8Szz3Ar3s/fRkQ0bO3Wooi44QnSx8f2/J5uXzrsQIDAQAB",
   "permissions": [

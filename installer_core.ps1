@@ -134,62 +134,67 @@ function Set-RegistryKeys {
     Write-Host "    - Registry keys updated to point to: $DestDir"
 }
 
-if ($IsUpdate) {
-    Write-Host "[*] Updating existing installation..."
-    
-    # Always update registry in case of path migration
-    try {
-        Set-RegistryKeys -ManifestPath $ManifestPath
-    } catch {
-        Write-Warning "Failed to update registry keys: $_"
-    }
+# --- COMMON: Generate Manifest & Register ---
 
-    Write-Host "SUCCESS: Installation/Update Complete!" -ForegroundColor Green
+# Auto-configure with fixed IDs
+# 1. Main Chrome/Edge ID (with key)
+# 2. Legacy/Dev ID (just in case)
+$ExtIds = @(
+    "fkemelmlolmdnldpofiahmnhngmhonno",
+    "aiimcjfjmibedicmckpphgbddankgdln"
+)
+
+Write-Host "Configuring Native Host Manifest..." -ForegroundColor Gray
+
+$AllowedOrigins = @()
+foreach ($Id in $ExtIds) {
+    $AllowedOrigins += "chrome-extension://$Id/"
+    $AllowedOrigins += "extension://$Id/"
+}
+
+# Create Manifest
+$ManifestContent = @{
+    name = $HostName
+    description = "Dynamics Helper Native Host"
+    path = "dh_native_host.exe"
+    type = "stdio"
+    allowed_origins = $AllowedOrigins
+} | ConvertTo-Json -Depth 5
+
+$ManifestContent | Out-File -FilePath $ManifestPath -Encoding ascii
+Write-Host "    - Manifest created/updated."
+
+# Register Keys (Works for both Chrome and Edge)
+Set-RegistryKeys -ManifestPath $ManifestPath
+
+
+if ($IsUpdate) {
+    Write-Host ""
+    Write-Host "SUCCESS: Update Complete!" -ForegroundColor Green
+    Write-Host "-------------------------"
+    Write-Host "The Native Host manifest has been updated with the latest Allowed Origins." -ForegroundColor Yellow
+    Write-Host "Please restart your browser (Edge/Chrome) for changes to take effect." -ForegroundColor Cyan
     Write-Host ""
     Write-Host "IMPORTANT: Ensure your browser is loading the extension from:" -ForegroundColor Yellow
     Write-Host "   $ExtDest" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "If you don't see the new version:"
-    Write-Host "1. Go to chrome://extensions"
-    Write-Host "2. Click 'Remove' on Dynamics Helper"
-    Write-Host "3. Click 'Load unpacked' and select the folder above."
-    Write-Host ""
 } else {
     Write-Host ""
-    Write-Host "NEW INSTALLATION DETECTED" -ForegroundColor Yellow
+    Write-Host "SUCCESS: Installation Complete!" -ForegroundColor Green
     Write-Host "-------------------------"
-    Write-Host "1. Go to chrome://extensions"
+    Write-Host "1. Go to chrome://extensions (or edge://extensions)"
     Write-Host "2. Enable 'Developer mode'"
     Write-Host "3. Click 'Load unpacked'"
     Write-Host "4. Select this folder:"
     Write-Host "   $ExtDest" -ForegroundColor Cyan
     Write-Host ""
-    
-    # Auto-configure with fixed ID
-    $ExtId = "fkemelmlolmdnldpofiahmnhngmhonno"
-    Write-Host "Auto-configuring for Extension ID: $ExtId" -ForegroundColor Gray
-    
-    # Create Manifest
-    $ManifestContent = @{
-        name = $HostName
-        description = "Dynamics Helper Native Host"
-        path = "dh_native_host.exe"
-        type = "stdio"
-        allowed_origins = @(
-            "chrome-extension://$ExtId/",
-            "extension://$ExtId/"
-        )
-    } | ConvertTo-Json
-    
-    $ManifestContent | Out-File -FilePath $ManifestPath -Encoding ascii
-    Write-Host "    - Manifest created."
-    
-    # Register
-    Set-RegistryKeys -ManifestPath $ManifestPath
-    
-    Write-Host ""
-    Write-Host "SUCCESS: Installation Complete!" -ForegroundColor Green
 }
+
+
+
+
+
+
 
 Write-Host ""
 Read-Host "Press Enter to exit"
