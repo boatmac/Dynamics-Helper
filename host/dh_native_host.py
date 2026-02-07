@@ -27,7 +27,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.30"
+VERSION = "2.0.31"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -408,26 +408,6 @@ class NativeHost:
         # FIX: Revert to using 'copilot-instructions.md' as the standard user file
         # to match user expectations and previous behavior.
         user_instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
-        legacy_temp_path = os.path.join(USER_DATA_DIR, "user-instructions.md")
-
-        # 1. Reverse Migration: If 'user-instructions.md' exists (legacy/broken state),
-        # we MUST migrate it back to 'copilot-instructions.md' because that is where
-        # the user's most recent edits likely are.
-        if os.path.exists(legacy_temp_path):
-            try:
-                # If target already exists, back it up first to avoid data loss
-                if os.path.exists(user_instr_path):
-                    backup_path = user_instr_path + ".bak"
-                    shutil.copy2(user_instr_path, backup_path)
-                    logging.info(f"Backed up existing configuration to {backup_path}")
-                    os.remove(user_instr_path)  # Remove to allow move
-
-                logging.info(
-                    f"Restoring instructions from {legacy_temp_path} to {user_instr_path}"
-                )
-                shutil.move(legacy_temp_path, user_instr_path)
-            except Exception as e:
-                logging.error(f"Failed to restore instructions: {e}")
 
         # 2. Load System Instructions (Managed by Installer)
         sys_content = ""
