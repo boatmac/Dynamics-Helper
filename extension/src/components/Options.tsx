@@ -494,7 +494,26 @@ const Options: React.FC = () => {
                 if (loadedPrefs.primaryColor === "#2563eb") { // Old default blue
                     loadedPrefs.primaryColor = "#0D9488"; // New default teal
                 }
-                setPrefs({ ...DEFAULT_PREFS, ...loadedPrefs });
+                
+                setPrefs(prev => {
+                    // Merge strategy: Default -> Loaded -> User Edits (prev)
+                    // We must be careful not to let 'prev' (which starts as Default) overwrite 'loaded' 
+                    // unless the user actually changed it.
+                    
+                    const base = { ...DEFAULT_PREFS, ...loadedPrefs };
+                    const final: any = { ...base };
+
+                    // Apply only changed fields from prev
+                    (Object.keys(prev) as Array<keyof Preferences>).forEach(k => {
+                        const key = k as keyof Preferences;
+                        if (prev[key] !== DEFAULT_PREFS[key]) {
+                            // User has modified this field, preserve it
+                            final[key] = prev[key];
+                        }
+                    });
+
+                    return final as Preferences;
+                });
             }
 
             // Sync with Native Host (Source of Truth for backend config)
@@ -552,22 +571,22 @@ const Options: React.FC = () => {
                             }
                         }
 
-                        // 4. Extension Preferences (Synced from Host)
+                        // 4. Extension Preferences (Synced from Host - Source of Truth)
                         if (hostConfig.extension_preferences) {
                             const extPrefs = hostConfig.extension_preferences;
                             
-                            if (extPrefs.auto_analyze_mode && extPrefs.auto_analyze_mode !== prev.autoAnalyzeMode) {
-                                newPrefs.autoAnalyzeMode = extPrefs.auto_analyze_mode;
-                                changed = true;
-                            }
-                            if (extPrefs.user_prompt !== undefined && extPrefs.user_prompt !== prev.userPrompt) {
-                                newPrefs.userPrompt = extPrefs.user_prompt;
-                                changed = true;
-                            }
-                            if (extPrefs.enable_status_bubble !== undefined && extPrefs.enable_status_bubble !== prev.enableStatusBubble) {
-                                newPrefs.enableStatusBubble = extPrefs.enable_status_bubble;
-                                changed = true;
-                            }
+                            if (extPrefs.auto_analyze_mode) newPrefs.autoAnalyzeMode = extPrefs.auto_analyze_mode;
+                            if (extPrefs.user_prompt !== undefined) newPrefs.userPrompt = extPrefs.user_prompt;
+                            if (extPrefs.enable_status_bubble !== undefined) newPrefs.enableStatusBubble = extPrefs.enable_status_bubble;
+                            
+                            // Visual Settings (Now synced)
+                            if (extPrefs.language) newPrefs.language = extPrefs.language;
+                            if (extPrefs.primaryColor) newPrefs.primaryColor = extPrefs.primaryColor;
+                            if (extPrefs.buttonText) newPrefs.buttonText = extPrefs.buttonText;
+                            if (extPrefs.offsetBottom !== undefined) newPrefs.offsetBottom = extPrefs.offsetBottom;
+                            if (extPrefs.offsetRight !== undefined) newPrefs.offsetRight = extPrefs.offsetRight;
+                            
+                            changed = true;
                         }
 
                         return changed ? newPrefs : prev;
@@ -622,7 +641,12 @@ const Options: React.FC = () => {
                             extension_preferences: {
                                 auto_analyze_mode: prefs.autoAnalyzeMode,
                                 user_prompt: prefs.userPrompt,
-                                enable_status_bubble: prefs.enableStatusBubble
+                                enable_status_bubble: prefs.enableStatusBubble,
+                                language: prefs.language,
+                                primaryColor: prefs.primaryColor,
+                                buttonText: prefs.buttonText,
+                                offsetBottom: prefs.offsetBottom,
+                                offsetRight: prefs.offsetRight
                             }
                         }
                      }
