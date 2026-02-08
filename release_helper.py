@@ -139,10 +139,11 @@ def create_zip(version):
 
     shutil.copy2(host_exe_src, host_stage_dir)
 
-    # Copy other host files (config.json, system_prompt.md)
+    # Copy other host files (config.json, system_prompt.md, register.py)
     # They are in host/ source folder
     shutil.copy2(os.path.join(HOST_DIR, "config.json"), host_stage_dir)
     shutil.copy2(os.path.join(HOST_DIR, "system_prompt.md"), host_stage_dir)
+    shutil.copy2(os.path.join(HOST_DIR, "register.py"), host_stage_dir)
 
     # 3. Copy Installer Script
     print("Copying Installer...")

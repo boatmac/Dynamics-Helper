@@ -26,13 +26,34 @@ def get_host_manifest(host_path):
 def install_host():
     # 1. Determine paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    batch_file_path = os.path.join(script_dir, "launch_host.bat")
+
+    # Detect if we are in "Prod" (exe exists) or "Dev" (use bat)
+    exe_path = os.path.join(script_dir, "dh_native_host.exe")
+    bat_path = os.path.join(script_dir, "launch_host.bat")
+
+    if os.path.exists(exe_path):
+        # PROD Mode: Use the executable directly (Relative path for portability)
+        # Note: If this script is run, we assume the manifest is in the same folder as the exe
+        host_path = "dh_native_host.exe"
+        print(f"Found executable. Registering: {host_path}")
+    else:
+        # DEV Mode: Use the batch file wrapper
+        host_path = bat_path
+        print(f"Executable not found. Registering Dev Script: {host_path}")
+
     manifest_path = os.path.join(script_dir, "host_manifest.json")
+    # In Prod (release zip), the manifest is usually named 'manifest.json' by the installer.
+    # But register.py historically uses 'host_manifest.json'.
+    # To be safe and compatible with the Extension's expectations in Prod, let's use 'manifest.json' if we found the EXE.
+    if os.path.exists(exe_path):
+        manifest_path = os.path.join(script_dir, "manifest.json")
 
     # 2. Write the Native Messaging Manifest file
     # The browser reads this to know how to start the host
-    manifest_content = get_host_manifest(batch_file_path)
-    with open(manifest_path, "w") as f:
+    manifest_content = get_host_manifest(host_path)
+
+    # Python defaults to UTF-8 without BOM (perfect for Chrome)
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest_content, f, indent=2)
     print(f"Created manifest at: {manifest_path}")
 

@@ -172,9 +172,14 @@ $ManifestContent = @{
     allowed_origins = $AllowedOrigins
 } | ConvertTo-Json -Depth 5
 
-# Write using UTF8 (PowerShell 5.1 adds BOM, but Chrome accepts it).
-# Ideally we would use [System.IO.File]::WriteAllText for no-BOM, but this is standard enough.
-$ManifestContent | Out-File -FilePath $ManifestPath -Encoding UTF8
+# CRITICAL FIX: Write using UTF8 *WITHOUT BOM*.
+# PowerShell's 'Out-File -Encoding UTF8' adds a BOM, which can confuse Chrome/Edge JSON parsers.
+# v2.0.36 failed due to ASCII corrupting "José".
+# v2.0.37 failed likely due to UTF8-BOM.
+# This method ensures pure UTF-8.
+$Utf8NoBom = New-Object System.Text.UTF8Encoding $False
+[System.IO.File]::WriteAllText($ManifestPath, $ManifestContent, $Utf8NoBom)
+
 Write-Host "    - Manifest created/updated."
 
 # Register Keys (Works for both Chrome and Edge)

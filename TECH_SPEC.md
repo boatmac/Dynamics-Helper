@@ -1,5 +1,7 @@
 # Project Specification: Dynamics Helper Extension
 
+> **DEPRECATION WARNING:** This document describes the initial concept. For the authoritative technical reference on Native Host deployment, Registry keys, and Manifest architecture, please refer to **[ARCHITECTURE.md](./ARCHITECTURE.md)**.
+
 > **Role for the Code Agent:** You are an expert Full-Stack Developer specializing in Browser Extensions (Manifest V3), Python System Programming, and Azure Cloud Services. You are building a productivity tool for Technical Support Engineers.
 
 ## 1. Project Overview
