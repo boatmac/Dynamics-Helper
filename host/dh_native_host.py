@@ -1,3 +1,66 @@
+# --- SELF-REGISTRATION MODE ---
+# Must run before stdout redirection to allow printing status to console.
+import sys
+
+if "--register" in sys.argv:
+    import os
+    import json
+    import winreg
+
+    try:
+        HOST_NAME = "com.dynamics.helper.native"
+        ALLOWED_ORIGINS = [
+            "chrome-extension://aiimcjfjmibedicmckpphgbddankgdln/",
+            "chrome-extension://fkemelmlolmdnldpofiahmnhngmhonno/",
+        ]
+
+        # Determine paths (Self-contained exe)
+        # When running as exe, sys.executable is the path to the exe.
+        # When running as script, it's python.exe.
+        # But --register is mainly for the compiled exe scenario in Prod.
+        exe_path = sys.executable
+        install_dir = os.path.dirname(exe_path)
+
+        # Manifest is strictly "manifest.json" in Prod
+        manifest_path = os.path.join(install_dir, "manifest.json")
+
+        # 1. Write Manifest (UTF-8 No BOM)
+        # Relative path "dh_native_host.exe" ensures portability and avoids encoding issues.
+        manifest_content = {
+            "name": HOST_NAME,
+            "description": "Dynamics Helper Native Host",
+            "path": "dh_native_host.exe",
+            "type": "stdio",
+            "allowed_origins": ALLOWED_ORIGINS,
+        }
+
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest_content, f, indent=2)
+        print(f"Created manifest at: {manifest_path}")
+
+        # 2. Register Keys (Windows Registry)
+        registry_locations = [
+            (winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\NativeMessagingHosts"),
+            (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Edge\NativeMessagingHosts"),
+        ]
+
+        for hkey, subkey in registry_locations:
+            try:
+                host_key_path = f"{subkey}\\{HOST_NAME}"
+                key = winreg.CreateKey(hkey, host_key_path)
+                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, manifest_path)
+                winreg.CloseKey(key)
+                print(f"Registered {HOST_NAME} at {host_key_path}")
+            except Exception as e:
+                print(f"Failed to register at {subkey}: {e}")
+
+        print("Registration completed successfully.")
+        sys.exit(0)
+
+    except Exception as e:
+        print(f"Registration failed: {e}")
+        sys.exit(1)
+
 # --- STDOUT PROTECTION ---
 # Native Messaging requires STDOUT to be exclusively used for length-prefixed JSON.
 # Any library that uses 'print()' will corrupt the stream and cause Chrome to disconnect.
@@ -60,7 +123,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.38"
+VERSION = "2.0.39"
 
 # Setup User Data Directory (Cross-platform)
 

@@ -117,73 +117,40 @@ Write-Host "    - Extension files copied to: $ExtDest ($FileCount files)"
 $ManifestPath = "$DestDir\manifest.json"
 $IsUpdate = Test-Path $ManifestPath
 
-function Set-RegistryKeys {
-    param ($ManifestPath)
-    $RegPathChrome = "HKCU\Software\Google\Chrome\NativeMessagingHosts\$HostName"
-    $RegPathEdge = "HKCU\Software\Microsoft\Edge\NativeMessagingHosts\$HostName"
-    
-    # Chrome
-    if (-not (Test-Path $RegPathChrome)) { 
-        New-Item -Path $RegPathChrome -Force | Out-Null 
-    }
-    # Use Set-Item for Default Value (Robust Method)
-    Set-Item -Path "Registry::$RegPathChrome" -Value $ManifestPath
-    
-    # Edge
-    if (-not (Test-Path $RegPathEdge)) { 
-        New-Item -Path $RegPathEdge -Force | Out-Null 
-    }
-    Set-Item -Path "Registry::$RegPathEdge" -Value $ManifestPath
-    
-    Write-Host "    - Registry keys updated to point to: $DestDir"
-}
 
 # --- COMMON: Generate Manifest & Register ---
 
-# Auto-configure with fixed IDs
-# 1. Main Chrome/Edge ID (with key)
-# 2. Legacy/Dev ID (just in case)
-$ExtIds = @(
-    "fkemelmlolmdnldpofiahmnhngmhonno",
-    "aiimcjfjmibedicmckpphgbddankgdln"
-)
-
 Write-Host "Configuring Native Host Manifest..." -ForegroundColor Gray
 
-$AllowedOrigins = @()
-foreach ($Id in $ExtIds) {
-    $AllowedOrigins += "chrome-extension://$Id/"
-    $AllowedOrigins += "extension://$Id/"
+# CRITICAL FIX (v2.0.39): Delegate registration to the Python Executable.
+# PowerShell has proven unreliable for generating JSON without BOM or encoding issues across different Windows locales.
+# The executable now has a '--register' flag that uses Python's standard library to:
+# 1. Generate 'manifest.json' (Strict UTF-8, No BOM)
+# 2. Update the Windows Registry for Chrome and Edge
+# This ensures perfect consistency regardless of the user's shell environment.
+
+$ExePath = "$DestDir\dh_native_host.exe"
+if (-not (Test-Path $ExePath)) {
+    Write-Error "Executable not found at '$ExePath'. Cannot register."
 }
 
-# Create Manifest
-# CRITICAL FIX: Use Relative Path ("dh_native_host.exe").
-# 1. It makes the manifest portable (can move the folder).
-# 2. It solves the "José" bug: If the absolute path contains non-ASCII characters, 
-#    and we save as ASCII/UTF8-with-BOM, the browser might fail to parse or find the path.
-#    By using a simple relative string, we remove the special characters from the JSON entirely.
-$ExePath = "dh_native_host.exe"
+try {
+    Write-Host "    Running registration command..."
+    # Execute the host with --register. 
+    # We pipe to Write-Host to show output, but in a way that doesn't break the script if it writes to stdout (which it does).
+    $RegisterOutput = & $ExePath --register 2>&1
+    
+    # Check for success pattern in output or exit code
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "    $RegisterOutput" -ForegroundColor Gray
+        Write-Host "    - Registration successful."
+    } else {
+        Write-Error "Registration failed with exit code $LASTEXITCODE. Output: $RegisterOutput"
+    }
+} catch {
+    Write-Error "Failed to execute registration command: $_"
+}
 
-$ManifestContent = @{
-    name = $HostName
-    description = "Dynamics Helper Native Host"
-    path = $ExePath
-    type = "stdio"
-    allowed_origins = $AllowedOrigins
-} | ConvertTo-Json -Depth 5
-
-# CRITICAL FIX: Write using UTF8 *WITHOUT BOM*.
-# PowerShell's 'Out-File -Encoding UTF8' adds a BOM, which can confuse Chrome/Edge JSON parsers.
-# v2.0.36 failed due to ASCII corrupting "José".
-# v2.0.37 failed likely due to UTF8-BOM.
-# This method ensures pure UTF-8.
-$Utf8NoBom = New-Object System.Text.UTF8Encoding $False
-[System.IO.File]::WriteAllText($ManifestPath, $ManifestContent, $Utf8NoBom)
-
-Write-Host "    - Manifest created/updated."
-
-# Register Keys (Works for both Chrome and Edge)
-Set-RegistryKeys -ManifestPath $ManifestPath
 
 
 if ($IsUpdate) {
