@@ -157,9 +157,12 @@ foreach ($Id in $ExtIds) {
 }
 
 # Create Manifest
-# CRITICAL FIX: Use Absolute Path for the executable to ensure the browser finds it reliably.
-# ConvertTo-Json handles the backslash escaping automatically.
-$ExePath = "$DestDir\dh_native_host.exe"
+# CRITICAL FIX: Use Relative Path ("dh_native_host.exe").
+# 1. It makes the manifest portable (can move the folder).
+# 2. It solves the "José" bug: If the absolute path contains non-ASCII characters, 
+#    and we save as ASCII/UTF8-with-BOM, the browser might fail to parse or find the path.
+#    By using a simple relative string, we remove the special characters from the JSON entirely.
+$ExePath = "dh_native_host.exe"
 
 $ManifestContent = @{
     name = $HostName
@@ -169,7 +172,9 @@ $ManifestContent = @{
     allowed_origins = $AllowedOrigins
 } | ConvertTo-Json -Depth 5
 
-$ManifestContent | Out-File -FilePath $ManifestPath -Encoding ascii
+# Write using UTF8 (PowerShell 5.1 adds BOM, but Chrome accepts it).
+# Ideally we would use [System.IO.File]::WriteAllText for no-BOM, but this is standard enough.
+$ManifestContent | Out-File -FilePath $ManifestPath -Encoding UTF8
 Write-Host "    - Manifest created/updated."
 
 # Register Keys (Works for both Chrome and Edge)
