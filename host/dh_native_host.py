@@ -3,6 +3,37 @@
 # Any library that uses 'print()' will corrupt the stream and cause Chrome to disconnect.
 # We save the original binary stdout for messaging, and redirect 'sys.stdout' to 'sys.stderr'.
 import sys
+import os
+import datetime
+import traceback
+
+# --- EMERGENCY LOGGING ---
+# We write to %TEMP% because we might crash before determining the User Data Directory.
+# This is crucial for debugging silent failures on startup (e.g. missing DLLs, import errors).
+
+
+# Define dummy first to prevent unbound errors
+def log_emergency(msg):
+    pass
+
+
+try:
+    temp_dir = os.environ.get("TEMP", os.environ.get("TMP", os.path.expanduser("~")))
+    EMERGENCY_LOG = os.path.join(temp_dir, "dh_startup.log")
+
+    def log_emergency(msg):
+        try:
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(EMERGENCY_LOG, "a") as f:
+                f.write(f"[{timestamp}] {msg}\n")
+        except:
+            pass
+
+    log_emergency("--- Native Host Process Started ---")
+    log_emergency(f"Executable: {sys.executable}")
+    log_emergency(f"CWD: {os.getcwd()}")
+except:
+    pass
 
 try:
     # Save the binary stdout for our use
@@ -12,6 +43,8 @@ try:
     sys.stdout = sys.stderr
 except Exception as e:
     # Fallback if something is weird (e.g. pythonw)
+    if "log_emergency" in locals():
+        log_emergency(f"Stdout redirection failed: {e}")
     NATIVE_STDOUT = sys.stdout.buffer
 
 import asyncio
@@ -27,7 +60,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.35"
+VERSION = "2.0.36"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -71,6 +104,7 @@ logging.info(f"Python Executable: {sys.executable}")
 
 # Import the SDK from the correct package name we discovered: 'copilot'
 try:
+    log_emergency("Attempting to import copilot SDK...")
     from copilot import CopilotClient
     from copilot.types import (
         CopilotClientOptions,
@@ -80,22 +114,31 @@ try:
     )
 
     logging.info("Successfully imported copilot SDK.")
+    log_emergency("Successfully imported copilot SDK.")
 except ImportError as e:
-    logging.critical(f"Failed to import copilot SDK: {e}")
+    msg = f"Failed to import copilot SDK: {e}\n{traceback.format_exc()}"
+    logging.critical(msg)
+    log_emergency(msg)
     # We exit here because the app cannot function without it
     sys.exit(1)
 except Exception as e:
-    logging.critical(f"Unexpected error importing copilot SDK: {e}")
+    msg = f"Unexpected error importing copilot SDK: {e}\n{traceback.format_exc()}"
+    logging.critical(msg)
+    log_emergency(msg)
     sys.exit(1)
 
 # Import PII Scrubber
 try:
+    log_emergency("Attempting to import PiiScrubber...")
     from pii_scrubber import PiiScrubber
     import updater  # Import the new updater module
 
     logging.info("Successfully imported PiiScrubber and Updater.")
+    log_emergency("Successfully imported PiiScrubber and Updater.")
 except ImportError as e:
-    logging.critical(f"Failed to import PiiScrubber or Updater: {e}")
+    msg = f"Failed to import PiiScrubber or Updater: {e}\n{traceback.format_exc()}"
+    logging.critical(msg)
+    log_emergency(msg)
     sys.exit(1)
 
 
@@ -1094,11 +1137,17 @@ class NativeHost:
 
 
 if __name__ == "__main__":
-    host = NativeHost()
     try:
+        log_emergency("Initializing NativeHost class...")
+        host = NativeHost()
+
+        log_emergency("Starting asyncio loop...")
         # Standard entry point for asyncio
         asyncio.run(host.run())
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        logging.critical(f"Fatal error: {e}")
+        msg = f"Fatal error in main loop: {e}\n{traceback.format_exc()}"
+        logging.critical(msg)
+        log_emergency(msg)
+        sys.exit(1)
