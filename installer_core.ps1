@@ -143,32 +143,10 @@ function Set-RegistryKeys {
 # Auto-configure with fixed IDs
 # 1. Main Chrome/Edge ID (with key)
 # 2. Legacy/Dev ID (just in case)
-$DefaultId = "fkemelmlolmdnldpofiahmnhngmhonno"
 $ExtIds = @(
-    $DefaultId,
+    "fkemelmlolmdnldpofiahmnhngmhonno",
     "aiimcjfjmibedicmckpphgbddankgdln"
 )
-
-Write-Host "--------------------------------------------------"
-Write-Host "EXTENSION ID VERIFICATION" -ForegroundColor Cyan
-Write-Host "--------------------------------------------------"
-Write-Host "The Native Host requires your specific Extension ID to allow connections."
-Write-Host "1. Open your browser extensions page (chrome://extensions or edge://extensions)."
-Write-Host "2. Find 'Dynamics Helper'."
-Write-Host "3. Look for the ID (e.g., ID: $DefaultId)."
-Write-Host ""
-Write-Host "Expected ID: $DefaultId" -ForegroundColor Green
-Write-Host ""
-$UserResponse = Read-Host "Press ENTER if the ID matches. If it is different, paste it here"
-
-if (-not [string]::IsNullOrWhiteSpace($UserResponse)) {
-    $UserResponse = $UserResponse.Trim()
-    Write-Host "Adding custom ID: $UserResponse" -ForegroundColor Yellow
-    $ExtIds += $UserResponse
-} else {
-    Write-Host "Using default ID."
-}
-Write-Host ""
 
 Write-Host "Configuring Native Host Manifest..." -ForegroundColor Gray
 
@@ -179,10 +157,14 @@ foreach ($Id in $ExtIds) {
 }
 
 # Create Manifest
+# CRITICAL FIX: Use Absolute Path for the executable to ensure the browser finds it reliably.
+# ConvertTo-Json handles the backslash escaping automatically.
+$ExePath = "$DestDir\dh_native_host.exe"
+
 $ManifestContent = @{
     name = $HostName
     description = "Dynamics Helper Native Host"
-    path = "dh_native_host.exe"
+    path = $ExePath
     type = "stdio"
     allowed_origins = $AllowedOrigins
 } | ConvertTo-Json -Depth 5
