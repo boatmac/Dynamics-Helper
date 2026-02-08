@@ -12,15 +12,26 @@ A productivity tool for Technical Support Engineers (TSEs) to analyze support ti
 
 ## Installation
 
-### For Users (Recommended)
+### Quick Install (User Friendly)
+
+Open PowerShell and run:
+
+```powershell
+irm https://aka.ms/mcdyhelper | iex
+```
+
+This command downloads the latest release and runs the installer automatically.
+
+### Manual Install
 
 1. **Download the Release:**
-    * Go to the [Releases Page](../../releases) and download the latest `.zip` file (e.g., `DynamicsHelper_v2.0.8.zip`).
+    * Go to the [Releases Page](../../releases) and download the latest `.zip` file.
     * Extract the contents to a folder.
 
 2. **Run the Installer:**
     * Double-click `install.bat`.
     * *(This wrapper script automatically bypasses PowerShell execution policies to allow the installer to run.)*
+
     * This will:
         * Install the Native Host and Extension to `%LOCALAPPDATA%\DynamicsHelper`.
         * Register the Native Host in the Windows Registry.

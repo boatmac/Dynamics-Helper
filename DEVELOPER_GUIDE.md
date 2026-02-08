@@ -29,15 +29,57 @@ The project consists of three main components:
   * **Logging:** Writes to `%APPDATA%\DynamicsHelper\native_host.log`.
   * **Config Loading:** Prioritizes `%APPDATA%` config over the local directory.
 * **`install.bat`**: Sets up the Python environment and registry keys.
-* **`register.py`**: Helper script called by `install.bat` to write the Native Messaging manifest to the Windows Registry.
-* **`copilot-instructions.md`**: The system prompt for the AI Agent. Defines its role, tools, and privacy rules.
+* **`system_prompt.md`**: The base persona for the AI Agent.
 
 ### `%LOCALAPPDATA%\DynamicsHelper\` (User Configuration)
 
 * **`config.json`**: Defines the MCP servers (Kusto, WorkIQ, etc.) and Skill directories the Agent can use.
   * *Note:* In Production mode, this file is shared between the installed app and the user's overrides.
 * **`native_host.log`**: The primary debug log.
-* **`copilot-instructions.md`**: The active system prompt. (Overrides the one in `host/` if present).
+* **`copilot-instructions.md`**: The active system prompt (User overrides).
+
+---
+
+## The Copilot Integration Pipeline
+
+Understanding how a user request becomes an AI response.
+
+### 1. The Prompt Pipeline
+
+1.  **User Input:** The user provides error text, context, and case metadata via the Extension UI.
+2.  **Native Messaging:** This data is sent to the `dh_native_host.exe` as a JSON payload (`analyze_error` action).
+3.  **PII Scrubbing (`pii_scrubber.py`):**
+    *   Before sending to the LLM, the `text` and `context` are scrubbed using regex.
+    *   **Removes:** Emails, IPv4 Addresses, US Phone Numbers.
+    *   **Masks:** GUIDs (Subscription IDs) are replaced with `[REDACTED_GUID]` to prevent ID leakage, though this limits specific resource querying.
+4.  **SDK Execution (`send_and_wait`):**
+    *   The backend initializes a `CopilotSession` with the specific configuration.
+    *   It sends the prompt with a **600s timeout**.
+
+### 2. Instruction Hierarchy (The Context)
+
+The "System Prompt" is built from three layers, merged at runtime in `_get_session_config`:
+
+1.  **Layer 1: System Instructions (Immutable)**
+    *   Source: `host/system_prompt.md` (or beside exe).
+    *   Content: Base persona, core capabilities, safety rules.
+
+2.  **Layer 2: User Instructions (Customizable)**
+    *   Source: `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`.
+    *   Content: User-specific preferences managed via the Extension Options Page.
+
+3.  **Layer 3: Workspace Instructions (Project-Specific)**
+    *   Source: `[Root Path]/.github/copilot-instructions.md`.
+    *   Content: Project-specific rules (if a Root Path is configured in the extension).
+
+### 3. Skills Configuration
+
+Capabilities (Skills) are loaded additively:
+*   **Default Skills:** Bundled with the application.
+*   **User Skills:** Defined in `%LOCALAPPDATA%\config.json`.
+*   **Workspace Skills:** Defined in `.github/copilot.config.json`.
+
+---
 
 ## Debugging Guide
 
@@ -45,48 +87,24 @@ The project consists of three main components:
 
 * **Check:** Is the Host running? Chrome spawns it automatically.
 * **Log:** Check `%LOCALAPPDATA%\DynamicsHelper\native_host.log`.
-* **Common Cause:** Python path issues or Registry key mismatches.
-* **Fix:** Re-run `install.bat` as Administrator. Check `register.py` has the correct Extension ID (`fkemelmlolmdnldpofiahmnhngmhonno`).
+* **Common Cause:** Registry key mismatches or PowerShell encoding bugs.
+* **Fix:**
+    *   Run `installer_core.ps1` (or `install.bat`) again.
+    *   Verify `manifest.json` in `%LOCALAPPDATA%\DynamicsHelper` is valid JSON and points to `dh_native_host.exe`.
 
 ### 2. "Analysis Timeout"
 
 * **Check:** Does the log show `Copilot request timed out after X seconds`?
 * **Cause:** The Agent is doing too much (heavy RAG, many Kusto queries).
-* **Fix:**
-  * **Temporary:** The user just needs to wait/retry.
-  * **Permanent:** Increase timeouts in `FAB.tsx` (Frontend) AND `dh_native_host.py` (Backend). Frontend timeout must always be > Backend timeout.
+* **Fix:** Increase timeouts in `FAB.tsx` (Frontend) AND `dh_native_host.py` (Backend).
 
-### 3. Agent outputting PII or missing Technical IDs
-
-* **Check:** `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`.
-* **Fix:** Edit the instructions file to clarify redaction rules. (We recently updated this to whitelist GUIDs/Resource IDs).
-
-### 4. Agent failing to run Kusto queries
+### 3. Agent failing to run Kusto queries
 
 * **Check:** Logs for `Permission requested`.
 * **Check:** `config.json` in `%LOCALAPPDATA%` to ensure the `kusto` MCP server is defined correctly.
 * **Check:** Does the user have `Use-AzureChina` or relevant credentials? The Agent runs as the user.
 
-## Security & Compliance
-
-### PII Redaction (`pii_scrubber.py`)
-
-To minimize data leakage, the Native Host employs a regex-based scrubber (`host/pii_scrubber.py`) *before* sending any prompt to the Copilot SDK.
-
-* **Trigger:** Called in `handle_analyze_error` inside `dh_native_host.py`.
-* **Entities Redacted:**
-  * Emails
-  * IPv4 Addresses
-  * GUIDs (Note: This includes Subscription/Tenant IDs, which effectively anonymizes the request but prevents the AI from querying specific resources by ID).
-  * US Phone Numbers
-* **Developer Note:** If you need to enable specific resource targeting (e.g., Kusto queries on a specific SubID), you may need to relax the GUID regex in `pii_scrubber.py` or implement a whitelist strategy.
-
-### Native Messaging Security
-
-* **Origins:** The `host/register.py` script restricts communication to *only* the specific Extension IDs defined in `ALLOWED_ORIGINS`.
-* **Auto-Approval:** The `dh_native_host.py` implements a `_permission_handler` that returns `{"kind": "approved"}` for all SDK permission requests.
-  * **Reason:** The host runs headless (no terminal UI). Without this, any tool use (reading files, running queries) would hang indefinitely waiting for user 'y/n' input.
-  * **Risk:** This grants the AI full access to the defined tools (File System, Kusto, etc.). Ensure only trusted Skills/MCP servers are configured.
+---
 
 ## Release Process & Testing
 
@@ -96,29 +114,10 @@ We use `release_helper.py` to manage versions and builds.
 
 * **Stable Release:** `python release_helper.py 2.0.18 --publish`
 * **Beta Release:** `python release_helper.py 2.0.19-beta --publish --prerelease`
-* **Manual Build:** `python release_helper.py 2.0.18` (Just builds the zip)
 
 ### 2. The "Safe Switch" Workflow
 
 To test the production build without breaking your dev environment, use `dev_switch.py`.
 
-* **Mode: Dev** (`python dev_switch.py dev`)
-  * Registry points to: `host/host_manifest.json`
-  * Runs: Local Python source (`host/dh_native_host.py`)
-  * Config: Uses `host/config.json` + `AppData` overrides.
-  * **Use for:** Daily coding and debugging.
-
-* **Mode: Prod** (`python dev_switch.py prod`)
-  * Registry points to: `%LOCALAPPDATA%\DynamicsHelper\manifest.json`
-  * Runs: Compiled Exe (`dh_native_host.exe`)
-  * Config: Uses `%LOCALAPPDATA%\DynamicsHelper\config.json`.
-  * **Use for:** Verifying the installer and release build.
-
-### 3. Recommended Test Cycle
-
-1. **Code** features in Dev mode.
-2. **Build** a candidate: `python release_helper.py 2.0.x`
-3. **Install** the candidate: Run `install.bat` from the `releases/` folder.
-4. **Switch** to Prod: `python dev_switch.py prod`
-5. **Test** end-to-end functionality in the browser.
-6. **Revert** to Dev: `python dev_switch.py dev`
+* **Mode: Dev** (`python dev_switch.py dev`): Runs local Python source.
+* **Mode: Prod** (`python dev_switch.py prod`): Runs installed `.exe` (verifies installer logic).

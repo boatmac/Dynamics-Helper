@@ -172,24 +172,35 @@ Since you cannot see the browser or console:
 * **Format:** Responses should be in Markdown.
 * **Safety:** Do not output real customer PII in the final report.
 
-## 7. Troubleshooting & Known Issues
+## 9. Definition of Done (DoD)
+
+To ensure long-term maintainability and consistency, a task is only considered "Done" when the following criteria are met:
+
+1.  **Code Functional:** The feature or bug fix is implemented and verified.
+2.  **No "Split Brain":** Changes to the Host architecture are compatible with both **Dev Mode** (Python script) and **Prod Mode** (Compiled Exe).
+3.  **Documentation Updated:**
+    *   If the **Architecture** changed (e.g., Registry keys, Manifest logic), update `ARCHITECTURE.md`.
+    *   If the **User Workflow** changed (e.g., new installation step), update `USER_GUIDE.md`.
+    *   If the **Internal Logic** changed significantly (e.g., new Copilot pipeline), update `DEVELOPER_GUIDE.md`.
+4.  **Clean Repository:** No temporary debug scripts or backup folders are left behind.
+
+## 10. Troubleshooting & Known Issues
 
 ### 1. "Native Host disconnected unexpectedly"
 
 This error means the Host process crashed during startup or failed to establish the communication pipe.
 
-* **Cause 1: Stdout Corruption**
-  * **Reason:** Native Messaging relies on `stdout` for JSON communication. Any `print()` statement (from libraries or debug code) will corrupt the stream.
-  * **Fix:** `dh_native_host.py` has a protection block at the very top that redirects `sys.stdout` to `sys.stderr`. **DO NOT REMOVE IT.** Ensure `import sys` happens *before* this block or immediately within it.
-* **Cause 2: Extension ID Mismatch**
-  * **Reason:** Chrome refuses to talk to a Native Host that doesn't explicitly allow the extension's ID in its manifest.
-  * **Dev ID:** `fkemelmlolmdnldpofiahmnhngmhonno`
-  * **Fix:** Ensure `host/register.py` includes this ID in `ALLOWED_ORIGINS`. Run `python host/register.py` to update the registry.
+*   **Cause 1: Stdout Corruption**
+    *   **Reason:** Native Messaging relies on `stdout` for JSON communication. Any `print()` statement (from libraries or debug code) will corrupt the stream.
+    *   **Fix:** `dh_native_host.py` has a protection block at the very top that redirects `sys.stdout` to `sys.stderr`. **DO NOT REMOVE IT.**
+*   **Cause 2: Manifest Encoding Bugs ("José")**
+    *   **Reason:** PowerShell's `Out-File` or `Set-Content` can introduce BOMs or incorrect encoding, causing Chrome to fail parsing the `manifest.json`.
+    *   **Fix (v2.0.39+):** The installer now delegates registration to the Python executable (`dh_native_host.exe --register`). This ensures strict UTF-8 (No BOM) generation.
 
 ### 2. Changes not reflecting
 
-* **Runtime Source:** The extension loads from `dist/extension` (not `extension/dist` or `extension/src`).
-* **Fix:** After building (`npm run build`), you must sync artifacts or rely on `release_helper.py` to do it.
+*   **Runtime Source:** The extension loads from `dist/extension` (not `extension/dist` or `extension/src`).
+*   **Fix:** After building (`npm run build`), you must sync artifacts or rely on `release_helper.py` to do it.
 
 ## 8. Release Workflow (Updated)
 
