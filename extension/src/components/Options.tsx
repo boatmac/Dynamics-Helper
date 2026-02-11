@@ -51,6 +51,7 @@ interface Preferences {
     rootPath?: string;
     skillDirectories?: string;
     mcpConfigPath?: string;
+    useWorkspaceOnly?: boolean;
     autoAnalyzeMode?: 'disabled' | 'critical' | 'always' | 'new_cases';
     enableStatusBubble?: boolean;
     language?: LanguageCode;
@@ -66,6 +67,7 @@ const DEFAULT_PREFS: Preferences = {
     rootPath: "",
     skillDirectories: "~/.copilot/skills",
     mcpConfigPath: "~/.copilot/mcp-config.json",
+    useWorkspaceOnly: true,
     autoAnalyzeMode: 'disabled',
     enableStatusBubble: true,
     language: 'auto'
@@ -589,6 +591,7 @@ const Options: React.FC = () => {
                             if (extPrefs.auto_analyze_mode) newPrefs.autoAnalyzeMode = extPrefs.auto_analyze_mode;
                             if (extPrefs.user_prompt !== undefined) newPrefs.userPrompt = extPrefs.user_prompt;
                             if (extPrefs.enable_status_bubble !== undefined) newPrefs.enableStatusBubble = extPrefs.enable_status_bubble;
+                            if (extPrefs.useWorkspaceOnly !== undefined) newPrefs.useWorkspaceOnly = extPrefs.useWorkspaceOnly;
                             
                             // Visual Settings (Now synced)
                             if (extPrefs.language) newPrefs.language = extPrefs.language;
@@ -656,6 +659,7 @@ const Options: React.FC = () => {
                                     auto_analyze_mode: prefs.autoAnalyzeMode,
                                     user_prompt: prefs.userPrompt,
                                     enable_status_bubble: prefs.enableStatusBubble,
+                                    useWorkspaceOnly: prefs.useWorkspaceOnly,
                                     language: prefs.language,
                                     primaryColor: prefs.primaryColor,
                                     buttonText: prefs.buttonText,
@@ -1221,11 +1225,24 @@ const Options: React.FC = () => {
                                                     value={prefs.rootPath || ""}
                                                     onChange={(e) => setPrefs(prev => ({ ...prev, rootPath: e.target.value }))}
                                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
-                                                    placeholder="C:\MyCases"
-                                                />
-                                            </div>
+                                                placeholder="C:\MyCases"
+                                            />
+                                        </div>
 
-                                            {/* 3. Skills Directory */}
+                                        <div className="mt-2 flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                id="useWorkspaceOnly"
+                                                checked={prefs.useWorkspaceOnly !== false}
+                                                onChange={(e) => setPrefs(prev => ({ ...prev, useWorkspaceOnly: e.target.checked }))}
+                                                className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
+                                            />
+                                            <label htmlFor="useWorkspaceOnly" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
+                                                {t('useWorkspaceOnly') || "Use repository SKILLS and MCP ONLY"}
+                                            </label>
+                                        </div>
+
+                                        {/* 3. Skills Directory */}
                                             <div className="mt-4">
                                                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('skillDirectories')}</label>
                                                 <p className="text-[10px] text-slate-500 mb-2">
@@ -1309,7 +1326,7 @@ const Options: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[600px]">
+                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[1200px]">
                                 {/* Toolbar */}
                                 <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex gap-2 items-center">
                                      <button 

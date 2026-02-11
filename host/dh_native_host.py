@@ -123,7 +123,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.41"
+VERSION = "2.0.42"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -457,11 +457,21 @@ class NativeHost:
                 continue  # IGNORE legacy mcp_servers in config.json
             final_data[key] = value
 
+        # Check Workspace Only Mode
+        ext_prefs = final_data.get("extension_preferences", {})
+        use_workspace_only = ext_prefs.get("useWorkspaceOnly", True)
+        has_root_path = bool(final_data.get("root_path"))
+
         # Merge Skill Directories (Additive)
         default_skills = default_data.get("skill_directories", [])
         user_skills = user_data.get("skill_directories", [])
-        # Combine unique skills
-        final_data["skill_directories"] = list(set(default_skills + user_skills))
+
+        if use_workspace_only and has_root_path:
+            final_data["skill_directories"] = []
+            logging.info("Workspace Only Mode: Ignoring global/default skills.")
+        else:
+            # Combine unique skills
+            final_data["skill_directories"] = list(set(default_skills + user_skills))
 
         # --- MCP SERVER CONFIGURATION (Global + Workspace Merge) ---
         mcp_servers = {}
@@ -473,17 +483,22 @@ class NativeHost:
         )
         global_mcp_path = os.path.expanduser(global_mcp_path_str)
 
-        if os.path.exists(global_mcp_path):
-            try:
-                with open(global_mcp_path, "r") as f:
-                    global_mcp_data = json.load(f)
-                    if "mcpServers" in global_mcp_data:
-                        mcp_servers.update(global_mcp_data["mcpServers"])
-                        logging.info(f"Loaded Global MCP config from {global_mcp_path}")
-            except Exception as e:
-                logging.error(f"Failed to load Global MCP config: {e}")
+        if not (use_workspace_only and has_root_path):
+            if os.path.exists(global_mcp_path):
+                try:
+                    with open(global_mcp_path, "r") as f:
+                        global_mcp_data = json.load(f)
+                        if "mcpServers" in global_mcp_data:
+                            mcp_servers.update(global_mcp_data["mcpServers"])
+                            logging.info(
+                                f"Loaded Global MCP config from {global_mcp_path}"
+                            )
+                except Exception as e:
+                    logging.error(f"Failed to load Global MCP config: {e}")
+            else:
+                logging.info(f"Global MCP config not found at {global_mcp_path}")
         else:
-            logging.info(f"Global MCP config not found at {global_mcp_path}")
+            logging.info("Workspace Only Mode: Ignoring global MCP config.")
 
         # --- Apply to Instance and Session ---
 
