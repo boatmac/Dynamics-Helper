@@ -550,15 +550,16 @@ const Options: React.FC = () => {
 
                         // 2. Skill Directories (Array -> CSV String)
                         if (Array.isArray(hostConfig.skill_directories)) {
-                            // Expand user home ~ for display? No, keep it as is or normalized.
-                            // The host resolves them, but returns the resolved paths? 
-                            // Actually _get_session_config returns resolved paths.
-                            // For UI, we might want to keep the raw string if possible, but we only get resolved.
-                            // Let's just join them.
-                            const skillsStr = hostConfig.skill_directories.join(", ");
-                            if (skillsStr !== prev.skillDirectories) {
-                                newPrefs.skillDirectories = skillsStr;
-                                changed = true;
+                            // Check incoming preference first
+                            const incomingWorkspaceOnly = hostConfig.extension_preferences?.useWorkspaceOnly ?? prev.useWorkspaceOnly;
+
+                            // Only sync skillDirectories if we are NOT in workspace-only mode
+                            if (incomingWorkspaceOnly !== true) {
+                                const skillsStr = hostConfig.skill_directories.join(", ");
+                                if (skillsStr !== prev.skillDirectories) {
+                                    newPrefs.skillDirectories = skillsStr;
+                                    changed = true;
+                                }
                             }
                         }
 
@@ -1251,14 +1252,10 @@ const Options: React.FC = () => {
                                                 </p>
                                                 <input
                                                     type="text"
-                                                    value={prefs.useWorkspaceOnly ? "" : (prefs.skillDirectories || "")}
-                                                    disabled={prefs.useWorkspaceOnly}
+                                                    value={prefs.skillDirectories || ""}
                                                     onChange={(e) => setPrefs(prev => ({ ...prev, skillDirectories: e.target.value }))}
-                                                    className={cn(
-                                                        "w-full px-3 py-2 border border-slate-200 rounded-lg outline-none transition-all text-sm font-mono",
-                                                        prefs.useWorkspaceOnly ? "bg-slate-100 text-slate-400 cursor-not-allowed" : "focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                                                    )}
-                                                    placeholder={prefs.useWorkspaceOnly ? "Using .github/skills from repository" : "~/.copilot/skills"}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
+                                                    placeholder="~/.copilot/skills"
                                                 />
                                             </div>
 

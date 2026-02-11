@@ -165,16 +165,29 @@ class Updater:
 
     @staticmethod
     def cleanup_old_version(current_exe_path):
-        """Deletes .old file if it exists."""
+        """Deletes .old file if it exists and cleans up legacy backups."""
         if not current_exe_path.endswith(".exe"):
             return
 
+        # 1. Cleanup Binary
         old_exe = current_exe_path + ".old"
         if os.path.exists(old_exe):
             try:
-                # Give the previous process a moment to die if we just restarted?
-                # Usually we call this on startup, so previous process is long gone.
                 os.remove(old_exe)
                 logging.info(f"Cleaned up old version: {old_exe}")
             except Exception as e:
                 logging.debug(f"Could not clean up old version (might be locked?): {e}")
+
+        # 2. Cleanup System Prompt Backups (Legacy)
+        host_dir = os.path.dirname(current_exe_path)
+        try:
+            for item in os.listdir(host_dir):
+                if item.startswith("system_prompt.md.") and item.endswith(".bak"):
+                    bak_path = os.path.join(host_dir, item)
+                    try:
+                        os.remove(bak_path)
+                        logging.info(f"Cleaned up legacy backup: {item}")
+                    except Exception as e:
+                        logging.warning(f"Failed to remove backup {item}: {e}")
+        except Exception as e:
+            logging.error(f"Error cleaning up backups: {e}")
