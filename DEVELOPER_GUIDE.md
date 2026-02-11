@@ -72,12 +72,39 @@ The "System Prompt" is built from three layers, merged at runtime in `_get_sessi
     *   Source: `[Root Path]/.github/copilot-instructions.md`.
     *   Content: Project-specific rules (if a Root Path is configured in the extension).
 
+**Repository ONLY Logic:** If "Repo Only" is enabled, Layer 2 (User) and Layer 1 (System) might be ignored or handled differently depending on specific implementation details, but generally workspace instructions are prioritized.
+
 ### 3. Skills Configuration
 
-Capabilities (Skills) are loaded additively:
-*   **Default Skills:** Bundled with the application.
-*   **User Skills:** Defined in `%LOCALAPPDATA%\config.json`.
-*   **Workspace Skills:** Defined in `.github/copilot.config.json`.
+Capabilities (Skills) are loaded based on the following precedence:
+
+1.  **Base Skills:**
+    *   **User Skills:** Defined in `%LOCALAPPDATA%\config.json`.
+    *   **Default Skills:** Bundled with the application.
+    *   *Rule:* User Settings **override** Default Settings. If `skill_directories` exists in User Config, Default is ignored.
+
+2.  **Workspace Skills:**
+    *   **Source:** `[Root Path]/.github/skills` directory.
+    *   *Rule:* Workspace skills are **appended** to Base Skills.
+
+3.  **Repository ONLY Mode:**
+    *   If enabled: The AI uses **ONLY** Workspace Skills. Base Skills (User + Default) are ignored.
+
+### 4. MCP Configuration
+
+Model Context Protocol (MCP) servers follow similar logic:
+
+1.  **Base MCP:**
+    *   **User Config:** Defined in `%LOCALAPPDATA%\config.json` (legacy) or `~/.copilot/mcp-config.json` (standard).
+    *   **Default Config:** Bundled `mcp-config.json` (if any).
+    *   *Rule:* User Settings **override** Default Settings.
+
+2.  **Workspace MCP:**
+    *   **Source:** `[Root Path]/.github/mcp-config.json`.
+    *   *Rule:* Workspace MCP servers are **merged** into Base MCP servers.
+
+3.  **Repository ONLY Mode:**
+    *   If enabled: The AI uses **ONLY** Workspace MCP servers. Base MCP servers are ignored.
 
 ---
 

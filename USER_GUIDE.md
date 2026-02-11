@@ -63,6 +63,23 @@ The extension uses configuration files stored in your User directory. This ensur
 * **`copilot-instructions.md`**: The "Persona" of the AI. You can edit this file to change how the AI responds (e.g., change the tone, add new rules).
 * **`native_host.log`**: The log file for troubleshooting.
 
+### Workspace Configuration (Advanced)
+
+You can configure Dynamics Helper to use specific skills and tools for a particular project or repository.
+
+1.  **Create a `.github` folder** in the root of your project/repository.
+2.  **Add Configuration Files:**
+    *   **`.github/skills/`**: A folder containing your custom skill definitions.
+    *   **`.github/mcp-config.json`**: A JSON file defining MCP servers for this project.
+    *   **`.github/copilot-instructions.md`**: Project-specific instructions for the AI.
+
+### Repository ONLY Mode
+
+In the extension settings, you can enable **"Repository ONLY Mode"**.
+
+*   **Enabled:** The AI will *only* use the configuration found in your current workspace (`.github` folder). It ignores your global User settings and the built-in defaults. This is useful for strict project isolation.
+*   **Disabled (Default):** The AI combines your Global User settings with the Workspace settings. Workspace settings are added to your global capabilities.
+
 ---
 
 ## Security & Privacy
