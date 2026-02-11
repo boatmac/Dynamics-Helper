@@ -12,9 +12,19 @@ class Updater:
     def __init__(self, current_exe_path):
         self.current_exe = os.path.abspath(current_exe_path)
         self.host_dir = os.path.dirname(self.current_exe)
-        # root_dir is up one level from 'host' dir (DynamicsHelper/host/.. -> DynamicsHelper/)
-        self.root_dir = os.path.dirname(self.host_dir)
-        self.extension_dir = os.path.join(self.root_dir, "extension")
+
+        # Logic to determine extension directory
+        # Prod Layout: extension/ is a sibling of the executable (in DynamicsHelper folder)
+        prod_ext = os.path.join(self.host_dir, "extension")
+
+        # Dev Layout: extension/ is in the parent directory (sibling of host folder)
+        dev_ext = os.path.join(os.path.dirname(self.host_dir), "extension")
+
+        # Default to Prod layout unless Dev exists and Prod doesn't
+        if os.path.exists(dev_ext) and not os.path.exists(prod_ext):
+            self.extension_dir = dev_ext
+        else:
+            self.extension_dir = prod_ext
 
     def download_update(self, url):
         """Downloads the update zip to a temporary file."""

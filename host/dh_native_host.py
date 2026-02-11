@@ -231,6 +231,45 @@ class NativeHost:
         except Exception as e:
             logging.error(f"Failed to cleanup old version: {e}")
 
+        # Fix for v2.0.45 Updater Bug (Wrong Directory)
+        # v2.0.45 erroneously extracted extension to ../extension (AppData/Local/extension)
+        # We detect this and move it to ./extension (AppData/Local/DynamicsHelper/extension)
+        try:
+            # Determine directory of the running executable/script
+            if getattr(sys, "frozen", False):
+                base_dir = os.path.dirname(sys.executable)
+                is_prod = True
+            else:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                is_prod = False
+
+            if is_prod:
+                # The "Wrong" location defined by v2.0.45 logic (Parent/extension)
+                wrong_ext_dir = os.path.join(os.path.dirname(base_dir), "extension")
+                # The "Right" location (Current/extension)
+                right_ext_dir = os.path.join(base_dir, "extension")
+
+                # Only migrate if the wrong directory exists and contains a manifest
+                # checking manifest ensures we don't pick up random folders
+                if os.path.exists(os.path.join(wrong_ext_dir, "manifest.json")):
+                    logging.info(
+                        f"Detected misplaced extension files at {wrong_ext_dir}. Migrating to {right_ext_dir}..."
+                    )
+
+                    # We want to OVERWRITE right with wrong, because wrong is the update
+                    if os.path.exists(right_ext_dir):
+                        try:
+                            shutil.rmtree(right_ext_dir)
+                        except Exception as e:
+                            logging.warning(f"Could not remove target dir: {e}")
+
+                    # Move
+                    shutil.move(wrong_ext_dir, right_ext_dir)
+                    logging.info("Extension migration successful.")
+
+        except Exception as e:
+            logging.error(f"Extension migration failed: {e}")
+
     async def check_for_updates(self, force=False):
         """Checks for updates from GitHub Releases."""
         try:
