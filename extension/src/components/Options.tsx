@@ -50,6 +50,7 @@ interface Preferences {
     userPrompt?: string;
     rootPath?: string;
     skillDirectories?: string;
+    mcpConfigPath?: string;
     autoAnalyzeMode?: 'disabled' | 'critical' | 'always' | 'new_cases';
     enableStatusBubble?: boolean;
     language?: LanguageCode;
@@ -64,6 +65,7 @@ const DEFAULT_PREFS: Preferences = {
     userPrompt: "",
     rootPath: "",
     skillDirectories: "~/.copilot/skills",
+    mcpConfigPath: "~/.copilot/mcp-config.json",
     autoAnalyzeMode: 'disabled',
     enableStatusBubble: true,
     language: 'auto'
@@ -153,7 +155,7 @@ const ItemEditor: React.FC<{
                                 value={draft.url || ''} 
                                 onChange={e => handleChange('url', e.target.value)} 
                                 placeholder="https://..."
-                                            />
+                            />
                         </div>
                     </div>
                 )}
@@ -558,7 +560,13 @@ const Options: React.FC = () => {
                             }
                         }
 
-                        // 3. User Instructions (Split Prompt)
+                        // 3. MCP Config Path
+                        if (hostConfig.mcp_config_path && hostConfig.mcp_config_path !== prev.mcpConfigPath) {
+                            newPrefs.mcpConfigPath = hostConfig.mcp_config_path;
+                            changed = true;
+                        }
+
+                        // 4. User Instructions (Split Prompt)
                         // Host now returns _user_instructions_raw for the editable part
                         // Fallback to system_message if raw is missing (legacy host)
                         if (hostConfig._user_instructions_raw !== undefined) {
@@ -643,6 +651,7 @@ const Options: React.FC = () => {
                             config: {
                                 root_path: prefs.rootPath,
                                 skill_directories: prefs.skillDirectories ? prefs.skillDirectories.split(',').map(s => s.trim()).filter(Boolean) : [],
+                                mcp_config_path: prefs.mcpConfigPath,
                                 extension_preferences: {
                                     auto_analyze_mode: prefs.autoAnalyzeMode,
                                     user_prompt: prefs.userPrompt,

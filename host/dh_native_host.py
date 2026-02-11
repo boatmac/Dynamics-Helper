@@ -123,7 +123,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.39"
+VERSION = "2.0.40"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -445,30 +445,45 @@ class NativeHost:
         # Start with default data
         final_data = default_data.copy()
 
+        # REMOVE legacy mcp_servers from default data to enforce new logic
+        if "mcp_servers" in final_data:
+            del final_data["mcp_servers"]
+
         # Update scalars (root_path, auto_analyze, etc.) from User
         for key, value in user_data.items():
             if key == "skill_directories":
                 continue  # Handle separately
             if key == "mcp_servers":
-                # For MCP servers, we might want to merge dictionaries?
-                # For now, let's assume simple update for servers, or we can merge tools.
-                # Let's do a shallow merge of the mcp_servers dict if it exists in both
-                if (
-                    "mcp_servers" in final_data
-                    and isinstance(final_data["mcp_servers"], dict)
-                    and isinstance(value, dict)
-                ):
-                    final_data["mcp_servers"].update(value)
-                else:
-                    final_data[key] = value
-            else:
-                final_data[key] = value
+                continue  # IGNORE legacy mcp_servers in config.json
+            final_data[key] = value
 
         # Merge Skill Directories (Additive)
         default_skills = default_data.get("skill_directories", [])
         user_skills = user_data.get("skill_directories", [])
         # Combine unique skills
         final_data["skill_directories"] = list(set(default_skills + user_skills))
+
+        # --- MCP SERVER CONFIGURATION (Global + Workspace Merge) ---
+        mcp_servers = {}
+
+        # 1. Load Global MCP Config
+        # Default to standard location if not set in config
+        global_mcp_path_str = final_data.get(
+            "mcp_config_path", "~/.copilot/mcp-config.json"
+        )
+        global_mcp_path = os.path.expanduser(global_mcp_path_str)
+
+        if os.path.exists(global_mcp_path):
+            try:
+                with open(global_mcp_path, "r") as f:
+                    global_mcp_data = json.load(f)
+                    if "mcpServers" in global_mcp_data:
+                        mcp_servers.update(global_mcp_data["mcpServers"])
+                        logging.info(f"Loaded Global MCP config from {global_mcp_path}")
+            except Exception as e:
+                logging.error(f"Failed to load Global MCP config: {e}")
+        else:
+            logging.info(f"Global MCP config not found at {global_mcp_path}")
 
         # --- Apply to Instance and Session ---
 
@@ -478,6 +493,27 @@ class NativeHost:
             # Do NOT delete here, we do it in _refresh_session
 
         session_config.update(final_data)  # type: ignore
+
+        # 2. Load Workspace MCP Config (.github/mcp-config.json)
+        # This overrides Global tools with the same name
+        if self.root_path and os.path.exists(self.root_path):
+            ws_mcp_path = os.path.join(self.root_path, ".github", "mcp-config.json")
+            if os.path.exists(ws_mcp_path):
+                try:
+                    with open(ws_mcp_path, "r") as f:
+                        ws_mcp_data = json.load(f)
+                        if "mcpServers" in ws_mcp_data:
+                            # Update (Merge/Override)
+                            mcp_servers.update(ws_mcp_data["mcpServers"])
+                            logging.info(
+                                f"Loaded Workspace MCP config from {ws_mcp_path}"
+                            )
+                except Exception as e:
+                    logging.error(f"Failed to load Workspace MCP config: {e}")
+
+        # Assign merged MCP servers to session config
+        if mcp_servers:
+            session_config["mcpServers"] = mcp_servers
 
         # D. Load Workspace Config (.github/copilot.config.json)
         if self.root_path and os.path.exists(self.root_path):
@@ -849,7 +885,15 @@ class NativeHost:
 
         # Update root path if provided (syncs frontend setting to backend state)
         if payload_root_path:
-            self.root_path = payload_root_path
+            if self.root_path != payload_root_path:
+                logging.info(
+                    f"Root path changed: {self.root_path} -> {payload_root_path}. Refreshing session."
+                )
+                self.root_path = payload_root_path
+                # Refresh session to pick up new Workspace MCP/Skills config
+                await self._refresh_session()
+            else:
+                self.root_path = payload_root_path
 
         if not text:
             return {"status": "error", "error": "No text provided for analysis."}

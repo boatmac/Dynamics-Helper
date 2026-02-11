@@ -61,6 +61,11 @@ export const translations: TranslationDictionary = {
         en: "Comma-separated list of directories containing custom skills (e.g., ~/.copilot/skills).", 
         zh: "包含自定义技能的目录列表，以逗号分隔 (例如 ~/.copilot/skills)。" 
     },
+    mcpConfigPath: { en: "Global MCP Config Path", zh: "全局 MCP 配置文件路径" },
+    mcpConfigPathDesc: {
+        en: "Path to the global MCP configuration JSON file (Default: ~/.copilot/mcp-config.json).",
+        zh: "全局 MCP 配置 JSON 文件的路径 (默认: ~/.copilot/mcp-config.json)。"
+    },
     hostVersion: { en: "Host Version", zh: "Host 版本" },
     
     menuEditor: { en: "Menu Editor", zh: "菜单编辑器" },
