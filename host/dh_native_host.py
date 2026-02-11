@@ -123,7 +123,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.46"
+VERSION = "2.0.47"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -231,9 +231,9 @@ class NativeHost:
         except Exception as e:
             logging.error(f"Failed to cleanup old version: {e}")
 
-        # Fix for v2.0.45 Updater Bug (Wrong Directory)
+        # Fix for v2.0.45 Updater Bug (Wrong Directory) & Nested Extension
         # v2.0.45 erroneously extracted extension to ../extension (AppData/Local/extension)
-        # We detect this and move it to ./extension (AppData/Local/DynamicsHelper/extension)
+        # v2.0.46 migration attempt might have created extension/extension if folder was locked
         try:
             # Determine directory of the running executable/script
             if getattr(sys, "frozen", False):
@@ -249,26 +249,90 @@ class NativeHost:
                 # The "Right" location (Current/extension)
                 right_ext_dir = os.path.join(base_dir, "extension")
 
+                # 1. FIX NESTED EXTENSION (caused by failed migration in v2.0.46)
+                # Check for DynamicsHelper/extension/extension/manifest.json
+                nested_ext_dir = os.path.join(right_ext_dir, "extension")
+                nested_manifest = os.path.join(nested_ext_dir, "manifest.json")
+
+                if os.path.exists(nested_manifest):
+                    logging.info(
+                        f"Detected nested extension at {nested_ext_dir}. Attempting repair..."
+                    )
+                    # We need to move content from extension/extension/* to extension/*
+                    # But extension/* contains locked files (maybe).
+                    # Actually, if extension/extension exists, it means the previous move succeeded
+                    # in moving the FOLDER into the FOLDER.
+                    # We should just move the contents UP one level.
+
+                    # Strategy: Rename current 'extension' to 'extension_locked' (if possible),
+                    # then move 'extension_locked/extension' to 'extension'.
+                    # If rename fails, we are stuck until Chrome closes.
+
+                    try:
+                        # Scan nested dir and copy/move files up
+                        for item in os.listdir(nested_ext_dir):
+                            src = os.path.join(nested_ext_dir, item)
+                            dst = os.path.join(right_ext_dir, item)
+                            try:
+                                if os.path.isdir(src):
+                                    # Recursive copy/overwrite
+                                    shutil.copytree(
+                                        src, dst, dirs_exist_ok=True
+                                    )  # Python 3.8+
+                                    shutil.rmtree(src)  # Remove source after copy
+                                else:
+                                    shutil.copy2(src, dst)  # Overwrite
+                                    os.remove(src)
+                            except Exception as ex:
+                                logging.warning(f"Failed to move {item} up: {ex}")
+
+                        # Clean up the empty nested folder
+                        try:
+                            os.rmdir(nested_ext_dir)
+                            logging.info("Nested extension repair complete.")
+                        except:
+                            pass
+
+                    except Exception as e:
+                        logging.error(f"Nested extension repair failed: {e}")
+
+                # 2. FIX MISPLACED EXTENSION (v2.0.45 bug)
                 # Only migrate if the wrong directory exists and contains a manifest
-                # checking manifest ensures we don't pick up random folders
                 if os.path.exists(os.path.join(wrong_ext_dir, "manifest.json")):
                     logging.info(
                         f"Detected misplaced extension files at {wrong_ext_dir}. Migrating to {right_ext_dir}..."
                     )
 
-                    # We want to OVERWRITE right with wrong, because wrong is the update
+                    # Robust Migration:
+                    # Do NOT use rmtree blindly. If it fails, move() creates nested folders.
                     if os.path.exists(right_ext_dir):
+                        # Try to copy/overwrite instead of delete/move
                         try:
-                            shutil.rmtree(right_ext_dir)
-                        except Exception as e:
-                            logging.warning(f"Could not remove target dir: {e}")
+                            shutil.copytree(
+                                wrong_ext_dir, right_ext_dir, dirs_exist_ok=True
+                            )
+                            logging.info(
+                                "Extension files updated via copytree (overwrite)."
+                            )
 
-                    # Move
-                    shutil.move(wrong_ext_dir, right_ext_dir)
-                    logging.info("Extension migration successful.")
+                            # Now safe to remove the wrong dir
+                            shutil.rmtree(wrong_ext_dir)
+                            logging.info("Cleaned up misplaced extension folder.")
+
+                        except Exception as e:
+                            logging.error(
+                                f"Failed to overwrite extension files (likely locked by Chrome): {e}"
+                            )
+                            # If we can't overwrite, we leave the 'wrong' folder there
+                            # hoping the next restart (when Chrome is closed) might succeed?
+                            # Or we just accept we can't update without Chrome closing.
+                    else:
+                        # Destination doesn't exist, safe to move
+                        shutil.move(wrong_ext_dir, right_ext_dir)
+                        logging.info("Extension migration successful (move).")
 
         except Exception as e:
-            logging.error(f"Extension migration failed: {e}")
+            logging.error(f"Extension migration/repair failed: {e}")
 
     async def check_for_updates(self, force=False):
         """Checks for updates from GitHub Releases."""
