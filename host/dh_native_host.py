@@ -123,7 +123,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.43"
+VERSION = "2.0.44"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -460,56 +460,93 @@ class NativeHost:
         # Check Workspace Only Mode
         ext_prefs = final_data.get("extension_preferences", {})
         use_workspace_only = ext_prefs.get("useWorkspaceOnly", True)
-        has_root_path = bool(final_data.get("root_path"))
 
-        # Merge Skill Directories (Additive)
+        # Extract root path
+        current_root = final_data.get("root_path")
+        has_root_path = bool(current_root)
+
+        if has_root_path:
+            self.root_path = current_root
+
+        # --- SKILL DIRECTORIES ---
+        # Strategy:
+        # 1. Base Skills: (User overrides Default)
+        # 2. Workspace Skills: (.github/skills in root_path)
+        # 3. Final:
+        #    - If Repository ONLY (use_workspace_only and has_root_path): [Workspace]
+        #    - Else: [Base] + [Workspace]
+
+        # A. Resolve Default Skills
         default_skills = default_data.get("skill_directories", [])
+
+        # B. Resolve User Skills
         user_skills = user_data.get("skill_directories", [])
 
-        if use_workspace_only and has_root_path:
-            final_data["skill_directories"] = []
-            logging.info("Workspace Only Mode: Ignoring global/default skills.")
+        # C. Determine Base Skills (User > Default)
+        # If user explicitly set skills (even empty list), use that. Else Default.
+        if "skill_directories" in user_data:
+            base_skills = user_skills
         else:
-            # Combine unique skills
-            final_data["skill_directories"] = list(set(default_skills + user_skills))
+            base_skills = default_skills
 
-        # --- MCP SERVER CONFIGURATION (Global + Workspace Merge) ---
+        # D. Detect Workspace Skills (.github/skills)
+        workspace_skills = []
+        if has_root_path and current_root:
+            ws_skills_path = os.path.join(current_root, ".github", "skills")
+            if os.path.isdir(ws_skills_path):
+                workspace_skills.append(ws_skills_path)
+                logging.info(f"Detected workspace skills at: {ws_skills_path}")
+
+        # E. Apply "Repository ONLY" Logic
+        if use_workspace_only and has_root_path:
+            final_data["skill_directories"] = workspace_skills
+            logging.info("Repository ONLY Mode: Using ONLY workspace skills.")
+        else:
+            # Merge Base + Workspace
+            final_data["skill_directories"] = list(set(base_skills + workspace_skills))
+
+        # --- MCP SERVER CONFIGURATION ---
+        # Strategy:
+        # 1. Base MCP: (User overrides Default)
+        # 2. Workspace MCP: (.github/mcp-config.json in root_path)
+        # 3. Final:
+        #    - If Repository ONLY: [Workspace]
+        #    - Else: Base merged with Workspace
+
         mcp_servers = {}
 
-        # 1. Load Global MCP Config
-        # Default to standard location if not set in config
-        global_mcp_path_str = final_data.get(
-            "mcp_config_path", "~/.copilot/mcp-config.json"
+        # A. Resolve Base MCP Config (Global)
+        base_mcp_path_str = (
+            final_data.get("mcp_config_path") or "~/.copilot/mcp-config.json"
         )
-        global_mcp_path = os.path.expanduser(global_mcp_path_str)
 
-        if not (use_workspace_only and has_root_path):
-            if os.path.exists(global_mcp_path):
+        base_mcp_path = os.path.expanduser(base_mcp_path_str)
+
+        should_load_global = True
+        if use_workspace_only and has_root_path:
+            should_load_global = False
+            logging.info("Repository ONLY Mode: Ignoring global MCP config.")
+
+        if should_load_global:
+            if os.path.exists(base_mcp_path):
                 try:
-                    with open(global_mcp_path, "r") as f:
-                        global_mcp_data = json.load(f)
-                        if "mcpServers" in global_mcp_data:
-                            mcp_servers.update(global_mcp_data["mcpServers"])
+                    with open(base_mcp_path, "r") as f:
+                        base_mcp_data = json.load(f)
+                        if "mcpServers" in base_mcp_data:
+                            mcp_servers.update(base_mcp_data["mcpServers"])
                             logging.info(
-                                f"Loaded Global MCP config from {global_mcp_path}"
+                                f"Loaded Global MCP config from {base_mcp_path}"
                             )
                 except Exception as e:
                     logging.error(f"Failed to load Global MCP config: {e}")
             else:
-                logging.info(f"Global MCP config not found at {global_mcp_path}")
-        else:
-            logging.info("Workspace Only Mode: Ignoring global MCP config.")
+                logging.info(f"Global MCP config not found at {base_mcp_path}")
 
         # --- Apply to Instance and Session ---
 
-        # Extract root_path for Host use
-        if "root_path" in final_data:
-            self.root_path = final_data["root_path"]
-            # Do NOT delete here, we do it in _refresh_session
-
         session_config.update(final_data)  # type: ignore
 
-        # 2. Load Workspace MCP Config (.github/mcp-config.json)
+        # B. Load Workspace MCP Config (.github/mcp-config.json)
         # This overrides Global tools with the same name
         if self.root_path and os.path.exists(self.root_path):
             ws_mcp_path = os.path.join(self.root_path, ".github", "mcp-config.json")
@@ -529,39 +566,6 @@ class NativeHost:
         # Assign merged MCP servers to session config
         if mcp_servers:
             session_config["mcpServers"] = mcp_servers
-
-        # D. Load Workspace Config (.github/copilot.config.json)
-        if self.root_path and os.path.exists(self.root_path):
-            ws_config_path = os.path.join(
-                self.root_path, ".github", "copilot.config.json"
-            )
-            if os.path.exists(ws_config_path):
-                try:
-                    with open(ws_config_path, "r") as f:
-                        ws_data = json.load(f)
-
-                    # Resolve workspace skills
-                    if "skill_directories" in ws_data:
-                        ws_skills = []
-                        for path in ws_data["skill_directories"]:
-                            if not os.path.isabs(path):
-                                ws_skills.append(
-                                    os.path.abspath(os.path.join(self.root_path, path))
-                                )
-                            else:
-                                ws_skills.append(path)
-
-                        # Merge skills
-                        current_skills = session_config.get("skill_directories", [])
-                        session_config["skill_directories"] = list(
-                            set(current_skills + ws_skills)
-                        )
-                        del ws_data["skill_directories"]
-
-                    session_config.update(ws_data)
-                    logging.info(f"Loaded workspace config from {ws_config_path}")
-                except Exception as e:
-                    logging.error(f"Failed to load workspace config: {e}")
 
         # --- System Instructions (Split Prompt Architecture) ---
 
@@ -800,82 +804,29 @@ class NativeHost:
 
                 # --- SANITIZE SKILLS ---
                 # The payload contains "effective" skills (User + Default + Workspace).
-                # We must NOT save Default or Workspace skills into the User Config.
+                # We must NOT save Workspace skills into the User Config (config.json).
+                # Default skills ARE saved if the user has them, because User Settings > Default.
                 if "skill_directories" in payload["config"]:
                     incoming_skills = payload["config"]["skill_directories"]
                     system_skills = set()
 
-                    # A. Resolve Default Config Skills
-                    if getattr(sys, "frozen", False):
-                        install_dir = os.path.dirname(sys.executable)
-                    else:
-                        install_dir = os.path.dirname(os.path.abspath(__file__))
-
-                    default_config_path = os.path.join(install_dir, "config.json")
-                    if os.path.exists(default_config_path):
-                        try:
-                            with open(default_config_path, "r") as f:
-                                d_data = json.load(f)
-                                if "skill_directories" in d_data:
-                                    resolved = self._resolve_skills(
-                                        d_data["skill_directories"], install_dir
-                                    )
-                                    system_skills.update(resolved)
-                        except Exception as e:
-                            logging.warning(
-                                f"Failed to load default config for sanitization: {e}"
-                            )
-
-                    # B. Resolve Workspace Config Skills
-                    if self.root_path and os.path.exists(self.root_path):
-                        ws_config_path = os.path.join(
-                            self.root_path, ".github", "copilot.config.json"
+                    # Identify Workspace Skills to Remove
+                    # The workspace skills path is <root>/.github/skills
+                    if self.root_path:
+                        ws_skills_path = os.path.join(
+                            self.root_path, ".github", "skills"
                         )
-                        if os.path.exists(ws_config_path):
-                            try:
-                                with open(ws_config_path, "r") as f:
-                                    ws_data = json.load(f)
-                                    if "skill_directories" in ws_data:
-                                        # Handle relative paths in workspace config
-                                        # Note: .github folder is inside root_path, but relative paths in config are usually relative to config location (.github)
-                                        # But let's check how _get_session_config does it.
-                                        # It joins self.root_path + path if not absolute.
-                                        # Wait, _get_session_config logic for workspace:
-                                        # os.path.abspath(os.path.join(self.root_path, path))
-                                        # So it assumes paths are relative to ROOT, not .github/
+                        # Normalize for comparison
+                        system_skills.add(os.path.normpath(ws_skills_path))
 
-                                        # Let's match that logic here manually because _resolve_skills uses base_path
-                                        resolved = []
-                                        for p in ws_data["skill_directories"]:
-                                            expanded = os.path.expanduser(p)
-                                            if not os.path.isabs(expanded):
-                                                resolved.append(
-                                                    os.path.normpath(
-                                                        os.path.abspath(
-                                                            os.path.join(
-                                                                self.root_path, expanded
-                                                            )
-                                                        )
-                                                    )
-                                                )
-                                            else:
-                                                resolved.append(
-                                                    os.path.normpath(expanded)
-                                                )
-                                        system_skills.update(resolved)
-                            except Exception as e:
-                                logging.warning(
-                                    f"Failed to load workspace config for sanitization: {e}"
-                                )
-
-                    # C. Filter Incoming
+                    # Filter Incoming
                     filtered_skills = []
                     for s in incoming_skills:
                         if os.path.normpath(s) not in system_skills:
                             filtered_skills.append(s)
 
                     logging.info(
-                        f"Sanitized skills: {len(incoming_skills)} -> {len(filtered_skills)} (Removed {len(incoming_skills) - len(filtered_skills)} system skills)"
+                        f"Sanitized skills: {len(incoming_skills)} -> {len(filtered_skills)} (Removed {len(incoming_skills) - len(filtered_skills)} workspace skills)"
                     )
                     payload["config"]["skill_directories"] = filtered_skills
 
