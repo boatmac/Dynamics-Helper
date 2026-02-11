@@ -123,7 +123,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.44"
+VERSION = "2.0.45"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -248,7 +248,7 @@ class NativeHost:
                     req = urllib.request.Request(
                         url, headers={"User-Agent": "DynamicsHelper-NativeHost"}
                     )
-                    with urllib.request.urlopen(req, timeout=10) as response:
+                    with urllib.request.urlopen(req, timeout=30) as response:
                         if response.status == 200:
                             return json.loads(response.read().decode())
                 except Exception as e:

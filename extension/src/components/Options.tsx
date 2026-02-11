@@ -775,11 +775,11 @@ const Options: React.FC = () => {
             payload: { action: "check_updates" } 
         });
         
-        // Safety timeout (15s) in case host doesn't respond
+        // Safety timeout (60s) in case host doesn't respond
         setTimeout(() => {
             setStatus(prev => prev === "Checking for updates..." ? "Check timed out." : prev);
             setTimeout(() => setStatus(prev => prev === "Check timed out." ? "" : prev), 3000);
-        }, 15000);
+        }, 60000);
     };
 
     // --- Item Handlers (Recursive) ---
