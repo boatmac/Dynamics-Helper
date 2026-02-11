@@ -85,25 +85,11 @@ class Updater:
             # 5. Update Config & Instructions (Safe Mode)
             logging.info("Updating configuration files...")
 
-            # system_prompt.md: Safe Backup and Overwrite
+            # system_prompt.md: Always Overwrite (No backup needed as it's system managed)
             new_instr_src = os.path.join(temp_extract_dir, "host", "system_prompt.md")
             dest_instr = os.path.join(self.host_dir, "system_prompt.md")
 
             if os.path.exists(new_instr_src):
-                # If destination exists, backup first
-                if os.path.exists(dest_instr):
-                    # Create unique backup name with timestamp
-                    timestamp = int(time.time())
-                    backup_path = f"{dest_instr}.{timestamp}.bak"
-                    try:
-                        shutil.copy2(dest_instr, backup_path)
-                        logging.info(
-                            f"Backed up existing instructions to {os.path.basename(backup_path)}"
-                        )
-                    except Exception as e:
-                        logging.error(f"Failed to backup instructions: {e}")
-
-                # Overwrite/Create
                 try:
                     shutil.copy2(new_instr_src, dest_instr)
                     logging.info("Updated system_prompt.md")
