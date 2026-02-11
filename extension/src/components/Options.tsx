@@ -651,13 +651,14 @@ const Options: React.FC = () => {
                         action: "update_config",
                         payload: {
                             user_instructions: prefs.userInstructions,
+                            user_prompt: prefs.userPrompt, // Add User Prompt for file storage
                             config: {
                                 root_path: prefs.rootPath,
                                 skill_directories: prefs.skillDirectories ? prefs.skillDirectories.split(',').map(s => s.trim()).filter(Boolean) : [],
                                 mcp_config_path: prefs.mcpConfigPath,
                                 extension_preferences: {
                                     auto_analyze_mode: prefs.autoAnalyzeMode,
-                                    user_prompt: prefs.userPrompt,
+                                    user_prompt: prefs.userPrompt, // Keep in preferences for now (backend handles cleanup/sanitization)
                                     enable_status_bubble: prefs.enableStatusBubble,
                                     useWorkspaceOnly: prefs.useWorkspaceOnly,
                                     language: prefs.language,

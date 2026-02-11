@@ -123,7 +123,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.43"
+VERSION = "2.0.42"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -644,40 +644,6 @@ class NativeHost:
                         f"Failed to load workspace instructions from {ws_instr_path}: {e}"
                     )
 
-        # --- User Prompt (New Architecture: user_prompt.md) ---
-        # 1. Path
-        user_prompt_path = os.path.join(USER_DATA_DIR, "user_prompt.md")
-
-        # 2. Migration: Check if config has it but file doesn't
-        # Access raw extension_preferences from final_data (merged config)
-        ext_prefs = final_data.get("extension_preferences", {})
-        legacy_prompt = ext_prefs.get("user_prompt")
-
-        if legacy_prompt and not os.path.exists(user_prompt_path):
-            try:
-                logging.info(f"Migrating legacy user_prompt to {user_prompt_path}")
-                with open(user_prompt_path, "w", encoding="utf-8") as f:
-                    f.write(legacy_prompt)
-            except Exception as e:
-                logging.error(f"Failed to migrate user_prompt: {e}")
-
-        # 3. Read from File (Source of Truth)
-        current_prompt_content = ""
-        if os.path.exists(user_prompt_path):
-            try:
-                with open(user_prompt_path, "r", encoding="utf-8") as f:
-                    current_prompt_content = f.read()
-            except Exception as e:
-                logging.error(f"Failed to read user_prompt.md: {e}")
-
-        # 4. Inject into extension_preferences for Frontend Sync
-        if "extension_preferences" not in session_config:
-            session_config["extension_preferences"] = {}
-
-        # We force the file content into the config object sent to frontend
-        # This overrides whatever might be lingering in config.json
-        session_config["extension_preferences"]["user_prompt"] = current_prompt_content
-
         return session_config
 
     def _permission_handler(self, request, context) -> PermissionRequestResult:
@@ -751,26 +717,6 @@ class NativeHost:
                     f.write(new_instr)
                 logging.info("Updated copilot-instructions.md")
 
-            # 1.5 Update User Prompt (New Architecture: user_prompt.md)
-            # Check top-level payload first, then try to fish it out of extension_preferences if missing
-            new_prompt = payload.get("user_prompt")
-
-            # If not in top-level, check if it's inside config (legacy/transition)
-            if (
-                new_prompt is None
-                and "config" in payload
-                and "extension_preferences" in payload["config"]
-            ):
-                new_prompt = payload["config"]["extension_preferences"].get(
-                    "user_prompt"
-                )
-
-            if new_prompt is not None:
-                prompt_path = os.path.join(USER_DATA_DIR, "user_prompt.md")
-                with open(prompt_path, "w", encoding="utf-8") as f:
-                    f.write(new_prompt)
-                logging.info("Updated user_prompt.md")
-
             # 2. Update Config (Model, etc)
             if "config" in payload:
                 user_config_path = os.path.join(USER_DATA_DIR, "config.json")
@@ -782,21 +728,6 @@ class NativeHost:
                             current_data = json.load(f)
                     except:
                         pass  # Start fresh if corrupt
-
-                # --- SANITIZE USER PROMPT ---
-                # Remove user_prompt from config to avoid duplication in config.json
-                # It is now stored in user_prompt.md
-                if "extension_preferences" in payload["config"]:
-                    ext_prefs = payload["config"]["extension_preferences"]
-                    if "user_prompt" in ext_prefs:
-                        # Remove it from the dict we are about to save
-                        # But we must create a copy if we want to be safe, though here we are just processing incoming payload
-                        # Actually, we can just delete it from payload["config"] before merging
-                        del ext_prefs["user_prompt"]
-                        # Also remove from current_data if it exists there (cleanup legacy)
-                        if "extension_preferences" in current_data:
-                            if "user_prompt" in current_data["extension_preferences"]:
-                                del current_data["extension_preferences"]["user_prompt"]
 
                 # --- SANITIZE SKILLS ---
                 # The payload contains "effective" skills (User + Default + Workspace).
