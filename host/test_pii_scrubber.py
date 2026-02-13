@@ -25,7 +25,8 @@ class TestPiiScrubber(unittest.TestCase):
 
     def test_guid_redaction(self):
         text = "Record ID: 123e4567-e89b-12d3-a456-426614174000."
-        expected = "Record ID: [REDACTED_GUID]."
+        # GUID Redaction Disabled (User Request)
+        expected = text
         self.assertEqual(self.scrubber.scrub(text), expected)
 
     def test_phone_redaction(self):
@@ -35,7 +36,8 @@ class TestPiiScrubber(unittest.TestCase):
 
     def test_mixed_content(self):
         text = "User john.doe@corp.com (IP: 10.0.0.5) encountered error with ID 550e8400-e29b-41d4-a716-446655440000."
-        expected = "User [REDACTED_EMAIL] (IP: [REDACTED_IP]) encountered error with ID [REDACTED_GUID]."
+        # GUID preserved, Emails and IPs redacted
+        expected = "User [REDACTED_EMAIL] (IP: [REDACTED_IP]) encountered error with ID 550e8400-e29b-41d4-a716-446655440000."
         self.assertEqual(self.scrubber.scrub(text), expected)
 
     def test_no_pii(self):

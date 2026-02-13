@@ -83,7 +83,8 @@ class PiiScrubber:
         # Phone numbers can be tricky (overlapping with IPs or dates), but the pattern is specific to US format.
 
         # 1. GUIDs (High confidence, distinct)
-        text = self.guid_pattern.sub("[REDACTED_GUID]", text)
+        # DISABLE GUID Redaction for troubleshooting (User Request)
+        # text = self.guid_pattern.sub("[REDACTED_GUID]", text)
 
         # 2. Emails (Distinct)
         text = self.email_pattern.sub("[REDACTED_EMAIL]", text)
