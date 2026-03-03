@@ -26,14 +26,14 @@ The project consists of three main components:
 * **`dh_native_host.py`**: The core backend script.
   * **Loop:** Reads messages from `stdin` (from Chrome) and writes to `stdout`.
   * **Timeout:** Has a hard timeout (currently 600s) for Copilot requests.
-  * **Logging:** Writes to `%APPDATA%\DynamicsHelper\native_host.log`.
-  * **Config Loading:** Prioritizes `%APPDATA%` config over the local directory.
+  * **Logging:** Writes to `%LOCALAPPDATA%\DynamicsHelper\native_host.log`.
+  * **Config Loading:** Prioritizes `%LOCALAPPDATA%` config over the local directory.
 * **`install.bat`**: Sets up the Python environment and registry keys.
 * **`system_prompt.md`**: The base persona for the AI Agent.
 
 ### `%LOCALAPPDATA%\DynamicsHelper\` (User Configuration)
 
-* **`config.json`**: Defines the MCP servers (Kusto, WorkIQ, etc.) and Skill directories the Agent can use.
+* **`config.json`**: Defines the MCP servers and Skill directories the Agent can use. Ships with a minimal default (`fetch` server); additional servers (Kusto, WorkIQ, etc.) are user-configured.
   * *Note:* In Production mode, this file is shared between the installed app and the user's overrides.
 * **`native_host.log`**: The primary debug log.
 * **`copilot-instructions.md`**: The active system prompt (User overrides).
@@ -51,7 +51,7 @@ Understanding how a user request becomes an AI response.
 3. **PII Scrubbing (`pii_scrubber.py`):**
     * Before sending to the LLM, the `text` and `context` are scrubbed using regex.
     * **Removes:** Emails, IPv4 Addresses, US Phone Numbers.
-    * **Masks:** GUIDs (Subscription IDs) are replaced with `[REDACTED_GUID]` to prevent ID leakage, though this limits specific resource querying.
+    * **Note:** GUID redaction is currently disabled to preserve technical identifiers needed for troubleshooting (e.g., Subscription IDs, Resource IDs).
 4. **SDK Execution (`send_and_wait`):**
     * The backend initializes a `CopilotSession` with the specific configuration.
     * It sends the prompt with a **600s timeout**.
@@ -72,7 +72,7 @@ The "System Prompt" is built from three layers, merged at runtime in `_get_sessi
     * Source: `[Root Path]/.github/copilot-instructions.md`.
     * Content: Project-specific rules (if a Root Path is configured in the extension).
 
-**Repository ONLY Logic:** If "Repo Only" is enabled, Layer 2 (User) and Layer 1 (System) might be ignored or handled differently depending on specific implementation details, but generally workspace instructions are prioritized.
+**Repository ONLY Logic:** If "Repo Only" is enabled (`useWorkspaceOnly = true`) and a Root Path is configured, only Workspace Instructions (Layer 3) are used. Layer 2 (User) and Layer 1 (System) instructions are still loaded, but Workspace Skills and MCP servers completely replace their global counterparts.
 
 ### 3. Skills Configuration
 
@@ -80,7 +80,7 @@ Capabilities (Skills) are loaded based on the following precedence:
 
 1. **Base Skills:**
     * **User Skills:** Defined in `%LOCALAPPDATA%\config.json`.
-    * **Default Skills:** Bundled with the application.
+    * **Default Skills:** The `host/skills/` directory is reserved for bundled skills but currently ships empty. Skills are user-configured.
     * *Rule:* User Settings **override** Default Settings. If `skill_directories` exists in User Config, Default is ignored.
 
 2. **Workspace Skills:**

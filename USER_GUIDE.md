@@ -12,8 +12,8 @@ Before installing, ensure you have the following software installed on your Wind
 2. **Node.js (LTS)**: [Download Here](https://nodejs.org/).
 3. **GitHub Copilot CLI**:
     * Open PowerShell or Command Prompt.
-    * Run: `npm install -g @githubnext/github-copilot-cli`
-    * Authenticate: `github-copilot-cli auth` (Follow the login prompt in your browser).
+    * Run: `npm install -g @github/copilot`
+    * Authenticate: `copilot auth` (Follow the login prompt in your browser).
 
 ## Installation
 
@@ -57,7 +57,7 @@ The "Host" is the bridge that allows the browser to talk to the AI.
 
 The extension uses configuration files stored in your User directory. This ensures your settings are safe even if you update the tool.
 
-**Location:** `%APPDATA%\DynamicsHelper` (Paste this into Windows File Explorer address bar).
+**Location:** `%LOCALAPPDATA%\DynamicsHelper` (Paste this into Windows File Explorer address bar).
 
 * **`config.json`**: Controls MCP servers, skills, and model settings.
 * **`copilot-instructions.md`**: The "Persona" of the AI. You can edit this file to change how the AI responds (e.g., change the tone, add new rules).
@@ -100,15 +100,14 @@ The tool includes a built-in "PII Scrubber" that attempts to remove the followin
 
 * **Emails**: Replaced with `[REDACTED_EMAIL]`
 * **IPv4 Addresses**: Replaced with `[REDACTED_IP]`
-* **GUIDs/UUIDs** (e.g., Subscription IDs): Replaced with `[REDACTED_GUID]`
 * **US Phone Numbers**: Replaced with `[REDACTED_PHONE]`
 
-*Note: While robust, no regex is perfect. Always review the `native_host.log` if you are concerned about what was sent.*
+*Note: GUID/UUID redaction is currently disabled to allow the AI to query specific resources (Subscription IDs, etc.). While the scrubber is robust, no regex is perfect. Always review the `native_host.log` if you are concerned about what was sent.*
 
 ### Auditing
 
 * All data sent to the AI and all responses are logged locally.
-* **Log Location**: `%APPDATA%\DynamicsHelper\native_host.log`
+* **Log Location**: `%LOCALAPPDATA%\DynamicsHelper\native_host.log`
 * You can inspect this file at any time to verify what data is being processed.
 
 ---
@@ -122,8 +121,8 @@ The tool includes a built-in "PII Scrubber" that attempts to remove the followin
     * It sends this context to the local AI Agent.
     * **Wait:** Deep analysis can take **2-5 minutes** if the agent needs to search logs or run database queries.
 4. **View Results:**
-    * A summary will appear in a popup window.
-    * A full detailed Markdown report (`dh_case_report.md`) is saved to your **Workbench Directory** (or `dh_error_analysis.md` in your **Downloads** folder if no directory is configured).
+    * The analysis summary will appear inline in the floating panel.
+    * A full detailed Markdown report (`dh_case_report.md`) is saved to your **Root Path** directory (configured in the Extension Options page). If no Root Path is configured, `dh_error_analysis.md` is saved to your **Downloads** folder instead.
 
 ---
 
@@ -133,7 +132,7 @@ If the tool isn't working, follow these steps to collect information for the dev
 
 ### Common Issues
 
-* **"Analysis Timed Out"**: The Agent is taking too long. This usually means it's doing a lot of work (good!) but hit the 5-minute safety limit. Try narrowing down your request or checking the logs.
+* **"Analysis Timed Out"**: The Agent is taking too long. This usually means it's doing a lot of work (good!) but hit the 10-minute safety limit. Try narrowing down your request or checking the logs.
 * **"Host error" / "Native host disconnected"**: The browser cannot find the Python script.
   * Verify you ran `install.bat` as Administrator.
   * Verify your Extension ID is correct in `register.py`.
@@ -144,7 +143,7 @@ If the tool isn't working, follow these steps to collect information for the dev
 If you need to report a bug, please provide the **Native Host Log**.
 
 1. Open File Explorer.
-2. In the address bar, type `%APPDATA%\DynamicsHelper` and press Enter.
+2. In the address bar, type `%LOCALAPPDATA%\DynamicsHelper` and press Enter.
 3. Find the file named **`native_host.log`**.
 4. Send this file to the developer.
     * *Warning: This log contains details about what the AI analyzed. Please check for sensitive info before sharing if dealing with highly confidential cases.*
