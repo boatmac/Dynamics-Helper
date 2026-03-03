@@ -1185,34 +1185,53 @@ class NativeHost:
 
             # Determine Save Location
             if self.root_path and os.path.exists(self.root_path):
-                # Clean up Product Name
-                # 1. Handle paths like "Azure / Data / Blob" -> "Blob"
-                clean_product = product
-                if "/" in clean_product:
-                    clean_product = clean_product.split("/")[-1]
-                if "\\" in clean_product:
-                    clean_product = clean_product.split("\\")[-1]
-
-                # 2. Remove common verbose prefixes (21Vianet, Mooncake, Microsoft)
-                clean_product = re.sub(
-                    r"^(21Vianet\s*China|Mooncake|Microsoft)\s*",
-                    "",
-                    clean_product,
-                    flags=re.IGNORECASE,
-                )
-
-                # 3. Compact: Remove spaces and keep only alphanumeric (e.g. "Azure SQL Database" -> "AzureSQLDatabase")
-                safe_product = "".join(c for c in clean_product if c.isalnum())
-
-                # Fallback
-                if not safe_product:
-                    safe_product = "General"
-
                 safe_case = "".join(
                     c for c in case_number if c.isalnum() or c in ("-", "_")
                 ).strip()
 
-                save_dir = os.path.join(self.root_path, safe_product, safe_case)
+                # Strategy 1: Scan filesystem for a folder Copilot already created
+                # Copilot uses the filesystem MCP to create product/case folders.
+                # We scan root_path for any product subfolder containing this case number
+                # to guarantee dh_case_report.md lands in the same directory.
+                save_dir = None
+                try:
+                    for entry in os.listdir(self.root_path):
+                        candidate = os.path.join(self.root_path, entry, safe_case)
+                        if os.path.isdir(candidate):
+                            save_dir = candidate
+                            logging.info(f"Found Copilot-created folder: {save_dir}")
+                            break
+                except OSError as e:
+                    logging.warning(f"Error scanning root_path: {e}")
+
+                # Strategy 2 (Fallback): Derive folder name from product string
+                if not save_dir:
+                    logging.info(
+                        "No existing case folder found. Falling back to product name cleanup."
+                    )
+                    # 1. Handle paths like "Azure / Data / Blob" -> "Blob"
+                    clean_product = product
+                    if "/" in clean_product:
+                        clean_product = clean_product.split("/")[-1]
+                    if "\\" in clean_product:
+                        clean_product = clean_product.split("\\")[-1]
+
+                    # 2. Remove common verbose prefixes (21Vianet, Mooncake, Microsoft)
+                    clean_product = re.sub(
+                        r"^(21Vianet\s*China|Mooncake|Microsoft)\s*",
+                        "",
+                        clean_product,
+                        flags=re.IGNORECASE,
+                    )
+
+                    # 3. Compact: Remove spaces and keep only alphanumeric
+                    safe_product = "".join(c for c in clean_product if c.isalnum())
+
+                    if not safe_product:
+                        safe_product = "General"
+
+                    save_dir = os.path.join(self.root_path, safe_product, safe_case)
+
                 os.makedirs(save_dir, exist_ok=True)
                 output_file = os.path.join(save_dir, "dh_case_report.md")
             else:

@@ -46,31 +46,31 @@ Understanding how a user request becomes an AI response.
 
 ### 1. The Prompt Pipeline
 
-1.  **User Input:** The user provides error text, context, and case metadata via the Extension UI.
-2.  **Native Messaging:** This data is sent to the `dh_native_host.exe` as a JSON payload (`analyze_error` action).
-3.  **PII Scrubbing (`pii_scrubber.py`):**
-    *   Before sending to the LLM, the `text` and `context` are scrubbed using regex.
-    *   **Removes:** Emails, IPv4 Addresses, US Phone Numbers.
-    *   **Masks:** GUIDs (Subscription IDs) are replaced with `[REDACTED_GUID]` to prevent ID leakage, though this limits specific resource querying.
-4.  **SDK Execution (`send_and_wait`):**
-    *   The backend initializes a `CopilotSession` with the specific configuration.
-    *   It sends the prompt with a **600s timeout**.
+1. **User Input:** The user provides error text, context, and case metadata via the Extension UI.
+2. **Native Messaging:** This data is sent to the `dh_native_host.exe` as a JSON payload (`analyze_error` action).
+3. **PII Scrubbing (`pii_scrubber.py`):**
+    * Before sending to the LLM, the `text` and `context` are scrubbed using regex.
+    * **Removes:** Emails, IPv4 Addresses, US Phone Numbers.
+    * **Masks:** GUIDs (Subscription IDs) are replaced with `[REDACTED_GUID]` to prevent ID leakage, though this limits specific resource querying.
+4. **SDK Execution (`send_and_wait`):**
+    * The backend initializes a `CopilotSession` with the specific configuration.
+    * It sends the prompt with a **600s timeout**.
 
 ### 2. Instruction Hierarchy (The Context)
 
 The "System Prompt" is built from three layers, merged at runtime in `_get_session_config`:
 
-1.  **Layer 1: System Instructions (Immutable)**
-    *   Source: `host/system_prompt.md` (or beside exe).
-    *   Content: Base persona, core capabilities, safety rules.
+1. **Layer 1: System Instructions (Immutable)**
+    * Source: `host/system_prompt.md` (or beside exe).
+    * Content: Base persona, core capabilities, safety rules.
 
-2.  **Layer 2: User Instructions (Customizable)**
-    *   Source: `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`.
-    *   Content: User-specific preferences managed via the Extension Options Page.
+2. **Layer 2: User Instructions (Customizable)**
+    * Source: `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`.
+    * Content: User-specific preferences managed via the Extension Options Page.
 
-3.  **Layer 3: Workspace Instructions (Project-Specific)**
-    *   Source: `[Root Path]/.github/copilot-instructions.md`.
-    *   Content: Project-specific rules (if a Root Path is configured in the extension).
+3. **Layer 3: Workspace Instructions (Project-Specific)**
+    * Source: `[Root Path]/.github/copilot-instructions.md`.
+    * Content: Project-specific rules (if a Root Path is configured in the extension).
 
 **Repository ONLY Logic:** If "Repo Only" is enabled, Layer 2 (User) and Layer 1 (System) might be ignored or handled differently depending on specific implementation details, but generally workspace instructions are prioritized.
 
@@ -78,33 +78,33 @@ The "System Prompt" is built from three layers, merged at runtime in `_get_sessi
 
 Capabilities (Skills) are loaded based on the following precedence:
 
-1.  **Base Skills:**
-    *   **User Skills:** Defined in `%LOCALAPPDATA%\config.json`.
-    *   **Default Skills:** Bundled with the application.
-    *   *Rule:* User Settings **override** Default Settings. If `skill_directories` exists in User Config, Default is ignored.
+1. **Base Skills:**
+    * **User Skills:** Defined in `%LOCALAPPDATA%\config.json`.
+    * **Default Skills:** Bundled with the application.
+    * *Rule:* User Settings **override** Default Settings. If `skill_directories` exists in User Config, Default is ignored.
 
-2.  **Workspace Skills:**
-    *   **Source:** `[Root Path]/.github/skills` directory.
-    *   *Rule:* Workspace skills are **appended** to Base Skills.
+2. **Workspace Skills:**
+    * **Source:** `[Root Path]/.github/skills` directory.
+    * *Rule:* Workspace skills are **appended** to Base Skills.
 
-3.  **Repository ONLY Mode:**
-    *   If enabled: The AI uses **ONLY** Workspace Skills. Base Skills (User + Default) are ignored.
+3. **Repository ONLY Mode:**
+    * If enabled: The AI uses **ONLY** Workspace Skills. Base Skills (User + Default) are ignored.
 
 ### 4. MCP Configuration
 
 Model Context Protocol (MCP) servers follow similar logic:
 
-1.  **Base MCP:**
-    *   **User Config:** Defined in `%LOCALAPPDATA%\config.json` (legacy) or `~/.copilot/mcp-config.json` (standard).
-    *   **Default Config:** Bundled `mcp-config.json` (if any).
-    *   *Rule:* User Settings **override** Default Settings.
+1. **Base MCP:**
+    * **User Config:** Defined in `%LOCALAPPDATA%\config.json` (legacy) or `~/.copilot/mcp-config.json` (standard).
+    * **Default Config:** Bundled `mcp-config.json` (if any).
+    * *Rule:* User Settings **override** Default Settings.
 
-2.  **Workspace MCP:**
-    *   **Source:** `[Root Path]/.github/mcp-config.json`.
-    *   *Rule:* Workspace MCP servers are **merged** into Base MCP servers.
+2. **Workspace MCP:**
+    * **Source:** `[Root Path]/.github/mcp-config.json`.
+    * *Rule:* Workspace MCP servers are **merged** into Base MCP servers.
 
-3.  **Repository ONLY Mode:**
-    *   If enabled: The AI uses **ONLY** Workspace MCP servers. Base MCP servers are ignored.
+3. **Repository ONLY Mode:**
+    * If enabled: The AI uses **ONLY** Workspace MCP servers. Base MCP servers are ignored.
 
 ---
 
@@ -116,8 +116,8 @@ Model Context Protocol (MCP) servers follow similar logic:
 * **Log:** Check `%LOCALAPPDATA%\DynamicsHelper\native_host.log`.
 * **Common Cause:** Registry key mismatches or PowerShell encoding bugs.
 * **Fix:**
-    *   Run `installer_core.ps1` (or `install.bat`) again.
-    *   Verify `manifest.json` in `%LOCALAPPDATA%\DynamicsHelper` is valid JSON and points to `dh_native_host.exe`.
+  * Run `installer_core.ps1` (or `install.bat`) again.
+  * Verify `manifest.json` in `%LOCALAPPDATA%\DynamicsHelper` is valid JSON and points to `dh_native_host.exe`.
 
 ### 2. "Analysis Timeout"
 
