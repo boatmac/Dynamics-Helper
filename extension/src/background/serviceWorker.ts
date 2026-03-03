@@ -229,6 +229,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         trackBackgroundException(message.payload.error, message.payload.severityLevel);
         return false;
     }
+
+    // Team Bookmark Catalog: manual sync from Options page
+    if (message.type === "SYNC_TEAM_CATALOG") {
+        (async () => {
+            try {
+                const { syncTeamBookmarks, clearTeamBookmarks } = await import('../utils/teamCatalog');
+                const teamId = message.payload?.teamId;
+                if (!teamId) {
+                    await clearTeamBookmarks();
+                    sendResponse({ status: "success", data: { items: [] } });
+                } else {
+                    const items = await syncTeamBookmarks(teamId);
+                    sendResponse({ status: "success", data: { items, teamId } });
+                }
+            } catch (e: any) {
+                console.error('[DH-SW] Team catalog sync error:', e);
+                sendResponse({ status: "error", error: e.message });
+            }
+        })();
+        return true; // Keep channel open for async response
+    }
 });
 
 console.log("[DH] Background Service Worker Loaded");
+
+// --- Team Bookmark Catalog: Background Sync ---
+async function syncTeamCatalogOnStartup() {
+    try {
+        const data = await new Promise<any>((resolve) => {
+            chrome.storage.local.get(['dh_prefs'], resolve);
+        });
+        const teamId = data.dh_prefs?.team;
+        if (!teamId) return; // No team selected, skip
+
+        const { syncTeamBookmarks } = await import('../utils/teamCatalog');
+        const items = await syncTeamBookmarks(teamId);
+        console.log(`[DH-SW] Team catalog synced: ${items.length} items for team '${teamId}'`);
+    } catch (e) {
+        console.warn('[DH-SW] Team catalog sync failed:', e);
+    }
+}
+
+// Sync on service worker startup
+syncTeamCatalogOnStartup();
+
+// Also sync on install/update
+chrome.runtime.onInstalled.addListener(() => {
+    syncTeamCatalogOnStartup();
+});

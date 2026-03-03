@@ -86,6 +86,18 @@ export const translations: TranslationDictionary = {
     import: { en: "Import JSON", zh: "导入 JSON" },
     export: { en: "Export JSON", zh: "导出 JSON" },
 
+    // --- Team Catalog ---
+    teamCatalog: { en: "Team Catalog", zh: "团队目录" },
+    selectTeam: { en: "Team", zh: "团队" },
+    selectTeamDesc: { en: "Select your team to load shared bookmarks.", zh: "选择您的团队以加载共享书签。" },
+    noTeam: { en: "None (Personal only)", zh: "无 (仅个人)" },
+    lastSynced: { en: "Last synced", zh: "上次同步" },
+    neverSynced: { en: "Never synced", zh: "从未同步" },
+    items: { en: "items", zh: "个项目" },
+    syncing: { en: "Syncing...", zh: "同步中..." },
+    refresh: { en: "Refresh", zh: "刷新" },
+    teamManaged: { en: "Team", zh: "团队" },
+
     // --- FAB ---
     analyze: { en: "Analyze", zh: "分析" },
     ping: { en: "Ping", zh: "测试连接" },

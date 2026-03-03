@@ -11,6 +11,8 @@ export interface MenuItem {
     children?: MenuItem[];
     target?: string;
     icon?: string;
+    tags?: string[];
+    source?: 'team' | 'personal';
 }
 
 export function useMenuLogic() {
@@ -28,14 +30,13 @@ export function useMenuLogic() {
         // Listen for changes
         if (chrome?.storage?.onChanged) {
             const listener = (changes: any, area: string) => {
-                if (area === "local" && changes.dh_items) {
-                    const newItemList = changes.dh_items.newValue;
-                    if (Array.isArray(newItemList)) {
-                        setItems(newItemList);
-                        // Reset nav stack on update to avoid inconsistencies
+                if (area === "local" && (changes.dh_items || changes.dh_team_items)) {
+                    // Reload everything when either personal or team items change
+                    loadItems().then(data => {
+                        setItems(data);
                         setNavStack([]);
-                        setCurrentItems(newItemList);
-                    }
+                        setCurrentItems(data);
+                    });
                 }
             };
             chrome.storage.onChanged.addListener(listener);
@@ -67,39 +68,72 @@ export function useMenuLogic() {
 }
 
 async function loadItems(): Promise<MenuItem[]> {
-    // 1. Try local storage
+    // 1. Load personal items
+    let personalItems: MenuItem[] = [];
     try {
         if (chrome?.storage?.local) {
             const obj = await new Promise<{ dh_items?: MenuItem[] }>((resolve) => {
                 chrome.storage.local.get("dh_items", (items) => resolve(items as { dh_items?: MenuItem[] }));
             });
-            if (Array.isArray(obj.dh_items) && obj.dh_items.length > 0) return obj.dh_items;
+            if (Array.isArray(obj.dh_items) && obj.dh_items.length > 0) {
+                personalItems = obj.dh_items;
+            }
         }
     } catch (_) { }
 
-    // 2. Fallback to items.json (packaged)
-    try {
-        const url = chrome.runtime.getURL("items.json");
-        const res = await fetch(url);
-        if (res.ok) {
-            const text = await res.text();
-            if (text.trim().startsWith("<")) {
-                throw new Error("Received HTML instead of JSON");
+    // Fallback to items.json if no personal items saved
+    if (personalItems.length === 0) {
+        try {
+            const url = chrome.runtime.getURL("items.json");
+            const res = await fetch(url);
+            if (res.ok) {
+                const text = await res.text();
+                if (text.trim().startsWith("<")) {
+                    throw new Error("Received HTML instead of JSON");
+                }
+                const data = JSON.parse(text);
+                personalItems = Array.isArray(data) ? data : (data.items || []);
             }
-            const data = JSON.parse(text);
-            return Array.isArray(data) ? data : (data.items || []);
+        } catch (e) {
+            console.warn("[DH] Failed to load items.json", e);
         }
-    } catch (e) {
-        console.warn("[DH] Failed to load items.json", e);
     }
 
-    // 3. Fallback defaults (if JSON missing)
-    return [
-        { type: "folder", label: "Favorites", children: [
-            { type: "link", label: "Dynamics Admin Center", url: "https://admin.powerplatform.microsoft.com/" },
-        ]},
-        { type: "markdown", label: "About", content: "# Dynamics Helper\nLoaded defaults." }
-    ] as MenuItem[];
+    // Ultimate fallback
+    if (personalItems.length === 0) {
+        personalItems = [
+            { type: "folder", label: "Favorites", children: [
+                { type: "link", label: "Dynamics Admin Center", url: "https://admin.powerplatform.microsoft.com/" },
+            ]},
+            { type: "markdown", label: "About", content: "# Dynamics Helper\nLoaded defaults." }
+        ] as MenuItem[];
+    }
+
+    // 2. Load team items from cache
+    let teamFolder: MenuItem | null = null;
+    try {
+        if (chrome?.storage?.local) {
+            const teamData = await new Promise<any>((resolve) => {
+                chrome.storage.local.get(['dh_team_items', 'dh_prefs'], resolve);
+            });
+            if (Array.isArray(teamData.dh_team_items) && teamData.dh_team_items.length > 0) {
+                const teamLabel = teamData.dh_prefs?.teamLabel || 'Team';
+                teamFolder = {
+                    type: 'folder',
+                    label: teamLabel,
+                    icon: 'building',
+                    source: 'team',
+                    children: teamData.dh_team_items,
+                };
+            }
+        }
+    } catch (_) { }
+
+    // 3. Merge: team folder first, then personal items
+    if (teamFolder) {
+        return [teamFolder, ...personalItems];
+    }
+    return personalItems;
 }
 
 export async function resolveDynamicUrl(rawUrl: string): Promise<string | null> {

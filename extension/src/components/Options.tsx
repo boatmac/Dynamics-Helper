@@ -18,7 +18,9 @@ import {
     MoreHorizontal,
     FolderOpen,
     Type,
-    RefreshCw
+    RefreshCw,
+    Building2,
+    Lock
 } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -39,6 +41,8 @@ interface MenuItem {
     target?: string;
     icon?: string;
     collapsed?: boolean;
+    tags?: string[];
+    source?: 'team' | 'personal';
 }
 
 interface Preferences {
@@ -55,6 +59,8 @@ interface Preferences {
     autoAnalyzeMode?: 'disabled' | 'critical' | 'always' | 'new_cases';
     enableStatusBubble?: boolean;
     language?: LanguageCode;
+    team?: string;        // Selected team catalog ID (e.g. "dnai")
+    teamLabel?: string;   // Display name for selected team
 }
 
 const DEFAULT_PREFS: Preferences = {
@@ -228,6 +234,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     const currentPath = [...path, index];
     const isEditing = editingItemPath && editingItemPath.join('.') === currentPath.join('.');
     const isSelected = selectedPath && selectedPath.join('.') === currentPath.join('.');
+    const isTeamItem = item.source === 'team';
 
     // Visual State for Drag
     const [dragPosition, setDragPosition] = useState<'top' | 'bottom' | 'inside' | null>(null);
@@ -236,6 +243,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     const [{ isDragging }, drag] = useDrag({
         type: ItemType.ITEM,
         item: { path: currentPath, type: item.type },
+        canDrag: !isTeamItem,
         collect: (monitor) => ({
             isDragging: monitor.isDragging(),
         }),
@@ -395,38 +403,46 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                         </div>
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {item.type === 'folder' && (
-                            <button 
-                                onClick={(e) => {
-                                     e.stopPropagation();
-                                     const newItem: MenuItem = { type: 'link', label: 'New Link', url: 'https://' };
-                                     setItems(prev => addItemAt(currentPath, newItem, prev));
-                                }}
-                                className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors" title="Add Child"
-                            >
-                                <Plus size={14} />
-                            </button>
+                        {isTeamItem ? (
+                            <span className="flex items-center gap-1 px-2 py-1 text-xs text-slate-400" title="Team managed">
+                                <Lock size={12} /> Team
+                            </span>
+                        ) : (
+                            <>
+                                {item.type === 'folder' && (
+                                    <button 
+                                        onClick={(e) => {
+                                             e.stopPropagation();
+                                             const newItem: MenuItem = { type: 'link', label: 'New Link', url: 'https://' };
+                                             setItems(prev => addItemAt(currentPath, newItem, prev));
+                                        }}
+                                        className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors" title="Add Child"
+                                    >
+                                        <Plus size={14} />
+                                    </button>
+                                )}
+                                <button 
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingItemPath(currentPath);
+                                    }}
+                                    className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Edit"
+                                >
+                                    <Edit2 size={14} />
+                                </button>
+                                <button 
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (confirm("Delete this item?")) {
+                                            setItems(prev => deleteItemAt(currentPath, prev));
+                                        }
+                                    }}
+                                    className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
+                            </>
                         )}
-                        <button 
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingItemPath(currentPath);
-                            }}
-                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Edit"
-                        >
-                            <Edit2 size={14} />
-                        </button>
-                        <button 
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                if (confirm("Delete this item?")) {
-                                    setItems(prev => deleteItemAt(currentPath, prev));
-                                }
-                            }}
-                            className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete"
-                        >
-                            <Trash2 size={14} />
-                        </button>
                     </div>
                 </div>
             )}
@@ -487,6 +503,12 @@ const Options: React.FC = () => {
     // Editor State
     const [editingItemPath, setEditingItemPath] = useState<number[] | null>(null); // path of indices
     const [selectedPath, setSelectedPath] = useState<number[] | null>(null); // path of currently selected folder
+
+    // Team Catalog State
+    const [teamList, setTeamList] = useState<{ id: string; label: string }[]>([]);
+    const [teamSynced, setTeamSynced] = useState<string>("");
+    const [isSyncingTeam, setIsSyncingTeam] = useState(false);
+    const [teamItems, setTeamItems] = useState<MenuItem[]>([]);
 
     // Initial Load
     useEffect(() => {
@@ -630,6 +652,21 @@ const Options: React.FC = () => {
             };
             setItems(collapseFolders(loadedItems));
         });
+
+        // Load team catalog metadata
+        chrome.storage.local.get(['dh_team_synced', 'dh_team_items'], (data: any) => {
+            if (data.dh_team_synced) setTeamSynced(data.dh_team_synced);
+            if (Array.isArray(data.dh_team_items)) setTeamItems(data.dh_team_items);
+        });
+
+        // Fetch manifest to populate team dropdown
+        import('../utils/teamCatalog').then(({ fetchManifest }) => {
+            fetchManifest().then(manifest => {
+                if (manifest) {
+                    setTeamList(manifest.teams.map(t => ({ id: t.id, label: t.label })));
+                }
+            });
+        });
     }, []);
 
     // --- Prefs Handlers ---
@@ -690,11 +727,59 @@ const Options: React.FC = () => {
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
             setPrefs(DEFAULT_PREFS);
-            chrome.storage.local.remove(["dh_prefs", "dh_items"], () => {
+            chrome.storage.local.remove(["dh_prefs", "dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_synced"], () => {
                 loadItems().then(setItems);
+                setTeamItems([]);
+                setTeamSynced("");
                 setStatus("Reset complete.");
             });
         }
+    };
+
+    // --- Team Catalog Handlers ---
+    const handleTeamChange = (teamId: string) => {
+        const selectedTeam = teamList.find(t => t.id === teamId);
+        setPrefs(prev => ({
+            ...prev,
+            team: teamId || undefined,
+            teamLabel: selectedTeam?.label || undefined,
+        }));
+
+        if (!teamId) {
+            // Clear team data
+            setTeamItems([]);
+            setTeamSynced("");
+            chrome.runtime.sendMessage({
+                type: "SYNC_TEAM_CATALOG",
+                payload: { teamId: null }
+            });
+            return;
+        }
+
+        // Trigger sync
+        setIsSyncingTeam(true);
+        chrome.runtime.sendMessage({
+            type: "SYNC_TEAM_CATALOG",
+            payload: { teamId }
+        }, (response) => {
+            setIsSyncingTeam(false);
+            if (chrome.runtime.lastError) {
+                setStatus(`Team sync failed: ${chrome.runtime.lastError.message}`);
+                setTimeout(() => setStatus(""), 3000);
+                return;
+            }
+            if (response?.status === "success") {
+                setTeamItems(response.data.items || []);
+                setTeamSynced(new Date().toISOString());
+            } else {
+                setStatus(`Team sync failed: ${response?.error || 'Unknown error'}`);
+                setTimeout(() => setStatus(""), 3000);
+            }
+        });
+    };
+
+    const handleTeamRefresh = () => {
+        if (prefs.team) handleTeamChange(prefs.team);
     };
 
     // Listen for updates
@@ -1211,6 +1296,51 @@ const Options: React.FC = () => {
                                             </label>
                                         </div>
                                         
+                                        {/* Team Catalog */}
+                                        <div className="mt-6 pt-6 border-t border-slate-200">
+                                            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                                <Building2 size={14} /> {t('teamCatalog')}
+                                            </h2>
+
+                                            <div>
+                                                <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('selectTeam')}</label>
+                                                <p className="text-[10px] text-slate-500 mb-2">
+                                                    {t('selectTeamDesc')}
+                                                </p>
+                                                <select
+                                                    value={prefs.team || ''}
+                                                    onChange={(e) => handleTeamChange(e.target.value)}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
+                                                >
+                                                    <option value="">{t('noTeam')}</option>
+                                                    {teamList.map(team => (
+                                                        <option key={team.id} value={team.id}>{team.label}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            {prefs.team && (
+                                                <div className="mt-3 flex items-center justify-between">
+                                                    <div className="text-xs text-slate-500">
+                                                        {teamSynced ? (
+                                                            <span>{t('lastSynced')}: {new Date(teamSynced).toLocaleString()}</span>
+                                                        ) : (
+                                                            <span>{t('neverSynced')}</span>
+                                                        )}
+                                                        <span className="ml-2 text-slate-400">({teamItems.length} {t('items')})</span>
+                                                    </div>
+                                                    <button
+                                                        onClick={handleTeamRefresh}
+                                                        disabled={isSyncingTeam}
+                                                        className="flex items-center gap-1 px-2 py-1 text-xs text-teal-600 hover:bg-teal-50 rounded-md transition-colors"
+                                                    >
+                                                        <RefreshCw size={12} className={isSyncingTeam ? 'animate-spin' : ''} />
+                                                        {isSyncingTeam ? t('syncing') : t('refresh')}
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+
                                         <div className="mt-6 pt-6 border-t border-slate-200">
                                             <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                                                 <FileText size={14} /> {t('copilotConfig')}
