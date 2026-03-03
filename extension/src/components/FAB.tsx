@@ -17,8 +17,7 @@ import {
     Activity, 
     Zap,
     AlertCircle,
-    RefreshCw,
-    Download
+    RefreshCw
 } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -821,6 +820,39 @@ const FAB: React.FC = () => {
         setIsOpen(false);
     };
 
+    const handleFabUpdate = () => {
+        if (!updateAvailable) return;
+        setIsOpen(false);
+        showStatusBubble(`Downloading v${updateAvailable.version}...`, 'default', 0);
+        trackEvent('FAB Update Started', { version: updateAvailable.version });
+
+        chrome.runtime.sendMessage({
+            type: "NATIVE_MSG",
+            payload: {
+                action: "perform_update",
+                payload: { url: updateAvailable.url }
+            }
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                showStatusBubble('Update failed: ' + chrome.runtime.lastError.message, 'error');
+                trackException(new Error('FAB Update: ' + chrome.runtime.lastError.message));
+                return;
+            }
+
+            if (response && response.status === "success") {
+                showStatusBubble('Update installed! Restarting...', 'success', 0);
+                trackEvent('FAB Update Success', { version: updateAvailable.version });
+                setTimeout(() => {
+                    chrome.runtime.reload();
+                }, 1500);
+            } else {
+                const errMsg = response?.error || 'Unknown error';
+                showStatusBubble('Update failed: ' + errMsg, 'error');
+                trackEvent('FAB Update Failed', { version: updateAvailable.version, error: errMsg });
+            }
+        });
+    };
+
     const handleItemClick = async (item: MenuItem) => {
         if (item.type === 'folder') {
             navigateTo(item);
@@ -905,12 +937,12 @@ const FAB: React.FC = () => {
                         {/* Update Banner */}
                         {updateAvailable && (
                             <button
-                                onClick={() => window.open(updateAvailable.url, '_blank')}
+                                onClick={() => { handleFabUpdate(); }}
                                 className="dh-item"
                                 style={{ backgroundColor: '#F0FDF4', borderBottom: '1px solid #BBF7D0' }}
                             >
                                 <span className="dh-item-icon" style={{ color: '#16A34A' }}>
-                                    <Download size={18} />
+                                    <RefreshCw size={18} />
                                 </span>
                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
                                     <span className="dh-item-label" style={{ color: '#15803D' }}>{t('updateAvailable')}</span>

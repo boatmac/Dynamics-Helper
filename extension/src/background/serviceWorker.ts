@@ -29,6 +29,15 @@ try {
 
     // Verify if we can load it (handling potential missing window/document issues in SW)
     appInsights.loadAppInsights();
+
+    // Stamp every telemetry item with the extension version so we can
+    // track adoption and identify users still on older builds.
+    const extVersion = chrome.runtime.getManifest().version;
+    appInsights.addTelemetryInitializer((item) => {
+        item.data = item.data || {};
+        item.data.extensionVersion = extVersion;
+    });
+
     console.log("[DH-SW] Telemetry Service Initialized in Background");
 } catch (e) {
     console.warn("[DH-SW] Failed to initialize Telemetry in Background:", e);
