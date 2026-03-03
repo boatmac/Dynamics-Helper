@@ -1043,24 +1043,28 @@ class NativeHost:
             }
 
         self.send_progress("Checking authentication...")
-        time.sleep(0.5)
 
-        # 1. Fast Fail: Check Authentication Status
+        # 1. Fast Fail: Check Authentication Status (with timeout to prevent hangs)
         try:
-            auth_status = await self.client.get_auth_status()
+            auth_status = await asyncio.wait_for(
+                self.client.get_auth_status(), timeout=15.0
+            )
             if not auth_status.get("isAuthenticated", False):
                 logging.warning("Copilot is not authenticated.")
                 return {
                     "status": "error",
                     "error": f"Copilot is not authenticated. Login: {auth_status.get('login', 'Unknown')}. Status: {auth_status.get('statusMessage', 'Unknown')}. Please run 'copilot auth' in your terminal.",
                 }
+            logging.info("Authentication check passed.")
+        except asyncio.TimeoutError:
+            logging.warning("Auth status check timed out after 15s, continuing...")
+            self.send_progress("Auth check timed out, continuing...")
         except Exception as e:
             logging.error(f"Failed to check auth status: {e}")
-            # Continue safely? or fail? Let's try to continue but log it.
+            self.send_progress("Auth check skipped, continuing...")
 
         try:
-            self.send_progress("Scrubbing PII...")
-            time.sleep(0.5)
+            self.send_progress("Preparing prompt...")
             # Scrub PII from text and context
             scrubbed_text = self.scrubber.scrub(text)
             scrubbed_context = self.scrubber.scrub(context) if context else ""
@@ -1076,7 +1080,6 @@ class NativeHost:
             logging.info(f"Sending prompt to Copilot (length: {len(prompt)})")
 
             self.send_progress("Waiting for Copilot agent...")
-            time.sleep(0.5)
 
             # Accumulate the response
             full_response = ""
