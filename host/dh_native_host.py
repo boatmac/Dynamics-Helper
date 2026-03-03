@@ -1201,10 +1201,6 @@ class NativeHost:
                     flags=re.IGNORECASE,
                 )
 
-                # Apply Shortnames for common Azure products
-                if "Azure Synapse" in clean_product:
-                    clean_product = "Synapse"
-
                 # 3. Compact: Remove spaces and keep only alphanumeric (e.g. "Azure SQL Database" -> "AzureSQLDatabase")
                 safe_product = "".join(c for c in clean_product if c.isalnum())
 
