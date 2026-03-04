@@ -78,6 +78,7 @@ function mount() {
     const baseStyle = document.createElement('style');
     baseStyle.textContent = `
         :host { all: initial; }
+        #root { display: contents; }
     `;
     shadowRoot.appendChild(baseStyle);
 

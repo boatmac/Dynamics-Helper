@@ -886,16 +886,19 @@ const FAB: React.FC = () => {
     };
 
     return (
-        <div className="dh-container">
-            {/* Analysis Result Popover */}
-            <ResultPopover 
-                isOpen={resultPopover.isOpen} 
-                onClose={() => setResultPopover(prev => ({ ...prev, isOpen: false }))} 
-                title={resultPopover.title}
-                content={resultPopover.content}
-                filePath={resultPopover.path}
-            />
+        <>
+        {/* Analysis Result Popover - rendered outside dh-container to avoid 
+            position:fixed stacking context issues with the bottom-right anchored container */}
+        <ResultPopover 
+            isOpen={resultPopover.isOpen} 
+            onClose={() => setResultPopover(prev => ({ ...prev, isOpen: false }))} 
+            title={resultPopover.title}
+            content={resultPopover.content}
+            filePath={resultPopover.path}
+            duration={resultPopover.duration}
+        />
 
+        <div className="dh-container">
             {/* Status Bubble */}
             <div className={cn(
                 "dh-status-bubble",
@@ -1090,6 +1093,7 @@ const FAB: React.FC = () => {
                 )}
             </button>
         </div>
+        </>
     );
 };
 
