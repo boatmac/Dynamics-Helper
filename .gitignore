@@ -39,6 +39,10 @@ releases/
 # Legacy
 legacy_backup/
 
+# Test / Local
+test_blobs/
+nul
+
 # Misc
 items.json
 build/
