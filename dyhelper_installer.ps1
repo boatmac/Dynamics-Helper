@@ -95,9 +95,11 @@ try {
             $ZipUrl = $Asset.browser_download_url
             Write-Host "    Found Latest Version: $($LatestRelease.tag_name)" -ForegroundColor Green
         } catch {
-            Write-Error "Failed to check GitHub for updates."
+            Write-Host ""
+            Write-Host "Failed to check GitHub for updates." -ForegroundColor Red
             Write-Host "Debug Info: $_" -ForegroundColor Gray
-            throw "Could not retrieve latest release URL."
+            Write-Host ""
+            throw "Could not retrieve latest release URL: $_"
         }
     }
 
