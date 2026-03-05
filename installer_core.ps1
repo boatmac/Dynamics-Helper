@@ -90,6 +90,19 @@ if (Test-Path "$HostSrc\system_prompt.md") {
     Write-Host "    - system_prompt.md updated."
 }
 
+# Cleanup legacy user-instructions.md (created by a bug in v2.0.28)
+# The correct file is copilot-instructions.md. If both exist, remove the legacy one.
+# If only the legacy one exists, rename it to the correct name.
+if (Test-Path "$DestDir\user-instructions.md") {
+    if (Test-Path "$DestDir\copilot-instructions.md") {
+        Remove-Item "$DestDir\user-instructions.md" -Force
+        Write-Host "    - Removed stale user-instructions.md (copilot-instructions.md exists)."
+    } else {
+        Rename-Item "$DestDir\user-instructions.md" "copilot-instructions.md"
+        Write-Host "    - Renamed user-instructions.md -> copilot-instructions.md."
+    }
+}
+
 # 4. Copy Extension Files
 Write-Host "[*] Installing Extension files..."
 $ExtDest = "$DestDir\extension"
@@ -131,8 +144,21 @@ Write-Host "Configuring Native Host Manifest..." -ForegroundColor Gray
 
 $ExePath = "$DestDir\dh_native_host.exe"
 if (-not (Test-Path $ExePath)) {
-    Write-Error "Executable not found at '$ExePath'. Cannot register."
+    Write-Host ""
+    Write-Host "!! Executable not found at: $ExePath !!" -ForegroundColor Red
+    Write-Host "The file was copied but is now missing. This usually means your antivirus" -ForegroundColor Yellow
+    Write-Host "quarantined it. See the steps below to whitelist the folder and re-run." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  1. Open Windows Security -> 'Virus & threat protection'" -ForegroundColor White
+    Write-Host "  2. Go to 'Protection history' and restore the blocked file" -ForegroundColor White
+    Write-Host "  3. Add an exclusion for: $DestDir" -ForegroundColor Cyan
+    Write-Host "  4. Re-run this installer" -ForegroundColor White
+    Write-Host ""
+    Read-Host "Press Enter to exit"
+    exit 1
 }
+
+$RegistrationFailed = $false
 
 try {
     Write-Host "    Running registration command..."
@@ -148,12 +174,63 @@ try {
         Write-Error "Registration failed with exit code $LASTEXITCODE. Output: $RegisterOutput"
     }
 } catch {
-    Write-Error "Failed to execute registration command: $_"
+    $ErrorMsg = $_.Exception.Message
+    $IsAVBlock = $ErrorMsg -match "virus|malware|potentially unwanted|threat|quarantine|blocked" -or
+                 $ErrorMsg -match "Operation did not complete successfully because the file contains"
+
+    if ($IsAVBlock) {
+        $RegistrationFailed = $true
+        Write-Host ""
+        Write-Host "!! ANTIVIRUS BLOCKED THE REGISTRATION !!" -ForegroundColor Red
+        Write-Host "==========================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Windows Defender (or your antivirus) blocked dh_native_host.exe from running." -ForegroundColor Yellow
+        Write-Host "This is a FALSE POSITIVE. The executable is built with PyInstaller, which" -ForegroundColor Yellow
+        Write-Host "some antivirus engines mistakenly flag because of how it packages Python." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "All files have been copied successfully, but the Native Host could not" -ForegroundColor Yellow
+        Write-Host "register itself with Chrome/Edge." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "TO FIX THIS:" -ForegroundColor Cyan
+        Write-Host "  1. Open Windows Security (search 'Windows Security' in Start Menu)" -ForegroundColor White
+        Write-Host "  2. Go to 'Virus & threat protection'" -ForegroundColor White
+        Write-Host "  3. Under 'Virus & threat protection settings', click 'Manage settings'" -ForegroundColor White
+        Write-Host "  4. Scroll down to 'Exclusions' and click 'Add or remove exclusions'" -ForegroundColor White
+        Write-Host "  5. Click 'Add an exclusion' -> 'Folder'" -ForegroundColor White
+        Write-Host "  6. Select: $DestDir" -ForegroundColor Cyan
+        Write-Host "  7. Re-run this installer" -ForegroundColor White
+        Write-Host ""
+        Write-Host "If the file was quarantined, you may also need to restore it:" -ForegroundColor Yellow
+        Write-Host "  - In Windows Security -> 'Protection history'" -ForegroundColor White
+        Write-Host "  - Find the blocked item and click 'Actions' -> 'Allow'" -ForegroundColor White
+        Write-Host ""
+
+        # Attempt to add exclusion automatically if running elevated
+        $IsAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator
+        )
+        if ($IsAdmin) {
+            Write-Host "Attempting to add Windows Defender exclusion automatically..." -ForegroundColor Gray
+            try {
+                Add-MpPreference -ExclusionPath $DestDir -ErrorAction Stop
+                Write-Host "    - Exclusion added for: $DestDir" -ForegroundColor Green
+                Write-Host "    - Please re-run this installer to complete registration." -ForegroundColor Cyan
+            } catch {
+                Write-Host "    - Could not add exclusion automatically: $_" -ForegroundColor Yellow
+                Write-Host "    - Please follow the manual steps above." -ForegroundColor Yellow
+            }
+        }
+    } else {
+        Write-Error "Failed to execute registration command: $ErrorMsg"
+    }
 }
 
-
-
-if ($IsUpdate) {
+if ($RegistrationFailed) {
+    # Skip the success message — the user needs to fix the AV issue first
+    Write-Host ""
+    Write-Host "Installation is INCOMPLETE. Registration could not finish." -ForegroundColor Yellow
+    Write-Host "After whitelisting the folder, re-run this installer." -ForegroundColor Yellow
+} elseif ($IsUpdate) {
     Write-Host ""
     Write-Host "SUCCESS: Update Complete!" -ForegroundColor Green
     Write-Host "-------------------------"

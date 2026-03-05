@@ -676,6 +676,28 @@ class NativeHost:
         # FIX: Revert to using 'copilot-instructions.md' as the standard user file
         # to match user expectations and previous behavior.
         user_instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
+        legacy_instr_path = os.path.join(USER_DATA_DIR, "user-instructions.md")
+
+        # Self-heal: A bug in v2.0.28 renamed copilot-instructions.md -> user-instructions.md.
+        # If the legacy file exists, migrate it back.
+        if os.path.exists(legacy_instr_path):
+            if not os.path.exists(user_instr_path):
+                try:
+                    shutil.move(legacy_instr_path, user_instr_path)
+                    logging.info(
+                        f"Migrated legacy user-instructions.md -> copilot-instructions.md"
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to migrate legacy instructions: {e}")
+            else:
+                # Both exist; remove the stale legacy file
+                try:
+                    os.remove(legacy_instr_path)
+                    logging.info(
+                        "Removed stale user-instructions.md (copilot-instructions.md exists)"
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to remove stale user-instructions.md: {e}")
 
         # 2. Load System Instructions (Managed by Installer)
         sys_content = ""
