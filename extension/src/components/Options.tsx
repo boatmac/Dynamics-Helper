@@ -1384,7 +1384,8 @@ const Options: React.FC = () => {
                                                     type="text"
                                                     value={prefs.skillDirectories || ""}
                                                     onChange={(e) => setPrefs(prev => ({ ...prev, skillDirectories: e.target.value }))}
-                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
+                                                    disabled={prefs.useWorkspaceOnly !== false}
+                                                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${prefs.useWorkspaceOnly !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/skills"
                                                 />
                                             </div>
@@ -1399,7 +1400,8 @@ const Options: React.FC = () => {
                                                     type="text"
                                                     value={prefs.mcpConfigPath || ""}
                                                     onChange={(e) => setPrefs(prev => ({ ...prev, mcpConfigPath: e.target.value }))}
-                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
+                                                    disabled={prefs.useWorkspaceOnly !== false}
+                                                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${prefs.useWorkspaceOnly !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/mcp-config.json"
                                                 />
                                             </div>

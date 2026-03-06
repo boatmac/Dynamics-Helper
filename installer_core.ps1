@@ -36,10 +36,6 @@ if (Test-Path $MistakeDir) {
     # Rescue Instructions
     if (Test-Path "$MistakeDir\copilot-instructions.md") {
         Copy-Item "$MistakeDir\copilot-instructions.md" -Destination "$DestDir\" -Force
-    } elseif (Test-Path "$MistakeDir\user-instructions.md") {
-        # Rescue Legacy Name -> New Name
-        Copy-Item "$MistakeDir\user-instructions.md" -Destination "$DestDir\copilot-instructions.md" -Force
-        Write-Host "    - user-instructions.md rescued and renamed to copilot-instructions.md."
     }
     
     # Nuke the Roaming folder to prevent split-brain
@@ -88,19 +84,6 @@ if (-not (Test-Path "$DestDir\config.json")) {
 if (Test-Path "$HostSrc\system_prompt.md") {
     Copy-Item "$HostSrc\system_prompt.md" -Destination "$DestDir\" -Force
     Write-Host "    - system_prompt.md updated."
-}
-
-# Cleanup legacy user-instructions.md (created by a bug in v2.0.28)
-# The correct file is copilot-instructions.md. If both exist, remove the legacy one.
-# If only the legacy one exists, rename it to the correct name.
-if (Test-Path "$DestDir\user-instructions.md") {
-    if (Test-Path "$DestDir\copilot-instructions.md") {
-        Remove-Item "$DestDir\user-instructions.md" -Force
-        Write-Host "    - Removed stale user-instructions.md (copilot-instructions.md exists)."
-    } else {
-        Rename-Item "$DestDir\user-instructions.md" "copilot-instructions.md"
-        Write-Host "    - Renamed user-instructions.md -> copilot-instructions.md."
-    }
 }
 
 # 4. Copy Extension Files

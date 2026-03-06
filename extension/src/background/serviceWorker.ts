@@ -38,6 +38,20 @@ try {
         item.data.extensionVersion = extVersion;
     });
 
+    // Generate a stable anonymous user ID for telemetry.
+    // Service workers lack cookies/localStorage, so the App Insights SDK
+    // cannot persist a user_Id on its own. We use chrome.storage.local instead.
+    chrome.storage.local.get("telemetryUserId", (data) => {
+        let userId = data.telemetryUserId as string | undefined;
+        if (!userId) {
+            userId = crypto.randomUUID();
+            chrome.storage.local.set({ telemetryUserId: userId });
+        }
+        if (appInsights) {
+            appInsights.context.user.id = userId;
+        }
+    });
+
     console.log("[DH-SW] Telemetry Service Initialized in Background");
 } catch (e) {
     console.warn("[DH-SW] Failed to initialize Telemetry in Background:", e);
@@ -47,6 +61,7 @@ function trackBackgroundEvent(name: string, properties: any = {}) {
     if (appInsights) {
         try {
             console.log(`[DH-SW] Received and tracking event: ${name}`);
+            properties.extensionVersion = properties.extensionVersion || chrome.runtime.getManifest().version;
             appInsights.trackEvent({ name }, properties);
         } catch (e) {
             console.error("[DH-SW] Track Event Failed:", e);
