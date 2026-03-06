@@ -145,7 +145,19 @@ class Updater:
             try:
                 os.remove(old_exe)
             except OSError:
-                logging.warning(f"Could not remove existing {old_exe}")
+                logging.warning(
+                    f"Could not remove existing {old_exe}, will try alternative names"
+                )
+                # Try alternative names if .old is locked
+                for suffix in [".old2", ".old3", ".old.bak"]:
+                    alt = self.current_exe + suffix
+                    try:
+                        if os.path.exists(alt):
+                            os.remove(alt)
+                        old_exe = alt
+                        break
+                    except OSError:
+                        continue
 
         try:
             os.rename(self.current_exe, old_exe)
@@ -169,14 +181,17 @@ class Updater:
         if not current_exe_path.endswith(".exe"):
             return
 
-        # 1. Cleanup Binary
-        old_exe = current_exe_path + ".old"
-        if os.path.exists(old_exe):
-            try:
-                os.remove(old_exe)
-                logging.info(f"Cleaned up old version: {old_exe}")
-            except Exception as e:
-                logging.debug(f"Could not clean up old version (might be locked?): {e}")
+        # 1. Cleanup Binary (including alternative suffixes from failed updates)
+        for suffix in [".old", ".old2", ".old3", ".old.bak"]:
+            old_exe = current_exe_path + suffix
+            if os.path.exists(old_exe):
+                try:
+                    os.remove(old_exe)
+                    logging.info(f"Cleaned up old version: {old_exe}")
+                except Exception as e:
+                    logging.debug(
+                        f"Could not clean up {old_exe} (might be locked?): {e}"
+                    )
 
         # 2. Cleanup System Prompt Backups (Legacy)
         host_dir = os.path.dirname(current_exe_path)
