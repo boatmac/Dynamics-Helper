@@ -216,6 +216,7 @@ class NativeHost:
         self.current_request_id = None  # Track current request for progress updates
         self.root_path = None  # Store root path from config
         self.last_update_check = 0  # Track last update check time
+        self.current_session_id = None  # Track current Copilot session ID for /resume
 
         # Log startup location
         logging.info(
@@ -796,17 +797,58 @@ class NativeHost:
         # For now, allowing execution prevents the 'hanging at prompt' issue.
         return {"kind": "approved"}
 
-    async def _refresh_session(self):
-        """Re-creates the Copilot session with current config."""
+    @staticmethod
+    def _extract_case_id(case_number: str) -> str | None:
+        """Extracts a valid 16-digit case ID from a case number or task ID.
+
+        Valid formats:
+        - 16 digits: main case ID (e.g., '2601190030003106')
+        - 19 digits: task ID (e.g., '2601190030003106001') -> returns parent case '2601190030003106'
+
+        Returns None if the input doesn't match a valid case/task ID pattern.
+        """
+        if not case_number or not re.match(r"^\d{16}(\d{3})?$", case_number):
+            return None
+        # Always return the first 16 digits (parent case ID)
+        return case_number[:16]
+
+    async def _refresh_session(self, session_id: str | None = None):
+        """Re-creates or resumes a Copilot session.
+
+        Args:
+            session_id: If provided, try to resume an existing session first.
+                        If resume fails, create a new session with this ID.
+                        If None, create a generic session (no resume capability).
+        """
         if not self.client:
             logging.error("Cannot refresh session: Client not initialized.")
             return False
+
+        # If a session_id is provided, try to resume an existing session first
+        if session_id:
+            try:
+                self.session = await self.client.resume_session(session_id)
+                self.current_session_id = session_id
+                logging.info(f"Resumed existing session: {session_id}")
+                return True
+            except AttributeError:
+                logging.info(
+                    "SDK does not support resume_session. Will create new session."
+                )
+            except Exception as e:
+                logging.info(
+                    f"No existing session to resume ({session_id}): {e}. Creating new session."
+                )
 
         try:
             config = self._get_session_config()
 
             # Register our permission handler to avoid hangs
             config["on_permission_request"] = self._permission_handler
+
+            # Inject session_id if provided
+            if session_id:
+                config["session_id"] = session_id
 
             # Filter out non-SDK config keys (Extension Prefs, root_path)
             # Create a shallow copy for SDK usage to avoid mutating the source of truth
@@ -819,11 +861,15 @@ class NativeHost:
                     del sdk_config[key]
 
             self.session = await self.client.create_session(sdk_config)
-            logging.info("Copilot Session created/refreshed successfully.")
+            self.current_session_id = session_id
+            logging.info(
+                f"Copilot Session created/refreshed successfully. Session ID: {session_id or 'generic'}"
+            )
             return True
         except Exception as e:
             logging.error(f"Failed to create/refresh session: {e}")
             self.session = None
+            self.current_session_id = None
             return False
 
     def _resolve_skills(self, directories, base_path):
@@ -1019,17 +1065,32 @@ class NativeHost:
         case_number = payload.get("caseNumber", "Unspecified")
         payload_root_path = payload.get("rootPath")
 
-        # Update root path if provided (syncs frontend setting to backend state)
+        # Derive a case-specific session ID for /resume support
+        valid_case_id = self._extract_case_id(case_number)
+        session_id = f"dh-{valid_case_id}" if valid_case_id else None
+
+        # Determine if we need to refresh the session:
+        # 1. Root path changed (workspace MCP/Skills config may differ)
+        # 2. Session ID changed (different case)
+        needs_refresh = False
+
         if payload_root_path:
             if self.root_path != payload_root_path:
                 logging.info(
-                    f"Root path changed: {self.root_path} -> {payload_root_path}. Refreshing session."
+                    f"Root path changed: {self.root_path} -> {payload_root_path}."
                 )
                 self.root_path = payload_root_path
-                # Refresh session to pick up new Workspace MCP/Skills config
-                await self._refresh_session()
+                needs_refresh = True
             else:
                 self.root_path = payload_root_path
+
+        if session_id and session_id != self.current_session_id:
+            logging.info(f"Case changed: {self.current_session_id} -> {session_id}.")
+            needs_refresh = True
+
+        if needs_refresh:
+            logging.info(f"Refreshing session for: {session_id or 'generic'}")
+            await self._refresh_session(session_id=session_id)
 
         if not text:
             return {"status": "error", "error": "No text provided for analysis."}
@@ -1251,7 +1312,14 @@ class NativeHost:
                 f.write(f"# Dynamics Helper - Error Analysis\n\n")
                 f.write(f"**Timestamp:** {timestamp}\n")
                 f.write(f"**Product:** {product}\n")
-                f.write(f"**Case Number:** {case_number}\n\n")
+                f.write(f"**Case Number:** {case_number}\n")
+                if self.current_session_id:
+                    f.write(f"**Session ID:** {self.current_session_id}\n")
+                f.write(f"\n")
+                if self.current_session_id:
+                    f.write(
+                        f"> Resume in Copilot CLI: `copilot /resume {self.current_session_id}`\n\n"
+                    )
                 f.write(f"## Original Error\n{text}\n\n")
                 if context:
                     f.write(f"## Context\n{context}\n\n")
@@ -1259,7 +1327,11 @@ class NativeHost:
 
             return {
                 "status": "success",
-                "data": {"markdown": full_response, "saved_to": output_file},
+                "data": {
+                    "markdown": full_response,
+                    "saved_to": output_file,
+                    "session_id": self.current_session_id,
+                },
             }
 
         except Exception as e:

@@ -788,6 +788,8 @@ const Options: React.FC = () => {
             if (message.type === "NATIVE_UPDATE_AVAILABLE") {
                 console.log("[Options] Received update available:", message.payload);
                 setUpdateAvailable(message.payload);
+                setStatus(`v${message.payload.version} available for update`);
+                setTimeout(() => setStatus(""), 5000);
             }
             
             if (message.type === "NATIVE_UPDATE_NOT_AVAILABLE") {
