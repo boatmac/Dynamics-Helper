@@ -246,6 +246,10 @@ const FAB: React.FC = () => {
     // Concurrency Control
     const latestRequestId = React.useRef<string | null>(null);
 
+    // Track whether the user has manually edited the context textarea
+    // This prevents background scans and re-opens from overwriting user edits
+    const isUserEdited = React.useRef(false);
+
     // Initial Health Check to wake up Host and check for updates
     useEffect(() => {
         const checkHealth = async () => {
@@ -417,7 +421,7 @@ const FAB: React.FC = () => {
         const doScan = async () => {
              // Initial scan on mount (even if closed) to support auto-analyze without opening
              const initialData = await PageReader.scanForErrors();
-             if (initialData) {
+             if (initialData && !isUserEdited.current) {
                   setScrapedData(initialData);
              }
 
@@ -434,6 +438,7 @@ const FAB: React.FC = () => {
                                           (freshData.ticketTitle && freshData.ticketTitle !== scrapedData.ticketTitle);
 
                      if (isNewContext) {
+                         isUserEdited.current = false; // New case context — reset edit flag
                          setScrapedData(freshData);
                          setHasAutoAnalyzed(false); // Reset to allow auto-analysis for the new context
                          setErrorMsg(null);
@@ -532,13 +537,21 @@ const FAB: React.FC = () => {
 
                          if (isIdentityChange) {
                              console.log("[DH] New Context Detected (Identity Change)");
+                             isUserEdited.current = false; // New case — reset edit flag
                              setHasAutoAnalyzed(false); // Reset to allow auto-analysis for the new context
                              latestRequestId.current = null;
                              setStatusBubble(prev => ({ ...prev, visible: false }));
-                         } else {
-                             console.log("[DH] Context Enriched (Same Identity)");
+                             return freshData;
                          }
-                         return freshData;
+                         
+                         // Same identity, but data enriched — only update if user hasn't edited
+                         if (!isUserEdited.current) {
+                             console.log("[DH] Context Enriched (Same Identity)");
+                             return freshData;
+                         }
+
+                         console.log("[DH] Context Enriched but user has edited — skipping overwrite");
+                         return prev;
                      }
                      return prev;
                  });
@@ -655,7 +668,8 @@ const FAB: React.FC = () => {
         
         // Ensure data is not null before processing
         if (data) {
-             // Force the text update by resetting the "edited" state implicitly
+             // Explicit refresh — user wants fresh data, so reset the edit flag
+            isUserEdited.current = false;
             setScrapedData(data);
             setHasAutoAnalyzed(false); // Reset so auto-analyze can run again if enabled
             setErrorMsg(null);
@@ -1024,6 +1038,7 @@ const FAB: React.FC = () => {
                                         }
                                         onChange={(e) => {
                                             const newVal = e.target.value;
+                                            isUserEdited.current = true;
                                             setScrapedData(prev => {
                                                 if (!prev) return { errorText: newVal }; // Should not happen given render condition
                                                 return { 
