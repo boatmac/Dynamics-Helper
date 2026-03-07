@@ -10,11 +10,11 @@ To prevent "Split Brain" (developing on source while running the installed exe),
 | **Executable** | `host/launch_host.bat` (Wrapper) | `dh_native_host.exe` (Compiled) |
 | **Manifest File** | `host/host_manifest.json` | `%LOCALAPPDATA%/DynamicsHelper/manifest.json` |
 | **Path Strategy** | **ABSOLUTE** (e.g., `C:\Repo\host\launch_host.bat`) | **RELATIVE** (e.g., `dh_native_host.exe`) |
-| **Why?** | Browser needs full path to find the repo. | Bypass encoding bugs (e.g., `José`) by keeping path local. |
+| **Why?** | Browser needs full path to find the repo. | Bypass encoding bugs (e.g., `Jose`) by keeping path local. |
 
 ## 2. Critical Technical Constraints
 
-### A. Manifest Encoding (The "José" Rule)
+### A. Manifest Encoding (The "Jose" Rule)
 
 * **Rule:** The `manifest.json` MUST be written as **UTF-8 WITHOUT BOM**.
 * **Reason:** Chrome/Edge Native Messaging hosts fail to parse JSON if a Byte Order Mark (BOM) is present.
@@ -31,6 +31,12 @@ The browser looks up the Host ID (`com.dynamics.helper.native`) in the Registry.
   * **Dev:** Points to `.../Repository/host/host_manifest.json`
   * **Prod:** Points to `%LOCALAPPDATA%/DynamicsHelper/manifest.json`
 
+### C. Stdout Protection
+
+* The Native Host communicates via `stdout` using length-prefixed JSON.
+* **Any `print()` to stdout (from code or libraries) will corrupt the communication pipe** and cause "Native Host disconnected" errors.
+* `dh_native_host.py` redirects `sys.stdout` to `sys.stderr` at the very top of the file. **DO NOT REMOVE THIS.**
+
 ## 3. Tooling Responsibilities
 
 ### `host/register.py` (Dev Registration)
@@ -45,8 +51,61 @@ The browser looks up the Host ID (`com.dynamics.helper.native`) in the Registry.
 * Writes `manifest.json` with `"path": "dh_native_host.exe"` (Relative).
 * **CRITICAL:** Uses `[System.IO.File]::WriteAllText` to ensure No-BOM.
 * Updates Registry to point to `%LOCALAPPDATA%/DynamicsHelper/manifest.json`.
+* **Preserves user data:** `copilot-instructions.md` and `config.json` are NEVER deleted or overwritten by the installer.
 
 ### `dev_switch.py` (Mode Toggler)
 
 * Does NOT modify files.
 * Only updates the **Registry Key** to toggle between the Dev Manifest path and the Prod Manifest path.
+
+## 4. Self-Update Architecture
+
+The host supports in-place updates without requiring the user to re-download and re-install.
+
+### Flow
+
+1. **Check:** On startup (`health_check` action), `NativeHost.check_for_updates()` queries the GitHub Releases API.
+2. **Notify:** If a newer version exists, sends `NATIVE_UPDATE_AVAILABLE` message to the extension with version and download URL.
+3. **Download:** When user clicks "Update Now", `updater.download_update()` fetches the release zip.
+4. **Apply:** The updater extracts files to the install directory (`%LOCALAPPDATA%\DynamicsHelper`).
+5. **Locked File Handling:** When replacing `dh_native_host.exe`:
+   * Try renaming old file to `.exe.old`
+   * If locked (antivirus): fall back to `.exe.old2`, `.exe.old3`
+   * Log errors for debugging
+6. **Restart:** The host process exits; Chrome relaunches it on the next native message.
+
+### Key Files
+
+* **`host/updater.py`** (~208 lines): The `Updater` class handling download, extraction, and locked-file fallback.
+* **`extension/src/components/Options.tsx`**: Displays update status and "Update Now" button.
+
+## 5. Session Persistence Architecture
+
+The host maintains named Copilot sessions so users can continue analysis in the Copilot CLI.
+
+### Session ID Derivation
+
+* **Format:** `dh-{caseId}` where `caseId` is a validated 16-digit case number.
+* **Validation:** `_extract_case_id()` accepts 16-digit (main case) or 19-digit (task ID, maps to parent 16 digits).
+* **Invalid case numbers** result in a generic session (no persistence, no resume).
+
+### Session Lifecycle
+
+1. **First analysis for a case:** `resume_session(session_id)` is tried first. If no prior session exists, falls back to `create_session()` with `session_id` in config.
+2. **Subsequent analyses for same case:** Session is reused (no refresh needed).
+3. **Case change or root path change:** Session is recreated with the new session ID.
+4. **SDK compatibility:** `AttributeError` is caught gracefully if the SDK version doesn't support `resume_session()`.
+
+### Storage
+
+* SDK stores session state at `~/.copilot/session-state/{session_id}/`.
+* The report (`dh_case_report.md`) includes the session ID and a resume command.
+
+## 6. Case ID Pipeline
+
+How case numbers flow from the browser to the host:
+
+1. **PageReader** (`pageReader.ts`): Scrapes case numbers using a 4-strategy cascade (header controls, label search, header container regex, ticket title fallback). Regex: `/(\b\d{16}\b)|(\b[A-Z]{2,10}-?\d{3,}[-\w]*\b)/`.
+2. **FAB.tsx**: Passes `caseNumber` in the analyze payload to the service worker.
+3. **serviceWorker.ts**: Transparent relay — passes the payload through to the native host.
+4. **dh_native_host.py**: `payload.get("caseNumber", "Unspecified")` extracts the value. `_extract_case_id()` validates the format. Invalid numbers fall back to generic (non-persistent) sessions.

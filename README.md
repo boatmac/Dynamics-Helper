@@ -4,15 +4,19 @@ A productivity tool for Technical Support Engineers (TSEs) to analyze support ti
 
 ## Features
 
-* **Native Host Integration:** Securely communicates with a local Python backend.
-* **AI Analysis:** Uses GitHub Copilot SDK to analyze error logs and ticket descriptions.
-* **Privacy Focused:** No PII leaves your machine; analysis is done locally via the CLI bridge.
-* **Fluent UI Support:** Automatically scrapes error context from Microsoft Dynamics interface.
-* **Bookmark Manager:** Drag-and-drop support for quick access to internal tools.
+* **AI-Powered Analysis:** Uses GitHub Copilot SDK to analyze error logs, ticket descriptions, and telemetry.
+* **Native Host Integration:** Securely communicates with a local Python backend via Chrome Native Messaging.
+* **Privacy Focused:** PII is scrubbed locally before sending to the AI. No raw customer data leaves your machine.
+* **Fluent UI Support:** Automatically scrapes error context from Microsoft Dynamics 365 and Azure Portal.
+* **Session Persistence:** Continue investigations in the Copilot CLI with `/resume` — conversation history and tool state are preserved.
+* **Self-Updating:** In-app update notifications with one-click install.
+* **Team Bookmark Catalog:** Shared bookmark collections synced via Azure Blob, with personal bookmarks and drag-and-drop support.
+* **Right-Click Analysis:** Select text on any page and analyze it directly from the context menu.
+* **Auto-Analyze:** Optionally trigger analysis automatically when navigating to a new case.
 
 ## Installation
 
-### Quick Install (User Friendly)
+### Quick Install (Recommended)
 
 Open PowerShell and run:
 
@@ -30,8 +34,6 @@ This command downloads the latest release and runs the installer automatically.
 
 2. **Run the Installer:**
     * Double-click `install.bat`.
-    * *(This wrapper script automatically bypasses PowerShell execution policies to allow the installer to run.)*
-
     * This will:
         * Install the Native Host and Extension to `%LOCALAPPDATA%\DynamicsHelper`.
         * Register the Native Host in the Windows Registry.
@@ -42,6 +44,12 @@ This command downloads the latest release and runs the installer automatically.
     * Enable **Developer Mode** (toggle in the top right).
     * Click **Load unpacked**.
     * Navigate to `%LOCALAPPDATA%\DynamicsHelper\extension` (you can paste this path into the folder selector) and select it.
+
+### Prerequisites
+
+* **Python 3.10+**: [Download Here](https://www.python.org/downloads/) (Ensure "Add Python to PATH" is checked).
+* **Node.js (LTS)**: [Download Here](https://nodejs.org/).
+* **GitHub Copilot CLI**: `npm install -g @github/copilot` then `copilot auth`.
 
 ### For Developers (Build from Source)
 
@@ -56,7 +64,6 @@ This command downloads the latest release and runs the installer automatically.
 2. **Install the Host:**
     * Navigate to `host/`
     * Run `install.bat` (Run as Administrator is recommended for Registry changes).
-    * Ensure you have the GitHub Copilot CLI installed (`npm install -g @githubnext/github-copilot-cli`) and authenticated (`github-copilot-cli auth`).
 
 3. **Load in Edge/Chrome:**
     * Go to `chrome://extensions`.
@@ -69,13 +76,17 @@ This command downloads the latest release and runs the installer automatically.
 
 ## Usage
 
-1. Open a support ticket in Dynamics or Azure Portal.
+1. Open a support ticket in Dynamics 365 or Azure Portal.
 2. Click the **DH** Floating Action Button (FAB) in the bottom right.
-3. Click **Analyze** to scrape the page and get an AI-generated Root Cause Analysis.
-4. The result is saved as a Markdown file in your Downloads folder and displayed in a popover.
+3. Review and optionally edit the scraped Case Context.
+4. Click **Analyze** to get an AI-generated Root Cause Analysis.
+5. The result is saved as a Markdown report and displayed in a popover.
+6. Continue the investigation in the Copilot CLI: `copilot /resume dh-{caseId}`.
 
 ## Development
 
-* **Frontend:** React, Vite, TypeScript, Tailwind CSS.
-* **Backend:** Python 3.x, Native Messaging API, asyncio.
-* **Telemetry:** Azure Application Insights (Optional).
+* **Frontend:** React 19, Vite, TypeScript, Tailwind CSS.
+* **Backend:** Python 3.x, Native Messaging API, asyncio, PyInstaller.
+* **Telemetry:** Azure Application Insights (anonymous, optional).
+
+See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for internal architecture details, and [AGENTS.md](AGENTS.md) for AI agent coding standards.

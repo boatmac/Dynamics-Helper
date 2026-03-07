@@ -16,8 +16,11 @@ The project consists of three main components:
 
 ### `extension/` (Frontend)
 
-* **`src/components/FAB.tsx`**: The main UI component. It contains the "Analyze" logic and the safety timeout configuration (currently 600s).
-* **`src/utils/pageReader.ts`**: Logic for scraping Dynamics/Azure Portal pages to extract case numbers, error text, and context.
+* **`src/components/FAB.tsx`**: The main UI component. It contains the "Analyze" logic, the safety timeout configuration (currently 600s), and the `isUserEdited` ref pattern for protecting user edits from background scans.
+* **`src/components/Options.tsx`**: The extension settings page. Handles preferences, Root Path, MCP/Skill directory config, team catalog sync, and update checking.
+* **`src/utils/pageReader.ts`**: Logic for scraping Dynamics/Azure Portal pages to extract case numbers, error text, and context. Uses a 4-strategy cascade (header controls, label search, header container regex, ticket title fallback).
+* **`src/background/serviceWorker.ts`**: Service worker handling telemetry (with stable anonymous UUID via `chrome.storage.local`), native messaging relay, and extension version injection.
+* **`src/utils/telemetry.ts`**: Azure Application Insights integration for anonymous telemetry.
 * **`manifest.json`**: Defines permissions (`nativeMessaging`) and background scripts.
 * **`dist/`**: The build output directory. Load the extension from here (`extension/dist`).
 
@@ -28,8 +31,17 @@ The project consists of three main components:
   * **Timeout:** Has a hard timeout (currently 600s) for Copilot requests.
   * **Logging:** Writes to `%LOCALAPPDATA%\DynamicsHelper\native_host.log`.
   * **Config Loading:** Prioritizes `%LOCALAPPDATA%` config over the local directory.
-* **`install.bat`**: Sets up the Python environment and registry keys.
+  * **Session Persistence:** Uses deterministic session IDs (`dh-{caseId}`) for Copilot `/resume` support.
+  * **Case ID Validation:** `_extract_case_id()` validates 16-digit case IDs and 19-digit task IDs.
+* **`updater.py`**: Self-update mechanism. Downloads updates from GitHub releases, handles locked `.exe` files by renaming to `.exe.old` (with `.old2`, `.old3` fallback for antivirus locks).
+* **`pii_scrubber.py`**: PII redaction utility for sanitizing text before sending to the LLM.
 * **`system_prompt.md`**: The base persona for the AI Agent.
+
+### Test Files (`host/`)
+
+* **`test_pii_scrubber.py`** — PII redaction tests.
+* **`test_case_id.py`** — Case ID extraction/validation tests (16-digit, 19-digit, edge cases).
+* **`test_analyze_flow.py`**, **`test_analyze_full.py`**, **`test_analyzer.py`** — Analysis pipeline tests.
 
 ### `%LOCALAPPDATA%\DynamicsHelper\` (User Configuration)
 
@@ -52,11 +64,25 @@ Understanding how a user request becomes an AI response.
     * Before sending to the LLM, the `text` and `context` are scrubbed using regex.
     * **Removes:** Emails, IPv4 Addresses, US Phone Numbers.
     * **Note:** GUID redaction is currently disabled to preserve technical identifiers needed for troubleshooting (e.g., Subscription IDs, Resource IDs).
-4. **SDK Execution (`send_and_wait`):**
-    * The backend initializes a `CopilotSession` with the specific configuration.
-    * It sends the prompt with a **600s timeout**.
+4. **Session Management:**
+    * The backend validates the case number via `_extract_case_id()` (accepts 16 or 19 digits).
+    * A deterministic session ID `dh-{caseId}` is derived from the validated case ID.
+    * Smart refresh: the session is only recreated when the case ID or workspace root path changes.
+    * On session creation, `resume_session()` is tried first (restores conversation history, tool state). Falls back to `create_session()` with `session_id` in config.
+5. **SDK Execution (`send_and_wait`):**
+    * The backend sends the prompt with a **600s timeout**.
 
-### 2. Instruction Hierarchy (The Context)
+### 2. Session Persistence
+
+The host maintains persistent sessions so users can continue analysis in the Copilot CLI.
+
+* **Session ID Format:** `dh-{caseId}` (e.g., `dh-2601190030003106`).
+* **SDK Mechanism:** `client.resume_session(session_id)` restores state from `~/.copilot/session-state/{session_id}/`.
+* **Graceful Fallback:** If the SDK version doesn't support `resume_session()`, an `AttributeError` is caught and a new session is created instead.
+* **Report Integration:** `dh_case_report.md` includes the session ID and a resume command: `copilot /resume dh-{caseId}`.
+* **Response Payload:** The `session_id` is returned to the extension in the analysis response for frontend visibility.
+
+### 3. Instruction Hierarchy (The Context)
 
 The "System Prompt" is built from three layers, merged at runtime in `_get_session_config`:
 
@@ -74,7 +100,7 @@ The "System Prompt" is built from three layers, merged at runtime in `_get_sessi
 
 **Repository ONLY Logic:** If "Repo Only" is enabled (`useWorkspaceOnly = true`) and a Root Path is configured, only Workspace Instructions (Layer 3) are used. Layer 2 (User) and Layer 1 (System) instructions are still loaded, but Workspace Skills and MCP servers completely replace their global counterparts.
 
-### 3. Skills Configuration
+### 4. Skills Configuration
 
 Capabilities (Skills) are loaded based on the following precedence:
 
@@ -90,7 +116,7 @@ Capabilities (Skills) are loaded based on the following precedence:
 3. **Repository ONLY Mode:**
     * If enabled: The AI uses **ONLY** Workspace Skills. Base Skills (User + Default) are ignored.
 
-### 4. MCP Configuration
+### 5. MCP Configuration
 
 Model Context Protocol (MCP) servers follow similar logic:
 
@@ -105,6 +131,53 @@ Model Context Protocol (MCP) servers follow similar logic:
 
 3. **Repository ONLY Mode:**
     * If enabled: The AI uses **ONLY** Workspace MCP servers. Base MCP servers are ignored.
+
+---
+
+## Frontend Patterns
+
+### User Edit Protection (`isUserEdited` Pattern)
+
+Background scans (MutationObserver, `useEffect` on `isOpen`) continuously scrape the page and update `scrapedData`. Without protection, these overwrites any user edits to the Case Context textarea.
+
+**Implementation (see `FAB.tsx`):**
+
+1. A `useRef<boolean>` flag `isUserEdited` tracks whether the user has manually edited the textarea.
+2. The textarea's `onChange` handler sets `isUserEdited.current = true`.
+3. All `setScrapedData` calls from background scans check `isUserEdited.current` before overwriting.
+4. The flag resets to `false` only on:
+   * **Identity change:** New case number or ticket title detected (SPA navigation).
+   * **Explicit refresh:** User clicks the refresh button (`handleRefreshContext`).
+
+**Rule:** Any new code path that calls `setScrapedData` from a background process MUST check `isUserEdited.current` first.
+
+### Telemetry
+
+* **Anonymous Identity:** Stable UUID generated via `chrome.storage.local` in `serviceWorker.ts`. Do NOT use cookies/localStorage (unavailable in service workers).
+* **Extension Version:** Injected automatically in `trackBackgroundEvent`. Do NOT rely on `item.data` for version stamping.
+* **Querying:** Use `dcount(user_Id)` in App Insights for unique user counts. The `user_Id` fix only works from v2.0.56+; older versions have empty user IDs.
+
+---
+
+## Self-Update Mechanism
+
+The extension checks for updates on startup (via `health_check` action) and displays an "Update Available" notification in the Options page and FAB.
+
+### Flow
+
+1. **Check:** `NativeHost.check_for_updates()` queries the GitHub Releases API.
+2. **Notify:** If a newer version exists, sends `NATIVE_UPDATE_AVAILABLE` message to the extension.
+3. **Download:** User clicks "Update Now" → `updater.download_update()` fetches the release zip.
+4. **Apply:** The updater extracts files, handles locked `.exe` via rename-to-`.old` strategy.
+5. **Restart:** The host process exits; Chrome relaunches it on the next native message.
+
+### Locked File Handling
+
+When replacing `dh_native_host.exe`, the file may be locked by the OS or antivirus:
+
+1. Try `rename → .exe.old`
+2. If locked: try `.exe.old2`, `.exe.old3` as fallback
+3. Log errors for debugging
 
 ---
 
@@ -139,8 +212,8 @@ Model Context Protocol (MCP) servers follow similar logic:
 
 We use `release_helper.py` to manage versions and builds.
 
-* **Stable Release:** `python release_helper.py 2.0.18 --publish`
-* **Beta Release:** `python release_helper.py 2.0.19-beta --publish --prerelease`
+* **Stable Release:** `python release_helper.py 2.0.57 --publish`
+* **Beta Release:** `python release_helper.py 2.0.58-beta --publish --prerelease`
 
 ### 2. The "Safe Switch" Workflow
 
