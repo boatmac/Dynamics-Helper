@@ -174,6 +174,7 @@ try:
         MessageOptions,
         SessionConfig,
         PermissionRequestResult,
+        PreToolUseHookOutput,
     )
 
     logging.info("Successfully imported copilot SDK.")
@@ -670,8 +671,15 @@ class NativeHost:
                     logging.error(f"Failed to load Workspace MCP config: {e}")
 
         # Assign merged MCP servers to session config
+        # IMPORTANT: SDK reads "mcp_servers" (snake_case) and converts to "mcpServers" on the wire
         if mcp_servers:
-            session_config["mcpServers"] = mcp_servers
+            session_config["mcp_servers"] = mcp_servers
+
+        # --- Working Directory ---
+        # Tells Copilot where to anchor file operations (e.g., filesystem MCP)
+        if self.root_path:
+            session_config["working_directory"] = self.root_path
+            logging.info(f"Set working_directory to: {self.root_path}")
 
         # --- System Instructions (Split Prompt Architecture) ---
 
@@ -791,13 +799,22 @@ class NativeHost:
     def _permission_handler(self, request, context) -> PermissionRequestResult:
         """
         Auto-approves permissions to prevent headless hangs.
-        Logs the approval for audit.
+        Fallback safety net — if pre_tool_use hook doesn't catch it.
         """
-        logging.info(f"Permission requested: {request}")
+        logging.info(f"Permission requested (fallback handler): {request}")
         logging.info("Auto-approving permission request to prevent headless hang.")
-        # We can implement finer-grained logic here if needed.
-        # For now, allowing execution prevents the 'hanging at prompt' issue.
-        return {"kind": "approved"}
+        return PermissionRequestResult(kind="approved")
+
+    @staticmethod
+    def _pre_tool_use_hook(hook_input, context) -> PreToolUseHookOutput:
+        """
+        Auto-approves all tool calls BEFORE they reach the permission request stage.
+        This eliminates the permission request overhead entirely, improving speed.
+        The _permission_handler above serves as a fallback safety net.
+        """
+        tool_name = hook_input.get("toolName", "unknown")
+        logging.info(f"Pre-tool-use hook: auto-allowing '{tool_name}'")
+        return PreToolUseHookOutput(permissionDecision="allow")
 
     @staticmethod
     def _extract_case_id(case_number: str) -> str | None:
@@ -843,6 +860,10 @@ class NativeHost:
         try:
             config = self._get_session_config()
             config["on_permission_request"] = self._permission_handler
+            # Add hooks for auto-approval (bypasses permission request stage)
+            config["hooks"] = {
+                "on_pre_tool_use": self._pre_tool_use_hook,
+            }
         except Exception as e:
             logging.error(f"Failed to build session config: {e}")
             return False
@@ -850,10 +871,18 @@ class NativeHost:
         # If a session_id is provided, try to resume an existing session first
         if session_id:
             try:
-                # Build a resume-specific config (subset of full config)
-                resume_config = {
-                    "on_permission_request": self._permission_handler,
-                }
+                # Build resume config from full config (same capabilities as create)
+                # resume_session accepts all SessionConfig fields except session_id
+                resume_config = config.copy()
+
+                # Strip non-SDK keys
+                for key in [
+                    "root_path",
+                    "extension_preferences",
+                    "_user_instructions_raw",
+                ]:
+                    resume_config.pop(key, None)
+
                 self.session = await self.client.resume_session(
                     session_id, resume_config
                 )
@@ -882,7 +911,11 @@ class NativeHost:
             sdk_config = config.copy()
 
             # Keys to strip
-            keys_to_remove = ["root_path", "extension_preferences"]
+            keys_to_remove = [
+                "root_path",
+                "extension_preferences",
+                "_user_instructions_raw",
+            ]
             for key in keys_to_remove:
                 if key in sdk_config:
                     del sdk_config[key]
@@ -1156,11 +1189,15 @@ class NativeHost:
             auth_status = await asyncio.wait_for(
                 self.client.get_auth_status(), timeout=15.0
             )
-            if not auth_status.get("isAuthenticated", False):
+            # SDK 0.1.32+: get_auth_status() returns a GetAuthStatusResponse dataclass, not a dict
+            is_auth = getattr(auth_status, "isAuthenticated", False)
+            if not is_auth:
+                login_name = getattr(auth_status, "login", "Unknown")
+                status_msg = getattr(auth_status, "statusMessage", "Unknown")
                 logging.warning("Copilot is not authenticated.")
                 return {
                     "status": "error",
-                    "error": f"Copilot is not authenticated. Login: {auth_status.get('login', 'Unknown')}. Status: {auth_status.get('statusMessage', 'Unknown')}. Please run 'copilot auth' in your terminal.",
+                    "error": f"Copilot is not authenticated. Login: {login_name}. Status: {status_msg}. Please run 'copilot auth' in your terminal.",
                 }
             logging.info("Authentication check passed.")
         except asyncio.TimeoutError:
