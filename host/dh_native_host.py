@@ -480,6 +480,7 @@ class NativeHost:
 
         except Exception as e:
             logging.error(f"Failed to initialize SDK: {e}")
+            self.client = None  # Ensure client is None so null checks catch it
             self.session = None  # Ensure it's None on failure
 
     def _get_session_config(self) -> SessionConfig:
@@ -823,8 +824,19 @@ class NativeHost:
                         If None, create a generic session (no resume capability).
         """
         if not self.client:
-            logging.error("Cannot refresh session: Client not initialized.")
-            return False
+            logging.warning("Client not initialized. Attempting re-initialization...")
+            try:
+                cli_path = self.find_copilot_cli()
+                options: CopilotClientOptions = {}
+                if cli_path:
+                    options["cli_path"] = cli_path
+                self.client = CopilotClient(options if options else None)
+                await self.client.start()
+                logging.info("Client re-initialized successfully.")
+            except Exception as e:
+                logging.error(f"Client re-initialization failed: {e}")
+                self.client = None
+                return False
 
         # If a session_id is provided, try to resume an existing session first
         if session_id:
