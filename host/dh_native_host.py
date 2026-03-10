@@ -819,8 +819,9 @@ class NativeHost:
 
         Args:
             session_id: If provided (format: "dh-{caseId}"), try to resume first.
-                        If resume fails, create a new session (without injecting
-                        our custom ID — the server assigns its own session ID).
+                        If resume fails, create a new session with this named ID
+                        for future /resume support. Logs a warning if the server
+                        does not honor the requested ID.
                         If None, create a generic session (no resume capability).
         """
         if not self.client:
@@ -886,15 +887,30 @@ class NativeHost:
                 if key in sdk_config:
                     del sdk_config[key]
 
+            # Inject named session ID for /resume support
+            if session_id:
+                sdk_config["session_id"] = session_id
+
             self.session = await self.client.create_session(sdk_config)
-            # Capture the server-assigned session ID (not our custom dh-{caseId})
-            self.current_session_id = getattr(self.session, "session_id", None)
+            # Capture the server-returned session ID
+            server_session_id = getattr(self.session, "session_id", None)
+
+            # Verify the server honored our named session ID
+            if session_id and server_session_id != session_id:
+                logging.warning(
+                    f"Server did not honor named session ID. "
+                    f"Requested: {session_id}, Got: {server_session_id}. "
+                    f"Using server-assigned ID."
+                )
+
+            self.current_session_id = server_session_id
             # Track which case this session belongs to (for smart-refresh comparison)
             if session_id:
                 # session_id is "dh-{caseId}", extract the case ID portion
                 self.current_case_id = session_id.replace("dh-", "", 1)
             logging.info(
-                f"Copilot Session created successfully. Server ID: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
+                f"Copilot Session created successfully. "
+                f"Session ID: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
             )
             return True
         except Exception as e:
