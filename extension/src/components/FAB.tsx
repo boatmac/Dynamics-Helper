@@ -854,10 +854,11 @@ const FAB: React.FC = () => {
             }
 
             if (response && response.status === "success") {
-                showStatusBubble('Update installed! Restarting...', 'success', 0);
+                showStatusBubble('Update installed! Reloading page...', 'success', 5000);
                 trackEvent('FAB Update Success', { version: updateAvailable.version });
+                setUpdateAvailable(null);
                 setTimeout(() => {
-                    chrome.runtime.reload();
+                    window.location.reload();
                 }, 1500);
             } else {
                 const errMsg = response?.error || 'Unknown error';
@@ -1026,12 +1027,16 @@ const FAB: React.FC = () => {
                                         value={
                                             scrapedData
                                                 ? (() => {
-                                                    // Check if we already have the formatted text in errorText (from previous edits)
-                                                    // AND it starts with our known header (a weak check but simple)
-                                                    if (scrapedData.errorText && (scrapedData.errorText.startsWith('## Ticket ID') || scrapedData.errorText.startsWith('## Case Number'))) {
+                                                    // If the user has manually edited, always respect their edits
+                                                    // (even if they cleared the textarea to empty)
+                                                    if (isUserEdited.current) {
+                                                        return scrapedData.errorText ?? '';
+                                                    }
+                                                    // Check if we already have the formatted text in errorText
+                                                    if (scrapedData.errorText && isFormattedTemplate(scrapedData.errorText)) {
                                                         return scrapedData.errorText;
                                                     }
-                                                    // Use the shared helper
+                                                    // Use the shared helper to construct the template from raw fields
                                                     return constructTemplate(scrapedData, prefs.userPrompt);
                                                 })()
                                                 : ''

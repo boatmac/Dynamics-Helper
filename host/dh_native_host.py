@@ -217,6 +217,7 @@ class NativeHost:
         self.root_path = None  # Store root path from config
         self.last_update_check = 0  # Track last update check time
         self.current_session_id = None  # Track current Copilot session ID for /resume
+        self.current_case_id = None  # Track which case the current session belongs to
 
         # Log startup location
         logging.info(
@@ -816,8 +817,9 @@ class NativeHost:
         """Re-creates or resumes a Copilot session.
 
         Args:
-            session_id: If provided, try to resume an existing session first.
-                        If resume fails, create a new session with this ID.
+            session_id: If provided (format: "dh-{caseId}"), try to resume first.
+                        If resume fails, create a new session (without injecting
+                        our custom ID — the server assigns its own session ID).
                         If None, create a generic session (no resume capability).
         """
         if not self.client:
@@ -828,8 +830,15 @@ class NativeHost:
         if session_id:
             try:
                 self.session = await self.client.resume_session(session_id)
-                self.current_session_id = session_id
-                logging.info(f"Resumed existing session: {session_id}")
+                # After resume, capture the server's session ID
+                self.current_session_id = getattr(
+                    self.session, "session_id", session_id
+                )
+                # Track which case this session belongs to
+                self.current_case_id = session_id.replace("dh-", "", 1)
+                logging.info(
+                    f"Resumed existing session: {session_id} (Server ID: {self.current_session_id})"
+                )
                 return True
             except AttributeError:
                 logging.info(
@@ -846,10 +855,6 @@ class NativeHost:
             # Register our permission handler to avoid hangs
             config["on_permission_request"] = self._permission_handler
 
-            # Inject session_id if provided
-            if session_id:
-                config["session_id"] = session_id
-
             # Filter out non-SDK config keys (Extension Prefs, root_path)
             # Create a shallow copy for SDK usage to avoid mutating the source of truth
             sdk_config = config.copy()
@@ -861,15 +866,21 @@ class NativeHost:
                     del sdk_config[key]
 
             self.session = await self.client.create_session(sdk_config)
-            self.current_session_id = session_id
+            # Capture the server-assigned session ID (not our custom dh-{caseId})
+            self.current_session_id = getattr(self.session, "session_id", None)
+            # Track which case this session belongs to (for smart-refresh comparison)
+            if session_id:
+                # session_id is "dh-{caseId}", extract the case ID portion
+                self.current_case_id = session_id.replace("dh-", "", 1)
             logging.info(
-                f"Copilot Session created/refreshed successfully. Session ID: {session_id or 'generic'}"
+                f"Copilot Session created successfully. Server ID: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
             )
             return True
         except Exception as e:
             logging.error(f"Failed to create/refresh session: {e}")
             self.session = None
             self.current_session_id = None
+            self.current_case_id = None
             return False
 
     def _resolve_skills(self, directories, base_path):
@@ -1084,8 +1095,8 @@ class NativeHost:
             else:
                 self.root_path = payload_root_path
 
-        if session_id and session_id != self.current_session_id:
-            logging.info(f"Case changed: {self.current_session_id} -> {session_id}.")
+        if valid_case_id and valid_case_id != self.current_case_id:
+            logging.info(f"Case changed: {self.current_case_id} -> {valid_case_id}.")
             needs_refresh = True
 
         if needs_refresh:
@@ -1183,7 +1194,7 @@ class NativeHost:
                             logging.warning(
                                 f"Session error encountered: {e}. Refreshing session..."
                             )
-                            await self._refresh_session()
+                            await self._refresh_session(session_id=session_id)
                             continue
                         # Re-raise other errors (including TimeoutError) to be handled by outer blocks
                         raise e
