@@ -66,9 +66,9 @@ Understanding how a user request becomes an AI response.
     * **Note:** GUID redaction is currently disabled to preserve technical identifiers needed for troubleshooting (e.g., Subscription IDs, Resource IDs).
 4. **Session Management:**
     * The backend validates the case number via `_extract_case_id()` (accepts 16 or 19 digits).
-    * A deterministic session ID `dh-{caseId}` is derived from the validated case ID.
-    * Smart refresh: the session is only recreated when the case ID or workspace root path changes.
-    * On session creation, `resume_session()` is tried first (restores conversation history, tool state). Falls back to `create_session()` with `session_id` in config.
+    * A resume label `dh-{caseId}` is derived from the validated case ID for `resume_session()` attempts.
+    * Smart refresh: the session is only recreated when `current_case_id` or workspace root path changes.
+    * On session creation, `resume_session("dh-{caseId}")` is tried first (restores conversation history, tool state). Falls back to `create_session()` without injecting a custom session ID — the server assigns its own.
 5. **SDK Execution (`send_and_wait`):**
     * The backend sends the prompt with a **600s timeout**.
 
@@ -76,11 +76,13 @@ Understanding how a user request becomes an AI response.
 
 The host maintains persistent sessions so users can continue analysis in the Copilot CLI.
 
-* **Session ID Format:** `dh-{caseId}` (e.g., `dh-2601190030003106`).
+* **Resume Label:** `dh-{caseId}` (e.g., `dh-2601190030003106`) — used only for `resume_session()` attempts.
+* **Server-Assigned ID:** After `create_session()`, the real session ID is read from `session.session_id` (a public attribute on `CopilotSession`). This server-assigned ID is stored in `self.current_session_id`.
+* **Case Tracking:** `self.current_case_id` tracks which case the current session belongs to, used for smart-refresh comparison (not the session ID itself).
 * **SDK Mechanism:** `client.resume_session(session_id)` restores state from `~/.copilot/session-state/{session_id}/`.
 * **Graceful Fallback:** If the SDK version doesn't support `resume_session()`, an `AttributeError` is caught and a new session is created instead.
-* **Report Integration:** `dh_case_report.md` includes the session ID and a resume command: `copilot /resume dh-{caseId}`.
-* **Response Payload:** The `session_id` is returned to the extension in the analysis response for frontend visibility.
+* **Report Integration:** `dh_case_report.md` includes the server-assigned session ID and a resume command.
+* **Response Payload:** The server-assigned `session_id` is returned to the extension in the analysis response for frontend visibility.
 
 ### 3. Instruction Hierarchy (The Context)
 
