@@ -838,10 +838,24 @@ class NativeHost:
                 self.client = None
                 return False
 
+        # Build session config upfront (used for both resume and create)
+        try:
+            config = self._get_session_config()
+            config["on_permission_request"] = self._permission_handler
+        except Exception as e:
+            logging.error(f"Failed to build session config: {e}")
+            return False
+
         # If a session_id is provided, try to resume an existing session first
         if session_id:
             try:
-                self.session = await self.client.resume_session(session_id)
+                # Build a resume-specific config (subset of full config)
+                resume_config = {
+                    "on_permission_request": self._permission_handler,
+                }
+                self.session = await self.client.resume_session(
+                    session_id, resume_config
+                )
                 # After resume, capture the server's session ID
                 self.current_session_id = getattr(
                     self.session, "session_id", session_id
@@ -862,11 +876,6 @@ class NativeHost:
                 )
 
         try:
-            config = self._get_session_config()
-
-            # Register our permission handler to avoid hangs
-            config["on_permission_request"] = self._permission_handler
-
             # Filter out non-SDK config keys (Extension Prefs, root_path)
             # Create a shallow copy for SDK usage to avoid mutating the source of truth
             sdk_config = config.copy()
