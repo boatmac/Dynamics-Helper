@@ -29,7 +29,7 @@ The project consists of three main components:
 * **`dh_native_host.py`**: The core backend script.
   * **Loop:** Reads messages from `stdin` (from Chrome) and writes to `stdout`.
   * **Timeout:** Has a hard timeout (currently 600s) for Copilot requests.
-  * **Logging:** Writes to `%LOCALAPPDATA%\DynamicsHelper\native_host.log`.
+  * **Logging:** Uses `_SafeRotatingFileHandler` (5 MB max, 3 backups) writing to `%LOCALAPPDATA%\DynamicsHelper\native_host.log`. Log level is configurable via the Options UI (DEBUG/INFO/WARNING/ERROR) and is applied at startup from `config.json`, then live-updated on `update_config`.
   * **Config Loading:** Prioritizes `%LOCALAPPDATA%` config over the local directory.
   * **Session Persistence:** Uses deterministic UUID v5 session IDs (derived from case IDs via `_case_to_session_id()`) for Copilot `/resume` support.
   * **Case ID Validation:** `_extract_case_id()` validates 16-digit case IDs and 19-digit task IDs.
@@ -171,7 +171,8 @@ The extension checks for updates on startup (via `health_check` action) and disp
 2. **Notify:** If a newer version exists, sends `NATIVE_UPDATE_AVAILABLE` message to the extension.
 3. **Download:** User clicks "Update Now" → `updater.download_update()` fetches the release zip.
 4. **Apply:** The updater extracts files, handles locked `.exe` via rename-to-`.old` strategy.
-5. **Restart:** The host process exits; Chrome relaunches it on the next native message.
+5. **Reload:** After a successful update, the FAB calls `chrome.runtime.reload()` to reload the extension (not just the page). The `pending_update` entry in `chrome.storage.local` is cleared on success. The Options page also includes version guards to dismiss stale update banners.
+6. **Restart:** The host process exits; Chrome relaunches it on the next native message.
 
 ### Locked File Handling
 

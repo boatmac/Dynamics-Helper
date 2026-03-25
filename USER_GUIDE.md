@@ -80,7 +80,18 @@ The extension uses configuration files stored in your User directory. This ensur
 
 * **`config.json`**: Controls MCP servers, skills, and model settings.
 * **`copilot-instructions.md`**: The "Persona" of the AI. You can edit this file to change how the AI responds (e.g., change the tone, add new rules).
-* **`native_host.log`**: The log file for troubleshooting.
+* **`native_host.log`**: The log file for troubleshooting. Log files rotate automatically at 5 MB (up to 3 backups: `.log.1`, `.log.2`, `.log.3`), keeping total disk usage under ~20 MB.
+
+### Log Level
+
+You can control the verbosity of the host log from the extension's **Settings → Copilot Config** section:
+
+* **DEBUG**: Maximum detail — useful for troubleshooting but produces large logs.
+* **INFO** (default): Normal operation events.
+* **WARNING**: Only warnings and errors.
+* **ERROR**: Only errors.
+
+Changes take effect immediately — no restart required.
 
 ### Workspace Configuration (Advanced)
 
@@ -219,6 +230,6 @@ If you need to report a bug, please provide the **Native Host Log**.
 
 1. Open File Explorer.
 2. In the address bar, type `%LOCALAPPDATA%\DynamicsHelper` and press Enter.
-3. Find the file named **`native_host.log`**.
+3. Find the file named **`native_host.log`** (and any rotated copies: `.log.1`, `.log.2`, `.log.3`).
 4. Send this file to the developer.
     * *Warning: This log contains details about what the AI analyzed. Please check for sensitive info before sharing if dealing with highly confidential cases.*

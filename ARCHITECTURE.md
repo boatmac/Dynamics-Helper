@@ -72,7 +72,8 @@ The host supports in-place updates without requiring the user to re-download and
    * Try renaming old file to `.exe.old`
    * If locked (antivirus): fall back to `.exe.old2`, `.exe.old3`
    * Log errors for debugging
-6. **Restart:** The host process exits; Chrome relaunches it on the next native message.
+6. **Reload:** The FAB calls `chrome.runtime.reload()` to reload the extension with the new code. The `pending_update` key is cleared from `chrome.storage.local` on success; the Options page uses version guards to dismiss stale banners.
+7. **Restart:** The host process exits; Chrome relaunches it on the next native message.
 
 ### Key Files
 

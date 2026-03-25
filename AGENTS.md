@@ -138,6 +138,8 @@ This file defines the operational rules, development workflows, and coding stand
   * **CRITICAL:** Do NOT print to `stdout` (used for Native Messaging).
   * Use `logging.info()`, `logging.error()`, etc.
   * Logs are written to `%LOCALAPPDATA%\DynamicsHelper\native_host.log` (Windows) or `~/.config/dynamics_helper/` (Linux/Mac).
+  * **Rotation:** `_SafeRotatingFileHandler` rotates at 5 MB, keeps 3 backups (~20 MB max). Catches `PermissionError` on Windows when files are locked.
+  * **Configurable Level:** User sets log level (DEBUG/INFO/WARNING/ERROR) in Options UI. Applied at startup from `config.json` and live-updated on `update_config`. Default: `INFO`.
 * **Error Handling:**
   * Catch exceptions in the main loop to prevent the process from crashing.
   * Return error responses to the extension: `{"status": "error", "message": "..."}`.
