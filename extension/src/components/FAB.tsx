@@ -854,11 +854,11 @@ const FAB: React.FC = () => {
             }
 
             if (response && response.status === "success") {
-                showStatusBubble('Update installed! Reloading page...', 'success', 5000);
+                showStatusBubble('Update installed! Reloading extension...', 'success', 5000);
                 trackEvent('FAB Update Success', { version: updateAvailable.version });
                 setUpdateAvailable(null);
                 setTimeout(() => {
-                    window.location.reload();
+                    chrome.runtime.reload();
                 }, 1500);
             } else {
                 const errMsg = response?.error || 'Unknown error';
