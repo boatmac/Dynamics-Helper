@@ -81,7 +81,7 @@ This command downloads the latest release and runs the installer automatically.
 3. Review and optionally edit the scraped Case Context.
 4. Click **Analyze** to get an AI-generated Root Cause Analysis.
 5. The result is saved as a Markdown report and displayed in a popover.
-6. Continue the investigation in the Copilot CLI: `copilot /resume dh-{caseId}`.
+6. Continue the investigation in the Copilot CLI: `copilot /resume {session_id}` (the session ID is shown in the report).
 
 ## Development
 

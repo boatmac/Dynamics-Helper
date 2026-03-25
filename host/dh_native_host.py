@@ -122,8 +122,9 @@ import time
 import re
 import traceback
 import urllib.request
+import uuid
 
-VERSION = "2.0.61"
+VERSION = "2.0.62"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -829,15 +830,33 @@ class NativeHost:
         # Always return the first 16 digits (parent case ID)
         return case_number[:16]
 
-    async def _refresh_session(self, session_id: str | None = None):
+    # Namespace UUID for deterministic session ID generation (RFC 4122 v5).
+    # This is a fixed arbitrary UUID that ensures the same case ID always
+    # produces the same session UUID across runs.
+    _SESSION_UUID_NAMESPACE = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+
+    @staticmethod
+    def _case_to_session_id(case_id: str) -> str:
+        """Converts a 16-digit case ID to a deterministic UUID v5 string.
+
+        The Copilot CLI stores the session_id in workspace.yaml as 'id' and
+        validates it as a UUID. Using 'dh-{caseId}' directly fails validation.
+        UUID v5 is deterministic: the same case_id always produces the same UUID,
+        so resume_session() can find the session across restarts.
+        """
+        return str(uuid.uuid5(DynamicsHelper._SESSION_UUID_NAMESPACE, f"dh-{case_id}"))
+
+    async def _refresh_session(
+        self, session_id: str | None = None, case_id: str | None = None
+    ):
         """Re-creates or resumes a Copilot session.
 
         Args:
-            session_id: If provided (format: "dh-{caseId}"), try to resume first.
-                        If resume fails, create a new session with this named ID
-                        for future /resume support. Logs a warning if the server
-                        does not honor the requested ID.
+            session_id: If provided (a deterministic UUID derived from the case ID),
+                        try to resume first. If resume fails, create a new session
+                        with this UUID for future /resume support.
                         If None, create a generic session (no resume capability).
+            case_id:    The 16-digit case ID this session belongs to (for tracking).
         """
         if not self.client:
             logging.warning("Client not initialized. Attempting re-initialization...")
@@ -894,7 +913,7 @@ class NativeHost:
                     self.session, "session_id", session_id
                 )
                 # Track which case this session belongs to
-                self.current_case_id = session_id.replace("dh-", "", 1)
+                self.current_case_id = case_id
                 logging.info(
                     f"Resumed existing session: {session_id} (Server ID: {self.current_session_id})"
                 )
@@ -910,7 +929,7 @@ class NativeHost:
                 logging.debug(f"Resume traceback: {traceback.format_exc()}")
 
         try:
-            # Inject named session ID for /resume support
+            # Inject deterministic UUID session ID for /resume support
             if session_id:
                 sdk_kwargs["session_id"] = session_id
 
@@ -932,9 +951,8 @@ class NativeHost:
 
             self.current_session_id = server_session_id
             # Track which case this session belongs to (for smart-refresh comparison)
-            if session_id:
-                # session_id is "dh-{caseId}", extract the case ID portion
-                self.current_case_id = session_id.replace("dh-", "", 1)
+            if case_id:
+                self.current_case_id = case_id
             logging.info(
                 f"Copilot Session created successfully. "
                 f"Session ID: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
@@ -962,8 +980,8 @@ class NativeHost:
                 self.session = await self.client.create_session(**sdk_kwargs)
                 server_session_id = getattr(self.session, "session_id", None)
                 self.current_session_id = server_session_id
-                if session_id:
-                    self.current_case_id = session_id.replace("dh-", "", 1)
+                if case_id:
+                    self.current_case_id = case_id
                 logging.info(
                     f"Copilot Session created successfully (after retry). "
                     f"Session ID: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
@@ -1177,9 +1195,9 @@ class NativeHost:
         case_number = payload.get("caseNumber", "Unspecified")
         payload_root_path = payload.get("rootPath")
 
-        # Derive a case-specific session ID for /resume support
+        # Derive a case-specific session ID (UUID) for /resume support
         valid_case_id = self._extract_case_id(case_number)
-        session_id = f"dh-{valid_case_id}" if valid_case_id else None
+        session_id = self._case_to_session_id(valid_case_id) if valid_case_id else None
 
         # Determine if we need to refresh the session:
         # 1. Root path changed (workspace MCP/Skills config may differ)
@@ -1201,8 +1219,10 @@ class NativeHost:
             needs_refresh = True
 
         if needs_refresh:
-            logging.info(f"Refreshing session for: {session_id or 'generic'}")
-            await self._refresh_session(session_id=session_id)
+            logging.info(
+                f"Refreshing session for: {session_id or 'generic'} (case: {valid_case_id or 'none'})"
+            )
+            await self._refresh_session(session_id=session_id, case_id=valid_case_id)
 
         if not text:
             return {"status": "error", "error": "No text provided for analysis."}
@@ -1296,7 +1316,9 @@ class NativeHost:
                             logging.warning(
                                 f"Session error encountered: {e}. Refreshing session..."
                             )
-                            await self._refresh_session(session_id=session_id)
+                            await self._refresh_session(
+                                session_id=session_id, case_id=valid_case_id
+                            )
                             continue
                         # Re-raise other errors (including TimeoutError) to be handled by outer blocks
                         raise e

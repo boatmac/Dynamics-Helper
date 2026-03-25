@@ -132,8 +132,8 @@ In the extension settings, you can enable automatic analysis:
 
 Each analysis creates a persistent Copilot session tied to your case number. After the analysis completes:
 
-* The report includes a **Session ID** (e.g., `dh-2601190030003106`).
-* You can continue the investigation in the Copilot CLI by running: `copilot /resume dh-{caseId}`.
+* The report includes a **Session ID** (a UUID that uniquely identifies the analysis session).
+* You can continue the investigation in the Copilot CLI by running: `copilot /resume {session_id}` (copy the session ID from the report).
 * This restores the full conversation history, tool state, and planning context from the browser-based analysis.
 
 ### Team Bookmark Catalog

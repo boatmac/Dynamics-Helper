@@ -85,15 +85,15 @@ The host maintains Copilot sessions so users can continue analysis in the Copilo
 
 ### Session ID Strategy
 
-* **Resume Label:** `dh-{caseId}` where `caseId` is a validated 16-digit case number. Used only for `resume_session()` attempts.
-* **Server-Assigned ID:** After `create_session()`, the real session ID is captured from `session.session_id`. This is stored in `self.current_session_id` and used in reports and `/resume` commands.
+* **Session ID:** A deterministic UUID v5 derived from the case ID via `_case_to_session_id()`. The same case always produces the same UUID. The Copilot CLI requires session IDs to be valid UUIDs (not arbitrary strings).
+* **Server Verification:** After `create_session()`, the real session ID is captured from `session.session_id`. This is stored in `self.current_session_id` and used in reports and `/resume` commands.
 * **Case Tracking:** `self.current_case_id` holds the 16-digit case ID for smart-refresh comparison. This is separate from the session ID.
 * **Validation:** `_extract_case_id()` accepts 16-digit (main case) or 19-digit (task ID, maps to parent 16 digits).
 * **Invalid case numbers** result in a generic session (no persistence, no resume).
 
 ### Session Lifecycle
 
-1. **First analysis for a case:** `resume_session("dh-{caseId}")` is tried first. If no prior session exists, falls back to `create_session()` without injecting a custom session ID — the server assigns its own.
+1. **First analysis for a case:** `resume_session(uuid)` is tried first. If no prior session exists, falls back to `create_session(session_id=uuid)`.
 2. **Subsequent analyses for same case:** Session is reused (no refresh needed). Smart-refresh compares `current_case_id`, not the session ID.
 3. **Case change or root path change:** Session is recreated with a new `resume_session()` attempt for the new case.
 4. **SDK compatibility:** `AttributeError` is caught gracefully if the SDK version doesn't support `resume_session()`.

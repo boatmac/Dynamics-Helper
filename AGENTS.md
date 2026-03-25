@@ -178,9 +178,9 @@ This file defines the operational rules, development workflows, and coding stand
 
 ### 6. Session Persistence
 
-* **Session IDs:** The host uses `dh-{caseId}` (derived from validated 16-digit case IDs) only for `resume_session()` attempts. Actual sessions use the **server-assigned session ID** returned by `create_session()`.
-* **Tracking:** `self.current_session_id` holds the real server-assigned ID (used in reports and `/resume`). `self.current_case_id` tracks which case the session belongs to (used for smart-refresh comparison).
-* **Resume:** The host tries `resume_session("dh-{caseId}")` first. If that fails, falls back to `create_session()` **without** injecting a custom session ID. Handles `AttributeError` gracefully if the SDK version doesn't support resume.
+* **Session IDs:** The host derives a deterministic UUID v5 from each 16-digit case ID via `_case_to_session_id()`. This UUID is used as the `session_id` for both `create_session()` and `resume_session()`. The Copilot CLI requires session IDs to be valid UUIDs.
+* **Tracking:** `self.current_session_id` holds the session UUID (used in reports and `/resume`). `self.current_case_id` tracks which case the session belongs to (used for smart-refresh comparison).
+* **Resume:** The host tries `resume_session(uuid)` first. If that fails, falls back to `create_session(session_id=uuid)`. Handles `AttributeError` gracefully if the SDK version doesn't support resume.
 * **Smart Refresh:** Sessions are only recreated when `current_case_id` or workspace root path actually changes — not on every analyze request.
 * **Report:** `dh_case_report.md` includes the server-assigned session ID and a resume command.
 

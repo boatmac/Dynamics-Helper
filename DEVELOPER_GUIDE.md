@@ -31,7 +31,7 @@ The project consists of three main components:
   * **Timeout:** Has a hard timeout (currently 600s) for Copilot requests.
   * **Logging:** Writes to `%LOCALAPPDATA%\DynamicsHelper\native_host.log`.
   * **Config Loading:** Prioritizes `%LOCALAPPDATA%` config over the local directory.
-  * **Session Persistence:** Uses deterministic session IDs (`dh-{caseId}`) for Copilot `/resume` support.
+  * **Session Persistence:** Uses deterministic UUID v5 session IDs (derived from case IDs via `_case_to_session_id()`) for Copilot `/resume` support.
   * **Case ID Validation:** `_extract_case_id()` validates 16-digit case IDs and 19-digit task IDs.
 * **`updater.py`**: Self-update mechanism. Downloads updates from GitHub releases, handles locked `.exe` files by renaming to `.exe.old` (with `.old2`, `.old3` fallback for antivirus locks).
 * **`pii_scrubber.py`**: PII redaction utility for sanitizing text before sending to the LLM.
@@ -66,9 +66,9 @@ Understanding how a user request becomes an AI response.
     * **Note:** GUID redaction is currently disabled to preserve technical identifiers needed for troubleshooting (e.g., Subscription IDs, Resource IDs).
 4. **Session Management:**
     * The backend validates the case number via `_extract_case_id()` (accepts 16 or 19 digits).
-    * A resume label `dh-{caseId}` is derived from the validated case ID for `resume_session()` attempts.
+    * A deterministic UUID v5 is derived from the validated case ID via `_case_to_session_id()` for `resume_session()` attempts.
     * Smart refresh: the session is only recreated when `current_case_id` or workspace root path changes.
-    * On session creation, `resume_session("dh-{caseId}")` is tried first (restores conversation history, tool state). Falls back to `create_session()` without injecting a custom session ID — the server assigns its own.
+    * On session creation, `resume_session(uuid)` is tried first (restores conversation history, tool state). Falls back to `create_session(session_id=uuid)`.
 5. **SDK Execution (`send_and_wait`):**
     * The backend sends the prompt as a plain string (SDK 0.2.0+) with a **600s timeout**.
 
@@ -76,8 +76,8 @@ Understanding how a user request becomes an AI response.
 
 The host maintains persistent sessions so users can continue analysis in the Copilot CLI.
 
-* **Resume Label:** `dh-{caseId}` (e.g., `dh-2601190030003106`) — used only for `resume_session()` attempts.
-* **Server-Assigned ID:** After `create_session()`, the real session ID is read from `session.session_id` (a public attribute on `CopilotSession`). This server-assigned ID is stored in `self.current_session_id`.
+* **Session ID:** A deterministic UUID v5 derived from the case ID via `_case_to_session_id()`. The same case always produces the same UUID, enabling resume across restarts. The Copilot CLI requires session IDs to be valid UUIDs (not arbitrary strings like `dh-{caseId}`).
+* **Server Verification:** After `create_session()`, the session ID is read from `session.session_id` and stored in `self.current_session_id`.
 * **Case Tracking:** `self.current_case_id` tracks which case the current session belongs to, used for smart-refresh comparison (not the session ID itself).
 * **SDK Mechanism:** `client.resume_session(session_id)` restores state from `~/.copilot/session-state/{session_id}/`.
 * **Graceful Fallback:** If the SDK version doesn't support `resume_session()`, an `AttributeError` is caught and a new session is created instead.
