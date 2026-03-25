@@ -124,7 +124,7 @@ import traceback
 import urllib.request
 import uuid
 
-VERSION = "2.0.62"
+VERSION = "2.0.63"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -835,8 +835,8 @@ class NativeHost:
     # produces the same session UUID across runs.
     _SESSION_UUID_NAMESPACE = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
-    @staticmethod
-    def _case_to_session_id(case_id: str) -> str:
+    @classmethod
+    def _case_to_session_id(cls, case_id: str) -> str:
         """Converts a 16-digit case ID to a deterministic UUID v5 string.
 
         The Copilot CLI stores the session_id in workspace.yaml as 'id' and
@@ -844,7 +844,7 @@ class NativeHost:
         UUID v5 is deterministic: the same case_id always produces the same UUID,
         so resume_session() can find the session across restarts.
         """
-        return str(uuid.uuid5(DynamicsHelper._SESSION_UUID_NAMESPACE, f"dh-{case_id}"))
+        return str(uuid.uuid5(cls._SESSION_UUID_NAMESPACE, f"dh-{case_id}"))
 
     async def _refresh_session(
         self, session_id: str | None = None, case_id: str | None = None
