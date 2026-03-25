@@ -857,6 +857,7 @@ const FAB: React.FC = () => {
                 showStatusBubble('Update installed! Reloading extension...', 'success', 5000);
                 trackEvent('FAB Update Success', { version: updateAvailable.version });
                 setUpdateAvailable(null);
+                chrome.storage.local.remove("pending_update");
                 setTimeout(() => {
                     chrome.runtime.reload();
                 }, 1500);

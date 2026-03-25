@@ -790,6 +790,12 @@ const Options: React.FC = () => {
     useEffect(() => {
         const handleRuntimeMsg = (message: any) => {
             if (message.type === "NATIVE_UPDATE_AVAILABLE") {
+                const currentVer = chrome.runtime.getManifest().version;
+                if (message.payload.version === currentVer) {
+                    setUpdateAvailable(null);
+                    chrome.storage.local.remove("pending_update");
+                    return;
+                }
                 console.log("[Options] Received update available:", message.payload);
                 setUpdateAvailable(message.payload);
                 setStatus(`v${message.payload.version} available for update`);
@@ -823,6 +829,12 @@ const Options: React.FC = () => {
         chrome.storage.local.get("pending_update", (data) => {
             const pending = data.pending_update as {version: string, url: string} | undefined;
             if (pending && pending.version && pending.url) {
+                const currentVer = chrome.runtime.getManifest().version;
+                if (pending.version === currentVer) {
+                    // Already updated — stale entry, clean up
+                    chrome.storage.local.remove("pending_update");
+                    return;
+                }
                 console.log("[Options] Found pending update in storage:", pending);
                 setUpdateAvailable(pending);
             }
@@ -850,6 +862,8 @@ const Options: React.FC = () => {
             }
             
             if (response && response.status === "success") {
+                setUpdateAvailable(null);
+                chrome.storage.local.remove("pending_update");
                 setStatus("Update success! Restarting...");
                 setTimeout(() => {
                     chrome.runtime.reload();
