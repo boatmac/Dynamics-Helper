@@ -58,6 +58,7 @@ interface Preferences {
     useWorkspaceOnly?: boolean;
     autoAnalyzeMode?: 'disabled' | 'critical' | 'always' | 'new_cases';
     enableStatusBubble?: boolean;
+    logLevel?: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
     language?: LanguageCode;
     team?: string;        // Selected team catalog ID (e.g. "dnai")
     teamLabel?: string;   // Display name for selected team
@@ -76,6 +77,7 @@ const DEFAULT_PREFS: Preferences = {
     useWorkspaceOnly: true,
     autoAnalyzeMode: 'disabled',
     enableStatusBubble: true,
+    logLevel: 'INFO',
     language: 'auto'
 };
 
@@ -615,6 +617,7 @@ const Options: React.FC = () => {
                             if (extPrefs.user_prompt !== undefined) newPrefs.userPrompt = extPrefs.user_prompt;
                             if (extPrefs.enable_status_bubble !== undefined) newPrefs.enableStatusBubble = extPrefs.enable_status_bubble;
                             if (extPrefs.useWorkspaceOnly !== undefined) newPrefs.useWorkspaceOnly = extPrefs.useWorkspaceOnly;
+                            if (extPrefs.log_level) newPrefs.logLevel = extPrefs.log_level;
                             
                             // Visual Settings (Now synced)
                             if (extPrefs.language) newPrefs.language = extPrefs.language;
@@ -699,6 +702,7 @@ const Options: React.FC = () => {
                                     user_prompt: prefs.userPrompt, // Keep in preferences for now (backend handles cleanup/sanitization)
                                     enable_status_bubble: prefs.enableStatusBubble,
                                     useWorkspaceOnly: prefs.useWorkspaceOnly,
+                                    log_level: prefs.logLevel,
                                     language: prefs.language,
                                     primaryColor: prefs.primaryColor,
                                     buttonText: prefs.buttonText,
@@ -1406,6 +1410,24 @@ const Options: React.FC = () => {
                                                     className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${prefs.useWorkspaceOnly !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/mcp-config.json"
                                                 />
+                                            </div>
+
+                                            {/* Log Level */}
+                                            <div className="mt-4">
+                                                <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('logLevel')}</label>
+                                                <p className="text-[10px] text-slate-500 mb-2">
+                                                    {t('logLevelDesc')}
+                                                </p>
+                                                <select
+                                                    value={prefs.logLevel || 'INFO'}
+                                                    onChange={(e) => setPrefs(prev => ({ ...prev, logLevel: e.target.value as Preferences['logLevel'] }))}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm"
+                                                >
+                                                    <option value="DEBUG">DEBUG</option>
+                                                    <option value="INFO">INFO</option>
+                                                    <option value="WARNING">WARNING</option>
+                                                    <option value="ERROR">ERROR</option>
+                                                </select>
                                             </div>
 
                                             {/* 4. User Instructions */}

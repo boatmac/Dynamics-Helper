@@ -67,6 +67,11 @@ export const translations: TranslationDictionary = {
         en: "Path to the global MCP configuration JSON file (Default: ~/.copilot/mcp-config.json).",
         zh: "全局 MCP 配置 JSON 文件的路径 (默认: ~/.copilot/mcp-config.json)。"
     },
+    logLevel: { en: "Log Level", zh: "日志级别" },
+    logLevelDesc: {
+        en: "Controls verbosity of the native host log file. DEBUG logs everything, INFO is recommended for normal use.",
+        zh: "控制 Native Host 日志文件的详细程度。DEBUG 记录所有内容，INFO 建议日常使用。"
+    },
     hostVersion: { en: "Host Version", zh: "Host 版本" },
     
     menuEditor: { en: "Menu Editor", zh: "菜单编辑器" },

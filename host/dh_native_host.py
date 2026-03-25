@@ -115,6 +115,7 @@ import threading
 import struct
 import json
 import logging
+import logging.handlers
 import os
 import datetime
 import shutil
@@ -142,12 +143,58 @@ else:
 os.makedirs(USER_DATA_DIR, exist_ok=True)
 
 # Setup logging to User Data Directory (avoiding permission issues in Program Files)
+# Uses RotatingFileHandler: 5 MB max per file, keeps 3 backups (.log.1, .log.2, .log.3)
 LOG_FILE = os.path.join(USER_DATA_DIR, "native_host.log")
-logging.basicConfig(
-    filename=LOG_FILE,
-    level=logging.DEBUG,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+
+
+class _SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """RotatingFileHandler that gracefully handles Windows file-lock errors.
+
+    On Windows, os.rename() fails with PermissionError if another process
+    (prod exe, Notepad, antivirus) holds the log file. This subclass catches
+    the error and silently skips rotation, continuing to write to the current
+    file until the next rotation attempt succeeds.
+    """
+
+    def doRollover(self):
+        try:
+            super().doRollover()
+        except PermissionError:
+            # File is locked by another process — skip rotation this time.
+            # The handler continues writing to the current (oversized) file.
+            # Next emit() will retry rotation if still over maxBytes.
+            pass
+
+
+_log_handler = _SafeRotatingFileHandler(
+    LOG_FILE,
+    maxBytes=5 * 1024 * 1024,  # 5 MB
+    backupCount=3,
+    encoding="utf-8",
 )
+_log_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+)
+logging.root.addHandler(_log_handler)
+logging.root.setLevel(logging.DEBUG)
+
+# Valid log levels that can be set via config
+_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+
+
+def _apply_log_level(level_name: str) -> None:
+    """Set the root logger level from a string name (e.g., 'INFO', 'DEBUG').
+
+    Validated against _VALID_LOG_LEVELS; defaults to INFO if invalid.
+    """
+    level_name = (level_name or "INFO").upper()
+    if level_name not in _VALID_LOG_LEVELS:
+        logging.warning(f"Invalid log level '{level_name}', defaulting to INFO")
+        level_name = "INFO"
+    numeric_level = getattr(logging, level_name)
+    if logging.root.level != numeric_level:
+        logging.info(f"Log level changed to {level_name}")
+        logging.root.setLevel(numeric_level)
 
 
 # Global Exception Handler
@@ -566,6 +613,9 @@ class NativeHost:
         # Check Workspace Only Mode
         ext_prefs = final_data.get("extension_preferences", {})
         use_workspace_only = ext_prefs.get("useWorkspaceOnly", True)
+
+        # Apply log level from config (default: INFO for normal use)
+        _apply_log_level(ext_prefs.get("log_level", "INFO"))
 
         # Extract root path
         current_root = final_data.get("root_path")
@@ -1113,6 +1163,10 @@ class NativeHost:
                 with open(user_config_path, "w") as f:
                     json.dump(current_data, f, indent=2)
                 logging.info("Updated config.json")
+
+                # Apply log level immediately (before session refresh)
+                ext_prefs = current_data.get("extension_preferences", {})
+                _apply_log_level(ext_prefs.get("log_level", "INFO"))
 
             # 3. Refresh Session
             success = await self._refresh_session()
