@@ -123,7 +123,7 @@ import re
 import traceback
 import urllib.request
 
-VERSION = "2.0.60"
+VERSION = "2.0.61"
 
 # Setup User Data Directory (Cross-platform)
 
@@ -170,9 +170,7 @@ try:
     log_emergency("Attempting to import copilot SDK...")
     from copilot import CopilotClient
     from copilot.types import (
-        CopilotClientOptions,
-        MessageOptions,
-        SessionConfig,
+        SubprocessConfig,
         PermissionRequestResult,
         PreToolUseHookOutput,
     )
@@ -466,11 +464,11 @@ class NativeHost:
             logging.info("Initializing Copilot Client...")
 
             cli_path = self.find_copilot_cli()
-            options: CopilotClientOptions = {}
-            if cli_path:
-                options["cli_path"] = cli_path
+            config = (
+                SubprocessConfig(cli_path=cli_path) if cli_path else SubprocessConfig()
+            )
 
-            self.client = CopilotClient(options if options else None)
+            self.client = CopilotClient(config)
 
             # Explicitly start the client to ensure connection before session creation
             logging.info("Starting Copilot Client...")
@@ -484,9 +482,9 @@ class NativeHost:
             self.client = None  # Ensure client is None so null checks catch it
             self.session = None  # Ensure it's None on failure
 
-    def _get_session_config(self) -> SessionConfig:
+    def _get_session_config(self) -> dict:
         """Constructs the session configuration from disk."""
-        session_config: SessionConfig = {}
+        session_config: dict = {}
 
         # 1. User-specific config (APPDATA/DynamicsHelper/config.json)
         user_config_path = os.path.join(USER_DATA_DIR, "config.json")
@@ -845,10 +843,12 @@ class NativeHost:
             logging.warning("Client not initialized. Attempting re-initialization...")
             try:
                 cli_path = self.find_copilot_cli()
-                options: CopilotClientOptions = {}
-                if cli_path:
-                    options["cli_path"] = cli_path
-                self.client = CopilotClient(options if options else None)
+                config = (
+                    SubprocessConfig(cli_path=cli_path)
+                    if cli_path
+                    else SubprocessConfig()
+                )
+                self.client = CopilotClient(config)
                 await self.client.start()
                 logging.info("Client re-initialized successfully.")
             except Exception as e:
@@ -858,33 +858,36 @@ class NativeHost:
 
         # Build session config upfront (used for both resume and create)
         try:
-            config = self._get_session_config()
-            config["on_permission_request"] = self._permission_handler
-            # Add hooks for auto-approval (bypasses permission request stage)
-            config["hooks"] = {
-                "on_pre_tool_use": self._pre_tool_use_hook,
-            }
+            full_config = self._get_session_config()
         except Exception as e:
             logging.error(f"Failed to build session config: {e}")
             return False
 
+        # Extract only SDK-compatible keyword arguments from the config dict.
+        # This prevents passing unknown keys (root_path, extension_preferences, etc.)
+        # to the SDK, which now uses strict keyword-only arguments.
+        sdk_kwargs = {
+            "on_permission_request": self._permission_handler,
+            "hooks": {
+                "on_pre_tool_use": self._pre_tool_use_hook,
+            },
+        }
+
+        # Map config dict keys to SDK keyword arguments
+        if "system_message" in full_config:
+            sdk_kwargs["system_message"] = full_config["system_message"]
+        if "mcp_servers" in full_config:
+            sdk_kwargs["mcp_servers"] = full_config["mcp_servers"]
+        if "working_directory" in full_config:
+            sdk_kwargs["working_directory"] = full_config["working_directory"]
+        if "skill_directories" in full_config:
+            sdk_kwargs["skill_directories"] = full_config["skill_directories"]
+
         # If a session_id is provided, try to resume an existing session first
         if session_id:
             try:
-                # Build resume config from full config (same capabilities as create)
-                # resume_session accepts all SessionConfig fields except session_id
-                resume_config = config.copy()
-
-                # Strip non-SDK keys
-                for key in [
-                    "root_path",
-                    "extension_preferences",
-                    "_user_instructions_raw",
-                ]:
-                    resume_config.pop(key, None)
-
                 self.session = await self.client.resume_session(
-                    session_id, resume_config
+                    session_id, **sdk_kwargs
                 )
                 # After resume, capture the server's session ID
                 self.current_session_id = getattr(
@@ -904,27 +907,18 @@ class NativeHost:
                 logging.info(
                     f"No existing session to resume ({session_id}): {e}. Creating new session."
                 )
+                logging.debug(f"Resume traceback: {traceback.format_exc()}")
 
         try:
-            # Filter out non-SDK config keys (Extension Prefs, root_path)
-            # Create a shallow copy for SDK usage to avoid mutating the source of truth
-            sdk_config = config.copy()
-
-            # Keys to strip
-            keys_to_remove = [
-                "root_path",
-                "extension_preferences",
-                "_user_instructions_raw",
-            ]
-            for key in keys_to_remove:
-                if key in sdk_config:
-                    del sdk_config[key]
-
             # Inject named session ID for /resume support
             if session_id:
-                sdk_config["session_id"] = session_id
+                sdk_kwargs["session_id"] = session_id
 
-            self.session = await self.client.create_session(sdk_config)
+            # Debug: Log the config keys being sent to create_session
+            safe_keys = {k: type(v).__name__ for k, v in sdk_kwargs.items()}
+            logging.info(f"create_session config keys: {safe_keys}")
+
+            self.session = await self.client.create_session(**sdk_kwargs)
             # Capture the server-returned session ID
             server_session_id = getattr(self.session, "session_id", None)
 
@@ -946,8 +940,45 @@ class NativeHost:
                 f"Session ID: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
             )
             return True
+        except OSError as e:
+            # OSError (e.g., [Errno 22] Invalid argument) typically means the CLI
+            # subprocess pipe is broken/closed (process exited during idle period).
+            # Re-initialize the client and retry once.
+            logging.warning(
+                f"create_session failed with OSError: {e}. "
+                f"CLI process likely exited. Re-initializing client and retrying..."
+            )
+            try:
+                cli_path = self.find_copilot_cli()
+                reinit_config = (
+                    SubprocessConfig(cli_path=cli_path)
+                    if cli_path
+                    else SubprocessConfig()
+                )
+                self.client = CopilotClient(reinit_config)
+                await self.client.start()
+                logging.info("Client re-initialized after OSError.")
+
+                self.session = await self.client.create_session(**sdk_kwargs)
+                server_session_id = getattr(self.session, "session_id", None)
+                self.current_session_id = server_session_id
+                if session_id:
+                    self.current_case_id = session_id.replace("dh-", "", 1)
+                logging.info(
+                    f"Copilot Session created successfully (after retry). "
+                    f"Session ID: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
+                )
+                return True
+            except Exception as retry_err:
+                logging.error(f"Retry after re-init also failed: {retry_err}")
+                logging.error(f"Full traceback: {traceback.format_exc()}")
+                self.session = None
+                self.current_session_id = None
+                self.current_case_id = None
+                return False
         except Exception as e:
             logging.error(f"Failed to create/refresh session: {e}")
+            logging.error(f"Full traceback: {traceback.format_exc()}")
             self.session = None
             self.current_session_id = None
             self.current_case_id = None
@@ -1189,7 +1220,7 @@ class NativeHost:
             auth_status = await asyncio.wait_for(
                 self.client.get_auth_status(), timeout=15.0
             )
-            # SDK 0.1.32+: get_auth_status() returns a GetAuthStatusResponse dataclass, not a dict
+            # SDK 0.2.0: get_auth_status() returns a GetAuthStatusResponse dataclass
             is_auth = getattr(auth_status, "isAuthenticated", False)
             if not is_auth:
                 login_name = getattr(auth_status, "login", "Unknown")
@@ -1234,16 +1265,13 @@ class NativeHost:
 
             logging.info(f"Prompt length: {len(safe_prompt)}")
 
-            # Use send_and_wait (send_messages is not available)
-            message_options: MessageOptions = {"prompt": safe_prompt}
-
             # Timeout Strategy:
             # Frontend (FAB.tsx) has a safety timeout of 310 seconds.
             # We set the backend timeout to 600 seconds (10 minutes) to be safe.
             timeout_seconds = 600.0
 
             logging.debug(
-                f"Calling send_and_wait with options: {message_options} and timeout: {timeout_seconds}"
+                f"Calling send_and_wait with prompt length={len(safe_prompt)} and timeout: {timeout_seconds}"
             )
             try:
                 # Retry loop to handle stale sessions
@@ -1257,7 +1285,7 @@ class NativeHost:
                             self.send_progress("Session expired. Reconnecting...")
 
                         response_event = await self.session.send_and_wait(
-                            message_options, timeout=timeout_seconds
+                            safe_prompt, timeout=timeout_seconds
                         )
                         break  # Success, exit loop
                     except Exception as e:

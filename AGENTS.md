@@ -133,7 +133,7 @@ This file defines the operational rules, development workflows, and coding stand
   * All I/O bound operations (SDK calls) must be `async`.
 * **Type Hinting:**
   * Use Python type hints extensively (e.g., `def func(a: int) -> str:`).
-  * Import types from `copilot.types`.
+  * Import types from `copilot.types` (e.g., `SubprocessConfig`, `PermissionRequestResult`, `PreToolUseHookOutput`). Note: `CopilotClientOptions`, `MessageOptions`, and `SessionConfig` were removed in SDK 0.2.0.
 * **Logging:**
   * **CRITICAL:** Do NOT print to `stdout` (used for Native Messaging).
   * Use `logging.info()`, `logging.error()`, etc.
@@ -152,7 +152,7 @@ This file defines the operational rules, development workflows, and coding stand
 * **The Golden Rule:** The Native Host runs **headless** (no UI).
 * **Permission Handler:** You **MUST** maintain the `_permission_handler` in `dh_native_host.py` that auto-approves requests.
 * **Why?** If the Copilot SDK asks for permission (e.g., "Allow Read File?"), the process will hang indefinitely if not auto-approved, as the user cannot see the prompt.
-* **Do Not Modify:** `config["on_permission_request"] = self._permission_handler`.
+* **Do Not Modify:** `on_permission_request=self._permission_handler` is passed as a keyword argument to `create_session()` and `resume_session()`. This ensures all SDK permission prompts are auto-approved.
 
 ### 2. Timeouts
 
