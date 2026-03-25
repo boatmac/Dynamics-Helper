@@ -197,6 +197,20 @@ def _apply_log_level(level_name: str) -> None:
         logging.root.setLevel(numeric_level)
 
 
+# Apply user's saved log level from config.json at startup (before any analyze).
+# Wrapped in try/except so a missing or corrupt config.json never blocks startup.
+try:
+    _startup_config_path = os.path.join(USER_DATA_DIR, "config.json")
+    if os.path.exists(_startup_config_path):
+        with open(_startup_config_path, "r", encoding="utf-8") as _f:
+            _startup_cfg = json.loads(_f.read())
+        _startup_level = _startup_cfg.get("extension_preferences", {}).get("log_level")
+        if _startup_level:
+            _apply_log_level(_startup_level)
+except Exception:
+    pass  # config.json missing, corrupt, or unreadable — stay at DEBUG
+
+
 # Global Exception Handler
 def handle_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
