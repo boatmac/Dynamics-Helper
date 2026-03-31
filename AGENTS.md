@@ -115,6 +115,10 @@ This file defines the operational rules, development workflows, and coding stand
   * **Hybrid Approach:** The project uses a mix of inline styles (`style={{...}}`) and utility classes (`clsx`, `tailwind-merge`).
   * **Preference:** New UI elements should prefer Tailwind classes via `className` where possible, but consistency with existing inline styles is acceptable for complex dynamic positioning.
 * **Icons:** Use `lucide-react` for all icons.
+* **Internationalization (i18n):**
+  * Use `useTranslation()` from `src/utils/i18n.ts`. All user-facing strings must use `t('key')` lookups.
+  * Translations are defined in `src/utils/translations.ts` (supports `en` and `zh`).
+  * When adding new UI text, add the translation key to `translations.ts` first, then reference it with `t()`.
 * **Telemetry:**
   * Import `trackEvent`, `trackException` from `../utils/telemetry`.
   * Wrap async operations in `try/catch` and log errors to telemetry.
@@ -185,6 +189,7 @@ This file defines the operational rules, development workflows, and coding stand
 * **Resume:** The host tries `resume_session(uuid)` first. If that fails, falls back to `create_session(session_id=uuid)`. Handles `AttributeError` gracefully if the SDK version doesn't support resume.
 * **Smart Refresh:** Sessions are only recreated when `current_case_id` or workspace root path actually changes — not on every analyze request.
 * **Report:** `dh_case_report.md` includes the server-assigned session ID and a resume command.
+* **System Message Injection:** The session ID is appended to the `system_message` content as a `## Session Info` section before session creation, so the AI can reference it during the conversation (e.g., for `context.md` frontmatter).
 
 ### 7. Self-Update Mechanism
 

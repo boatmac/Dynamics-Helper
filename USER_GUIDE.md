@@ -84,7 +84,7 @@ The extension uses configuration files stored in your User directory. This ensur
 
 ### Log Level
 
-You can control the verbosity of the host log from the extension's **Settings → Copilot Config** section:
+You can control the verbosity of the host log from the extension's **Settings → General** section:
 
 * **DEBUG**: Maximum detail — useful for troubleshooting but produces large logs.
 * **INFO** (default): Normal operation events.
@@ -92,6 +92,15 @@ You can control the verbosity of the host log from the extension's **Settings �
 * **ERROR**: Only errors.
 
 Changes take effect immediately — no restart required.
+
+### Custom Instructions & Prompts
+
+In the **Settings → Copilot Configuration** section, you can customize two Markdown text fields:
+
+* **User Instructions**: Appended to the core system prompt. Use this for personal rules (e.g., "Always respond in bullet points", "Focus on technical details"). These instructions shape the AI's behavior across all analyses.
+* **User Prompt**: Appended to the case context description when scanning a page. Use this for standard questions or instructions that should accompany every analysis (e.g., "Please provide a root cause analysis and mitigation steps").
+
+Both fields support Markdown formatting. Click the **Preview** toggle above each textarea to see the rendered output; click **Edit** to return to the raw text editor.
 
 ### Workspace Configuration (Advanced)
 

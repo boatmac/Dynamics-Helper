@@ -16,8 +16,9 @@ The project consists of three main components:
 
 ### `extension/` (Frontend)
 
-* **`src/components/FAB.tsx`**: The main UI component. It contains the "Analyze" logic, the safety timeout configuration (currently 600s), and the `isUserEdited` ref pattern for protecting user edits from background scans.
-* **`src/components/Options.tsx`**: The extension settings page. Handles preferences, Root Path, MCP/Skill directory config, team catalog sync, and update checking.
+* **`src/components/FAB.tsx`**: The main UI component. It contains the "Analyze" logic, the safety timeout configuration (currently 600s), and the `isUserEdited` ref pattern for protecting user edits from background scans. All user-facing strings use `t()` from `useTranslation()` for i18n support.
+* **`src/components/Options.tsx`**: The extension settings page. Handles preferences, Root Path, MCP/Skill directory config, team catalog sync, and update checking. User Instructions and User Prompt textareas include an Edit/Preview toggle for rendered Markdown preview.
+* **`src/components/MarkdownPreview.tsx`**: Shared Markdown renderer using `react-markdown` + `remark-gfm`. Provides styled GFM rendering (headings, code blocks, tables, links, lists, blockquotes). Used by Options.tsx for preview toggles.
 * **`src/utils/pageReader.ts`**: Logic for scraping Dynamics/Azure Portal pages to extract case numbers, error text, and context. Uses a 4-strategy cascade (header controls, label search, header container regex, ticket title fallback).
 * **`src/background/serviceWorker.ts`**: Service worker handling telemetry (with stable anonymous UUID via `chrome.storage.local`), native messaging relay, and extension version injection.
 * **`src/utils/telemetry.ts`**: Azure Application Insights integration for anonymous telemetry.
@@ -69,6 +70,7 @@ Understanding how a user request becomes an AI response.
     * A deterministic UUID v5 is derived from the validated case ID via `_case_to_session_id()` for `resume_session()` attempts.
     * Smart refresh: the session is only recreated when `current_case_id` or workspace root path changes.
     * On session creation, `resume_session(uuid)` is tried first (restores conversation history, tool state). Falls back to `create_session(session_id=uuid)`.
+    * The session ID is injected into the `system_message` content as a `## Session Info` section, making it available to the AI during the conversation (e.g., for writing `context.md` frontmatter).
 5. **SDK Execution (`send_and_wait`):**
     * The backend sends the prompt as a plain string (SDK 0.2.0+) with a **600s timeout**.
 
@@ -83,10 +85,11 @@ The host maintains persistent sessions so users can continue analysis in the Cop
 * **Graceful Fallback:** If the SDK version doesn't support `resume_session()`, an `AttributeError` is caught and a new session is created instead.
 * **Report Integration:** `dh_case_report.md` includes the server-assigned session ID and a resume command.
 * **Response Payload:** The server-assigned `session_id` is returned to the extension in the analysis response for frontend visibility.
+* **System Message Injection:** The session ID is appended to the `system_message` content as a `## Session Info` section before session creation. This ensures the AI can reference it (e.g., for `context.md` frontmatter) without relying on a fallback value.
 
 ### 3. Instruction Hierarchy (The Context)
 
-The "System Prompt" is built from three layers, merged at runtime in `_get_session_config`. The resulting dict is unpacked into keyword-only arguments for `create_session()` (SDK 0.2.0 no longer accepts a single config dict):
+The "System Prompt" is built from three layers, merged at runtime in `_get_session_config`. The resulting dict is unpacked into keyword-only arguments for `create_session()` (SDK 0.2.0 no longer accepts a single config dict). After the three layers are merged, the session ID is appended as a `## Session Info` section (runtime augmentation in `_refresh_session`):
 
 1. **Layer 1: System Instructions (Immutable)**
     * Source: `host/system_prompt.md` (or beside exe).
@@ -158,6 +161,13 @@ Background scans (MutationObserver, `useEffect` on `isOpen`) continuously scrape
 * **Anonymous Identity:** Stable UUID generated via `chrome.storage.local` in `serviceWorker.ts`. Do NOT use cookies/localStorage (unavailable in service workers).
 * **Extension Version:** Injected automatically in `trackBackgroundEvent`. Do NOT rely on `item.data` for version stamping.
 * **Querying:** Use `dcount(user_Id)` in App Insights for unique user counts. The `user_Id` fix only works from v2.0.56+; older versions have empty user IDs.
+
+### Internationalization (i18n)
+
+* **Hook:** `useTranslation()` from `src/utils/i18n.ts` returns a `t(key)` function.
+* **Dictionary:** `src/utils/translations.ts` maps keys to `{ en, zh }` string pairs.
+* **Rule:** All user-facing strings in FAB.tsx and Options.tsx must use `t('key')` lookups. Do not hardcode English strings in UI code.
+* **Status messages:** Timeout comparisons that use `setStatus(prev => prev === "..." ? "..." : prev)` must capture the translated string into a local variable before the `setTimeout` closure (see the `checkingMsg` / `timedOutMsg` pattern in Options.tsx).
 
 ---
 
