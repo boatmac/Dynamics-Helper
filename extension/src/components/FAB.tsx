@@ -837,7 +837,7 @@ const FAB: React.FC = () => {
     const handleFabUpdate = () => {
         if (!updateAvailable) return;
         setIsOpen(false);
-        showStatusBubble(`Downloading v${updateAvailable.version}...`, 'default', 0);
+        showStatusBubble(`${t('downloadingVersion')} v${updateAvailable.version}...`, 'default', 0);
         trackEvent('FAB Update Started', { version: updateAvailable.version });
 
         chrome.runtime.sendMessage({
@@ -848,13 +848,13 @@ const FAB: React.FC = () => {
             }
         }, (response) => {
             if (chrome.runtime.lastError) {
-                showStatusBubble('Update failed: ' + chrome.runtime.lastError.message, 'error');
+                showStatusBubble(`${t('updateFailed')}: ` + chrome.runtime.lastError.message, 'error');
                 trackException(new Error('FAB Update: ' + chrome.runtime.lastError.message));
                 return;
             }
 
             if (response && response.status === "success") {
-                showStatusBubble('Update installed! Reloading extension...', 'success', 5000);
+                showStatusBubble(t('updateInstalled'), 'success', 5000);
                 trackEvent('FAB Update Success', { version: updateAvailable.version });
                 setUpdateAvailable(null);
                 chrome.storage.local.remove("pending_update");
@@ -863,7 +863,7 @@ const FAB: React.FC = () => {
                 }, 1500);
             } else {
                 const errMsg = response?.error || 'Unknown error';
-                showStatusBubble('Update failed: ' + errMsg, 'error');
+                showStatusBubble(`${t('updateFailed')}: ` + errMsg, 'error');
                 trackEvent('FAB Update Failed', { version: updateAvailable.version, error: errMsg });
             }
         });

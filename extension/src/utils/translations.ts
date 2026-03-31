@@ -38,7 +38,7 @@ export const translations: TranslationDictionary = {
     modeNew: { en: "New Cases Only", zh: "仅新案例" },
     modeAlways: { en: "Always", zh: "总是启用" },
     
-    behavior: { en: "Behavior", zh: "行为设置" },
+    behavior: { en: "General", zh: "通用设置" },
     copilotConfig: { en: "Copilot Configuration", zh: "Copilot 配置" },
     userPrompt: { en: "Custom User Prompt", zh: "自定义用户提示词" },
     userPromptDesc: { 
@@ -122,6 +122,20 @@ export const translations: TranslationDictionary = {
     analysisTook: { en: "Analysis took", zh: "分析耗时" },
     savedReport: { en: "Saved report", zh: "已保存报告" },
     version: { en: "Version", zh: "版本" },
+    checkingForUpdates: { en: "Checking for updates...", zh: "正在检查更新..." },
+    upToDate: { en: "You are up to date!", zh: "已是最新版本！" },
+    checkTimedOut: { en: "Check timed out.", zh: "检查超时。" },
+    downloadingUpdate: { en: "Downloading update...", zh: "正在下载更新..." },
+    downloadingVersion: { en: "Downloading", zh: "正在下载" },
+    updateSuccess: { en: "Update success! Restarting...", zh: "更新成功！正在重启..." },
+    updateInstalled: { en: "Update installed! Reloading extension...", zh: "更新已安装！正在重新加载扩展..." },
+    updateFailed: { en: "Update failed", zh: "更新失败" },
+    resetComplete: { en: "Reset complete.", zh: "重置完成。" },
+    importSuccess: { en: "Imported successfully!", zh: "导入成功！" },
+    availableForUpdate: { en: "available for update", zh: "可更新" },
+    checkFailed: { en: "Check failed", zh: "检查失败" },
+    edit: { en: "Edit", zh: "编辑" },
+    preview: { en: "Preview", zh: "预览" },
     
     // --- Context Menu ---
     analyzeError: { en: "Analyze Error", zh: "分析报错" },
