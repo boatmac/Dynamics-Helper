@@ -946,6 +946,17 @@ class NativeHost:
             logging.error(f"Failed to build session config: {e}")
             return False
 
+        # Inject session ID into system message so the AI can reference it
+        # (e.g. when creating context.md frontmatter).
+        if session_id and "system_message" in full_config:
+            sys_msg = full_config["system_message"]
+            if isinstance(sys_msg, dict):
+                prev = sys_msg.get("content", "")
+                sys_msg["content"] = (
+                    prev + f"\n\n## Session Info\n\nSession ID: {session_id}"
+                )
+            logging.debug(f"Injected session ID into system message: {session_id}")
+
         # Extract only SDK-compatible keyword arguments from the config dict.
         # This prevents passing unknown keys (root_path, extension_preferences, etc.)
         # to the SDK, which now uses strict keyword-only arguments.
