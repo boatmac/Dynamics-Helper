@@ -89,6 +89,13 @@ Get-ChildItem -Path $HostSrc -Recurse | ForEach-Object {
 }
 Write-Host "    - Host files copied (exe + runtime libraries)."
 
+# Remove "Mark of the Web" (Zone.Identifier) from all host files.
+# When the user downloads the zip from GitHub, Windows tags every extracted file
+# with ZoneId=3 (Internet). This causes the exe to hang or be blocked by
+# SmartScreen/Defender. Unblock-File strips the alternate data stream.
+Get-ChildItem -Path $DestDir -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
+Write-Host "    - Files unblocked (Mark of the Web removed)."
+
 # Force update system_prompt.md (already copied above, but ensure it's there)
 if (Test-Path "$HostSrc\system_prompt.md") {
     Copy-Item "$HostSrc\system_prompt.md" -Destination "$DestDir\" -Force
