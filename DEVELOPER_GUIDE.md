@@ -34,7 +34,7 @@ The project consists of three main components:
   * **Config Loading:** Prioritizes `%LOCALAPPDATA%` config over the local directory.
   * **Session Persistence:** Uses deterministic UUID v5 session IDs (derived from case IDs via `_case_to_session_id()`) for Copilot `/resume` support.
   * **Case ID Validation:** `_extract_case_id()` validates 16-digit case IDs and 19-digit task IDs.
-* **`updater.py`**: Self-update mechanism. Downloads updates from GitHub releases, handles locked `.exe` files by renaming to `.exe.old` (with `.old2`, `.old3` fallback for antivirus locks).
+* **`updater.py`**: Self-update mechanism. Downloads updates from GitHub releases. Copies all host files (exe, `_internal/` runtime, `system_prompt.md`) while protecting user files (`config.json`, `copilot-instructions.md`, logs) via `_USER_FILES` set. Handles locked `.exe` files by renaming to `.exe.old` (with `.old2`, `.old3` fallback for antivirus locks).
 * **`pii_scrubber.py`**: PII redaction utility for sanitizing text before sending to the LLM.
 * **`system_prompt.md`**: The base persona for the AI Agent.
 
@@ -180,7 +180,7 @@ The extension checks for updates on startup (via `health_check` action) and disp
 1. **Check:** `NativeHost.check_for_updates()` queries the GitHub Releases API.
 2. **Notify:** If a newer version exists, sends `NATIVE_UPDATE_AVAILABLE` message to the extension.
 3. **Download:** User clicks "Update Now" → `updater.download_update()` fetches the release zip.
-4. **Apply:** The updater extracts files, handles locked `.exe` via rename-to-`.old` strategy.
+4. **Apply:** The updater extracts files. The exe is swapped via rename-to-`.old` strategy. Other host files (`_internal/`, `system_prompt.md`) are overwritten directly. User files (`config.json`, `copilot-instructions.md`, logs) are protected.
 5. **Reload:** After a successful update, the FAB calls `chrome.runtime.reload()` to reload the extension (not just the page). The `pending_update` entry in `chrome.storage.local` is cleared on success. The Options page also includes version guards to dismiss stale update banners.
 6. **Restart:** The host process exits; Chrome relaunches it on the next native message.
 
@@ -190,7 +190,9 @@ When replacing `dh_native_host.exe`, the file may be locked by the OS or antivir
 
 1. Try `rename → .exe.old`
 2. If locked: try `.exe.old2`, `.exe.old3` as fallback
-3. Log errors for debugging
+3. Other host files (`_internal/` directory, `system_prompt.md`) are overwritten directly
+4. User files (`config.json`, `copilot-instructions.md`, log files) are never overwritten
+5. Log errors for debugging
 
 ---
 

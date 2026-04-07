@@ -14,7 +14,7 @@ This file defines the operational rules, development workflows, and coding stand
 
 * `extension/`: Source code AND build output for the frontend.
 * `host/`: Source code for the backend.
-* `dist/`: Contains the compiled Python executable (`dh_native_host.exe`) used for releases.
+* `dist/`: Contains the PyInstaller `--onedir` build output (`dist/dh_native_host/` folder with exe + `_internal/` runtime) used for releases.
 
 ### Critical Runtime Instructions
 
@@ -68,7 +68,7 @@ This file defines the operational rules, development workflows, and coding stand
 * **Build Executable (PyInstaller):**
 
     ```bash
-    pyinstaller --onefile --name dh_native_host host/dh_native_host.py
+    pyinstaller --onedir --clean --name dh_native_host host/dh_native_host.py
     ```
 
 * **Run Tests:**
@@ -194,7 +194,8 @@ This file defines the operational rules, development workflows, and coding stand
 ### 7. Self-Update Mechanism
 
 * **Updater:** `host/updater.py` handles downloading and applying updates from GitHub releases.
-* **Locked File Handling:** When replacing `dh_native_host.exe`, the old file may be locked by the OS or antivirus. The updater renames it to `.exe.old` (or `.exe.old2`, `.exe.old3` as fallback).
+* **--onedir Layout:** The release zip contains a `host/` folder with the exe, `_internal/` directory (Python runtime, DLLs), and config files. The updater copies all files to the install directory, protecting user files (`config.json`, `copilot-instructions.md`, log files) via `_USER_FILES` set.
+* **Locked File Handling:** When replacing `dh_native_host.exe`, the old file may be locked by the OS or antivirus. The updater renames it to `.exe.old` (or `.exe.old2`, `.exe.old3` as fallback). Other files (`_internal/`, `system_prompt.md`) are overwritten directly.
 * **Do Not Break:** The `--register` CLI flag and the self-update flow are critical for production users. Test changes carefully.
 
 ## 5. Debugging Workflow
@@ -253,8 +254,8 @@ This script automates version bumping, git operations, building, and publishing.
 
 1. Updates version in `package.json`, `manifest.json`, and `dh_native_host.py`.
 2. **Commits & Tags:** Creates a `chore: release vX.X.X` commit and a `vX.X.X` git tag.
-3. **Builds:** Runs `npm build` and `pyinstaller`.
-4. **Packages:** Creates `DynamicsHelper_vX.X.X.zip` in `releases/`.
+3. **Builds:** Runs `npm build` and `pyinstaller --onedir`.
+4. **Packages:** Creates `DynamicsHelper_vX.X.X.zip` in `releases/` (contains `extension/`, `host/` with exe + `_internal/`, installer scripts).
 5. **Publishes:** Uses `gh` CLI to upload the release to GitHub.
 
 ### Pre-Release Documentation Checklist
@@ -306,4 +307,4 @@ This error means the Host process crashed during startup or failed to establish 
 ### 3. Self-update fails silently
 
 * **Cause:** Antivirus software (e.g., Windows Defender) may lock the `.exe` file, preventing rename/replace.
-* **Fix:** The updater (`host/updater.py`) falls back to `.exe.old2`, `.exe.old3` naming. Check `native_host.log` for "locked" or "PermissionError" entries.
+* **Fix:** The updater (`host/updater.py`) falls back to `.exe.old2`, `.exe.old3` naming for the exe. Other host files (`_internal/`, `system_prompt.md`) are overwritten directly. Check `native_host.log` for "locked" or "PermissionError" entries.

@@ -47,7 +47,7 @@ The browser looks up the Host ID (`com.dynamics.helper.native`) in the Registry.
 
 ### `installer_core.ps1` (Prod Installation)
 
-* Copies `dh_native_host.exe` to `%LOCALAPPDATA%/DynamicsHelper`.
+* Copies host files (exe + `_internal/` runtime from `--onedir` build) to `%LOCALAPPDATA%/DynamicsHelper`.
 * Writes `manifest.json` with `"path": "dh_native_host.exe"` (Relative).
 * **CRITICAL:** Uses `[System.IO.File]::WriteAllText` to ensure No-BOM.
 * Updates Registry to point to `%LOCALAPPDATA%/DynamicsHelper/manifest.json`.
@@ -71,6 +71,8 @@ The host supports in-place updates without requiring the user to re-download and
 5. **Locked File Handling:** When replacing `dh_native_host.exe`:
    * Try renaming old file to `.exe.old`
    * If locked (antivirus): fall back to `.exe.old2`, `.exe.old3`
+   * Other host files (`_internal/`, `system_prompt.md`) are overwritten directly
+   * User files (`config.json`, `copilot-instructions.md`, logs) are protected via `_USER_FILES` set
    * Log errors for debugging
 6. **Reload:** The FAB calls `chrome.runtime.reload()` to reload the extension with the new code. The `pending_update` key is cleared from `chrome.storage.local` on success; the Options page uses version guards to dismiss stale banners.
 7. **Restart:** The host process exits; Chrome relaunches it on the next native message.
