@@ -553,7 +553,7 @@ class NativeHost:
 
         # 2. Default/bundled config (beside the executable/script)
         if getattr(sys, "frozen", False):
-            # PyInstaller OneFile: Look beside the .exe
+            # PyInstaller OneDir: Look beside the .exe
             install_dir = os.path.dirname(sys.executable)
         else:
             # Dev Mode: Look beside the script

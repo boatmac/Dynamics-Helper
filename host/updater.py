@@ -48,6 +48,16 @@ class Updater:
             logging.error(f"Download failed: {e}")
             raise
 
+    # Files that must not be overwritten during self-update
+    _USER_FILES = {
+        "config.json",
+        "copilot-instructions.md",
+        "native_host.log",
+        "native_host.log.1",
+        "native_host.log.2",
+        "native_host.log.3",
+    }
+
     def apply_update(self, zip_path):
         """Extracts zip and swaps files."""
         logging.info("Applying update...")
@@ -60,15 +70,13 @@ class Updater:
 
             # 2. Validate Structure
             new_ext_src = os.path.join(temp_extract_dir, "extension")
-            # In the release zip, the host is inside a 'host' folder
-            new_host_src = os.path.join(temp_extract_dir, "host", "dh_native_host.exe")
+            new_host_dir = os.path.join(temp_extract_dir, "host")
+            new_host_exe = os.path.join(new_host_dir, "dh_native_host.exe")
 
             if not os.path.exists(new_ext_src):
-                # Try finding it if the zip structure is different (e.g. root/extension)
-                # But our release_helper creates: extension/ and host/ at root of zip
                 raise Exception("Update zip missing 'extension' folder")
 
-            if not os.path.exists(new_host_src):
+            if not os.path.exists(new_host_exe):
                 raise Exception("Update zip missing 'host/dh_native_host.exe'")
 
             # 3. Update Extension Files
@@ -78,35 +86,42 @@ class Updater:
             else:
                 shutil.copytree(new_ext_src, self.extension_dir)
 
-            # 4. Swap Host Binary
+            # 4. Swap Host Binary (rename running exe so we can overwrite)
             logging.info("Swapping host binary...")
-            self._swap_host_binary(new_host_src)
+            self._swap_host_binary(new_host_exe)
 
-            # 5. Update Config & Instructions (Safe Mode)
-            logging.info("Updating configuration files...")
+            # 5. Copy remaining host files (DLLs, internal dirs, system_prompt.md)
+            # This handles the --onedir layout where DLLs sit alongside the exe.
+            logging.info("Updating host runtime files...")
+            for item in os.listdir(new_host_dir):
+                if item == "dh_native_host.exe":
+                    continue  # Already handled by _swap_host_binary
+                if item in self._USER_FILES:
+                    # Only create config.json if it doesn't exist
+                    if item == "config.json" and not os.path.exists(
+                        os.path.join(self.host_dir, item)
+                    ):
+                        shutil.copy2(
+                            os.path.join(new_host_dir, item),
+                            os.path.join(self.host_dir, item),
+                        )
+                        logging.info("Created default config.json")
+                    continue
 
-            # system_prompt.md: Always Overwrite (No backup needed as it's system managed)
-            new_instr_src = os.path.join(temp_extract_dir, "host", "system_prompt.md")
-            dest_instr = os.path.join(self.host_dir, "system_prompt.md")
+                src_path = os.path.join(new_host_dir, item)
+                dst_path = os.path.join(self.host_dir, item)
 
-            if os.path.exists(new_instr_src):
                 try:
-                    shutil.copy2(new_instr_src, dest_instr)
-                    logging.info("Updated system_prompt.md")
+                    if os.path.isdir(src_path):
+                        if os.path.exists(dst_path):
+                            shutil.rmtree(dst_path, ignore_errors=True)
+                        shutil.copytree(src_path, dst_path)
+                    else:
+                        shutil.copy2(src_path, dst_path)
                 except Exception as e:
-                    logging.error(f"Failed to update system_prompt.md: {e}")
+                    logging.warning(f"Could not update {item}: {e}")
 
-            # config.json: Create Only (Do not overwrite user settings)
-            new_config_src = os.path.join(temp_extract_dir, "host", "config.json")
-            dest_config = os.path.join(self.host_dir, "config.json")
-
-            if os.path.exists(new_config_src) and not os.path.exists(dest_config):
-                try:
-                    shutil.copy2(new_config_src, dest_config)
-                    logging.info("Created default config.json")
-                except Exception as e:
-                    logging.error(f"Failed to create config.json: {e}")
-
+            logging.info("Host files updated successfully.")
             return True
 
         except Exception as e:

@@ -69,18 +69,27 @@ if (-not (Test-Path $HostSrc)) {
     Write-Error "Could not find 'host' folder in '$PSScriptRoot'. Please extract the zip file completely before running."
 }
 
-Copy-Item "$HostSrc\dh_native_host.exe" -Destination "$DestDir\" -Force
-Write-Host "    - dh_native_host.exe copied."
+# Copy all host files (exe + DLLs from --onedir build + config files)
+# This overwrites existing files but preserves user config (checked below)
+Get-ChildItem -Path $HostSrc -Recurse | ForEach-Object {
+    $RelPath = $_.FullName.Substring($HostSrc.Length + 1)
+    $DestPath = Join-Path $DestDir $RelPath
 
-# Copy config if not exists
-if (-not (Test-Path "$DestDir\config.json")) {
-    if (Test-Path "$HostSrc\config.json") {
-        Copy-Item "$HostSrc\config.json" -Destination "$DestDir\"
-        Write-Host "    - Default config.json copied."
+    if ($_.PSIsContainer) {
+        if (-not (Test-Path $DestPath)) {
+            New-Item -ItemType Directory -Path $DestPath | Out-Null
+        }
+    } else {
+        # Skip config.json if user already has one (preserve user settings)
+        if ($RelPath -eq "config.json" -and (Test-Path "$DestDir\config.json")) {
+            return
+        }
+        Copy-Item $_.FullName -Destination $DestPath -Force
     }
 }
+Write-Host "    - Host files copied (exe + runtime libraries)."
 
-# Force update instructions
+# Force update system_prompt.md (already copied above, but ensure it's there)
 if (Test-Path "$HostSrc\system_prompt.md") {
     Copy-Item "$HostSrc\system_prompt.md" -Destination "$DestDir\" -Force
     Write-Host "    - system_prompt.md updated."

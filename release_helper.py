@@ -94,10 +94,10 @@ def build_host():
             "pyinstaller --version", check=True, shell=True, stdout=subprocess.DEVNULL
         )
 
-        # Build command: pyinstaller --onefile --name dh_native_host host/dh_native_host.py
-        # We run from root, so path is host/dh_native_host.py
+        # Build command: pyinstaller --onedir (avoids WDAC temp extraction blocks)
+        # Output goes to dist/dh_native_host/ folder with exe + DLLs alongside
         cmd = (
-            "pyinstaller --onefile --clean --name dh_native_host host/dh_native_host.py"
+            "pyinstaller --onedir --clean --name dh_native_host host/dh_native_host.py"
         )
         print(f"Executing: {cmd}")
         subprocess.run(cmd, cwd=ROOT_DIR, check=True, shell=True)
@@ -125,19 +125,25 @@ def create_zip(version):
     print("Copying Extension...")
     shutil.copytree(EXT_DIST_DIR, os.path.join(stage_dir, "extension"))
 
-    # 2. Copy Host (dist/dh_native_host.exe -> host/)
+    # 2. Copy Host (dist/dh_native_host/ folder contents -> host/)
     print("Copying Host...")
     host_stage_dir = os.path.join(stage_dir, "host")
     os.makedirs(host_stage_dir)
 
-    # PyInstaller output is in dist/dh_native_host.exe (relative to where we ran it)
-    # We ran from ROOT, so output is ROOT/dist/dh_native_host.exe
-    host_exe_src = os.path.join(ROOT_DIR, "dist", "dh_native_host.exe")
-    if not os.path.exists(host_exe_src):
-        print(f"Error: Host executable not found at {host_exe_src}")
+    # PyInstaller --onedir output is in dist/dh_native_host/ (a folder with exe + DLLs)
+    host_onedir_src = os.path.join(ROOT_DIR, "dist", "dh_native_host")
+    if not os.path.isdir(host_onedir_src):
+        print(f"Error: Host build folder not found at {host_onedir_src}")
         sys.exit(1)
 
-    shutil.copy2(host_exe_src, host_stage_dir)
+    # Copy all files from the --onedir output (exe + DLLs + bundled modules)
+    for item in os.listdir(host_onedir_src):
+        s = os.path.join(host_onedir_src, item)
+        d = os.path.join(host_stage_dir, item)
+        if os.path.isdir(s):
+            shutil.copytree(s, d)
+        else:
+            shutil.copy2(s, d)
 
     # Copy other host files (config.json, system_prompt.md, register.py)
     # They are in host/ source folder
