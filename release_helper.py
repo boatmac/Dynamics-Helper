@@ -96,9 +96,7 @@ def build_host():
 
         # Build command: pyinstaller --onedir (avoids WDAC temp extraction blocks)
         # Output goes to dist/dh_native_host/ folder with exe + DLLs alongside
-        cmd = (
-            "pyinstaller --onedir --clean --name dh_native_host host/dh_native_host.py"
-        )
+        cmd = "pyinstaller --onedir --clean -y --name dh_native_host host/dh_native_host.py"
         print(f"Executing: {cmd}")
         subprocess.run(cmd, cwd=ROOT_DIR, check=True, shell=True)
         print("Host build successful.")

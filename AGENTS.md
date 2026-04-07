@@ -68,7 +68,7 @@ This file defines the operational rules, development workflows, and coding stand
 * **Build Executable (PyInstaller):**
 
     ```bash
-    pyinstaller --onedir --clean --name dh_native_host host/dh_native_host.py
+    pyinstaller --onedir --clean -y --name dh_native_host host/dh_native_host.py
     ```
 
 * **Run Tests:**
