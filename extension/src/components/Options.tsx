@@ -516,8 +516,8 @@ const Options: React.FC = () => {
     const [teamItems, setTeamItems] = useState<MenuItem[]>([]);
 
     // Markdown preview toggles
-    const [previewInstructions, setPreviewInstructions] = useState(false);
-    const [previewPrompt, setPreviewPrompt] = useState(false);
+    const [previewInstructions, setPreviewInstructions] = useState(true);
+    const [previewPrompt, setPreviewPrompt] = useState(true);
 
     // Initial Load
     useEffect(() => {
