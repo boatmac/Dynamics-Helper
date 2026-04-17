@@ -71,6 +71,17 @@ class PiiScrubber:
             r"(?!\d)"  # Negative lookahead: Ensure it doesn't continue with more digits
         )
 
+        # CJK Name after "case owner:" (half-width or full-width colon)
+        # Matches 2-4 CJK characters following "case owner" label
+        # Examples: "21v case owner: 张三", "case owner: ZhangSan"
+        self.cjk_name_pattern = re.compile(
+            r"(case\s*owner\s*[:：]\s*)"  # label with half/full-width colon
+            r"([\u4e00-\u9fa5]{2,4}"  # CJK name (2-4 chars)
+            r"|[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)"  # Or English name like "KongBinbin" or "Li Hong"
+            r"(?=\s|$|<|,|;)",  # followed by whitespace, EOL, angle bracket, comma, or semicolon
+            re.IGNORECASE,
+        )
+
     def scrub(self, text: str) -> str:
         """
         Replaces detected PII in the given text with placeholders.
@@ -94,5 +105,8 @@ class PiiScrubber:
 
         # 4. Phone Numbers (Lowest confidence, do last to avoid breaking IP addresses if they look like phones? Unlikely with dots vs dashes)
         text = self.phone_pattern.sub("[REDACTED_PHONE]", text)
+
+        # 5. CJK/English Names after "case owner:" labels
+        text = self.cjk_name_pattern.sub(r"\1[REDACTED_NAME]", text)
 
         return text

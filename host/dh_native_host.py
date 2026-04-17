@@ -1534,9 +1534,9 @@ class NativeHost:
                     f.write(
                         f"> Resume in Copilot CLI: `copilot /resume {self.current_session_id}`\n\n"
                     )
-                f.write(f"## Original Error\n{text}\n\n")
-                if context:
-                    f.write(f"## Context\n{context}\n\n")
+                f.write(f"## Original Error\n{scrubbed_text}\n\n")
+                if scrubbed_context:
+                    f.write(f"## Context\n{scrubbed_context}\n\n")
                 f.write(f"## AI Explanation\n{full_response}\n")
 
             return {
