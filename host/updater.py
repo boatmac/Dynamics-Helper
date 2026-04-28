@@ -113,9 +113,10 @@ class Updater:
 
                 try:
                     if os.path.isdir(src_path):
-                        if os.path.exists(dst_path):
-                            shutil.rmtree(dst_path, ignore_errors=True)
-                        shutil.copytree(src_path, dst_path)
+                        # Merge into existing directory instead of replace.
+                        # We can't rmtree _internal while the host is running
+                        # because DLLs are locked by the Python process.
+                        self._overwrite_directory(src_path, dst_path)
                     else:
                         shutil.copy2(src_path, dst_path)
                 except Exception as e:
@@ -134,7 +135,8 @@ class Updater:
                 os.remove(zip_path)
 
     def _overwrite_directory(self, src, dst):
-        """Recursively copies files from src to dst, overwriting existing."""
+        """Recursively copies files from src to dst, overwriting existing.
+        Skips individual files that are locked (e.g., DLLs loaded by the running process)."""
         os.makedirs(dst, exist_ok=True)
         for item in os.listdir(src):
             s = os.path.join(src, item)
@@ -142,7 +144,12 @@ class Updater:
             if os.path.isdir(s):
                 self._overwrite_directory(s, d)
             else:
-                shutil.copy2(s, d)
+                try:
+                    shutil.copy2(s, d)
+                except PermissionError:
+                    logging.debug(f"Skipped locked file: {d}")
+                except Exception as e:
+                    logging.warning(f"Could not copy {item}: {e}")
 
     def _swap_host_binary(self, new_exe_source):
         """
