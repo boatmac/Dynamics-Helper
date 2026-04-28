@@ -1451,6 +1451,12 @@ class NativeHost:
                 logging.error(
                     f"Copilot request timed out after {timeout_seconds} seconds."
                 )
+                # Invalidate the session — the subprocess pipe is likely dead
+                logging.info("Invalidating session after timeout.")
+                self.session = None
+                self.client = None
+                self.current_session_id = None
+                self.current_case_id = None
                 # Return a specific error guiding the user to check authentication/skills
                 return {
                     "status": "error",
@@ -1550,6 +1556,13 @@ class NativeHost:
 
         except Exception as e:
             logging.error(f"SDK Error: {e}")
+            # Invalidate session on pipe/subprocess errors so next request reconnects
+            if "Invalid argument" in str(e) or "Broken pipe" in str(e):
+                logging.info("Invalidating session due to broken pipe/subprocess.")
+                self.session = None
+                self.client = None
+                self.current_session_id = None
+                self.current_case_id = None
             return {"status": "error", "error": f"SDK Error: {str(e)}"}
 
     async def process_message(self, message):
