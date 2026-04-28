@@ -125,7 +125,7 @@ import traceback
 import urllib.request
 import uuid
 
-VERSION = "2.0.67"
+VERSION = "2.0.68"
 
 # Setup User Data Directory (Cross-platform)
 
