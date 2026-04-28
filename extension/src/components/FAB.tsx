@@ -267,6 +267,21 @@ const FAB: React.FC = () => {
         };
         // Small delay to ensure listeners are ready
         setTimeout(checkHealth, 1000);
+
+        // Check persistent storage for pending updates (in case the live event was missed)
+        chrome.storage.local.get("pending_update", (data) => {
+            const pending = data.pending_update as {version: string, url: string} | undefined;
+            if (pending?.version) {
+                const currentVer = chrome.runtime.getManifest().version;
+                if (pending.version === currentVer) {
+                    // Already updated — stale entry, clean up
+                    chrome.storage.local.remove("pending_update");
+                } else {
+                    console.log("[DH-FAB] Found pending update in storage:", pending);
+                    setUpdateAvailable(pending);
+                }
+            }
+        });
     }, []);
 
     // Progress Listener Effect
