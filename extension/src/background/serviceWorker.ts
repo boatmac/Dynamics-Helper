@@ -14,50 +14,57 @@ setupContextMenu();
 const CONNECTION_STRING = TELEMETRY_CONNECTION_STRING;
 
 let appInsights: ApplicationInsights | null = null;
+let stableUserId: string | null = null;
 
-try {
-    // Initialize App Insights for Service Worker environment
-    // Note: We disable automatic tracking features that rely on DOM/Window
-    appInsights = new ApplicationInsights({
-        config: {
-            connectionString: CONNECTION_STRING,
-            disableAjaxTracking: true,
-            disableFetchTracking: true,
-            disableExceptionTracking: true,
+// Initialize telemetry async so userId is ready before any events fire.
+async function initTelemetry(): Promise<void> {
+    try {
+        // 1. Resolve stable anonymous user ID FIRST (before loading SDK).
+        // Service workers lack cookies/localStorage, so the App Insights SDK
+        // cannot persist a user_Id on its own. We use chrome.storage.local.
+        const data = await chrome.storage.local.get("telemetryUserId");
+        stableUserId = (data.telemetryUserId as string) || null;
+        if (!stableUserId) {
+            stableUserId = crypto.randomUUID();
+            await chrome.storage.local.set({ telemetryUserId: stableUserId });
         }
-    });
 
-    // Verify if we can load it (handling potential missing window/document issues in SW)
-    appInsights.loadAppInsights();
+        // 2. Create and load App Insights.
+        appInsights = new ApplicationInsights({
+            config: {
+                connectionString: CONNECTION_STRING,
+                disableAjaxTracking: true,
+                disableFetchTracking: true,
+                disableExceptionTracking: true,
+            }
+        });
+        appInsights.loadAppInsights();
 
-    // Stamp every telemetry item with the extension version so we can
-    // track adoption and identify users still on older builds.
-    const extVersion = chrome.runtime.getManifest().version;
-    appInsights.addTelemetryInitializer((item) => {
-        item.data = item.data || {};
-        item.data.extensionVersion = extVersion;
-    });
+        // 3. Set user context so SDK populates user_Id in the schema.
+        appInsights.context.user.id = stableUserId;
+        appInsights.context.user.authenticatedId = stableUserId;
 
-    // Generate a stable anonymous user ID for telemetry.
-    // Service workers lack cookies/localStorage, so the App Insights SDK
-    // cannot persist a user_Id on its own. We use chrome.storage.local instead.
-    chrome.storage.local.get("telemetryUserId", (data) => {
-        let userId = data.telemetryUserId as string | undefined;
-        if (!userId) {
-            userId = crypto.randomUUID();
-            chrome.storage.local.set({ telemetryUserId: userId });
-        }
-        if (appInsights) {
-            appInsights.context.user.id = userId;
-        }
-    });
+        // 4. Stamp every telemetry item with extensionVersion AND userId
+        // as custom dimensions (backup — guarantees they appear even if
+        // the SDK drops the context fields).
+        const extVersion = chrome.runtime.getManifest().version;
+        appInsights.addTelemetryInitializer((item) => {
+            item.data = item.data || {};
+            item.data.extensionVersion = extVersion;
+            item.data.userId = stableUserId;
+        });
 
-    console.log("[DH-SW] Telemetry Service Initialized in Background");
-} catch (e) {
-    console.warn("[DH-SW] Failed to initialize Telemetry in Background:", e);
+        console.log("[DH-SW] Telemetry initialized, userId:", stableUserId);
+    } catch (e) {
+        console.warn("[DH-SW] Failed to initialize Telemetry in Background:", e);
+    }
 }
 
-function trackBackgroundEvent(name: string, properties: any = {}) {
+// Fire-and-forget but trackBackgroundEvent will queue until ready.
+const telemetryReady = initTelemetry();
+
+async function trackBackgroundEvent(name: string, properties: any = {}) {
+    await telemetryReady;
     if (appInsights) {
         try {
             console.log(`[DH-SW] Received and tracking event: ${name}`);
@@ -69,7 +76,8 @@ function trackBackgroundEvent(name: string, properties: any = {}) {
     }
 }
 
-function trackBackgroundException(error: any, severityLevel?: number) {
+async function trackBackgroundException(error: any, severityLevel?: number) {
+    await telemetryReady;
     if (appInsights) {
         try {
             appInsights.trackException({ error, severityLevel });

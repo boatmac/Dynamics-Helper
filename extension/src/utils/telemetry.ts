@@ -96,3 +96,15 @@ export const trackException = (error: Error, severityLevel?: number) => {
         }
     }
 };
+
+/**
+ * Hash a case ID (SHA-256) so we can count unique incidents without storing PII.
+ * Returns empty string if input is falsy.
+ */
+export async function hashCaseId(caseId: string | undefined | null): Promise<string> {
+    if (!caseId) return '';
+    const data = new TextEncoder().encode(caseId.trim());
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}

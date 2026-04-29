@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 import { useTranslation } from '../utils/i18n';
-import { trackEvent, trackException } from '../utils/telemetry';
+import { trackEvent, trackException, hashCaseId } from '../utils/telemetry';
 import { 
     X, 
     Settings, 
@@ -249,6 +249,10 @@ const FAB: React.FC = () => {
     // Track whether the user has manually edited the context textarea
     // This prevents background scans and re-opens from overwriting user edits
     const isUserEdited = React.useRef(false);
+
+    // Track which case IDs have already fired "Case Analyzed" this session
+    // to deduplicate: 3 analyses of the same case = 1 "Case Analyzed" event.
+    const reportedCases = React.useRef<Set<string>>(new Set());
 
     // Initial Health Check to wake up Host and check for updates
     useEffect(() => {
@@ -726,7 +730,7 @@ const FAB: React.FC = () => {
 
         trackEvent('Analyze Clicked', { 
             hasContext: !!targetData.source,
-            product: targetData.productCategory || 'Unknown'
+            sap: targetData.productCategory || 'Unknown'
         });
 
         setIsAnalyzing(true);
@@ -805,7 +809,29 @@ const FAB: React.FC = () => {
                     if (analysisData && !analysisData.error) {
                         setErrorMsg(null); // Clear any potential timeout errors if we recovered
                         const duration = (Date.now() - startTime) / 1000;
-                        trackEvent('Analyze Success', { durationSeconds: duration });
+                        const caseNum = targetData.caseNumber || '';
+                        const caseHash = await hashCaseId(caseNum);
+                        const sap = targetData.productCategory || 'Unknown';
+                        const severity = targetData.severity || 'Unknown';
+
+                        trackEvent('Analyze Success', {
+                            durationSeconds: duration,
+                            caseIdHash: caseHash,
+                            sap,
+                            severity,
+                        });
+
+                        // Fire "Case Analyzed" only once per unique case per session.
+                        // This lets us count unique incidents without inflating numbers
+                        // when the same case is re-analyzed multiple times.
+                        if (caseHash && !reportedCases.current.has(caseHash)) {
+                            reportedCases.current.add(caseHash);
+                            trackEvent('Case Analyzed', {
+                                caseIdHash: caseHash,
+                                sap,
+                                severity,
+                            });
+                        }
                         setLastDuration(`${duration.toFixed(1)}s`);
                         showStatusBubble(`${t('analysisComplete')} (${duration.toFixed(1)}s)`, 'success', 3000);
 
