@@ -466,7 +466,7 @@ Copy-Item -Recurse "dist/dh_native_host" $tmp
 $em = "$env:TEMP\dh_startup.log"; if (Test-Path $em) { Set-Content $em "" }
 $nh = "$env:LOCALAPPDATA\DynamicsHelper\native_host.log"; if (Test-Path $nh) { Set-Content $nh "" }
 $j = Start-Job -ScriptBlock { param($e) & $e 2>&1 } -ArgumentList "$tmp/dh_native_host.exe"
-Start-Sleep 12
+Start-Sleep 20
 Stop-Job $j -EA SilentlyContinue; Remove-Job $j -Force -EA SilentlyContinue
 Get-Content $nh | Select-Object -Last 10
 Remove-Item -Recurse -Force $tmp -EA SilentlyContinue
