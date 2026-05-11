@@ -43,6 +43,54 @@ def update_json_version(file_path, new_version):
     print(f"  Updated {os.path.basename(file_path)}: {old_version} -> {new_version}")
 
 
+def update_chrome_manifest_version(file_path, new_version):
+    """Like update_json_version but split semver-with-prerelease into
+    Chrome's numeric `version` + display-only `version_name`.
+
+    Chrome (and Edge) reject `2.0.70-beta` in the manifest's `version`
+    field with `Required value 'version' is missing or invalid. It
+    must be between 1-4 dot-separated integers each between 0 and
+    65536.` See manifest v3 spec.
+
+    Workaround per Chrome docs: keep `version` numeric (drop the
+    `-<prerelease>` suffix) and put the full display string in
+    `version_name`. Chrome surfaces `version_name` in the UI; updater
+    comparisons can still rely on `version` being numeric.
+    """
+    if not os.path.exists(file_path):
+        print(f"Error: {file_path} not found.")
+        sys.exit(1)
+
+    print(f"Reading {file_path}...")
+    with open(file_path, "r") as f:
+        data = json.load(f)
+
+    # Split "2.0.70-beta" -> numeric="2.0.70", display="2.0.70-beta"
+    # Plain "2.0.70" -> numeric="2.0.70", drop any stale version_name
+    numeric = new_version.split("-", 1)[0]
+    has_prerelease = "-" in new_version
+
+    old_version = data.get("version")
+    old_name = data.get("version_name")
+    data["version"] = numeric
+    if has_prerelease:
+        data["version_name"] = new_version
+    elif "version_name" in data:
+        # No prerelease in the new version: drop the stale version_name
+        del data["version_name"]
+
+    print(f"  Writing version={numeric}, version_name={new_version if has_prerelease else '(none)'}")
+    with open(file_path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+
+    print(
+        f"  Updated {os.path.basename(file_path)}: "
+        f"version {old_version} -> {numeric}"
+        + (f", version_name {old_name} -> {new_version}" if has_prerelease else "")
+    )
+
+
 def update_python_version(file_path, new_version):
     if not os.path.exists(file_path):
         print(f"Error: {file_path} not found.")
@@ -200,9 +248,9 @@ def publish_to_github(version, zip_path, prerelease=False):
 
     try:
         subprocess.run(
-            "gh --version", check=True, shell=True, stdout=subprocess.DEVNULL
+            ["gh", "--version"], check=True, stdout=subprocess.DEVNULL
         )
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, FileNotFoundError):
         print(
             "Error: 'gh' CLI not found. Please install GitHub CLI to publish releases."
         )
@@ -210,15 +258,27 @@ def publish_to_github(version, zip_path, prerelease=False):
 
     tag = f"v{version}"
     title = f"v{version}"
-    notes = f"Release {tag}\n\n## Installation\n1. Download and extract the zip file.\n2. Double-click `install.bat` (Safely bypasses PowerShell restrictions).\n3. Follow the on-screen instructions."
+    notes = (
+        f"Release {tag}\n\n"
+        "## Installation\n"
+        "1. Download and extract the zip file.\n"
+        "2. Double-click `install.bat` (Safely bypasses PowerShell restrictions).\n"
+        "3. Follow the on-screen instructions."
+    )
 
-    prerelease_flag = "--prerelease" if prerelease else ""
-    cmd = f'gh release create {tag} "{zip_path}" --title "{title}" --notes "{notes}" {prerelease_flag}'
+    # Use argv-list form (NOT shell=True) so the multi-line --notes string
+    # cannot swallow the trailing --prerelease flag. Previously
+    # `shell=True` with a single f-string command silently dropped
+    # --prerelease on Windows; verified by observing isPrerelease=false
+    # on the v2.0.70-beta release.
+    cmd = ["gh", "release", "create", tag, zip_path, "--title", title, "--notes", notes]
+    if prerelease:
+        cmd.append("--prerelease")
 
-    print(f"Executing: {cmd}")
+    print(f"Executing: {' '.join(cmd[:5])} ... (prerelease={prerelease})")
 
     try:
-        subprocess.run(cmd, check=True, shell=True)
+        subprocess.run(cmd, check=True)
         print("GitHub Release created successfully!")
     except subprocess.CalledProcessError as e:
         print(f"Failed to create GitHub Release: {e}")
@@ -266,7 +326,7 @@ def main():
     print(f"Start Release Process: v{args.version}\n")
 
     update_json_version(PACKAGE_JSON, args.version)
-    update_json_version(MANIFEST_JSON, args.version)
+    update_chrome_manifest_version(MANIFEST_JSON, args.version)
     update_python_version(HOST_FILE, args.version)
 
     # Git Commit and Tag
