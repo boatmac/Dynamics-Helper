@@ -1,9 +1,10 @@
 # Copilot SDK 0.2.0 → 0.3.0 升级评估与计划
 
-> Status: **PHASE 1 DONE — code change list locked, ready for phase 2.**
-> Author: phase 0 / 1 worked across two sessions, 2026-05-11.
-> Tracking commit base: `3f0079e` (B82.1) — this work starts on top of that.
+> Status: **PHASE 3 STEP 1-3 DONE — local build + Defender clean. Awaiting release decision (steps 4-7) from human.**
+> Author: phases 0/1/2/3 worked across sessions, 2026-05-11.
+> Tracking commits: `8d069a5` (phase 0 doc) → `e2582c5` (phase 2 code).
 > Phase 1 evidence: `.scratch/b82-1-sdk03-surface-probe.py` STATIC_VERDICT=PASS.
+> Phase 3 evidence: see § 8 below.
 
 ## 1. 摘要
 
@@ -283,7 +284,9 @@ Results landed in § 7 below. Probe artifact: `.scratch/b82-1-sdk03-surface-prob
 
 **Exit criteria**: Tests green + 同 commit `feat(sdk): upgrade github-copilot-sdk 0.2.0 → 0.3.0`。
 
-### Phase 3 — PyInstaller + Defender 验证 + beta release  [PENDING]
+### Phase 3 — PyInstaller + Defender 验证 + beta release  **STEPS 1-3 DONE (2026-05-11), 4-7 awaiting human**
+
+Results landed in § 8 below.
 
 **前置**: Phase 2 done + 用户在 dev mode 跑过 e2e。
 
@@ -378,6 +381,97 @@ Phase 1 不动 host/dh_native_host.py 源代码、不改 requirements.txt —
 ```
 
 ---
+
+## 8. Phase 3 结果（STEPS 1-3 COMPLETED 2026-05-11）
+
+### 8.1 Step 1 — PyInstaller --onedir build
+
+**Build invocation** (critical: must use venv pyinstaller, NOT system pyinstaller):
+
+```powershell
+& "host/venv/Scripts/pyinstaller.exe" --onedir --clean -y --name dh_native_host host/dh_native_host.py
+```
+
+**Why this matters**: `release_helper.py:99` currently shells `pyinstaller --onedir ...` via PATH, which on this machine resolves to the *system* Python pyinstaller. System Python still has SDK **0.2.0** installed (per doc § 4.1; we deliberately did not upgrade it to preserve isolation). If we let release_helper.py run as-is, the release zip would silently bundle SDK 0.2.0 with our 0.3.0 source code — a guaranteed runtime crash for end users.
+
+**ACTION REQUIRED before step 4 (release_helper.py invocation)**:
+Update `release_helper.py:99` (and possibly line 94 version check) to invoke `host/venv/Scripts/pyinstaller.exe` (or compute it relative to ROOT_DIR). One-line change, but **without it** every 0.3.0 release would be broken.
+
+A separate dependency note: this step required `pip install pyinstaller==6.18.0` into the venv (it was only present at system scope before). The venv already contains the SDK 0.3.0 plus everything the host imports, so pyinstaller's static-import scan now resolves against the correct site-packages.
+
+### 8.2 Step 2 — Package size & layout comparison
+
+| Metric | 0.2.0 baseline (was in `dist/dh_native_host/` before rebuild) | 0.3.0 (just built) | Delta |
+|---|---:|---:|---:|
+| total folder size | 27.12 MB | **26.22 MB** | **−0.90 MB** |
+| file count        | 648      | **40**     | **−608**     |
+| exe size          | 5.52 MB  | **5.45 MB**| −0.07 MB     |
+
+The dramatic file-count drop comes from the SDK's internal restructure: 0.3.0 ships `copilot/bin/copilot.exe` (a 105.98 MB self-contained Node binary) inside the wheel instead of unpacking ~600 small Node runtime assets. PyInstaller's static import analyser scans only `.py` modules, so the bundled `bin/copilot.exe` is **not** included in our dist — which is exactly what we want, since DH always uses the user's `%APPDATA%\npm\copilot.cmd` (see `host/dh_native_host.py:506-527`). SDK code path confirms this is fine: `client.py:891` only falls back to the bundled binary if `config.cli_path` is None, which DH never sets.
+
+**Defender implication**: fewer files = fewer scan triggers. This is materially better for end-user AV friendliness than the 0.2.0 layout.
+
+### 8.3 Step 2.5 — Smoke test (clean location)
+
+Copied `dist/dh_native_host/` to `%TEMP%\dh_phase3_smoke2_<rand>\` (outside the repo and outside any dev-machine cached paths) and ran the exe. Logged via `%TEMP%\dh_startup.log` and `%LOCALAPPDATA%\DynamicsHelper\native_host.log`:
+
+```
+[20:53:08] Attempting to import copilot SDK...
+[20:53:08] Successfully imported copilot SDK.
+[20:53:08] Successfully imported PiiScrubber and Updater.
+[20:53:08] Starting asyncio loop...
+[20:53:08] Found Copilot CLI at npm location: ...\npm\copilot.cmd
+[20:53:08] Starting Copilot Client...
+[20:53:09] Copilot Client started.
+[20:53:09] create_session config keys: {on_permission_request, hooks, system_message, working_directory, skill_directories}
+[20:53:11] Copilot Session created successfully. Session Name: f28f2057-...
+[20:53:11] Stdin closed. Stopping.
+```
+
+Full SDK import → client.start → create_session → graceful shutdown in ~3 seconds. Headless mode works end-to-end with the new permission vocabulary.
+
+(Initial 4-second smoke run mistakenly looked like an import crash — the host simply needs ≥5s for cold-start SDK import. Always allow ≥10s when smoke-testing.)
+
+### 8.4 Step 3 — Defender local scan
+
+Posture on the build machine at scan time:
+- `DisableRealtimeMonitoring`: False (real-time on)
+- `DisableBehaviorMonitoring`: False (heuristic behaviour on)
+- `DisableScriptScanning`: False (script scan on)
+- `WinDefend` service: Running
+
+Targeted scan:
+
+```powershell
+& "$env:ProgramFiles\Windows Defender\MpCmdRun.exe" -Scan -ScanType 3 -File "$(Resolve-Path dist/dh_native_host)"
+# => Scan finished. Scanning ... dist\dh_native_host found no threats.
+```
+
+`Get-MpThreatDetection` for the last 24 hours: zero detections. The build, the smoke test from `%TEMP%`, and the explicit -ScanType 3 file scan all passed.
+
+**Caveat**: this is a *dev* machine that has run dozens of earlier DH builds; Defender ML telemetry may already trust this binary identity by author or signing-cert pattern. The Phase 3 doc's "clean Windows VM" assertion remains the gold standard — schedule that test before final stable release.
+
+### 8.5 Steps 4-7 — Deferred to human-driven release flow
+
+Per AGENTS.md § 8 ("CRITICAL RULE: Do not automatically publish a release to GitHub without the user's explicit approval or confirmation"), steps 4-7 are explicitly NOT executed in this session:
+
+- Step 4 `release_helper.py 2.0.70-beta --publish --prerelease`
+- Step 5 user e2e
+- Step 6 one-week observation
+- Step 7 `release_helper.py 2.0.70 --publish` (stable)
+
+**Pre-release blockers that MUST be resolved first**:
+
+1. **release_helper.py:99 fix** (§ 8.1) — change `pyinstaller --onedir ...` to invoke venv pyinstaller. Without this, the release zip would silently bundle SDK 0.2.0.
+2. **Pre-release doc checklist** (AGENTS.md § 8): walk AGENTS.md / DEVELOPER_GUIDE.md / USER_GUIDE.md / ARCHITECTURE.md / README.md and update any that mention `copilot.types`, the legacy MCP `type: "local"` vocabulary, or version pins.
+3. **Optional but recommended**: spin up a clean Win10/11 VM (no Visual Studio, no Python, factory Defender), run the to-be-released installer, confirm 0 quarantine + 0 false-positive. The dev-machine clean scan in § 8.4 is necessary but not sufficient evidence.
+
+### 8.6 Phase 3 SOP extraction (deferred)
+
+doc § 6 phase 3 step 8 ("Extract upgrade SOP into `docs/sdk-upgrade-playbook.md`") is best done **after** the stable release ships, with the full hindsight of what actually went wrong vs. predicted. Leave as a tracker item, not blocking.
+
+---
+
 
 ## 附录 A：DH 0.2.0 → 0.3.0 跳版本 0.2.1 / 0.2.2 的理由
 
