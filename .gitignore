@@ -46,3 +46,6 @@ nul
 # Misc
 items.json
 build/
+
+# Scratch / probes (B82)
+.scratch/
