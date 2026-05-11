@@ -1351,7 +1351,7 @@ const Options: React.FC = () => {
                                                 >
                                                     {t('betaChannelLabel')}
                                                 </label>
-                                                <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                                                <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
                                                     {t('betaChannelHint')}
                                                 </p>
                                             </div>
