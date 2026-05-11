@@ -137,7 +137,7 @@ This file defines the operational rules, development workflows, and coding stand
   * All I/O bound operations (SDK calls) must be `async`.
 * **Type Hinting:**
   * Use Python type hints extensively (e.g., `def func(a: int) -> str:`).
-  * Import types from `copilot.types` (e.g., `SubprocessConfig`, `PermissionRequestResult`, `PreToolUseHookOutput`). Note: `CopilotClientOptions`, `MessageOptions`, and `SessionConfig` were removed in SDK 0.2.0.
+  * Import types from `copilot` (top-level: `CopilotClient`, `SubprocessConfig`) and `copilot.session` (`PermissionRequestResult`, `PreToolUseHookOutput`). `copilot.types` was removed in SDK 0.3.0; `CopilotClientOptions`, `MessageOptions`, and `SessionConfig` were removed in 0.2.0. WARNING: `copilot.generated.rpc.PermissionRequestResult` is a different internal RPC type (`success: bool`) — always import the session version. Full migration notes: `docs/sdk-upgrade-2026-05-0.3.0.md`.
 * **Logging:**
   * **CRITICAL:** Do NOT print to `stdout` (used for Native Messaging).
   * Use `logging.info()`, `logging.error()`, etc.
@@ -308,3 +308,9 @@ This error means the Host process crashed during startup or failed to establish 
 
 * **Cause:** Antivirus software (e.g., Windows Defender) may lock the `.exe` file, preventing rename/replace.
 * **Fix:** The updater (`host/updater.py`) falls back to `.exe.old2`, `.exe.old3` naming for the exe. Other host files (`_internal/`, `system_prompt.md`) are overwritten directly. Check `native_host.log` for "locked" or "PermissionError" entries.
+
+### 4. MCP server config still uses legacy `type: "local"` / `"remote"`
+
+* **Cause:** SDK 0.3.0 renamed MCP `type` values: `"local"` → `"stdio"`, `"remote"` → `"http"`. SDK 0.3.0 silently accepts the legacy values, so behaviour is undefined.
+* **Symptom:** `native_host.log` shows lines like `MCP server 'foo' uses legacy type='local'; remapping in-memory to 'stdio'`.
+* **Fix:** DH performs an in-memory remap inside `start_session()` so existing user configs keep working, but the user should update their `mcp.json` (global `~/.copilot/mcp-config.json` or workspace `.github/mcp-config.json`) to silence the warning. See `docs/sdk-upgrade-2026-05-0.3.0.md` § 7 (B-4).

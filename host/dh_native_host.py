@@ -229,9 +229,14 @@ logging.info(f"Python Executable: {sys.executable}")
 # Import the SDK from the correct package name we discovered: 'copilot'
 try:
     log_emergency("Attempting to import copilot SDK...")
-    from copilot import CopilotClient
-    from copilot.types import (
-        SubprocessConfig,
+    # SDK 0.3.0 reorganized type exports: `copilot.types` was removed.
+    # SubprocessConfig moved to top-level `copilot`; PermissionRequestResult
+    # and PreToolUseHookOutput moved to `copilot.session`.
+    # WARNING: `copilot.generated.rpc.PermissionRequestResult` is a different
+    # internal RPC type (success: bool); always import from `copilot.session`.
+    # See docs/sdk-upgrade-2026-05-0.3.0.md § 7.1 for the full import map.
+    from copilot import CopilotClient, SubprocessConfig
+    from copilot.session import (
         PermissionRequestResult,
         PreToolUseHookOutput,
     )
@@ -737,6 +742,29 @@ class NativeHost:
         # Assign merged MCP servers to session config
         # IMPORTANT: SDK reads "mcp_servers" (snake_case) and converts to "mcpServers" on the wire
         if mcp_servers:
+            # SDK 0.3.0 renamed MCP `type` values: "local" -> "stdio", "remote" -> "http".
+            # The user's mcp.json may still carry the legacy values; the SDK
+            # silently accepts them on 0.3.0 but behaviour is undefined.
+            # Migrate in-memory only — do NOT mutate the user's config file.
+            # See docs/sdk-upgrade-2026-05-0.3.0.md § 7 (B-4).
+            _MCP_TYPE_MIGRATION = {"local": "stdio", "remote": "http"}
+            remapped = []
+            for srv_name, srv_cfg in mcp_servers.items():
+                if not isinstance(srv_cfg, dict):
+                    continue
+                old_type = srv_cfg.get("type")
+                if old_type in _MCP_TYPE_MIGRATION:
+                    srv_cfg["type"] = _MCP_TYPE_MIGRATION[old_type]
+                    remapped.append((srv_name, old_type, srv_cfg["type"]))
+            if remapped:
+                for srv_name, old_type, new_type in remapped:
+                    logging.warning(
+                        "MCP server '%s' uses legacy type=%r; remapping "
+                        "in-memory to %r. Update your mcp.json to silence "
+                        "this warning. See docs/sdk-upgrade-2026-05-0.3.0.md "
+                        "(B-4).",
+                        srv_name, old_type, new_type,
+                    )
             session_config["mcp_servers"] = mcp_servers
 
         # --- Working Directory ---
@@ -867,7 +895,9 @@ class NativeHost:
         """
         logging.info(f"Permission requested (fallback handler): {request}")
         logging.info("Auto-approving permission request to prevent headless hang.")
-        return PermissionRequestResult(kind="approved")
+        # SDK 0.3.0 renamed the approval vocabulary: "approved" -> "approve-once".
+        # See docs/sdk-upgrade-2026-05-0.3.0.md § 7 (B-1) and host/test_sdk_compat.py.
+        return PermissionRequestResult(kind="approve-once")
 
     @staticmethod
     def _pre_tool_use_hook(hook_input, context) -> PreToolUseHookOutput:

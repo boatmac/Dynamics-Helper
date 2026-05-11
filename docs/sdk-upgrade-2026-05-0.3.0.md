@@ -1,8 +1,9 @@
 # Copilot SDK 0.2.0 → 0.3.0 升级评估与计划
 
-> Status: **PHASE 0 DONE — awaiting phase 1 kickoff in a fresh session.**
-> Author: this session, 2026-05-11.
+> Status: **PHASE 1 DONE — code change list locked, ready for phase 2.**
+> Author: phase 0 / 1 worked across two sessions, 2026-05-11.
 > Tracking commit base: `3f0079e` (B82.1) — this work starts on top of that.
+> Phase 1 evidence: `.scratch/b82-1-sdk03-surface-probe.py` STATIC_VERDICT=PASS.
 
 ## 1. 摘要
 
@@ -238,7 +239,9 @@ DH 已知问题（grep `Defender|antivirus` 命中 49 处）:
 - [x] 探查 Defender 风险面
 - [x] 文档落地（本文）
 
-### Phase 1 — 隔离 venv + 探针  [PENDING]
+### Phase 1 — 隔离 venv + 探针  ✅ DONE (2026-05-11)
+
+Results landed in § 7 below. Probe artifact: `.scratch/b82-1-sdk03-surface-probe.py`. Original step list (kept for audit):
 
 **前置**: 新会话 `Read docs/sdk-upgrade-2026-05-0.3.0.md` 续起。
 
@@ -297,18 +300,71 @@ DH 已知问题（grep `Defender|antivirus` 命中 49 处）:
 
 **Exit criteria**: stable release 落地 + playbook 文档。
 
-## 7. Phase 1 结果（PENDING — 下一会话填）
+## 7. Phase 1 结果（COMPLETED 2026-05-11）
+
+Probe artifact: `.scratch/b82-1-sdk03-surface-probe.py` (STATIC_VERDICT=PASS).
 
 | 探针 | 期望 | 实际 | 决策 |
 |---|---|---|---|
-| B82.0 round-trip on 0.3.0 | PASS | — | — |
-| B-1: kind="approve-once" | accept | — | — |
-| B-1: kind="approved" (regression check) | reject/error | — | — |
-| B-2: permissionDecision="allow" | accept | — | — |
-| B-2: PreToolUseHookOutput annotations | (literal set) | — | — |
-| B-3: send_and_wait one round | PASS | — | — |
-| B-4: mcp_servers type="local" | (observed behavior) | — | — |
-| B-4: mcp_servers type="stdio" | accept | — | — |
+| B82.0 round-trip on 0.3.0 | PASS | **N/A** — fails at import (`copilot.types` gone) before reaching round-trip; superseded by B82.1 B-3 below | rewrite paths under phase 2 if we keep B82.0 around |
+| B-1: kind="approve-once" | accept | **PASS** — `PermissionRequestResultKind` literal = `('approve-once', 'reject', 'user-not-available', 'no-result')`; TypedDict constructs cleanly | apply rename at `host/dh_native_host.py:870` |
+| B-1: kind="approved" (regression check) | reject/error | **PASS (literal removed)** — `'approved'` is no longer in the kind Literal. TypedDict still constructs at runtime (no runtime enforcement on plain TypedDict), but the SDK contract no longer accepts it. | regression test must assert the literal SET, not the constructor |
+| B-2: permissionDecision="allow" | accept | **PASS** — annotation unchanged: `Literal['allow', 'deny', 'ask']` | no change needed at `host/dh_native_host.py:881` |
+| B-2: PreToolUseHookOutput annotations | (literal set) | `permissionDecision: Literal['allow', 'deny', 'ask']`, plus `permissionDecisionReason: str`, `modifiedArgs: Any`, `additionalContext: str`, `suppressOutput: bool` | new optional fields — not required, ignore |
+| B-3: send_and_wait one round | PASS | **PASS** — `client.create_session` + `session.send_and_wait("Reply with exactly: PONG")` returned `SessionEvent(data=AssistantMessageData(content='PONG', …))`. Python event restructure does not break DH's usage. | no change to call sites |
+| B-4: mcp_servers type="local" | (observed behavior) | **SILENTLY ACCEPTED** — `create_session(mcp_servers={..., "type": "local", ...})` did not raise. Behavioural consequences (does the server actually start? does the tool list resolve?) not tested in this probe, but the "loud reject" we hoped for is **not** happening. | **must** implement in-memory `local` → `stdio` migration on the user's `mcp.json` read path (`host/dh_native_host.py:687-740`) to preserve forward-compat behaviour and avoid silent regressions for existing user configs |
+| B-4: mcp_servers type="stdio" | accept | **PASS** — accepted without warning | the migration target literal is confirmed |
+
+### 7.1 Additional Phase 1 findings (not in original § 3 plan)
+
+These were discovered during inspection and probe authoring; they materially expand the phase 2 change set.
+
+#### S-1. `copilot.types` is gone — import paths must move
+
+**Evidence**: `from copilot.types import ...` raises `ModuleNotFoundError` on 0.3.0.
+
+**0.3.0 import map** (verified by probe):
+
+| Symbol | 0.2.0 location | 0.3.0 location |
+|---|---|---|
+| `CopilotClient` | `copilot` | `copilot` (unchanged) |
+| `SubprocessConfig` | `copilot.types` | `copilot` |
+| `PermissionRequestResult` | `copilot.types` | `copilot.session` |
+| `PreToolUseHookOutput` | `copilot.types` | `copilot.session` |
+
+**WARNING — name collision**: `copilot.generated.rpc` ALSO exports a class called `PermissionRequestResult`, but it is a different type (`(success: bool)`) used internally as an RPC response. **The DH-relevant one is `copilot.session.PermissionRequestResult`** (TypedDict with `kind` field). Phase 2 must import from `copilot.session`, never from `copilot.generated.rpc`.
+
+#### S-2 / S-3. Handler signatures already match
+
+`_PermissionHandlerFn = Callable[[PermissionRequest, dict[str, str]], PermissionRequestResult | Awaitable[...]]`
+`PreToolUseHandler = Callable[[PreToolUseHookInput, dict[str, str]], PreToolUseHookOutput | None | Awaitable[...]]`
+
+DH's `_permission_handler(self, request, context)` and `_pre_tool_use_hook(hook_input, context)` (`host/dh_native_host.py:863, 872`) **already accept the two-argument shape**. No signature change needed.
+
+#### S-4. `system_message` as plain dict still accepted
+
+DH currently passes `{"role": ..., "content": ...}`. 0.3.0 introduced a typed `SystemMessageConfig`, but plain dict still works (probe PASS). No change required, but phase 2 could optionally tighten it.
+
+### 7.2 Phase 2 change list (LOCKED)
+
+Updated from § 6 Phase 2 table with phase 1 evidence applied:
+
+| File:line | Change | Source of decision |
+|---|---|---|
+| `host/dh_native_host.py` imports (~ line 30) | `from copilot.types import (SubprocessConfig, PermissionRequestResult, PreToolUseHookOutput)` → split: `from copilot import SubprocessConfig` and `from copilot.session import PermissionRequestResult, PreToolUseHookOutput` | S-1 |
+| `host/dh_native_host.py:870` | `kind="approved"` → `kind="approve-once"` | B-1 |
+| `host/dh_native_host.py:881` | **no change** — `"allow"` literal preserved | B-2 |
+| `host/dh_native_host.py:687-740` (mcp.json read) | Add in-memory normalization: `cfg["type"] = {"local": "stdio", "remote": "http"}.get(cfg["type"], cfg["type"])`; log a one-time deprecation warning when a remap happens. **Do not write back to user's mcp.json** | B-4 (silent acceptance forces us to be defensive) |
+| `host/dh_native_host.py` handler signatures | **no change** — already `(request, context)` and `(input, context)` | S-2 / S-3 |
+| `.scratch/b82-0-sdk-probe.py` | Optional: update imports to 0.3.0 paths so the B82.0 round-trip probe stays runnable; or remove the file if B82.1 superseded it | S-1 |
+| `host/requirements.txt` | `github-copilot-sdk>=0.2.0` → `github-copilot-sdk==0.3.0` | doc § 4.3 |
+| `host/test_sdk_compat.py` (new) | Assert: `typing.get_args(PermissionRequestResultKind) == ('approve-once', 'reject', 'user-not-available', 'no-result')`. Assert `permissionDecision` literal still includes `'allow'`. Assert imports from `copilot` and `copilot.session` succeed. **Do not** test the TypedDict constructor with a bogus kind — TypedDict has no runtime literal enforcement. | B-1, B-2, S-1 |
+| `AGENTS.md § "Type Hinting"` | Update import note to reference `copilot` / `copilot.session` and point at this doc | S-1 |
+| `AGENTS.md § 9` | Add troubleshooting entry: "User's old `mcp.json` with `type: local` still loads silently; in-memory remap to `stdio` exists; user should update their file" | B-4 |
+
+**Exit criteria for phase 1 → 2 handoff**: ✅ all criteria met.
+
+
 
 ## 8. Hand-off — 下一会话开工 prompt 建议
 
