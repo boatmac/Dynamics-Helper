@@ -28,6 +28,7 @@ import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useTranslation, LanguageCode } from '../utils/i18n';
 import MarkdownPreview from './MarkdownPreview';
+import { trackEvent } from '../utils/telemetry';
 
 // Helper
 function cn(...inputs: (string | undefined | null | false)[]) {
@@ -1327,6 +1328,33 @@ const Options: React.FC = () => {
                                             <label htmlFor="enableStatusBubble" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
                                                 {t('statusBubble')}
                                             </label>
+                                        </div>
+
+                                        <div className="flex items-start gap-2 mt-3">
+                                            <input
+                                                type="checkbox"
+                                                id="betaChannelEnabled"
+                                                checked={prefs.betaChannelEnabled === true}
+                                                onChange={(e) => {
+                                                    const enabled = e.target.checked;
+                                                    setPrefs(prev => ({ ...prev, betaChannelEnabled: enabled }));
+                                                    try {
+                                                        trackEvent('Beta Channel Toggled', { enabled });
+                                                    } catch { /* telemetry never blocks UX */ }
+                                                }}
+                                                className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 mt-0.5"
+                                            />
+                                            <div className="flex flex-col">
+                                                <label
+                                                    htmlFor="betaChannelEnabled"
+                                                    className="text-xs font-semibold text-slate-700 select-none cursor-pointer"
+                                                >
+                                                    {t('betaChannelLabel')}
+                                                </label>
+                                                <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                                                    {t('betaChannelHint')}
+                                                </p>
+                                            </div>
                                         </div>
 
                                         {/* Log Level */}

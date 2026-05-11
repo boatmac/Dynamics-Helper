@@ -24,6 +24,11 @@ export const translations: TranslationDictionary = {
     offsetBottom: { en: "Bottom Offset (px)", zh: "底部边距 (px)" },
     offsetRight: { en: "Right Offset (px)", zh: "右侧边距 (px)" },
     statusBubble: { en: "Enable Status Bubble", zh: "启用状态气泡" },
+    betaChannelLabel: { en: "Receive beta updates", zh: "接收 Beta 更新" },
+    betaChannelHint: {
+        en: "Beta versions include new features and fixes before they ship to stable. They may also be less tested. Toggling off does not downgrade you from a beta you are already on.",
+        zh: "Beta 版本会先于 Stable 版本提供新功能和修复，但测试可能不充分。关闭此项不会将你从已安装的 Beta 版本降级。",
+    },
     language: { en: "Language", zh: "语言" },
     auto: { en: "Auto (System)", zh: "自动 (跟随系统)" },
     
