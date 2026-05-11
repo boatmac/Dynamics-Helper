@@ -88,17 +88,45 @@ def build_extension():
 
 def build_host():
     print("\n--- Building Native Host ---")
+    # CRITICAL: must use the venv's pyinstaller, NOT the system one. The venv
+    # pins github-copilot-sdk to the supported version (host/requirements.txt);
+    # the system Python may have a different SDK version installed and will
+    # silently bundle the wrong one, causing ImportError at runtime in user
+    # installations. See docs/sdk-upgrade-2026-05-0.3.0.md § 8.1.
+    venv_pyinstaller = os.path.join(
+        ROOT_DIR, "host", "venv", "Scripts", "pyinstaller.exe"
+    )
+    if not os.path.exists(venv_pyinstaller):
+        print(
+            f"ERROR: venv pyinstaller not found at {venv_pyinstaller}\n"
+            "Run `& host/venv/Scripts/python.exe -m pip install pyinstaller` "
+            "to provision it. Using the system-PATH pyinstaller is unsafe "
+            "because it binds to a Python interpreter with possibly the wrong "
+            "SDK version (see docs/sdk-upgrade-2026-05-0.3.0.md § 8.1)."
+        )
+        sys.exit(1)
+
     try:
-        # Check for pyinstaller
+        # Sanity-check by asking for --version. argv-list form (no shell=True)
+        # avoids quoting issues with the path containing spaces.
         subprocess.run(
-            "pyinstaller --version", check=True, shell=True, stdout=subprocess.DEVNULL
+            [venv_pyinstaller, "--version"],
+            check=True,
+            stdout=subprocess.DEVNULL,
         )
 
         # Build command: pyinstaller --onedir (avoids WDAC temp extraction blocks)
         # Output goes to dist/dh_native_host/ folder with exe + DLLs alongside
-        cmd = "pyinstaller --onedir --clean -y --name dh_native_host host/dh_native_host.py"
-        print(f"Executing: {cmd}")
-        subprocess.run(cmd, cwd=ROOT_DIR, check=True, shell=True)
+        cmd = [
+            venv_pyinstaller,
+            "--onedir",
+            "--clean",
+            "-y",
+            "--name", "dh_native_host",
+            os.path.join("host", "dh_native_host.py"),
+        ]
+        print(f"Executing: {' '.join(cmd)}")
+        subprocess.run(cmd, cwd=ROOT_DIR, check=True)
         print("Host build successful.")
     except subprocess.CalledProcessError as e:
         print(f"Host build failed: {e}")
