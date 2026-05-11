@@ -850,3 +850,7 @@ Expected: only the files listed in the "File Structure" table at the top of this
 - The pre-existing host smoke-test pattern (`Copy-Item dist/dh_native_host` to `%TEMP%`, wait 12s, tail `native_host.log`) is the canonical way to confirm a host change boots. Don't shortcut it.
 - The spec is final — if you find a spec ambiguity while executing, stop and surface it to the user; don't reinterpret on the fly.
 - Each task is one commit. Don't squash, don't re-order. The `is_prerelease` payload addition in Task 3 step 2 is a deliberate extra: it costs one line, opens a future "you are on beta" badge feature (spec § 7) without scope creep today.
+
+## Follow-up nits (not blocking this plan)
+
+- Code reviewer for Task 2 noted that `_compare_prerelease` is only tested transitively via `_version_gt`. The numeric-vs-alphanumeric § 11.4.3 branch is therefore not explicitly covered (Task 1 tests cover numeric-vs-numeric and the length tiebreak through `_version_gt` but not a mixed pair like `("1",)` vs `("alpha",)`). If we ever add `rc` or `alpha` to the release pipeline, add one direct unit test for `_compare_prerelease`. Cheap, not urgent.
