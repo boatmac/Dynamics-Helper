@@ -182,6 +182,17 @@ The extension checks for updates on startup. When a new version is available:
 
 Re-run the Quick Install command or download the latest release from the Releases page.
 
+### Beta Channel
+
+By default, Dynamics Helper only receives **stable** releases. To opt in to pre-release (Beta) versions ahead of stable:
+
+1. Open the extension **Options** page → **General** tab.
+2. Tick **"Receive beta updates"**.
+
+Beta versions include new features and fixes before they ship to stable, but may also be less tested. The setting is persisted to the host's `config.json` and takes effect on the next update check.
+
+Toggling this option **off** does not roll you back from a Beta you are already on — you will simply return to the stable channel for future updates. The next stable release that is newer than your current Beta will pick you up automatically.
+
 ---
 
 ## Security & Privacy

@@ -111,6 +111,7 @@ This file defines the operational rules, development workflows, and coding stand
   * Use a `useRef` flag (e.g., `isUserEdited`) that is set `true` in `onChange` handlers and checked before any `setScrapedData` call.
   * The flag should reset only on: (a) identity change (new case number/ticket), (b) explicit user-triggered refresh.
   * See `FAB.tsx` for the canonical implementation of this pattern.
+  * **Beta channel preference** (`prefs.betaChannelEnabled`): plain user preference, no `isUserEdited` guard needed — there is no background refresh path that overwrites it. Mirrored to host `config.json` as `extension_preferences.beta_channel_enabled`.
 * **Styling:**
   * **Hybrid Approach:** The project uses a mix of inline styles (`style={{...}}`) and utility classes (`clsx`, `tailwind-merge`).
   * **Preference:** New UI elements should prefer Tailwind classes via `className` where possible, but consistency with existing inline styles is acceptable for complex dynamic positioning.
