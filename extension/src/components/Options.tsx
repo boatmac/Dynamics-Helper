@@ -1348,6 +1348,9 @@ const Options: React.FC = () => {
                                                 {t('betaChannelLabel')}
                                             </label>
                                         </div>
+                                        <p className="text-[10px] text-slate-500 mt-1 ml-6 leading-snug">
+                                            {t('betaChannelHint')}
+                                        </p>
 
                                         {/* Log Level */}
                                         <div className="mt-4">
