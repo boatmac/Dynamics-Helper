@@ -1,6 +1,6 @@
 {
   "name": "extension",
-  "version": "2.0.69",
+  "version": "2.0.70-beta",
   "description": "",
   "main": "index.js",
   "scripts": {
