@@ -123,7 +123,6 @@ import time
 import re
 import traceback
 import urllib.request
-import uuid
 
 VERSION = "2.0.69"
 
@@ -277,7 +276,9 @@ class NativeHost:
         self.current_request_id = None  # Track current request for progress updates
         self.root_path = None  # Store root path from config
         self.last_update_check = 0  # Track last update check time
-        self.current_session_id = None  # Track current Copilot session ID for /resume
+        self.current_session_id = (
+            None  # Track current Copilot session name (co-<case>) for --resume
+        )
         self.current_case_id = None  # Track which case the current session belongs to
 
         # Log startup location
@@ -894,21 +895,29 @@ class NativeHost:
         # Always return the first 16 digits (parent case ID)
         return case_number[:16]
 
-    # Namespace UUID for deterministic session ID generation (RFC 4122 v5).
-    # This is a fixed arbitrary UUID that ensures the same case ID always
-    # produces the same session UUID across runs.
-    _SESSION_UUID_NAMESPACE = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
-
     @classmethod
     def _case_to_session_id(cls, case_id: str) -> str:
-        """Converts a 16-digit case ID to a deterministic UUID v5 string.
+        """Returns the session-name string used for both Copilot SDK
+        create_session(session_id=...) and shell-CLI `copilot --resume <name>`.
 
-        The Copilot CLI stores the session_id in workspace.yaml as 'id' and
-        validates it as a UUID. Using 'dh-{caseId}' directly fails validation.
-        UUID v5 is deterministic: the same case_id always produces the same UUID,
-        so resume_session() can find the session across restarts.
+        Format: `co-<case-num>`. Matches the MyCasesKit B81 RFC § D1
+        cross-CLI session-naming convention so that a DH-launched session
+        (this method's value passed to SDK) and a shell-CLI-launched session
+        (`copilot -n co-<case>`) are the same logical session, resumable by
+        the same `copilot --resume co-<case>` command.
+
+        History: prior versions used `str(uuid.uuid5(NAMESPACE, f"dh-{case_id}"))`
+        because the Copilot CLI then validated session_id as a UUID and
+        `copilot --resume <custom-name>` corrupted state. Both constraints
+        were verified lifted on 2026-05-11:
+          - CLI side: MyCasesKit B81.0c (W11 dry-run, custom name resumes clean)
+          - SDK side: B82.0 probe (.scratch/b82-0-sdk-probe.py — SDK->SDK
+            and SDK->CLI handoff both round-trip; CANARY token preserved
+            across the SDK/CLI process boundary)
+        See sibling repo MyCasesKit docs/b81-session-naming-rfc.md § D1 and
+        docs/postmortem-followup.md B82 row.
         """
-        return str(uuid.uuid5(cls._SESSION_UUID_NAMESPACE, f"dh-{case_id}"))
+        return f"co-{case_id}"
 
     async def _refresh_session(
         self, session_id: str | None = None, case_id: str | None = None
@@ -916,9 +925,10 @@ class NativeHost:
         """Re-creates or resumes a Copilot session.
 
         Args:
-            session_id: If provided (a deterministic UUID derived from the case ID),
-                        try to resume first. If resume fails, create a new session
-                        with this UUID for future /resume support.
+            session_id: If provided (the session-name string `co-<case>` from
+                        _case_to_session_id), try to resume first. If resume
+                        fails, create a new session with this name for future
+                        shell-CLI `copilot --resume <name>` support.
                         If None, create a generic session (no resume capability).
             case_id:    The 16-digit case ID this session belongs to (for tracking).
         """
@@ -946,16 +956,17 @@ class NativeHost:
             logging.error(f"Failed to build session config: {e}")
             return False
 
-        # Inject session ID into system message so the AI can reference it
-        # (e.g. when creating context.md frontmatter).
+        # Inject session name into system message so the AI can reference it
+        # (e.g. when creating context.md frontmatter — MyCasesKit B81 RFC § D1
+        # field is `session_name:`, value form `co-<case-num>`).
         if session_id and "system_message" in full_config:
             sys_msg = full_config["system_message"]
             if isinstance(sys_msg, dict):
                 prev = sys_msg.get("content", "")
                 sys_msg["content"] = (
-                    prev + f"\n\n## Session Info\n\nSession ID: {session_id}"
+                    prev + f"\n\n## Session Info\n\nSession Name: {session_id}"
                 )
-            logging.debug(f"Injected session ID into system message: {session_id}")
+            logging.debug(f"Injected session name into system message: {session_id}")
 
         # Extract only SDK-compatible keyword arguments from the config dict.
         # This prevents passing unknown keys (root_path, extension_preferences, etc.)
@@ -1004,7 +1015,9 @@ class NativeHost:
                 logging.debug(f"Resume traceback: {traceback.format_exc()}")
 
         try:
-            # Inject deterministic UUID session ID for /resume support
+            # Inject the session-name (co-<case>) so the server uses it as
+            # the session_id; this is what `copilot --resume <name>` later
+            # looks up (B82 — see _case_to_session_id docstring).
             if session_id:
                 sdk_kwargs["session_id"] = session_id
 
@@ -1030,7 +1043,7 @@ class NativeHost:
                 self.current_case_id = case_id
             logging.info(
                 f"Copilot Session created successfully. "
-                f"Session ID: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
+                    f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
             )
             return True
         except OSError as e:
@@ -1059,7 +1072,7 @@ class NativeHost:
                     self.current_case_id = case_id
                 logging.info(
                     f"Copilot Session created successfully (after retry). "
-                    f"Session ID: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
+                f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
                 )
                 return True
             except Exception as retry_err:
@@ -1274,13 +1287,14 @@ class NativeHost:
         case_number = payload.get("caseNumber", "Unspecified")
         payload_root_path = payload.get("rootPath")
 
-        # Derive a case-specific session ID (UUID) for /resume support
+        # Derive the case-specific session name (`co-<case>`) for cross-CLI
+        # --resume (B82 / MyCasesKit B81 RFC § D1)
         valid_case_id = self._extract_case_id(case_number)
         session_id = self._case_to_session_id(valid_case_id) if valid_case_id else None
 
         # Determine if we need to refresh the session:
         # 1. Root path changed (workspace MCP/Skills config may differ)
-        # 2. Session ID changed (different case)
+        # 2. Session name changed (different case)
         needs_refresh = False
 
         if payload_root_path:
@@ -1534,11 +1548,11 @@ class NativeHost:
                 f.write(f"**Product:** {product}\n")
                 f.write(f"**Case Number:** {case_number}\n")
                 if self.current_session_id:
-                    f.write(f"**Session ID:** {self.current_session_id}\n")
+                    f.write(f"**Session Name:** {self.current_session_id}\n")
                 f.write(f"\n")
                 if self.current_session_id:
                     f.write(
-                        f"> Resume in Copilot CLI: `copilot /resume {self.current_session_id}`\n\n"
+                        f"> Resume in Copilot CLI: `copilot --resume {self.current_session_id}`\n\n"
                     )
                 f.write(f"## Original Error\n{scrubbed_text}\n\n")
                 if scrubbed_context:
@@ -1550,7 +1564,7 @@ class NativeHost:
                 "data": {
                     "markdown": full_response,
                     "saved_to": output_file,
-                    "session_id": self.current_session_id,
+                    "session_name": self.current_session_id,
                 },
             }
 

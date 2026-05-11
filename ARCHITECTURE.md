@@ -93,7 +93,7 @@ The host maintains Copilot sessions so users can continue analysis in the Copilo
 * **Case Tracking:** `self.current_case_id` holds the 16-digit case ID for smart-refresh comparison. This is separate from the session ID.
 * **Validation:** `_extract_case_id()` accepts 16-digit (main case) or 19-digit (task ID, maps to parent 16 digits).
 * **Invalid case numbers** result in a generic session (no persistence, no resume).
-* **System Message Injection:** Before calling `create_session()` or `resume_session()`, the session ID is appended to the `system_message` content as a `## Session Info` section. This makes the session ID available to the AI for use in generated files (e.g., `context.md` frontmatter).
+* **System Message Injection:** Before calling `create_session()` or `resume_session()`, the session name (`co-<case>`, per B82 / MyCasesKit B81 RFC § D1) is appended to the `system_message` content as a `## Session Info` section (labelled `Session Name:`). This makes the name available to the AI for use in generated files (e.g., `context.md` frontmatter `session_name:` field, resumable from any shell via `copilot --resume co-<case>`).
 
 ### Session Lifecycle
 

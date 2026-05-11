@@ -67,10 +67,10 @@ Understanding how a user request becomes an AI response.
     * **Note:** GUID redaction is currently disabled to preserve technical identifiers needed for troubleshooting (e.g., Subscription IDs, Resource IDs).
 4. **Session Management:**
     * The backend validates the case number via `_extract_case_id()` (accepts 16 or 19 digits).
-    * A deterministic UUID v5 is derived from the validated case ID via `_case_to_session_id()` for `resume_session()` attempts.
+    * A stable session-name `co-<case>` is derived via `_case_to_session_id()` (B82 / MyCasesKit B81 RFC § D1) — the same string is the SDK `session_id` argument AND the shell-CLI `copilot --resume <name>` handle. History: prior UUID v5 derivation was retired 2026-05-11 after CLI `--resume <name>` corruption was verified fixed.
     * Smart refresh: the session is only recreated when `current_case_id` or workspace root path changes.
-    * On session creation, `resume_session(uuid)` is tried first (restores conversation history, tool state). Falls back to `create_session(session_id=uuid)`.
-    * The session ID is injected into the `system_message` content as a `## Session Info` section, making it available to the AI during the conversation (e.g., for writing `context.md` frontmatter).
+    * On session creation, `resume_session(name)` is tried first (restores conversation history, tool state). Falls back to `create_session(session_id=name)`.
+    * The session name is injected into the `system_message` content as a `## Session Info` section (labelled `Session Name: co-<case>`), making it available to the AI during the conversation (e.g., for writing `context.md` frontmatter `session_name:` field).
 5. **SDK Execution (`send_and_wait`):**
     * The backend sends the prompt as a plain string (SDK 0.2.0+) with a **600s timeout**.
 
@@ -83,9 +83,9 @@ The host maintains persistent sessions so users can continue analysis in the Cop
 * **Case Tracking:** `self.current_case_id` tracks which case the current session belongs to, used for smart-refresh comparison (not the session ID itself).
 * **SDK Mechanism:** `client.resume_session(session_id)` restores state from `~/.copilot/session-state/{session_id}/`.
 * **Graceful Fallback:** If the SDK version doesn't support `resume_session()`, an `AttributeError` is caught and a new session is created instead.
-* **Report Integration:** `dh_case_report.md` includes the server-assigned session ID and a resume command.
-* **Response Payload:** The server-assigned `session_id` is returned to the extension in the analysis response for frontend visibility.
-* **System Message Injection:** The session ID is appended to the `system_message` content as a `## Session Info` section before session creation. This ensures the AI can reference it (e.g., for `context.md` frontmatter) without relying on a fallback value.
+* **Report Integration:** `dh_case_report.md` includes the session name (`co-<case>`) and a `copilot --resume <name>` command.
+* **Response Payload:** The session name is returned to the extension as `session_name` in the analysis response for frontend visibility (renamed from `session_id` in B82 to match the B81 cross-CLI naming RFC).
+* **System Message Injection:** The session name is appended to the `system_message` content as a `## Session Info` section (labelled `Session Name: co-<case>`) before session creation. This ensures the AI can reference it (e.g., for `context.md` frontmatter `session_name:` field) without relying on a fallback value.
 
 ### 3. Instruction Hierarchy (The Context)
 

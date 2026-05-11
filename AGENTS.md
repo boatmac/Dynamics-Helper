@@ -184,12 +184,12 @@ This file defines the operational rules, development workflows, and coding stand
 
 ### 6. Session Persistence
 
-* **Session IDs:** The host derives a deterministic UUID v5 from each 16-digit case ID via `_case_to_session_id()`. This UUID is used as the `session_id` for both `create_session()` and `resume_session()`. The Copilot CLI requires session IDs to be valid UUIDs.
-* **Tracking:** `self.current_session_id` holds the session UUID (used in reports and `/resume`). `self.current_case_id` tracks which case the session belongs to (used for smart-refresh comparison).
-* **Resume:** The host tries `resume_session(uuid)` first. If that fails, falls back to `create_session(session_id=uuid)`. Handles `AttributeError` gracefully if the SDK version doesn't support resume.
+* **Session Names:** The host derives a stable session-name string from each 16-digit case ID via `_case_to_session_id()`, returning `co-<case>`. This string is used as the `session_id` for both SDK `create_session()` and `resume_session()`, AND as the shell-CLI handle for `copilot --resume co-<case>`. Contract: MyCasesKit B81 RFC § D1 (`^(cc|co)-<case-num>$`). B82 (2026-05-11) replaced the prior UUID v5 derivation after the CLI's `--resume <custom-name>` corruption bug was verified fixed (see `host/test_case_id.py::TestCaseToSessionId` regression guard).
+* **Tracking:** `self.current_session_id` (Python field name retained for diff economy) holds the session-name string `co-<case>` used in reports and `--resume`. `self.current_case_id` tracks which case the session belongs to (used for smart-refresh comparison).
+* **Resume:** The host tries `resume_session(name)` first (where `name` is `co-<case>`). If that fails, falls back to `create_session(session_id=name)`. Handles `AttributeError` gracefully if the SDK version doesn't support resume.
 * **Smart Refresh:** Sessions are only recreated when `current_case_id` or workspace root path actually changes — not on every analyze request.
-* **Report:** `dh_case_report.md` includes the server-assigned session ID and a resume command.
-* **System Message Injection:** The session ID is appended to the `system_message` content as a `## Session Info` section before session creation, so the AI can reference it during the conversation (e.g., for `context.md` frontmatter).
+* **Report:** `dh_case_report.md` includes the session name and a `copilot --resume <name>` command.
+* **System Message Injection:** The session name is appended to the `system_message` content as a `## Session Info` section before session creation (labelled `Session Name: co-<case>`), so the AI can reference it during the conversation (e.g., for `context.md` frontmatter — MyCasesKit `session_name:` field per B81 RFC § D1).
 
 ### 7. Self-Update Mechanism
 
