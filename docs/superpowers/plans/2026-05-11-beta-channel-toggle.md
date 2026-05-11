@@ -605,19 +605,29 @@ the inverse). UI checkbox follows in the next commit."
 
 - [ ] **Step 1: Add translation keys**
 
-Open `extension/src/utils/translations.ts`. Find any existing toggle's translation entries (e.g. search for `statusBubble`). Add two new keys to BOTH the `en` and `zh` tables. Example, adapt to the actual table shape you find:
+Open `extension/src/utils/translations.ts`. The file uses a `{[key]: {en, zh}}` shape — each translation is a single entry with both languages as siblings. Find the existing `statusBubble` entry as the visual template:
 
 ```typescript
-// in en table
-betaChannelLabel: "Receive beta updates",
-betaChannelHint: "Beta versions include new features and fixes before they ship to stable. They may also be less tested. Toggling off does not downgrade you from a beta you are already on.",
-
-// in zh table
-betaChannelLabel: "接收 Beta 更新",
-betaChannelHint: "Beta 版本会先于 Stable 版本提供新功能和修复，但测试可能不充分。关闭此项不会将你从已安装的 Beta 版本降级。",
+statusBubble: { en: "Enable Status Bubble", zh: "启用状态气泡" },
 ```
 
-If the translations file uses a different layout (e.g. one nested object per key with `en`/`zh` siblings), follow that layout instead. The two keys are the contract; the surrounding shape is whatever the file currently uses.
+Add two new entries somewhere in the same logical block (the "Options Page" section is fine, near `statusBubble`):
+
+```typescript
+betaChannelLabel: { en: "Receive beta updates", zh: "接收 Beta 更新" },
+betaChannelHint: {
+    en: "Beta versions include new features and fixes before they ship to stable. They may also be less tested. Toggling off does not downgrade you from a beta you are already on.",
+    zh: "Beta 版本会先于 Stable 版本提供新功能和修复，但测试可能不充分。关闭此项不会将你从已安装的 Beta 版本降级。",
+},
+```
+
+The file is UTF-8 (no BOM). When editing on Windows, ensure your editor preserves UTF-8 — do NOT save as UTF-16 or Windows-1252. After saving, verify with:
+
+```powershell
+$line = (Get-Content extension/src/utils/translations.ts -Encoding UTF8 | Select-String "betaChannelLabel").Line
+"$line"
+([regex]::Matches($line, "[\u4e00-\u9fff]")).Count  # expect ≥ 4 Chinese chars (接收 Beta 更新)
+```
 
 - [ ] **Step 2: Find the existing `enableStatusBubble` checkbox row in Options.tsx**
 
