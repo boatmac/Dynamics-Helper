@@ -270,6 +270,84 @@ except ImportError as e:
     sys.exit(1)
 
 
+# Matches "2.0.70" or "v2.0.70" optionally followed by "-<prerelease>".
+# Prerelease is dot-separated identifiers per semver.org § 9.
+_VERSION_RE = re.compile(
+    r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.\-]+))?$"
+)
+
+
+def _parse_version(tag: str) -> tuple[tuple[int, int, int], tuple[str, ...]] | None:
+    """Parse a semver-ish tag like "2.0.70", "v2.0.70", or "2.0.70-beta.2".
+
+    Returns ((major, minor, patch), prerelease_parts) or None when the
+    tag is not recognisable as a semver. See spec § 3.4.
+    """
+    if not isinstance(tag, str):
+        return None
+    m = _VERSION_RE.match(tag.strip())
+    if not m:
+        return None
+    major, minor, patch, pre = m.groups()
+    triple = (int(major), int(minor), int(patch))
+    parts = tuple(pre.split(".")) if pre else ()
+    return triple, parts
+
+
+def _compare_prerelease(a: tuple[str, ...], b: tuple[str, ...]) -> int:
+    """Compare two prerelease tuples per semver.org § 11.4.
+
+    Returns negative, zero, or positive (like cmp): a < b, ==, or a > b.
+    Empty tuple means "no prerelease" (i.e. a stable release) and per
+    semver § 11.3 it ranks HIGHER than any non-empty prerelease.
+    """
+    if a == b:
+        return 0
+    # Stable beats prerelease at the same numeric triple.
+    if not a:
+        return 1
+    if not b:
+        return -1
+    # Both have identifiers; compare element-wise.
+    for ai, bi in zip(a, b):
+        a_is_num = ai.isdigit()
+        b_is_num = bi.isdigit()
+        if a_is_num and b_is_num:
+            ai_n, bi_n = int(ai), int(bi)
+            if ai_n != bi_n:
+                return -1 if ai_n < bi_n else 1
+        elif a_is_num and not b_is_num:
+            # numeric < alphanumeric per § 11.4.3
+            return -1
+        elif not a_is_num and b_is_num:
+            return 1
+        else:
+            if ai != bi:
+                return -1 if ai < bi else 1
+    # All shared identifiers are equal; the longer one wins (§ 11.4.4).
+    if len(a) == len(b):
+        return 0
+    return -1 if len(a) < len(b) else 1
+
+
+def _version_gt(remote_tag: str, local_tag: str) -> bool:
+    """True iff remote is strictly semver-greater than local.
+
+    Returns False (defensively) if either tag is unparseable, so an
+    unrecognised remote release never triggers an update prompt.
+    See spec § 3.4.
+    """
+    remote = _parse_version(remote_tag)
+    local = _parse_version(local_tag)
+    if remote is None or local is None:
+        return False
+    r_triple, r_pre = remote
+    l_triple, l_pre = local
+    if r_triple != l_triple:
+        return r_triple > l_triple
+    return _compare_prerelease(r_pre, l_pre) > 0
+
+
 class NativeHost:
     def __init__(self):
         self.input_queue = asyncio.Queue()
