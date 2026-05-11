@@ -61,6 +61,7 @@ interface Preferences {
     useWorkspaceOnly?: boolean;
     autoAnalyzeMode?: 'disabled' | 'critical' | 'always' | 'new_cases';
     enableStatusBubble?: boolean;
+    betaChannelEnabled?: boolean;
     logLevel?: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
     language?: LanguageCode;
     team?: string;        // Selected team catalog ID (e.g. "dnai")
@@ -80,6 +81,7 @@ const DEFAULT_PREFS: Preferences = {
     useWorkspaceOnly: true,
     autoAnalyzeMode: 'disabled',
     enableStatusBubble: true,
+    betaChannelEnabled: false,
     logLevel: 'INFO',
     language: 'auto'
 };
@@ -623,6 +625,7 @@ const Options: React.FC = () => {
                             if (extPrefs.auto_analyze_mode) newPrefs.autoAnalyzeMode = extPrefs.auto_analyze_mode;
                             if (extPrefs.user_prompt !== undefined) newPrefs.userPrompt = extPrefs.user_prompt;
                             if (extPrefs.enable_status_bubble !== undefined) newPrefs.enableStatusBubble = extPrefs.enable_status_bubble;
+                            if (extPrefs.beta_channel_enabled !== undefined) newPrefs.betaChannelEnabled = extPrefs.beta_channel_enabled;
                             if (extPrefs.useWorkspaceOnly !== undefined) newPrefs.useWorkspaceOnly = extPrefs.useWorkspaceOnly;
                             if (extPrefs.log_level) newPrefs.logLevel = extPrefs.log_level;
                             
@@ -708,6 +711,7 @@ const Options: React.FC = () => {
                                     auto_analyze_mode: prefs.autoAnalyzeMode,
                                     user_prompt: prefs.userPrompt, // Keep in preferences for now (backend handles cleanup/sanitization)
                                     enable_status_bubble: prefs.enableStatusBubble,
+                                    beta_channel_enabled: prefs.betaChannelEnabled,
                                     useWorkspaceOnly: prefs.useWorkspaceOnly,
                                     log_level: prefs.logLevel,
                                     language: prefs.language,
