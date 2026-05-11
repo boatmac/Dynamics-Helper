@@ -193,16 +193,24 @@ already exercised every time the user clicks "Check for update").
 
 ## 6. Rollout
 
-1. Land this feature in a normal stable release (`2.0.71` or whatever
-   is next), with the toggle OFF by default.
-2. Publish a single `2.0.72-beta` to test that opt-in users actually
-   receive it. Until at least one user has the `2.0.71` running with
-   the toggle ON, the beta channel cannot be validated end-to-end.
-3. After validation, beta releases become a normal part of the release
-   workflow.
+The feature can be shipped in either a stable or a beta release; both paths self-validate:
 
-This sequencing intentionally ships the receiver before the first real
-sender, otherwise we'd have a chicken-and-egg problem.
+- **Ship in stable (e.g. `2.0.70`)**: every user receives the toggle. Beta channel
+  is dormant until someone opts in. First beta release after that proves the
+  channel works end-to-end.
+- **Ship in beta (e.g. `2.0.70-beta`)**: only users who have *already* opted in to
+  beta updates receive it. The developer (who installs locally) is one such user
+  and can validate the channel immediately. Users on stable are unaffected; they
+  pick up the toggle automatically when the next stable release ships (which will
+  include the same code).
+
+There is no chicken-and-egg problem because at least one beta-channel-aware
+installation already exists at the moment we publish (the developer's local
+install), so any beta release we publish is verifiable end-to-end.
+
+**Recommended sequencing (chosen for lowest risk to existing users):** ship in
+stable first if there are concurrent breaking changes (e.g. SDK 0.3.0 upgrade);
+otherwise either ordering works.
 
 ## 7. Open questions / deferred
 
