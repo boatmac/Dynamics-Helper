@@ -408,15 +408,15 @@ New body (replace lines 406-475 — line numbers approximate; the existing funct
                     best_release = release
 
             if best_release is None:
-                logging.info("No newer version available.")
+                logging.info(
+                    f"No update available (Local: {VERSION}, "
+                    f"checked {len(candidates)} release(s))"
+                )
                 if force:
                     self.send_message(
                         {
-                            "action": "update_status",
-                            "payload": {
-                                "status": "up_to_date",
-                                "version": VERSION,
-                            },
+                            "action": "update_not_available",
+                            "payload": {"version": VERSION},
                         }
                     )
                 return
@@ -698,7 +698,7 @@ With the rebuilt extension loaded:
    ```powershell
    Get-Content "$env:LOCALAPPDATA\DynamicsHelper\native_host.log" -Tail 20 -Wait
    ```
-   Expect to see `Checking for updates (beta_channel_enabled=False)` followed by `No newer version available.` (assuming no newer stable shipped while you were working).
+   Expect to see `Checking for updates (beta_channel_enabled=False)` followed by `No update available (Local: ..., checked 1 release(s))` (assuming no newer stable shipped while you were working).
 
 - [ ] **Step 2: Confirm beta channel behaviour (toggle on)**
 
@@ -706,7 +706,7 @@ With the rebuilt extension loaded:
 2. Confirm the host log shows `Updated config.json` and that `config.json` at `%LOCALAPPDATA%\DynamicsHelper\config.json` now contains `"beta_channel_enabled": true` inside `extension_preferences`.
 3. Trigger an update check.
 4. Expect `Checking for updates (beta_channel_enabled=True)` in the log. The HTTP call now hits `/releases?per_page=10`.
-5. If there is no live beta release on the repo: `No newer version available.` is the correct outcome. The branch logic itself is exercised; the discovery of a real beta will be exercised once `2.0.72-beta` ships (spec § 6).
+5. If there is no live beta release on the repo: `No update available ...` is the correct outcome. The branch logic itself is exercised; the discovery of a real beta will be exercised once `2.0.72-beta` ships (spec § 6).
 
 - [ ] **Step 3: Confirm toggle persists across host restart**
 
