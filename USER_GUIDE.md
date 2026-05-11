@@ -27,6 +27,14 @@ irm https://aka.ms/mcdyhelper | iex
 
 This command downloads the latest release and runs the installer automatically.
 
+To install the latest **Beta** instead of stable, run:
+
+```powershell
+& ([scriptblock]::Create((irm https://aka.ms/mcdyhelper))) -Beta
+```
+
+This also enables the Beta channel in your host config, so future automatic update checks continue to consider Beta releases. You can disable Beta updates at any time from **Options → General → Receive beta updates** (remember to click Save Changes).
+
 ### Manual Install
 
 1. **Download the Release:**

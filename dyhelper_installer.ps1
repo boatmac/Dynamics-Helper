@@ -13,12 +13,20 @@
 
 .PARAMETER ZipUrl
     Optional: Provide a direct URL to override the GitHub lookup.
+
+.PARAMETER Beta
+    When set, the installer considers PRE-RELEASE (Beta) versions in
+    addition to stable releases, and picks whichever has the highest
+    version tag. Default behaviour (switch absent) is stable-only.
+    Mirrors the in-app "Receive beta updates" toggle so first-install
+    users on the beta channel can opt in at install time.
 #>
 
 param(
     [string]$RepoOwner = "boatmac",
     [string]$RepoName = "Dynamics-Helper",
-    [string]$ZipUrl = ""
+    [string]$ZipUrl = "",
+    [switch]$Beta
 )
 
 $ErrorActionPreference = "Stop"
@@ -81,19 +89,41 @@ try {
         try {
             # TLS 1.2+ is required for GitHub API
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            
-            $ApiUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
-            $LatestRelease = Invoke-RestMethod -Uri $ApiUrl -ErrorAction Stop
-            
+
+            if ($Beta) {
+                # /releases returns ALL releases including prereleases, newest first.
+                # Take up to 10, pick the one with the highest tag that has a .zip asset.
+                # Mirrors host updater logic (host/dh_native_host.py:514-561).
+                $ApiUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases?per_page=10"
+                Write-Host "    Channel: BETA (prereleases included)" -ForegroundColor Cyan
+                $Releases = Invoke-RestMethod -Uri $ApiUrl -ErrorAction Stop
+                # GitHub returns the list in descending creation order, so the first
+                # release with a .zip asset is also the most-recently-published
+                # candidate. This is the same "newest published wins" semantic the
+                # host updater uses; for the installer we don't need full semver
+                # ordering because we always install whatever is latest.
+                $LatestRelease = $Releases | Where-Object {
+                    $_.assets | Where-Object { $_.name -like "*.zip" }
+                } | Select-Object -First 1
+                if (-not $LatestRelease) {
+                    throw "No release with a .zip asset found in the most recent 10 releases."
+                }
+            } else {
+                $ApiUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
+                Write-Host "    Channel: STABLE" -ForegroundColor Cyan
+                $LatestRelease = Invoke-RestMethod -Uri $ApiUrl -ErrorAction Stop
+            }
+
             # Find the first asset that ends with .zip
             $Asset = $LatestRelease.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
-            
+
             if (-not $Asset) {
                 throw "No .zip asset found in the latest GitHub release ($($LatestRelease.tag_name))."
             }
-            
+
             $ZipUrl = $Asset.browser_download_url
-            Write-Host "    Found Latest Version: $($LatestRelease.tag_name)" -ForegroundColor Green
+            $VerLabel = if ($LatestRelease.prerelease) { "$($LatestRelease.tag_name) (prerelease)" } else { $LatestRelease.tag_name }
+            Write-Host "    Found Latest Version: $VerLabel" -ForegroundColor Green
         } catch {
             Write-Host ""
             Write-Host "Failed to check GitHub for updates." -ForegroundColor Red
@@ -149,11 +179,39 @@ try {
     if (-not $Installer) {
         throw "Invalid Release Package: Could not find 'installer_core.ps1' inside the downloaded ZIP."
     }
-    
+
+    # 4b. If -Beta was requested, pre-seed the bundled host/config.json with
+    # extension_preferences.beta_channel_enabled = $true so the user's
+    # FIRST update check after install also queries the beta channel.
+    # Skipped if the user already has a config.json at the install target
+    # (installer_core.ps1 preserves that one anyway), so existing users'
+    # toggle preferences are never overwritten. Skipped silently on any
+    # parse error - failing this step should never block installation.
+    if ($Beta) {
+        $TemplateConfig = Get-ChildItem -Path $TempDir -Filter "config.json" -Recurse |
+            Where-Object { $_.Directory.Name -eq "host" } |
+            Select-Object -First 1
+        if ($TemplateConfig) {
+            try {
+                $cfgRaw = Get-Content $TemplateConfig.FullName -Raw -Encoding UTF8
+                $cfg = $cfgRaw | ConvertFrom-Json
+                if (-not $cfg.PSObject.Properties.Match("extension_preferences").Count) {
+                    $cfg | Add-Member -NotePropertyName "extension_preferences" -NotePropertyValue ([pscustomobject]@{})
+                }
+                $cfg.extension_preferences | Add-Member -NotePropertyName "beta_channel_enabled" -NotePropertyValue $true -Force
+                $cfg | ConvertTo-Json -Depth 20 | Set-Content -Path $TemplateConfig.FullName -Encoding UTF8
+                Write-Host "[*] Pre-seeded beta_channel_enabled=true in bundled config.json" -ForegroundColor Cyan
+            } catch {
+                Write-Host "[!] Could not pre-seed beta channel preference: $_" -ForegroundColor Yellow
+                Write-Host "    You can enable it manually in Options -> General -> Receive beta updates." -ForegroundColor Yellow
+            }
+        }
+    }
+
     # 5. Execute Installer
     Write-Host "[*] Launching installer..." -ForegroundColor Green
     Write-Host "------------------------------------------"
-    
+
     # Execute the core installer in the current scope
     & $Installer.FullName
     
