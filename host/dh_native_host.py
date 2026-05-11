@@ -481,18 +481,54 @@ class NativeHost:
         except Exception as e:
             logging.error(f"Extension migration/repair failed: {e}")
 
-    async def check_for_updates(self, force=False):
-        """Checks for updates from GitHub Releases."""
+    def _read_beta_channel_pref(self) -> bool:
+        """Best-effort read of the beta-channel preference from config.json.
+
+        Returns False when config is missing, unreadable, or the key is
+        absent — i.e. the safe default (stable channel only).
+        """
         try:
-            # Rate limit: Check at most once per hour unless forced
+            cfg_path = os.path.join(USER_DATA_DIR, "config.json")
+            if not os.path.exists(cfg_path):
+                return False
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                data = json.loads(f.read())
+            ext = data.get("extension_preferences", {})
+            return bool(ext.get("beta_channel_enabled", False))
+        except Exception as e:
+            logging.warning(f"Could not read beta_channel_enabled: {e}")
+            return False
+
+    async def check_for_updates(self, force=False):
+        """Checks for updates from GitHub Releases.
+
+        When the user has opted in to beta updates (config.json
+        extension_preferences.beta_channel_enabled == True) we query
+        /releases?per_page=10 which includes prereleases, and pick the
+        highest semver-greater tag. Otherwise we use /releases/latest
+        which GitHub server-side filters to stable only.
+        """
+        try:
             now = time.time()
             if not force and (now - self.last_update_check) < 3600:
                 return
-
             self.last_update_check = now
-            url = "https://api.github.com/repos/boatmac/Dynamics-Helper/releases/latest"
 
-            # Run blocking I/O in a thread
+            beta_enabled = self._read_beta_channel_pref()
+            if beta_enabled:
+                url = (
+                    "https://api.github.com/repos/boatmac/Dynamics-Helper/"
+                    "releases?per_page=10"
+                )
+            else:
+                url = (
+                    "https://api.github.com/repos/boatmac/Dynamics-Helper/"
+                    "releases/latest"
+                )
+            logging.info(
+                f"Checking for updates (beta_channel_enabled={beta_enabled})"
+            )
+
             def fetch():
                 try:
                     req = urllib.request.Request(
@@ -509,7 +545,6 @@ class NativeHost:
                 return
 
             data = await self.loop.run_in_executor(None, fetch)
-
             if not data:
                 if force:
                     self.send_message(
@@ -520,66 +555,67 @@ class NativeHost:
                     )
                 return
 
-            if not self.loop:
-                return
+            # Normalise to a list of release dicts.
+            if isinstance(data, list):
+                candidates = data
+            else:
+                candidates = [data]
 
-            tag_name = data.get("tag_name", "").lstrip("v")
-            # Basic semver parsing (assumes x.y.z)
-            try:
-                remote_ver = [int(x) for x in tag_name.split(".")]
-                local_ver = [int(x) for x in VERSION.split(".")]
+            # Pick the highest semver-greater release.
+            best_release = None
+            best_tag = None
+            for release in candidates:
+                tag = release.get("tag_name", "")
+                if not tag:
+                    continue
+                if not _version_gt(tag, VERSION):
+                    continue
+                if best_tag is None or _version_gt(tag, best_tag):
+                    best_tag = tag
+                    best_release = release
 
-                if remote_ver > local_ver:
-                    logging.info(f"Update available: {tag_name}")
-
-                    # Find the .zip asset URL
-                    assets = data.get("assets", [])
-                    zip_url = None
-                    for asset in assets:
-                        if asset.get("name", "").endswith(".zip"):
-                            zip_url = asset.get("browser_download_url")
-                            break
-
-                    final_url = (
-                        zip_url
-                        if zip_url
-                        else data.get(
-                            "html_url",
-                            "https://github.com/boatmac/Dynamics-Helper/releases/latest",
-                        )
-                    )
-
-                    self.send_message(
-                        {
-                            "action": "update_available",
-                            "payload": {
-                                "version": tag_name,
-                                "url": final_url,
-                            },
-                        }
-                    )
-                elif force:
-                    logging.info(
-                        f"No update available (Remote: {tag_name}, Local: {VERSION})"
-                    )
+            if best_release is None:
+                logging.info(
+                    f"No update available (Local: {VERSION}, "
+                    f"checked {len(candidates)} release(s))"
+                )
+                if force:
                     self.send_message(
                         {
                             "action": "update_not_available",
                             "payload": {"version": VERSION},
                         }
                     )
-            except Exception as e:
-                logging.warning(f"Version parsing failed: {e}")
+                return
+
+            logging.info(f"Update available: {best_tag}")
+
+            # Find the .zip asset URL on the chosen release.
+            assets = best_release.get("assets", [])
+            zip_url = None
+            for asset in assets:
+                if asset.get("name", "").endswith(".zip"):
+                    zip_url = asset.get("browser_download_url")
+                    break
+
+            final_url = zip_url if zip_url else best_release.get(
+                "html_url",
+                "https://github.com/boatmac/Dynamics-Helper/releases",
+            )
+
+            self.send_message(
+                {
+                    "action": "update_available",
+                    "payload": {
+                        "version": best_tag,
+                        "url": final_url,
+                        "is_prerelease": bool(best_release.get("prerelease", False)),
+                    },
+                }
+            )
 
         except Exception as e:
-            logging.error(f"Failed to check for updates: {e}")
-            if force:
-                self.send_message(
-                    {
-                        "action": "update_error",
-                        "payload": {"error": str(e)},
-                    }
-                )
+            logging.error(f"check_for_updates failed: {e}\n{traceback.format_exc()}")
 
     def find_copilot_cli(self):
         """Finds the Copilot CLI executable path."""
