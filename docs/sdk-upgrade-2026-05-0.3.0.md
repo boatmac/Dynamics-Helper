@@ -463,7 +463,7 @@ Per AGENTS.md § 8 ("CRITICAL RULE: Do not automatically publish a release to Gi
 **Pre-release blockers that MUST be resolved first**:
 
 1. ~~**release_helper.py:99 fix**~~ ✅ **DONE in commit `7f438a5`** — `build_host()` now invokes the venv pyinstaller via absolute path. Without this fix, the system pyinstaller bundled the wrong SDK version and the produced exe crashed at import time with `ImportError: cannot import name 'PreToolUseHookOutput' from 'copilot.session'`. Verified end-to-end by invoking `release_helper.build_host()` directly + smoke-running the produced exe from `%TEMP%\` — full SDK import + Copilot Client start + create_session round-trip succeeds.
-2. **Pre-release doc checklist** (AGENTS.md § 8): walk AGENTS.md / DEVELOPER_GUIDE.md / USER_GUIDE.md / ARCHITECTURE.md / README.md and update any that mention `copilot.types`, the legacy MCP `type: "local"` vocabulary, or version pins.
+2. ~~**Pre-release doc checklist**~~ ✅ **DONE in commit ahead** — walked AGENTS.md, DEVELOPER_GUIDE.md, USER_GUIDE.md, ARCHITECTURE.md, README.md, rust-sdk-spec.md. Only DEVELOPER_GUIDE.md required updates (2 lines noting that the "SDK 0.2.0" keyword-only / send_and_wait shape still applies in 0.3.0). Other docs either described 0.3.0-correct content already (AGENTS.md was updated in phase 2), or are version-agnostic (user-facing CLI install, high-level feature blurbs, session-state filesystem paths).
 3. **Optional but recommended**: spin up a clean Win10/11 VM (no Visual Studio, no Python, factory Defender), run the to-be-released installer, confirm 0 quarantine + 0 false-positive. The dev-machine clean scan in § 8.4 is necessary but not sufficient evidence.
 
 ### 8.6 Phase 3 SOP extraction (deferred)

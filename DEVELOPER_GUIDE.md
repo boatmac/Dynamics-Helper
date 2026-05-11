@@ -72,7 +72,7 @@ Understanding how a user request becomes an AI response.
     * On session creation, `resume_session(name)` is tried first (restores conversation history, tool state). Falls back to `create_session(session_id=name)`.
     * The session name is injected into the `system_message` content as a `## Session Info` section (labelled `Session Name: co-<case>`), making it available to the AI during the conversation (e.g., for writing `context.md` frontmatter `session_name:` field).
 5. **SDK Execution (`send_and_wait`):**
-    * The backend sends the prompt as a plain string (SDK 0.2.0+) with a **600s timeout**.
+    * The backend sends the prompt as a plain string (SDK 0.2.0+, still applies in 0.3.0) with a **600s timeout**.
 
 ### 2. Session Persistence
 
@@ -89,7 +89,7 @@ The host maintains persistent sessions so users can continue analysis in the Cop
 
 ### 3. Instruction Hierarchy (The Context)
 
-The "System Prompt" is built from three layers, merged at runtime in `_get_session_config`. The resulting dict is unpacked into keyword-only arguments for `create_session()` (SDK 0.2.0 no longer accepts a single config dict). After the three layers are merged, the session ID is appended as a `## Session Info` section (runtime augmentation in `_refresh_session`):
+The "System Prompt" is built from three layers, merged at runtime in `_get_session_config`. The resulting dict is unpacked into keyword-only arguments for `create_session()` (SDK 0.2.0 no longer accepts a single config dict; 0.3.0 also requires keyword-only — see `docs/sdk-upgrade-2026-05-0.3.0.md`). After the three layers are merged, the session ID is appended as a `## Session Info` section (runtime augmentation in `_refresh_session`):
 
 1. **Layer 1: System Instructions (Immutable)**
     * Source: `host/system_prompt.md` (or beside exe).
