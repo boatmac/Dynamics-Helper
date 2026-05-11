@@ -616,6 +616,13 @@ class NativeHost:
 
         except Exception as e:
             logging.error(f"check_for_updates failed: {e}\n{traceback.format_exc()}")
+            if force:
+                self.send_message(
+                    {
+                        "action": "update_error",
+                        "payload": {"error": str(e)},
+                    }
+                )
 
     def find_copilot_cli(self):
         """Finds the Copilot CLI executable path."""

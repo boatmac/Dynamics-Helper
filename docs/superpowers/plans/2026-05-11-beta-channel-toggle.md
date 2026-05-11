@@ -449,6 +449,13 @@ New body (replace lines 406-475 — line numbers approximate; the existing funct
 
         except Exception as e:
             logging.error(f"check_for_updates failed: {e}\n{traceback.format_exc()}")
+            if force:
+                self.send_message(
+                    {
+                        "action": "update_error",
+                        "payload": {"error": str(e)},
+                    }
+                )
 ```
 
 Notes for the engineer:
