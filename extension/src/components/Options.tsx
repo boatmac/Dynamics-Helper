@@ -1330,7 +1330,7 @@ const Options: React.FC = () => {
                                             </label>
                                         </div>
 
-                                        <div className="flex items-start gap-2 mt-3">
+                                        <div className="mt-2 flex items-center gap-2">
                                             <input
                                                 type="checkbox"
                                                 id="betaChannelEnabled"
@@ -1342,19 +1342,11 @@ const Options: React.FC = () => {
                                                         trackEvent('Beta Channel Toggled', { enabled });
                                                     } catch { /* telemetry never blocks UX */ }
                                                 }}
-                                                className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 mt-0.5"
+                                                className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
                                             />
-                                            <div className="flex flex-col">
-                                                <label
-                                                    htmlFor="betaChannelEnabled"
-                                                    className="text-xs font-semibold text-slate-700 select-none cursor-pointer"
-                                                >
-                                                    {t('betaChannelLabel')}
-                                                </label>
-                                                <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                                                    {t('betaChannelHint')}
-                                                </p>
-                                            </div>
+                                            <label htmlFor="betaChannelEnabled" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
+                                                {t('betaChannelLabel')}
+                                            </label>
                                         </div>
 
                                         {/* Log Level */}
