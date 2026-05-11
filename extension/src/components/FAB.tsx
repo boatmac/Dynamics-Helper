@@ -5,6 +5,7 @@ import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 import { useTranslation } from '../utils/i18n';
 import { trackEvent, trackException, hashCaseId } from '../utils/telemetry';
+import { getExtensionVersion } from '../utils/version';
 import { 
     X, 
     Settings, 
@@ -276,7 +277,7 @@ const FAB: React.FC = () => {
         chrome.storage.local.get("pending_update", (data) => {
             const pending = data.pending_update as {version: string, url: string} | undefined;
             if (pending?.version) {
-                const currentVer = chrome.runtime.getManifest().version;
+                const currentVer = getExtensionVersion();
                 if (pending.version === currentVer) {
                     // Already updated — stale entry, clean up
                     chrome.storage.local.remove("pending_update");
@@ -305,7 +306,7 @@ const FAB: React.FC = () => {
         const handleUpdate = (e: any) => {
             // Check if available update is NEWER than current
             // If we just updated, current version == available version, so don't show it.
-            const currentVer = chrome.runtime.getManifest().version;
+            const currentVer = getExtensionVersion();
             const availableVer = e.detail.version;
             
             // Simple semver compare (assuming x.y.z)
@@ -984,7 +985,7 @@ const FAB: React.FC = () => {
                             )}
                             <h3 className="dh-title">{t('appName')}</h3>
                             <span style={{ fontSize: '10px', color: '#94A3B8', marginLeft: '6px', fontWeight: 'normal' }}>
-                                v{chrome.runtime.getManifest().version}
+                                v{getExtensionVersion()}
                             </span>
                         </div>
                         <button onClick={handleOpenOptions} title="Settings" className="dh-settings-btn">

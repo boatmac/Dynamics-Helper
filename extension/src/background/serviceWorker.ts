@@ -3,6 +3,7 @@
 
 import { ApplicationInsights } from '@microsoft/applicationinsights-web';
 import { TELEMETRY_CONNECTION_STRING } from '../utils/constants';
+import { getExtensionVersion } from '../utils/version';
 import { setupContextMenu } from './contextMenu';
 
 const NATIVE_HOST_NAME = "com.dynamics.helper.native";
@@ -45,9 +46,9 @@ async function initTelemetry(): Promise<void> {
         appInsights.context.user.authenticatedId = stableUserId;
 
         // 4. Stamp every telemetry item with extensionVersion AND userId
-        // as custom dimensions (backup — guarantees they appear even if
+        // as custom dimensions (backup - guarantees they appear even if
         // the SDK drops the context fields).
-        const extVersion = chrome.runtime.getManifest().version;
+        const extVersion = getExtensionVersion();
         appInsights.addTelemetryInitializer((item) => {
             item.data = item.data || {};
             item.data.extensionVersion = extVersion;
@@ -68,7 +69,7 @@ async function trackBackgroundEvent(name: string, properties: any = {}) {
     if (appInsights) {
         try {
             console.log(`[DH-SW] Received and tracking event: ${name}`);
-            properties.extensionVersion = properties.extensionVersion || chrome.runtime.getManifest().version;
+            properties.extensionVersion = properties.extensionVersion || getExtensionVersion();
             appInsights.trackEvent({ name }, properties);
         } catch (e) {
             console.error("[DH-SW] Track Event Failed:", e);

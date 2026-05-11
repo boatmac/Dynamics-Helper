@@ -29,6 +29,7 @@ import { twMerge } from 'tailwind-merge';
 import { useTranslation, LanguageCode } from '../utils/i18n';
 import MarkdownPreview from './MarkdownPreview';
 import { trackEvent } from '../utils/telemetry';
+import { getExtensionVersion } from '../utils/version';
 
 // Helper
 function cn(...inputs: (string | undefined | null | false)[]) {
@@ -802,7 +803,7 @@ const Options: React.FC = () => {
     useEffect(() => {
         const handleRuntimeMsg = (message: any) => {
             if (message.type === "NATIVE_UPDATE_AVAILABLE") {
-                const currentVer = chrome.runtime.getManifest().version;
+                const currentVer = getExtensionVersion();
                 if (message.payload.version === currentVer) {
                     setUpdateAvailable(null);
                     chrome.storage.local.remove("pending_update");
@@ -841,7 +842,7 @@ const Options: React.FC = () => {
         chrome.storage.local.get("pending_update", (data) => {
             const pending = data.pending_update as {version: string, url: string} | undefined;
             if (pending && pending.version && pending.url) {
-                const currentVer = chrome.runtime.getManifest().version;
+                const currentVer = getExtensionVersion();
                 if (pending.version === currentVer) {
                     // Already updated — stale entry, clean up
                     chrome.storage.local.remove("pending_update");
@@ -1154,7 +1155,7 @@ const Options: React.FC = () => {
                             <div>
                                     <h1 className="text-xl font-bold text-slate-800 tracking-tight">{t('appName')}</h1>
                                 <div className="flex gap-3 text-xs text-slate-500 font-medium uppercase tracking-wider items-center">
-                                    <span>Extension v{chrome.runtime.getManifest().version}</span>
+                                    <span>Extension v{getExtensionVersion()}</span>
                                     {hostVersion && <span>• {t('hostVersion')} v{hostVersion}</span>}
                                     <button 
                                         onClick={handleCheckUpdates} 
