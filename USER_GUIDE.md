@@ -188,10 +188,11 @@ By default, Dynamics Helper only receives **stable** releases. To opt in to pre-
 
 1. Open the extension **Options** page → **General** tab.
 2. Tick **"Receive beta updates"**.
+3. Click **Save Changes** at the top of the Options page so the setting is persisted to the host.
 
-Beta versions include new features and fixes before they ship to stable, but may also be less tested. The setting is persisted to the host's `config.json` and takes effect on the next update check.
+Beta versions include new features and fixes before they ship to stable, but may also be less tested. Once saved, the setting takes effect on the next update check.
 
-Toggling this option **off** does not roll you back from a Beta you are already on — you will simply return to the stable channel for future updates. The next stable release that is newer than your current Beta will pick you up automatically.
+Toggling this option **off** (and saving) does not roll you back from a Beta you are already on — you will simply return to the stable channel for future updates. The next stable release that is newer than your current Beta will pick you up automatically.
 
 ---
 
