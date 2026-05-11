@@ -238,7 +238,7 @@ Also: confirm `import re` is present at module top. It should already be there; 
 & "host/venv/Scripts/python.exe" -m unittest host/test_version_parse.py -v
 ```
 
-Expected: every test in `TestParseVersion` and `TestVersionGt` PASS (12 tests total).
+Expected: every test in `TestParseVersion` and `TestVersionGt` PASS (13 tests total).
 
 - [ ] **Step 4: Run the full host test suite to check for regressions**
 
@@ -246,7 +246,7 @@ Expected: every test in `TestParseVersion` and `TestVersionGt` PASS (12 tests to
 & "host/venv/Scripts/python.exe" -m unittest discover host
 ```
 
-Expected: 49 tests OK (37 existing + 12 new). If anything went red, stop and fix before commit.
+Expected: 50 tests OK (37 existing + 13 new). If anything went red, stop and fix before commit.
 
 - [ ] **Step 5: Commit**
 
@@ -480,7 +480,7 @@ Expected: log should show `Successfully imported copilot SDK.` ... `Copilot Sess
 & "host/venv/Scripts/python.exe" -m unittest discover host
 ```
 
-Expected: 49 tests OK.
+Expected: 50 tests OK.
 
 - [ ] **Step 5: Commit**
 
@@ -789,7 +789,7 @@ AGENTS.md gets a one-line note that the new preference is plain
 & "host/venv/Scripts/python.exe" -m unittest discover host
 ```
 
-Expected: 49 tests OK (37 baseline + 12 from Task 1).
+Expected: 50 tests OK (37 baseline + 13 from Task 1).
 
 - [ ] **Step 2: Confirm extension builds cleanly**
 
