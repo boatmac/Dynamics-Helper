@@ -462,7 +462,7 @@ Per AGENTS.md § 8 ("CRITICAL RULE: Do not automatically publish a release to Gi
 
 **Pre-release blockers that MUST be resolved first**:
 
-1. **release_helper.py:99 fix** (§ 8.1) — change `pyinstaller --onedir ...` to invoke venv pyinstaller. Without this, the release zip would silently bundle SDK 0.2.0.
+1. ~~**release_helper.py:99 fix**~~ ✅ **DONE in commit `7f438a5`** — `build_host()` now invokes the venv pyinstaller via absolute path. Without this fix, the system pyinstaller bundled the wrong SDK version and the produced exe crashed at import time with `ImportError: cannot import name 'PreToolUseHookOutput' from 'copilot.session'`. Verified end-to-end by invoking `release_helper.build_host()` directly + smoke-running the produced exe from `%TEMP%\` — full SDK import + Copilot Client start + create_session round-trip succeeds.
 2. **Pre-release doc checklist** (AGENTS.md § 8): walk AGENTS.md / DEVELOPER_GUIDE.md / USER_GUIDE.md / ARCHITECTURE.md / README.md and update any that mention `copilot.types`, the legacy MCP `type: "local"` vocabulary, or version pins.
 3. **Optional but recommended**: spin up a clean Win10/11 VM (no Visual Studio, no Python, factory Defender), run the to-be-released installer, confirm 0 quarantine + 0 false-positive. The dev-machine clean scan in § 8.4 is necessary but not sufficient evidence.
 
