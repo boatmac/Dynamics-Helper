@@ -385,6 +385,15 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                         onClick={(e) => {
                              e.stopPropagation();
                              if (item.type === 'folder') {
+                                 // Team items are read-only - never mutate setItems
+                                 // with a path that indexes into the team region of
+                                 // the merged view (it would be out-of-bounds in
+                                 // personal-only `items` state and crash the page).
+                                 // Just allow selection visual state.
+                                 if (isTeamItem) {
+                                     setSelectedPath(currentPath);
+                                     return;
+                                 }
                                  // Toggle collapse
                                  const newItem = { ...item, collapsed: !item.collapsed };
                                  setItems(prev => updateItemAt(currentPath, newItem, prev));
