@@ -1267,6 +1267,32 @@ const Options: React.FC = () => {
             });
         };
         setItems(prev => traverse(prev));
+
+        // Team folders can't persist collapsed via item.collapsed (next SW
+        // sync wipes dh_team_items), so DraggableItem keys them into the
+        // ephemeral teamCollapsedLabels Set with the format
+        // `${teamId}\0${...labelPath}\0${label}` (see L419). Mirror that
+        // construction here so Collapse/Expand All affects team folders too.
+        const teamId = prefs.team || '';
+        const teamKeys: string[] = [];
+        const collectTeamFolderKeys = (list: MenuItem[], labelPath: string[]): void => {
+            for (const item of list) {
+                if (item.type === 'folder') {
+                    teamKeys.push(teamId + '\0' + [...labelPath, item.label].join('\0'));
+                    collectTeamFolderKeys(item.children || [], [...labelPath, item.label]);
+                }
+            }
+        };
+        collectTeamFolderKeys(teamItems, []);
+        setTeamCollapsedLabels(prev => {
+            const next = new Set(prev);
+            if (collapse) {
+                for (const k of teamKeys) next.add(k);
+            } else {
+                for (const k of teamKeys) next.delete(k);
+            }
+            return next;
+        });
     };
 
     const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
