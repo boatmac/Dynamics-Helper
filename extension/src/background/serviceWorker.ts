@@ -263,7 +263,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         (async () => {
             try {
                 const teamId = message.payload?.teamId;
-                if (!teamId) {
+                const manifestOnly = message.payload?.manifestOnly === true;
+                if (manifestOnly) {
+                    // Manifest-only fetch: refresh dh_team_manifest from the URL stored
+                    // in dh_prefs.teamManifestUrl without touching the user's current
+                    // team selection. Triggered when the user saves a new manifest URL
+                    // so the team dropdown can populate before they pick one.
+                    const prefsData = await new Promise<any>((resolve) => {
+                        chrome.storage.local.get(['dh_prefs', 'dh_team_manifest_etag'], resolve);
+                    });
+                    const manifestUrl = prefsData.dh_prefs?.teamManifestUrl || '';
+                    if (!manifestUrl) {
+                        sendResponse({ status: "error", error: "Manifest URL not configured" });
+                        return;
+                    }
+                    const result = await fetchManifest(manifestUrl, prefsData.dh_team_manifest_etag);
+                    if (result && result.changed && result.manifest) {
+                        await new Promise<void>((resolve) => {
+                            chrome.storage.local.set({
+                                dh_team_manifest: result.manifest,
+                                dh_team_manifest_etag: result.etag,
+                            }, resolve);
+                        });
+                    }
+                    // result === null means 304 Not Modified (cached manifest still valid)
+                    // or the URL did not return a manifest. Either way report success
+                    // so the Options page can render the existing dropdown options.
+                    sendResponse({ status: "success", data: { manifestOnly: true, changed: !!(result && result.changed) } });
+                } else if (!teamId) {
                     await clearTeamSelection();
                     sendResponse({ status: "success", data: { items: [] } });
                 } else {

@@ -532,6 +532,12 @@ const Options: React.FC = () => {
     type StatusMessage = { message: string; type: 'success' | 'error' } | null;
     const [status, setStatus] = useState<StatusMessage>(null);
     const statusTimerRef = useRef<number | null>(null);
+    // Track the manifest URL as it was at the moment of last load/save. When
+    // handleSave detects a change vs. this ref it triggers a manifest fetch.
+    // Sentinel '__unset__' means "we haven't seen storage yet" so the very
+    // first save (which loads dh_prefs and writes it back unchanged) does not
+    // count as a URL change.
+    const lastSavedManifestUrlRef = useRef<string>('__unset__');
 
     // Status toast helpers - centralize timer cleanup and type tagging.
     // Use these instead of calling setStatus directly so success/error colors
@@ -604,6 +610,10 @@ const Options: React.FC = () => {
                 if (loadedPrefs.primaryColor === "#2563eb") { // Old default blue
                     loadedPrefs.primaryColor = "#0D9488"; // New default teal
                 }
+                // Seed the change-detection ref with whatever is on disk so the
+                // very first save after page open is a no-op for manifest fetch
+                // (only an explicit user-driven URL change should trigger fetch).
+                lastSavedManifestUrlRef.current = loadedPrefs.teamManifestUrl || '';
                 
                 setPrefs(prev => {
                     // Merge strategy: Default -> Loaded -> User Edits (prev)
@@ -624,6 +634,10 @@ const Options: React.FC = () => {
 
                     return final as Preferences;
                 });
+            } else {
+                // No saved prefs yet (first run). The ref defaults to '' so the
+                // first save with a non-empty manifest URL triggers a fetch.
+                lastSavedManifestUrlRef.current = '';
             }
 
             // Sync with Native Host (Source of Truth for backend config)
@@ -711,7 +725,12 @@ const Options: React.FC = () => {
 
                             // Team Catalog (mirrored as backup; host does not read these)
                             if (extPrefs.team_catalog_enabled !== undefined) newPrefs.teamCatalogEnabled = extPrefs.team_catalog_enabled;
-                            if (extPrefs.team_manifest_url !== undefined) newPrefs.teamManifestUrl = extPrefs.team_manifest_url;
+                            if (extPrefs.team_manifest_url !== undefined) {
+                                newPrefs.teamManifestUrl = extPrefs.team_manifest_url;
+                                // Re-seed the change-detection ref so a host-driven URL
+                                // does not look like a user edit on the next save.
+                                lastSavedManifestUrlRef.current = extPrefs.team_manifest_url || '';
+                            }
                             if (extPrefs.team !== undefined) newPrefs.team = extPrefs.team;
                             if (extPrefs.team_label !== undefined) newPrefs.teamLabel = extPrefs.team_label;
 
@@ -773,6 +792,14 @@ const Options: React.FC = () => {
     };
 
     const handleSave = () => {
+        // Snapshot manifest URL before write so we can detect a user edit
+        // independently of the async storage callback ordering.
+        const previousManifestUrl = lastSavedManifestUrlRef.current;
+        const currentManifestUrl = prefs.teamManifestUrl || '';
+        const manifestUrlChanged = prefs.teamCatalogEnabled && currentManifestUrl !== '' && currentManifestUrl !== previousManifestUrl;
+        // Update ref immediately so a rapid second save does not double-fire.
+        lastSavedManifestUrlRef.current = currentManifestUrl;
+
         chrome.storage.local.set({ dh_prefs: prefs, dh_items: items }, () => {
             // Also notify the Host via Service Worker if instructions changed
              // We use a fire-and-forget message pattern here
@@ -818,6 +845,31 @@ const Options: React.FC = () => {
                      }
                  });
              }
+
+            // Trigger manifest fetch if the URL changed and team catalog is on.
+            // Routed through the service worker so spec section 3.4 (single
+            // network fetch entry) keeps holding: only fetchManifest from the
+            // SW reaches the network. The SW writes dh_team_manifest back to
+            // chrome.storage so the dropdown auto-populates without a reload.
+            if (manifestUrlChanged) {
+                chrome.runtime.sendMessage(
+                    { type: "SYNC_TEAM_CATALOG", payload: { manifestOnly: true } },
+                    (response) => {
+                        if (chrome.runtime.lastError) {
+                            showError(`Manifest fetch failed: ${chrome.runtime.lastError.message}`, 5000);
+                            return;
+                        }
+                        if (!response || response.status !== "success") {
+                            showError(`Manifest fetch failed: ${response?.error || 'Unknown error'}`, 5000);
+                            return;
+                        }
+                        // Success path: fall through. showSuccess(saved) already
+                        // fired below; we do not stack a second toast for the
+                        // fetch result because the dropdown populating is the
+                        // visible confirmation.
+                    }
+                );
+            }
 
             showSuccess(t('savedSuccess'), 2000);
         });
