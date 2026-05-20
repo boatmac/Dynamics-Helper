@@ -1056,6 +1056,28 @@ const Options: React.FC = () => {
         }, 60000);
     };
 
+    // Merged view for the bookmark manager. Personal items are editable;
+    // team items render with a Lock icon (existing isTeamItem branch in
+    // renderRow at line ~419) and cannot be dragged (canDrag: !isTeamItem
+    // at line ~259). Personal items always occupy the first items.length
+    // slots so path-based handlers (setItems(prev => updateItemAt(...)))
+    // remain correct without translation.
+    // Spec § 3.3 / § 3.5.
+    //
+    // CRITICAL: read-only handlers (getSelectedFolderName, isSelectedPathTeam)
+    // resolve paths against THIS merged list because selectedPath comes from
+    // the rendered tree which is also merged. Mutation handlers (addItemAt,
+    // updateItemAt, deleteItemAt + setItems) continue to operate on personal
+    // `items` only. Calling sites are responsible for blocking mutations
+    // against team paths (see Add button at L~1825).
+    const mergedItems = useMemo(() => {
+        const teamCatalogEnabled = prefs.teamCatalogEnabled === true;
+        if (!teamCatalogEnabled || !Array.isArray(teamItems) || teamItems.length === 0) {
+            return items;
+        }
+        return mergeMenus(items, teamItems);
+    }, [items, teamItems, prefs.teamCatalogEnabled]);
+
     // --- Item Handlers (Recursive) ---
     // Helper to get item at path
     const getItemAt = (path: number[], list: MenuItem[]): MenuItem | null => {
@@ -1069,8 +1091,20 @@ const Options: React.FC = () => {
 
     const getSelectedFolderName = () => {
         if (!selectedPath) return null;
-        const item = getItemAt(selectedPath, items);
+        // selectedPath indexes into the merged view (rendered tree). Resolving
+        // against personal-only `items` returned null for team folders and
+        // produced the "Add to null" button text. Use mergedItems instead.
+        const item = getItemAt(selectedPath, mergedItems);
         return item && item.type === 'folder' ? item.label : null;
+    };
+
+    // True iff the currently selected path points at a team-sourced folder.
+    // Used to disable mutations the user is not allowed to make (e.g. the
+    // "Add to X" button when X is a team folder).
+    const isSelectedPathTeam = () => {
+        if (!selectedPath) return false;
+        const item = getItemAt(selectedPath, mergedItems);
+        return !!item && (item as any).source === 'team';
     };
 
     // Helper to update item at path
@@ -1305,21 +1339,6 @@ const Options: React.FC = () => {
             </ul>
         );
     };
-
-    // Merged view for the bookmark manager. Personal items are editable;
-    // team items render with a Lock icon (existing isTeamItem branch in
-    // renderRow at line ~419) and cannot be dragged (canDrag: !isTeamItem
-    // at line ~259). Personal items always occupy the first items.length
-    // slots so path-based handlers (setItems(prev => updateItemAt(...)))
-    // remain correct without translation.
-    // Spec § 3.3 / § 3.5.
-    const mergedItems = useMemo(() => {
-        const teamCatalogEnabled = prefs.teamCatalogEnabled === true;
-        if (!teamCatalogEnabled || !Array.isArray(teamItems) || teamItems.length === 0) {
-            return items;
-        }
-        return mergeMenus(items, teamItems);
-    }, [items, teamItems, prefs.teamCatalogEnabled]);
 
     return (
         <PrefsLanguageProvider language={prefs.language ?? 'auto'}>
@@ -1820,6 +1839,13 @@ const Options: React.FC = () => {
                                 <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex gap-2 items-center">
                                      <button 
                                         onClick={() => {
+                                            // Defence in depth: button is disabled below when
+                                            // selection points at a team folder, but check again
+                                            // in case state races (e.g. selection set between
+                                            // render and click). addItemAt operates on personal
+                                            // `items`; writing to a team path silently no-ops
+                                            // because indices won't match.
+                                            if (isSelectedPathTeam()) return;
                                             const newItem: MenuItem = { type: 'link', label: 'New Item', url: 'https://' };
                                             if (selectedPath) {
                                                 setItems(prev => addItemAt(selectedPath, newItem, prev));
@@ -1827,10 +1853,19 @@ const Options: React.FC = () => {
                                                 setItems(prev => [...prev, newItem]);
                                             }
                                         }}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-600 text-white text-xs font-bold rounded-md hover:bg-teal-700 transition-colors shadow-sm"
+                                        disabled={isSelectedPathTeam()}
+                                        className={cn(
+                                            "flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-md transition-colors shadow-sm",
+                                            isSelectedPathTeam()
+                                                ? "bg-slate-400 cursor-not-allowed"
+                                                : "bg-teal-600 hover:bg-teal-700"
+                                        )}
+                                        title={isSelectedPathTeam() ? t('teamFolderReadOnly') : undefined}
                                     >
                                         <Plus size={14} strokeWidth={3} /> 
-                                        {selectedPath ? `${t('addTo')} "${getSelectedFolderName()}"` : t('addRootItem')}
+                                        {isSelectedPathTeam()
+                                            ? t('teamFolderReadOnly')
+                                            : selectedPath ? `${t('addTo')} "${getSelectedFolderName()}"` : t('addRootItem')}
                                     </button>
                                     
                                     {selectedPath && (

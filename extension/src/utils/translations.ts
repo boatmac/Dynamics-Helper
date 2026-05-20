@@ -96,6 +96,7 @@ export const translations: TranslationDictionary = {
     menuEditor: { en: "Menu Editor", zh: "菜单编辑器" },
     addRootItem: { en: "Add Root Item", zh: "添加根项目" },
     addTo: { en: "Add to", zh: "添加到" },
+    teamFolderReadOnly: { en: "Team folder (read-only)", zh: "团队文件夹（只读）" },
     clearSelection: { en: "(Clear Selection)", zh: "(清除选择)" },
     collapseAll: { en: "Collapse All", zh: "折叠所有" },
     expandAll: { en: "Expand All", zh: "展开所有" },
