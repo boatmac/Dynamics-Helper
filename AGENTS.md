@@ -112,6 +112,7 @@ This file defines the operational rules, development workflows, and coding stand
   * The flag should reset only on: (a) identity change (new case number/ticket), (b) explicit user-triggered refresh.
   * See `FAB.tsx` for the canonical implementation of this pattern.
   * **Beta channel preference** (`prefs.betaChannelEnabled`): plain user preference, no `isUserEdited` guard needed — there is no background refresh path that overwrites it. Mirrored to host `config.json` as `extension_preferences.beta_channel_enabled`.
+  * **Team catalog preferences** (`prefs.teamCatalogEnabled`, `prefs.teamManifestUrl`): plain user preferences, no `isUserEdited` guard needed. These are NOT mirrored to host `config.json` — team catalog is a purely extension-side feature; the host process never reads team data. See `docs/superpowers/specs/2026-05-20-team-catalog-user-config-design.md`.
 * **Styling:**
   * **Hybrid Approach:** The project uses a mix of inline styles (`style={{...}}`) and utility classes (`clsx`, `tailwind-merge`).
   * **Preference:** New UI elements should prefer Tailwind classes via `className` where possible, but consistency with existing inline styles is acceptable for complex dynamic positioning.

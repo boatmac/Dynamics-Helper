@@ -166,11 +166,45 @@ Each analysis creates a persistent Copilot session tied to your case number. Aft
 
 ### Team Bookmark Catalog
 
-The extension includes a bookmark manager with team synchronization:
+The extension can subscribe to a shared list of bookmarks ("team catalog") published by your team. **The feature is off by default** — no team-related network requests are made until you enable it.
 
-* **Personal Bookmarks:** Drag-and-drop links for quick access to internal tools.
-* **Team Catalog:** Select your team from the dropdown in Settings to sync shared bookmarks from a centralized catalog (Azure Blob).
-* **Import/Export:** Back up your bookmarks to a JSON file.
+To enable:
+
+1. Open the extension **Options** page.
+2. Tick **"Enable Team Catalog"**.
+3. Paste your team's **Manifest URL** into the input. This URL is provided by your team admin and points to a JSON file (e.g. on GitHub raw, Azure Blob, SharePoint).
+4. Click **Save Changes**.
+5. Click **Refresh** to fetch the manifest and populate the dropdown.
+6. Pick your team from the dropdown.
+
+The manifest format your admin needs to publish:
+
+```json
+{
+    "version": 1,
+    "teams": [
+        { "id": "sales", "label": "Sales", "url": "https://example.com/sales-bookmarks.json" }
+    ]
+}
+```
+
+Each team's bookmark file at its `url`:
+
+```json
+{
+    "version": 1,
+    "team": "sales",
+    "items": [
+        { "type": "url", "label": "Sales Dashboard", "url": "https://..." }
+    ]
+}
+```
+
+**Update behaviour**: the manifest and the selected team's bookmarks are re-fetched once per browser session (on extension startup), with ETag-based conditional requests to skip bandwidth when nothing changed. You can also click **Refresh** at any time for an immediate update.
+
+**Disabling** the toggle hides team data and stops all team-related network requests, but does not delete the local cache — turning it back on restores your previous selection.
+
+**Personal bookmarks** (drag-and-drop in Options) work independently of the team catalog and are not affected by the toggle.
 
 ---
 
