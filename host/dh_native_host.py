@@ -241,6 +241,51 @@ try:
         PreToolUseHookOutput,
     )
 
+    # --- SDK / CLI wire compat shim (2026-05-20) ---
+    # Copilot CLI >= 1.0.46 returns the `timestamp` field in `PingResponse`
+    # as an ISO 8601 string (e.g. "2026-05-20T06:00:50.595Z"). SDK 0.3.0's
+    # PingResponse.from_dict at client.py:204 does `int(timestamp)` directly,
+    # which raises ValueError, killing client.start() before any RPC works.
+    #
+    # Patch from_dict to detect ISO strings and convert to epoch-ms first.
+    # protocolVersion remains int(); only timestamp needs the workaround.
+    # Remove this shim once SDK ships a release that handles ISO timestamps.
+    try:
+        import copilot.client as _copilot_client
+        from datetime import datetime as _datetime
+
+        _orig_ping_from_dict = _copilot_client.PingResponse.from_dict
+
+        def _patched_ping_from_dict(obj):
+            if isinstance(obj, dict):
+                ts = obj.get("timestamp")
+                if isinstance(ts, str):
+                    # Try ISO 8601 with trailing Z; fall back to passing through.
+                    try:
+                        # fromisoformat handles "...+00:00"; not "...Z" until 3.11+
+                        normalized = ts.replace("Z", "+00:00") if ts.endswith("Z") else ts
+                        dt = _datetime.fromisoformat(normalized)
+                        # convert to epoch ms (SDK's contract)
+                        obj = {**obj, "timestamp": int(dt.timestamp() * 1000)}
+                    except Exception as _conv_err:
+                        logging.warning(
+                            f"PingResponse timestamp ISO parse failed for {ts!r}: "
+                            f"{_conv_err}; letting original cast surface."
+                        )
+            return _orig_ping_from_dict(obj)
+
+        _copilot_client.PingResponse.from_dict = staticmethod(_patched_ping_from_dict)
+        logging.info(
+            "Applied SDK shim: PingResponse.from_dict tolerates ISO timestamps "
+            "(CLI 1.0.46+ wire format)."
+        )
+    except Exception as _shim_err:
+        logging.warning(
+            f"Could not apply SDK ping-timestamp shim: {_shim_err}. "
+            "DH will likely fail at client.start() if CLI >= 1.0.46."
+        )
+    # --- end shim ---
+
     logging.info("Successfully imported copilot SDK.")
     log_emergency("Successfully imported copilot SDK.")
 except ImportError as e:
@@ -1437,6 +1482,18 @@ class NativeHost:
         product = payload.get("product", "General")
         case_number = payload.get("caseNumber", "Unspecified")
         payload_root_path = payload.get("rootPath")
+
+        # Diagnostic: log the identifying payload fields so we can correlate
+        # cross-tab issues (e.g. Tab B sending stale caseNumber from Tab A).
+        # text/error body is intentionally excluded to keep PII out of the log.
+        logging.info(
+            "analyze payload: caseNumber=%r product=%r context=%r rootPath=%r textLen=%d",
+            case_number,
+            product,
+            context,
+            payload_root_path,
+            len(text) if isinstance(text, str) else -1,
+        )
 
         # Derive the case-specific session name (`co-<case>`) for cross-CLI
         # --resume (B82 / MyCasesKit B81 RFC § D1)
