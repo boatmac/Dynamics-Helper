@@ -120,9 +120,21 @@ export async function fetchTeamBookmarks(
             return null;
         }
 
-        const data: TeamCatalogFile = await res.json();
+        const data = await res.json();
         const etag = res.headers.get('ETag') || res.headers.get('etag') || '';
-        const items = stampTeamSource(data.items || []);
+        // Accept two shapes:
+        //   - Wrapped: { version, team, items: [...] }  (spec-canonical)
+        //   - Raw array: [...]                         (matches DH's own export
+        //     format - see handleExport in Options.tsx which writes plain
+        //     JSON.stringify(items))
+        // The wrapped form is preferred for new manifests because it carries
+        // a version field for forward compatibility, but team admins frequently
+        // host a DH-exported backup directly. Accept either to keep the user
+        // experience friction-free.
+        const rawItems = Array.isArray(data)
+            ? data
+            : (Array.isArray(data?.items) ? data.items : []);
+        const items = stampTeamSource(rawItems);
 
         return { items, etag, changed: true };
     } catch (e) {
