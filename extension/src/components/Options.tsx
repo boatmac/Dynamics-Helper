@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { mergeMenus } from './MenuLogic';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { 
@@ -1006,6 +1007,16 @@ const Options: React.FC = () => {
 
     // Move Item Logic
     const moveItem = (dragPath: number[], hoverPath: number[], placement: 'before' | 'after' | 'inside') => {
+        // Defense in depth: team items live at indices >= items.length in
+        // the merged view. Mutation handlers operate on personal-only state
+        // (items) via setItems. If a drop accidentally targets a team item
+        // path, the resulting updateItemAt / addItemAt call would silently
+        // miss (out-of-bounds into personal items). canDrop on the team
+        // rows is the primary defense; this guard is the belt-and-braces.
+        if (hoverPath.length > 0 && hoverPath[0] >= items.length) {
+            console.warn('[Options] moveItem ignored: hover path targets team region', { dragPath, hoverPath });
+            return;
+        }
         if (dragPath.join('.') === hoverPath.join('.')) return;
 
         // 1. Get the item to move
@@ -1168,6 +1179,21 @@ const Options: React.FC = () => {
             </ul>
         );
     };
+
+    // Merged view for the bookmark manager. Personal items are editable;
+    // team items render with a Lock icon (existing isTeamItem branch in
+    // renderRow at line ~419) and cannot be dragged (canDrag: !isTeamItem
+    // at line ~259). Personal items always occupy the first items.length
+    // slots so path-based handlers (setItems(prev => updateItemAt(...)))
+    // remain correct without translation.
+    // Spec § 3.3 / § 3.5.
+    const mergedItems = useMemo(() => {
+        const teamCatalogEnabled = prefs.teamCatalogEnabled === true;
+        if (!teamCatalogEnabled || !Array.isArray(teamItems) || teamItems.length === 0) {
+            return items;
+        }
+        return mergeMenus(items as any, teamItems as any) as MenuItem[];
+    }, [items, teamItems, prefs.teamCatalogEnabled]);
 
     return (
         <DndProvider backend={HTML5Backend}>
@@ -1712,7 +1738,7 @@ const Options: React.FC = () => {
                                         </div>
                                     ) : (
                                         <div onClick={() => setSelectedPath(null)} className="min-h-full pb-12">
-                                            {renderList(items)}
+                                            {renderList(mergedItems)}
                                             {/* Root Empty Drop Zone */}
                                             <EmptyDropZone moveItem={moveItem} itemsLength={items.length} />
                                         </div>
