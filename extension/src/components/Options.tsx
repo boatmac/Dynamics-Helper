@@ -67,6 +67,8 @@ interface Preferences {
     logLevel?: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
     language?: LanguageCode;
     team?: string;        // Selected team catalog ID (e.g. "dnai")
+    teamCatalogEnabled?: boolean;   // Master toggle for the Team Catalog feature
+    teamManifestUrl?: string;       // User-supplied manifest URL
     teamLabel?: string;   // Display name for selected team
 }
 
@@ -85,7 +87,9 @@ const DEFAULT_PREFS: Preferences = {
     enableStatusBubble: true,
     betaChannelEnabled: false,
     logLevel: 'INFO',
-    language: 'auto'
+    language: 'auto',
+    teamCatalogEnabled: false,
+    teamManifestUrl: ''
 };
 
 // --- Helpers ---
