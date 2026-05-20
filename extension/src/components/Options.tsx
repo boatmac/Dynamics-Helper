@@ -587,6 +587,10 @@ const Options: React.FC = () => {
     // Switching teams keeps Set state but each team's keys are isolated by
     // their distinct teamId prefix.
     const [teamCollapsedLabels, setTeamCollapsedLabels] = useState<Set<string>>(new Set());
+    // Mirrors itemsLoadedRef: prevents the initial empty-Set mount from
+    // overwriting stored collapse state before chrome.storage.local.get
+    // resolves. Flipped to true once the initial load completes.
+    const teamCollapsedLoadedRef = useRef(false);
 
     const toggleTeamCollapsed = (labelKey: string) => {
         setTeamCollapsedLabels(prev => {
@@ -770,7 +774,7 @@ const Options: React.FC = () => {
 
         // Load team catalog metadata
         chrome.storage.local.get(
-            ['dh_team_synced', 'dh_team_items', 'dh_team_manifest'],
+            ['dh_team_synced', 'dh_team_items', 'dh_team_manifest', 'dh_team_collapsed_labels'],
             (data: any) => {
                 if (data.dh_team_synced) setTeamSynced(data.dh_team_synced);
                 if (Array.isArray(data.dh_team_items)) setTeamItems(data.dh_team_items);
@@ -782,9 +786,29 @@ const Options: React.FC = () => {
                         data.dh_team_manifest.teams.map((t: any) => ({ id: t.id, label: t.label })),
                     );
                 }
+                // Restore collapsed-folder labels for team items. Stored as an
+                // array because Sets don't survive JSON / chrome.storage round-
+                // trip. Keys take the form `${teamId}\0${...labelPath}\0${label}`
+                // — stale keys (e.g. for a team the user no longer belongs to)
+                // are harmless: they won't match any rendered folder so they
+                // just sit dormant until the next set-write replaces them.
+                if (Array.isArray(data.dh_team_collapsed_labels)) {
+                    setTeamCollapsedLabels(new Set(data.dh_team_collapsed_labels));
+                }
+                teamCollapsedLoadedRef.current = true;
             },
         );
     }, []);
+
+    // Persist teamCollapsedLabels on every change. Mirrors the dh_items
+    // useEffect pattern. Guarded so the initial empty-Set mount doesn't
+    // clobber stored data before the load-effect resolves.
+    useEffect(() => {
+        if (!teamCollapsedLoadedRef.current) return;
+        chrome.storage.local.set({
+            dh_team_collapsed_labels: Array.from(teamCollapsedLabels),
+        });
+    }, [teamCollapsedLabels]);
 
     // --- Prefs Handlers ---
     // Generic onChange for text/number inputs and the color picker. Plan A:
@@ -911,10 +935,11 @@ const Options: React.FC = () => {
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
             setPrefs(DEFAULT_PREFS);
-            chrome.storage.local.remove(["dh_prefs", "dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced"], () => {
+            chrome.storage.local.remove(["dh_prefs", "dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels"], () => {
                 loadItems().then(setItems);
                 setTeamItems([]);
                 setTeamSynced("");
+                setTeamCollapsedLabels(new Set());
                 // Sync host with default prefs so config.json matches the
                 // freshly-reset extension state. persistPrefs writes dh_prefs
                 // back too — that's OK because we just removed it; the
@@ -1685,21 +1710,50 @@ const Options: React.FC = () => {
                                                         placeholder={t('manifestUrlPlaceholder')}
                                                         onChange={(e) => setPrefs(prev => ({ ...prev, teamManifestUrl: e.target.value }))}
                                                         onBlur={() => {
-                                                            // Plan A: persist on focus loss. Manifest URL
-                                                            // also triggers fetch when actually changed
-                                                            // (lastFetchedManifestUrlRef diff inside
-                                                            // persistPrefs). Validate format first so a
-                                                            // half-typed "https://" doesn't burn a 404.
-                                                            setPrefs(prev => {
-                                                                const url = prev.teamManifestUrl || '';
-                                                                let valid = !url; // empty is fine, clears manifest
-                                                                if (url) {
-                                                                    try { new URL(url); valid = true; }
-                                                                    catch { valid = false; }
-                                                                }
-                                                                persistPrefs(prev, { fetchManifest: valid });
-                                                                return prev;
-                                                            });
+                                                            // Plan A: persist on focus loss. Three cases:
+                                                            //   (a) empty   → user cleared the URL: wipe
+                                                            //                  cached manifest, team items,
+                                                            //                  collapse state, and team
+                                                            //                  selection so the UI fully
+                                                            //                  unwinds. Persist prefs
+                                                            //                  (team / teamLabel also blanked)
+                                                            //                  so reload doesn't see ghosts.
+                                                            //   (b) valid   → persist; if URL actually
+                                                            //                  changed since last fetch,
+                                                            //                  trigger a new manifest fetch
+                                                            //                  via persistPrefs opts.
+                                                            //   (c) invalid → do nothing. The bad string
+                                                            //                  stays in React state so the
+                                                            //                  user can keep editing, but
+                                                            //                  nothing is written to storage
+                                                            //                  or host. This is what
+                                                            //                  prevents "type garbage →
+                                                            //                  break installed team setup".
+                                                            const url = prefs.teamManifestUrl || '';
+                                                            if (!url) {
+                                                                // (a) clear-out
+                                                                (async () => {
+                                                                    const { clearTeamBookmarks } = await import('../utils/teamCatalog');
+                                                                    await clearTeamBookmarks();
+                                                                    setTeamList([]);
+                                                                    setTeamItems([]);
+                                                                    setTeamCollapsedLabels(new Set());
+                                                                    setTeamSynced('');
+                                                                    setTeamFetchError(false);
+                                                                    lastFetchedManifestUrlRef.current = '';
+                                                                    updatePref({ teamManifestUrl: '', team: '', teamLabel: '' });
+                                                                })();
+                                                                return;
+                                                            }
+                                                            let valid = false;
+                                                            try { new URL(url); valid = true; }
+                                                            catch { valid = false; }
+                                                            if (!valid) {
+                                                                // (c) invalid: leave everything untouched.
+                                                                return;
+                                                            }
+                                                            // (b) valid: persist + fetch if changed.
+                                                            persistPrefs(prefs, { fetchManifest: true });
                                                         }}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
                                                     />
