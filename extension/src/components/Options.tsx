@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { mergeMenus } from './MenuLogic';
+import { mergeMenus, MenuItem } from './MenuLogic';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { 
@@ -38,19 +38,6 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 }
 
 // --- Types ---
-interface MenuItem {
-    type: 'folder' | 'link' | 'markdown' | 'back' | 'unknown';
-    label: string;
-    url?: string;
-    content?: string;
-    children?: MenuItem[];
-    target?: string;
-    icon?: string;
-    collapsed?: boolean;
-    tags?: string[];
-    source?: 'team' | 'personal';
-}
-
 interface Preferences {
     buttonText: string;
     primaryColor: string;
@@ -1192,7 +1179,7 @@ const Options: React.FC = () => {
         if (!teamCatalogEnabled || !Array.isArray(teamItems) || teamItems.length === 0) {
             return items;
         }
-        return mergeMenus(items as any, teamItems as any) as MenuItem[];
+        return mergeMenus(items, teamItems);
     }, [items, teamItems, prefs.teamCatalogEnabled]);
 
     return (

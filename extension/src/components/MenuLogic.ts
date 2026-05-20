@@ -11,6 +11,7 @@ export interface MenuItem {
     children?: MenuItem[];
     target?: string;
     icon?: string;
+    collapsed?: boolean;
     tags?: string[];
     source?: 'team' | 'personal';
 }
