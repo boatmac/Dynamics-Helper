@@ -674,19 +674,21 @@ const Options: React.FC = () => {
         });
 
         // Load team catalog metadata
-        chrome.storage.local.get(['dh_team_synced', 'dh_team_items'], (data: any) => {
-            if (data.dh_team_synced) setTeamSynced(data.dh_team_synced);
-            if (Array.isArray(data.dh_team_items)) setTeamItems(data.dh_team_items);
-        });
-
-        // Fetch manifest to populate team dropdown
-        import('../utils/teamCatalog').then(({ fetchManifest }) => {
-            fetchManifest().then(manifest => {
-                if (manifest) {
-                    setTeamList(manifest.teams.map(t => ({ id: t.id, label: t.label })));
+        chrome.storage.local.get(
+            ['dh_team_synced', 'dh_team_items', 'dh_team_manifest'],
+            (data: any) => {
+                if (data.dh_team_synced) setTeamSynced(data.dh_team_synced);
+                if (Array.isArray(data.dh_team_items)) setTeamItems(data.dh_team_items);
+                // Populate dropdown from cached manifest. No fetch here - the service
+                // worker startup hook is the only auto-fetch trigger (spec § 3.4).
+                // To force a refresh, the user clicks the Refresh button below.
+                if (data.dh_team_manifest && Array.isArray(data.dh_team_manifest.teams)) {
+                    setTeamList(
+                        data.dh_team_manifest.teams.map((t: any) => ({ id: t.id, label: t.label })),
+                    );
                 }
-            });
-        });
+            },
+        );
     }, []);
 
     // --- Prefs Handlers ---
@@ -800,8 +802,30 @@ const Options: React.FC = () => {
         });
     };
 
-    const handleTeamRefresh = () => {
-        if (prefs.team) handleTeamChange(prefs.team);
+    const handleTeamRefresh = async () => {
+        if (!prefs.teamManifestUrl || !prefs.team) return;
+        setIsSyncingTeam(true);
+        setTeamFetchError(false);
+        try {
+            const { syncTeamBookmarks } = await import('../utils/teamCatalog');
+            const items = await syncTeamBookmarks(prefs.teamManifestUrl, prefs.team);
+            setTeamItems(items);
+            setTeamSynced(new Date().toISOString());
+            // Refresh the dropdown if the manifest changed during this sync
+            const cached = await new Promise<any>((resolve) => {
+                chrome.storage.local.get(['dh_team_manifest'], resolve);
+            });
+            if (cached.dh_team_manifest && Array.isArray(cached.dh_team_manifest.teams)) {
+                setTeamList(
+                    cached.dh_team_manifest.teams.map((t: any) => ({ id: t.id, label: t.label })),
+                );
+            }
+        } catch (e) {
+            console.warn('[Options] Team refresh failed:', e);
+            setTeamFetchError(true);
+        } finally {
+            setIsSyncingTeam(false);
+        }
     };
 
     // Listen for updates
