@@ -396,6 +396,21 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                     onClick={(e) => {
                         e.stopPropagation(); // Prevent bubbling
                         if (item.type === 'folder') {
+                            // Plan A: single click on any part of a folder row
+                            // toggles collapsed state AND selects the folder.
+                            // Clicking the same folder again toggles back AND
+                            // clears selection (cancel pattern). Personal folders
+                            // persist via item.collapsed on dh_items; team folders
+                            // use the ephemeral teamCollapsedLabels Set keyed by
+                            // `${teamId}\0${...labelPath}\0${label}` because
+                            // dh_team_items is wiped by SW sync.
+                            if (isTeamItem) {
+                                const key = currentTeamId + '\0' + [...labelPath, item.label].join('\0');
+                                toggleTeamCollapsed(key);
+                            } else {
+                                const newItem = { ...item, collapsed: !item.collapsed };
+                                setItems(prev => updateItemAt(currentPath, newItem, prev));
+                            }
                             setSelectedPath(isSelected ? null : currentPath);
                         } else {
                             setSelectedPath(null);
@@ -404,29 +419,6 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                 >
                     <div 
                         className="flex items-center gap-3 flex-1 min-w-0"
-                        onClick={(e) => {
-                             e.stopPropagation();
-                             if (item.type === 'folder') {
-                                 // Personal folders persist collapse via the
-                                 // item.collapsed field on dh_items. Team
-                                 // folders can't write back to dh_team_items
-                                 // (next SW sync wipes it), so they use the
-                                 // ephemeral teamCollapsedLabels Set keyed by
-                                 // `${teamId}\0${...labelPath}\0${label}` —
-                                 // teamId prefix isolates two teams whose
-                                 // folders share a label.
-                                 if (isTeamItem) {
-                                     const key = currentTeamId + '\0' + [...labelPath, item.label].join('\0');
-                                     toggleTeamCollapsed(key);
-                                 } else {
-                                     const newItem = { ...item, collapsed: !item.collapsed };
-                                     setItems(prev => updateItemAt(currentPath, newItem, prev));
-                                 }
-                                 setSelectedPath(currentPath);
-                             } else {
-                                 setSelectedPath(null);
-                             }
-                        }}
                     >
                         <span className={cn("p-1.5 rounded-md", item.type === 'folder' ? "bg-amber-100 text-amber-600" : item.type === 'link' ? "bg-blue-100 text-blue-600" : "bg-purple-100 text-purple-600")}>
                             {item.type === 'folder' ? (effectiveCollapsed ? <Folder size={16} /> : <FolderOpen size={16} />) : item.type === 'link' ? <LinkIcon size={16} /> : <FileText size={16} />}
