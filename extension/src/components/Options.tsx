@@ -816,6 +816,46 @@ const Options: React.FC = () => {
         });
     }, [teamCollapsedLabels]);
 
+    // Watch chrome.storage for team-catalog writes from elsewhere — most
+    // importantly the Service Worker's manifestOnly fetch (triggered by
+    // the URL field onBlur) writing dh_team_manifest. Before this hook,
+    // Options.tsx only read teamList during initial mount, so users had
+    // to F5 after typing in a new URL to see the dropdown populate. SW
+    // startup auto-sync and any future write paths benefit from the
+    // same wiring.
+    useEffect(() => {
+        const onStorageChanged = (
+            changes: { [key: string]: chrome.storage.StorageChange },
+            areaName: string
+        ) => {
+            if (areaName !== 'local') return;
+            if (changes.dh_team_manifest) {
+                const newVal: any = changes.dh_team_manifest.newValue;
+                if (newVal && Array.isArray(newVal.teams)) {
+                    setTeamList(
+                        newVal.teams.map((t: any) => ({ id: t.id, label: t.label })),
+                    );
+                } else {
+                    // dh_team_manifest was deleted (e.g. clearTeamBookmarks).
+                    // Clearing teamList here is redundant with the explicit
+                    // setTeamList([]) in the case (a) onBlur path, but
+                    // covers any future call site that forgets to do it.
+                    setTeamList([]);
+                }
+            }
+            if (changes.dh_team_items) {
+                const newVal: any = changes.dh_team_items.newValue;
+                setTeamItems(Array.isArray(newVal) ? newVal : []);
+            }
+            if (changes.dh_team_synced) {
+                const newVal: any = changes.dh_team_synced.newValue;
+                setTeamSynced(typeof newVal === 'string' ? newVal : '');
+            }
+        };
+        chrome.storage.onChanged.addListener(onStorageChanged);
+        return () => chrome.storage.onChanged.removeListener(onStorageChanged);
+    }, []);
+
     // --- Prefs Handlers ---
     // Generic onChange for text/number inputs and the color picker. Plan A:
     // these are text-ish fields, so onChange only mutates local state.
