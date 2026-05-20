@@ -5,6 +5,10 @@ import { ApplicationInsights } from '@microsoft/applicationinsights-web';
 import { TELEMETRY_CONNECTION_STRING } from '../utils/constants';
 import { getExtensionVersion } from '../utils/version';
 import { setupContextMenu } from './contextMenu';
+// teamCatalog is imported statically: dynamic import() is disallowed in
+// ServiceWorkerGlobalScope per the HTML spec
+// (https://github.com/w3c/ServiceWorker/issues/1356).
+import { syncTeamBookmarks, clearTeamBookmarks, fetchManifest } from '../utils/teamCatalog';
 
 const NATIVE_HOST_NAME = "com.dynamics.helper.native";
 
@@ -258,7 +262,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "SYNC_TEAM_CATALOG") {
         (async () => {
             try {
-                const { syncTeamBookmarks, clearTeamBookmarks } = await import('../utils/teamCatalog');
                 const teamId = message.payload?.teamId;
                 if (!teamId) {
                     await clearTeamBookmarks();
@@ -308,7 +311,6 @@ async function syncTeamCatalogOnStartup() {
         if (!teamId) {
             // No team selected - still refresh manifest so the dropdown gets
             // populated next time the user opens Options.
-            const { fetchManifest } = await import('../utils/teamCatalog');
             const cached = await new Promise<any>((resolve) => {
                 chrome.storage.local.get(['dh_team_manifest_etag'], resolve);
             });
@@ -324,7 +326,6 @@ async function syncTeamCatalogOnStartup() {
             return;
         }
 
-        const { syncTeamBookmarks } = await import('../utils/teamCatalog');
         const items = await syncTeamBookmarks(manifestUrl, teamId);
         console.log(`[DH-SW] Team catalog synced: ${items.length} items for team '${teamId}'`);
     } catch (e) {
