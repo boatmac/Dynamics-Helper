@@ -38,6 +38,10 @@ export const translations: TranslationDictionary = {
         en: "Could not fetch manifest. Check the URL and try Refresh.",
         zh: "无法获取 manifest。请检查 URL 并尝试刷新。",
     },
+    manifestUrlInvalid: {
+        en: "Invalid URL format — not saved.",
+        zh: "URL 格式不正确，未保存。",
+    },
     betaChannelLabel: { en: "Receive beta updates", zh: "接收 Beta 更新" },
     betaChannelHint: {
         en: "Beta versions include new features and fixes before they ship to stable. They may also be less tested. Toggling off does not downgrade you from a beta you are already on.",

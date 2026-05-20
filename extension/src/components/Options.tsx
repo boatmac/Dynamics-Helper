@@ -579,6 +579,12 @@ const Options: React.FC = () => {
     const [isSyncingTeam, setIsSyncingTeam] = useState(false);
     const [teamItems, setTeamItems] = useState<MenuItem[]>([]);
     const [teamFetchError, setTeamFetchError] = useState<boolean>(false);
+    // Plan A onBlur validation feedback for the manifest URL field. True
+    // when the user typed something that doesn't parse as a URL — we
+    // refuse to persist garbage but want to tell them why nothing
+    // happened. Cleared on next onChange (any keystroke = user is fixing
+    // it) and on successful blur paths (empty / valid).
+    const [manifestUrlInvalid, setManifestUrlInvalid] = useState<boolean>(false);
     // Ephemeral per-Options-session collapse state for team folders. Personal
     // folder collapse persists via item.collapsed field on dh_items. Team
     // folder collapse cannot be written to dh_team_items because the next SW
@@ -1708,7 +1714,14 @@ const Options: React.FC = () => {
                                                         type="text"
                                                         value={prefs.teamManifestUrl || ''}
                                                         placeholder={t('manifestUrlPlaceholder')}
-                                                        onChange={(e) => setPrefs(prev => ({ ...prev, teamManifestUrl: e.target.value }))}
+                                                        onChange={(e) => {
+                                                            // Any keystroke = user is editing; clear the
+                                                            // "not saved" red state so they don't keep
+                                                            // staring at it after they've already started
+                                                            // fixing the typo.
+                                                            if (manifestUrlInvalid) setManifestUrlInvalid(false);
+                                                            setPrefs(prev => ({ ...prev, teamManifestUrl: e.target.value }));
+                                                        }}
                                                         onBlur={() => {
                                                             // Plan A: persist on focus loss. Three cases:
                                                             //   (a) empty   → user cleared the URL: wipe
@@ -1722,16 +1735,14 @@ const Options: React.FC = () => {
                                                             //                  changed since last fetch,
                                                             //                  trigger a new manifest fetch
                                                             //                  via persistPrefs opts.
-                                                            //   (c) invalid → do nothing. The bad string
-                                                            //                  stays in React state so the
-                                                            //                  user can keep editing, but
-                                                            //                  nothing is written to storage
-                                                            //                  or host. This is what
-                                                            //                  prevents "type garbage →
-                                                            //                  break installed team setup".
+                                                            //   (c) invalid → do nothing to storage / host /
+                                                            //                  manifest. Flag the input red
+                                                            //                  + show "not saved" hint so
+                                                            //                  silent failure is visible.
                                                             const url = prefs.teamManifestUrl || '';
                                                             if (!url) {
                                                                 // (a) clear-out
+                                                                setManifestUrlInvalid(false);
                                                                 (async () => {
                                                                     const { clearTeamBookmarks } = await import('../utils/teamCatalog');
                                                                     await clearTeamBookmarks();
@@ -1749,15 +1760,25 @@ const Options: React.FC = () => {
                                                             try { new URL(url); valid = true; }
                                                             catch { valid = false; }
                                                             if (!valid) {
-                                                                // (c) invalid: leave everything untouched.
+                                                                // (c) invalid: leave storage/host untouched,
+                                                                // raise the red hint.
+                                                                setManifestUrlInvalid(true);
                                                                 return;
                                                             }
                                                             // (b) valid: persist + fetch if changed.
+                                                            setManifestUrlInvalid(false);
                                                             persistPrefs(prefs, { fetchManifest: true });
                                                         }}
-                                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
+                                                        className={`w-full px-3 py-2 border rounded-lg outline-none transition-all text-sm bg-white ${
+                                                            manifestUrlInvalid
+                                                                ? 'border-red-400 focus:ring-2 focus:ring-red-500 focus:border-red-500'
+                                                                : 'border-slate-200 focus:ring-2 focus:ring-teal-500 focus:border-teal-500'
+                                                        }`}
                                                     />
-                                                    {teamFetchError && (
+                                                    {manifestUrlInvalid && (
+                                                        <p className="text-[11px] text-red-600 mt-1">{t('manifestUrlInvalid')}</p>
+                                                    )}
+                                                    {teamFetchError && !manifestUrlInvalid && (
                                                         <p className="text-[11px] text-red-600 mt-1">{t('manifestFetchFailed')}</p>
                                                     )}
                                                 </div>
