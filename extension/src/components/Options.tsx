@@ -522,6 +522,7 @@ const Options: React.FC = () => {
     const [teamSynced, setTeamSynced] = useState<string>("");
     const [isSyncingTeam, setIsSyncingTeam] = useState(false);
     const [teamItems, setTeamItems] = useState<MenuItem[]>([]);
+    const [teamFetchError, setTeamFetchError] = useState<boolean>(false);
 
     // Markdown preview toggles
     const [previewInstructions, setPreviewInstructions] = useState(true);
@@ -1381,24 +1382,65 @@ const Options: React.FC = () => {
                                                 <Building2 size={14} /> {t('teamCatalog')}
                                             </h2>
 
-                                            <div>
-                                                <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('selectTeam')}</label>
-                                                <p className="text-[10px] text-slate-500 mb-2">
-                                                    {t('selectTeamDesc')}
-                                                </p>
-                                                <select
-                                                    value={prefs.team || ''}
-                                                    onChange={(e) => handleTeamChange(e.target.value)}
-                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
-                                                >
-                                                    <option value="">{t('noTeam')}</option>
-                                                    {teamList.map(team => (
-                                                        <option key={team.id} value={team.id}>{team.label}</option>
-                                                    ))}
-                                                </select>
+                                            {/* Toggle: Enable Team Catalog */}
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    id="teamCatalogEnabled"
+                                                    checked={prefs.teamCatalogEnabled === true}
+                                                    onChange={(e) => {
+                                                        const enabled = e.target.checked;
+                                                        setPrefs(prev => ({ ...prev, teamCatalogEnabled: enabled }));
+                                                        try {
+                                                            trackEvent('Team Catalog Toggled', { enabled });
+                                                        } catch { /* telemetry never blocks UX */ }
+                                                    }}
+                                                    className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
+                                                />
+                                                <label htmlFor="teamCatalogEnabled" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
+                                                    {t('enableTeamCatalog')}
+                                                </label>
                                             </div>
+                                            <p className="text-[10px] text-slate-500 mt-1 ml-6 leading-snug">
+                                                {t('enableTeamCatalogHint')}
+                                            </p>
 
-                                            {prefs.team && (
+                                            {/* Manifest URL input (revealed when toggle is on) */}
+                                            {prefs.teamCatalogEnabled && (
+                                                <div className="mt-3">
+                                                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('manifestUrl')}</label>
+                                                    <input
+                                                        type="text"
+                                                        value={prefs.teamManifestUrl || ''}
+                                                        placeholder={t('manifestUrlPlaceholder')}
+                                                        onChange={(e) => setPrefs(prev => ({ ...prev, teamManifestUrl: e.target.value }))}
+                                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
+                                                    />
+                                                    {teamFetchError && (
+                                                        <p className="text-[11px] text-red-600 mt-1">{t('manifestFetchFailed')}</p>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {/* Team dropdown (revealed when URL is non-empty) */}
+                                            {prefs.teamCatalogEnabled && prefs.teamManifestUrl && (
+                                                <div className="mt-3">
+                                                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('selectTeam')}</label>
+                                                    <select
+                                                        value={prefs.team || ''}
+                                                        onChange={(e) => handleTeamChange(e.target.value)}
+                                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
+                                                    >
+                                                        <option value="">{t('noTeam')}</option>
+                                                        {teamList.map(team => (
+                                                            <option key={team.id} value={team.id}>{team.label}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
+
+                                            {/* Last synced + Refresh (revealed when team is selected) */}
+                                            {prefs.teamCatalogEnabled && prefs.teamManifestUrl && prefs.team && (
                                                 <div className="mt-3 flex items-center justify-between">
                                                     <div className="text-xs text-slate-500">
                                                         {teamSynced ? (
