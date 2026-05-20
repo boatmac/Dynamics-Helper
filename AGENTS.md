@@ -315,3 +315,28 @@ This error means the Host process crashed during startup or failed to establish 
 * **Cause:** SDK 0.3.0 renamed MCP `type` values: `"local"` → `"stdio"`, `"remote"` → `"http"`. SDK 0.3.0 silently accepts the legacy values, so behaviour is undefined.
 * **Symptom:** `native_host.log` shows lines like `MCP server 'foo' uses legacy type='local'; remapping in-memory to 'stdio'`.
 * **Fix:** DH performs an in-memory remap inside `start_session()` so existing user configs keep working, but the user should update their `mcp.json` (global `~/.copilot/mcp-config.json` or workspace `.github/mcp-config.json`) to silence the warning. See `docs/sdk-upgrade-2026-05-0.3.0.md` § 7 (B-4).
+
+### 5. SDK ↔ CLI wire drift (Copilot CLI changes, SDK lags)
+
+**Architecture context.** `github-copilot-sdk` (PyPI) is **not** a self-contained library — it is a JSON-RPC client for the Copilot CLI (`npm install -g @github/copilot`). At runtime the SDK spawns `copilot.cmd --headless ...` as a subprocess; all LLM inference, auth, and tool execution happen inside the CLI process. SDK ↔ CLI talk over stdio JSON-RPC against a generated schema (`copilot/generated/rpc.py` on the Python side mirrors `copilot-sdk/generated/rpc.d.ts` on the CLI side).
+
+The SDK has **no version pin on the CLI** in its package metadata. The only runtime check is `_verify_protocol_version()` calling `PingResponse`, comparing `SDK_PROTOCOL_VERSION` (3) against the CLI's reported version. This only catches **major** protocol bumps, NOT field-level type drift.
+
+**Why this matters for DH.** DH's `requirements.txt` pins the SDK version, but Copilot CLI is whatever the user has installed (and `copilot.cmd` auto-updates itself by re-extracting newer versions into `%LOCALAPPDATA%\copilot\pkg\<version>\` on each invocation). So DH ships with `SDK pinned + CLI wildcard`. Any field-level wire change in the CLI between DH's released SDK version and the user's current CLI will surface as a crash inside `CopilotClient.start()` or `create_session()`.
+
+**Known incident (2026-05-20):** CLI 1.0.46+ changed `PingResponse.timestamp` from `int` (epoch ms) to ISO 8601 string. SDK 0.3.0 does `int(timestamp)` in `client.py:204` and crashes with `ValueError: invalid literal for int() with base 10: '2026-05-20T...Z'`. Fix: monkey-patch `copilot.client.PingResponse.from_dict` at SDK-import time (see `host/dh_native_host.py:244-287`, commit `b4bb6ab`). Delete the shim once SDK ships a release with native ISO support.
+
+**Response playbook when this recurs:**
+
+1. Reproduce in dev mode with a 5-line probe:
+   ```python
+   import asyncio
+   from copilot import CopilotClient, SubprocessConfig
+   asyncio.run(CopilotClient(SubprocessConfig(cli_path=r"C:\Users\<u>\AppData\Roaming\npm\copilot.cmd")).start())
+   ```
+2. Grep the traceback for the SDK file and line: `from_dict`, `int(...)`, `str(...)` casts on RPC dict fields are the usual suspects.
+3. Add a startup-time monkey-patch in `dh_native_host.py` mirroring the PingResponse shim pattern (read raw obj, normalise, fall through to original).
+4. Verify with `& "host/venv/Scripts/python.exe" -c "..."` before rebuilding.
+5. Record the patch in `docs/superpowers/plans/<latest>.md` follow-ups so the shim gets deleted when the SDK release catches up.
+
+**Do NOT pin the user's CLI version.** Bundling a CLI binary inside DH (~100 MB), pinning npm install version (CLI auto-updates anyway by extracting into `%LOCALAPPDATA%\copilot\pkg\`), or wrapping `copilot.cmd` are all worse than per-incident shims. The Copilot CLI is a moving target by design.
