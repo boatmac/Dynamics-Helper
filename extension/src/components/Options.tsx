@@ -205,10 +205,8 @@ interface DraggableItemProps {
     index: number;
     path: number[];
     moveItem: (dragPath: number[], hoverPath: number[], placement: 'before' | 'after' | 'inside') => void;
-    renderList: (list: MenuItem[], pathPrefix: number[]) => React.ReactNode;
+    renderList: (list: MenuItem[], pathPrefix: number[], labelPathPrefix?: string[]) => React.ReactNode;
     setItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
-    setTeamItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
-    personalCount: number;
     setEditingItemPath: React.Dispatch<React.SetStateAction<number[] | null>>;
     editingItemPath: number[] | null;
     updateItemAt: (path: number[], newItem: MenuItem, list: MenuItem[]) => MenuItem[];
@@ -216,6 +214,15 @@ interface DraggableItemProps {
     addItemAt: (path: number[] | null, newItem: MenuItem, list: MenuItem[]) => MenuItem[];
     selectedPath: number[] | null;
     setSelectedPath: (path: number[] | null) => void;
+    // Team folder collapse handling: see teamCollapsedLabels docstring in
+    // Options main. labelPath is the trail of labels from root to this row's
+    // PARENT (the row's own label is appended at the click site). currentTeamId
+    // namespaces keys so two teams with same-named folders track collapse
+    // independently.
+    teamCollapsedLabels: Set<string>;
+    toggleTeamCollapsed: (labelKey: string) => void;
+    labelPath: string[];
+    currentTeamId: string;
 }
 
 const DraggableItem: React.FC<DraggableItemProps> = ({ 
@@ -225,21 +232,32 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     moveItem, 
     renderList, 
     setItems, 
-    setTeamItems,
-    personalCount,
     setEditingItemPath, 
     editingItemPath, 
     updateItemAt, 
     deleteItemAt, 
     addItemAt,
     selectedPath,
-    setSelectedPath
+    setSelectedPath,
+    teamCollapsedLabels,
+    toggleTeamCollapsed,
+    labelPath,
+    currentTeamId,
 }) => {
     const ref = useRef<HTMLDivElement>(null);
     const currentPath = [...path, index];
     const isEditing = editingItemPath && editingItemPath.join('.') === currentPath.join('.');
     const isSelected = selectedPath && selectedPath.join('.') === currentPath.join('.');
     const isTeamItem = item.source === 'team';
+    // Team folders ignore item.collapsed (next SW sync would wipe a write anyway)
+    // and read from the ephemeral teamCollapsedLabels Set. Personal folders keep
+    // using item.collapsed which persists through handleSave -> dh_items.
+    const teamCollapseKey = isTeamItem && item.type === 'folder'
+        ? currentTeamId + '\0' + [...labelPath, item.label].join('\0')
+        : '';
+    const effectiveCollapsed = isTeamItem
+        ? teamCollapsedLabels.has(teamCollapseKey)
+        : !!item.collapsed;
 
     // Visual State for Drag
     const [dragPosition, setDragPosition] = useState<'top' | 'bottom' | 'inside' | null>(null);
@@ -389,20 +407,19 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                         onClick={(e) => {
                              e.stopPropagation();
                              if (item.type === 'folder') {
-                                 // Toggle collapse. Personal vs team folders
-                                 // live in different state arrays; pick the
-                                 // right setter and translate the path.
-                                 // Team items occupy merged indices
-                                 // [personalCount, personalCount + teamCount);
-                                 // subtract personalCount to get the team-only
-                                 // index. This keeps the page from crashing
-                                 // (the previous bug: writing a team path
-                                 // into personal state corrupted the array).
-                                 const newItem = { ...item, collapsed: !item.collapsed };
+                                 // Personal folders persist collapse via the
+                                 // item.collapsed field on dh_items. Team
+                                 // folders can't write back to dh_team_items
+                                 // (next SW sync wipes it), so they use the
+                                 // ephemeral teamCollapsedLabels Set keyed by
+                                 // `${teamId}\0${...labelPath}\0${label}` —
+                                 // teamId prefix isolates two teams whose
+                                 // folders share a label.
                                  if (isTeamItem) {
-                                     const teamPath = [currentPath[0] - personalCount, ...currentPath.slice(1)];
-                                     setTeamItems(prev => updateItemAt(teamPath, newItem, prev));
+                                     const key = currentTeamId + '\0' + [...labelPath, item.label].join('\0');
+                                     toggleTeamCollapsed(key);
                                  } else {
+                                     const newItem = { ...item, collapsed: !item.collapsed };
                                      setItems(prev => updateItemAt(currentPath, newItem, prev));
                                  }
                                  setSelectedPath(currentPath);
@@ -412,7 +429,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                         }}
                     >
                         <span className={cn("p-1.5 rounded-md", item.type === 'folder' ? "bg-amber-100 text-amber-600" : item.type === 'link' ? "bg-blue-100 text-blue-600" : "bg-purple-100 text-purple-600")}>
-                            {item.type === 'folder' ? (item.collapsed ? <Folder size={16} /> : <FolderOpen size={16} />) : item.type === 'link' ? <LinkIcon size={16} /> : <FileText size={16} />}
+                            {item.type === 'folder' ? (effectiveCollapsed ? <Folder size={16} /> : <FolderOpen size={16} />) : item.type === 'link' ? <LinkIcon size={16} /> : <FileText size={16} />}
                         </span>
                         <div className="flex flex-col min-w-0">
                             <span className="font-medium text-slate-700 text-sm truncate">{item.label}</span>
@@ -466,9 +483,9 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
             </div>
             
             {/* Children */}
-            {item.children && item.children.length > 0 && !item.collapsed && (
+            {item.children && item.children.length > 0 && !effectiveCollapsed && (
                 <div className="ml-5 pl-2 border-l-2 border-slate-100 mt-1 space-y-1">
-                    {renderList(item.children, currentPath)}
+                    {renderList(item.children, currentPath, [...labelPath, item.label])}
                 </div>
             )}
         </li>
@@ -527,6 +544,23 @@ const Options: React.FC = () => {
     const [isSyncingTeam, setIsSyncingTeam] = useState(false);
     const [teamItems, setTeamItems] = useState<MenuItem[]>([]);
     const [teamFetchError, setTeamFetchError] = useState<boolean>(false);
+    // Ephemeral per-Options-session collapse state for team folders. Personal
+    // folder collapse persists via item.collapsed field on dh_items. Team
+    // folder collapse cannot be written to dh_team_items because the next SW
+    // sync overwrites it; instead we track collapsed team folders here.
+    // Keys are namespaced by team id: `${teamId}\0${...labelPath}`.
+    // Switching teams keeps Set state but each team's keys are isolated by
+    // their distinct teamId prefix.
+    const [teamCollapsedLabels, setTeamCollapsedLabels] = useState<Set<string>>(new Set());
+
+    const toggleTeamCollapsed = (labelKey: string) => {
+        setTeamCollapsedLabels(prev => {
+            const next = new Set(prev);
+            if (next.has(labelKey)) next.delete(labelKey);
+            else next.add(labelKey);
+            return next;
+        });
+    };
 
     // Markdown preview toggles
     const [previewInstructions, setPreviewInstructions] = useState(true);
@@ -1158,7 +1192,7 @@ const Options: React.FC = () => {
     };
 
     // Render List
-    const renderList = (list: MenuItem[], pathPrefix: number[] = []) => {
+    const renderList = (list: MenuItem[], pathPrefix: number[] = [], labelPathPrefix: string[] = []) => {
         return (
             <ul className="space-y-1">
                 {list.map((item, idx) => (
@@ -1170,8 +1204,6 @@ const Options: React.FC = () => {
                         moveItem={moveItem}
                         renderList={renderList}
                         setItems={setItems}
-                        setTeamItems={setTeamItems}
-                        personalCount={items.length}
                         setEditingItemPath={setEditingItemPath}
                         editingItemPath={editingItemPath}
                         updateItemAt={updateItemAt}
@@ -1179,6 +1211,10 @@ const Options: React.FC = () => {
                         addItemAt={addItemAt}
                         selectedPath={selectedPath}
                         setSelectedPath={setSelectedPath}
+                        teamCollapsedLabels={teamCollapsedLabels}
+                        toggleTeamCollapsed={toggleTeamCollapsed}
+                        labelPath={labelPathPrefix}
+                        currentTeamId={prefs.team || ''}
                     />
                 ))}
             </ul>
