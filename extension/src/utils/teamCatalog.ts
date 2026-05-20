@@ -248,8 +248,27 @@ export async function syncTeamBookmarks(
 }
 
 /**
- * Clear all team catalog data from storage.
- * Called when the user disables the toggle or signs out of a team.
+ * Clear only the user's team SELECTION + the selected team's cached
+ * bookmarks. Preserves the manifest cache (`dh_team_manifest`,
+ * `dh_team_manifest_etag`) so the dropdown stays populated and the
+ * user can re-select a team without re-fetching the manifest.
+ *
+ * Use this when the user picks "No team" from the dropdown.
+ */
+export async function clearTeamSelection(): Promise<void> {
+    await new Promise<void>((resolve) => {
+        chrome.storage.local.remove(
+            ['dh_team', 'dh_team_items', 'dh_team_etag', 'dh_team_synced'],
+            resolve,
+        );
+    });
+}
+
+/**
+ * Clear ALL team catalog data from storage, including the manifest
+ * cache. Use this for hard resets (e.g. the Options "Reset Settings"
+ * button). For "user picked No team" use clearTeamSelection() instead
+ * - the manifest survives and the dropdown remains populated.
  */
 export async function clearTeamBookmarks(): Promise<void> {
     await new Promise<void>((resolve) => {

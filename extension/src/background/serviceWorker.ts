@@ -8,7 +8,7 @@ import { setupContextMenu } from './contextMenu';
 // teamCatalog is imported statically: dynamic import() is disallowed in
 // ServiceWorkerGlobalScope per the HTML spec
 // (https://github.com/w3c/ServiceWorker/issues/1356).
-import { syncTeamBookmarks, clearTeamBookmarks, fetchManifest } from '../utils/teamCatalog';
+import { syncTeamBookmarks, clearTeamSelection, fetchManifest } from '../utils/teamCatalog';
 
 const NATIVE_HOST_NAME = "com.dynamics.helper.native";
 
@@ -264,7 +264,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             try {
                 const teamId = message.payload?.teamId;
                 if (!teamId) {
-                    await clearTeamBookmarks();
+                    await clearTeamSelection();
                     sendResponse({ status: "success", data: { items: [] } });
                 } else {
                     const prefsData = await new Promise<any>((resolve) => {
