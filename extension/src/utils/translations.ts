@@ -24,6 +24,20 @@ export const translations: TranslationDictionary = {
     offsetBottom: { en: "Bottom Offset (px)", zh: "底部边距 (px)" },
     offsetRight: { en: "Right Offset (px)", zh: "右侧边距 (px)" },
     statusBubble: { en: "Enable Status Bubble", zh: "启用状态气泡" },
+    enableTeamCatalog: { en: "Enable Team Catalog", zh: "启用团队目录" },
+    enableTeamCatalogHint: {
+        en: "Subscribe to a shared list of bookmarks from a manifest URL hosted by your team admin. Off by default - no network requests are made to fetch team data when disabled.",
+        zh: "订阅团队管理员托管的共享书签列表（通过 manifest URL）。默认关闭——关闭时不会发出任何团队相关的网络请求。",
+    },
+    manifestUrl: { en: "Manifest URL", zh: "Manifest URL" },
+    manifestUrlPlaceholder: {
+        en: "https://example.com/team-manifest.json",
+        zh: "https://example.com/team-manifest.json",
+    },
+    manifestFetchFailed: {
+        en: "Could not fetch manifest. Check the URL and try Refresh.",
+        zh: "无法获取 manifest。请检查 URL 并尝试刷新。",
+    },
     betaChannelLabel: { en: "Receive beta updates", zh: "接收 Beta 更新" },
     betaChannelHint: {
         en: "Beta versions include new features and fixes before they ship to stable. They may also be less tested. Toggling off does not downgrade you from a beta you are already on.",
