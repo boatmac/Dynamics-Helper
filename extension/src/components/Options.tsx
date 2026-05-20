@@ -4,7 +4,6 @@ import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { 
     Settings, 
-    Save, 
     RotateCcw, 
     Upload, 
     Download, 
@@ -251,7 +250,8 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     const isTeamItem = item.source === 'team';
     // Team folders ignore item.collapsed (next SW sync would wipe a write anyway)
     // and read from the ephemeral teamCollapsedLabels Set. Personal folders keep
-    // using item.collapsed which persists through handleSave -> dh_items.
+    // using item.collapsed which persists into dh_items via the setItems
+    // useEffect (instant persistence; no Save button as of Plan A).
     const teamCollapseKey = isTeamItem && item.type === 'folder'
         ? currentTeamId + '\0' + [...labelPath, item.label].join('\0')
         : '';
@@ -521,6 +521,15 @@ const Options: React.FC = () => {
     const { t } = useTranslation();
     const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
     const [items, setItems] = useState<MenuItem[]>([]);
+    // Plan A: bookmark editor mutations (add / edit / delete / drag / toggle
+    // collapse) persist instantly via this effect. Guard prevents the initial
+    // mount writing an empty array over the storage's real data before the
+    // load completes.
+    const itemsLoadedRef = useRef(false);
+    useEffect(() => {
+        if (!itemsLoadedRef.current) return;
+        chrome.storage.local.set({ dh_items: items });
+    }, [items]);
     type StatusMessage = { message: string; type: 'success' | 'error' } | null;
     const [status, setStatus] = useState<StatusMessage>(null);
     const statusTimerRef = useRef<number | null>(null);
@@ -754,6 +763,9 @@ const Options: React.FC = () => {
                 });
             };
             setItems(collapseFolders(loadedItems));
+            // Mark hydration complete — subsequent setItems calls will now
+            // fall through the persist-on-change useEffect above.
+            itemsLoadedRef.current = true;
         });
 
         // Load team catalog metadata
@@ -896,90 +908,6 @@ const Options: React.FC = () => {
         });
     };
 
-    const handleSave = () => {
-        // Snapshot manifest URL before write so we can detect a user edit
-        // independently of the async storage callback ordering.
-        const previousManifestUrl = lastFetchedManifestUrlRef.current;
-        const currentManifestUrl = prefs.teamManifestUrl || '';
-        const manifestUrlChanged = prefs.teamCatalogEnabled && currentManifestUrl !== '' && currentManifestUrl !== previousManifestUrl;
-        // Update ref immediately so a rapid second save does not double-fire.
-        lastFetchedManifestUrlRef.current = currentManifestUrl;
-
-        chrome.storage.local.set({ dh_prefs: prefs, dh_items: items }, () => {
-            // Also notify the Host via Service Worker if instructions changed
-             // We use a fire-and-forget message pattern here
-             if (prefs.userInstructions !== undefined) {
-                 chrome.runtime.sendMessage({
-                     type: "NATIVE_MSG",
-                     payload: {
-                        action: "update_config",
-                        payload: {
-                            user_instructions: prefs.userInstructions,
-                            user_prompt: prefs.userPrompt, // Add User Prompt for file storage
-                            config: {
-                                root_path: prefs.rootPath,
-                                skill_directories: prefs.skillDirectories ? prefs.skillDirectories.split(',').map(s => s.trim()).filter(Boolean) : [],
-                                mcp_config_path: prefs.mcpConfigPath,
-                                extension_preferences: {
-                                    auto_analyze_mode: prefs.autoAnalyzeMode,
-                                    user_prompt: prefs.userPrompt, // Keep in preferences for now (backend handles cleanup/sanitization)
-                                    enable_status_bubble: prefs.enableStatusBubble,
-                                    beta_channel_enabled: prefs.betaChannelEnabled,
-                                    use_workspace_only: prefs.useWorkspaceOnly,
-                                    log_level: prefs.logLevel,
-                                    language: prefs.language,
-                                    primary_color: prefs.primaryColor,
-                                    button_text: prefs.buttonText,
-                                    offset_bottom: prefs.offsetBottom,
-                                    offset_right: prefs.offsetRight,
-                                    team_catalog_enabled: prefs.teamCatalogEnabled,
-                                    team_manifest_url: prefs.teamManifestUrl,
-                                    team: prefs.team,
-                                    team_label: prefs.teamLabel
-                                }
-                            }
-                        }
-                     }
-                 }, (response) => {
-                     // Check for runtime errors (like if host isn't connected yet)
-                     if (chrome.runtime.lastError) {
-                         console.warn("Could not update host immediately:", chrome.runtime.lastError.message);
-                         // This is fine, the host loads the file on startup anyway
-                     } else {
-                         console.log("Host config updated response:", response);
-                     }
-                 });
-             }
-
-            // Trigger manifest fetch if the URL changed and team catalog is on.
-            // Routed through the service worker so spec section 3.4 (single
-            // network fetch entry) keeps holding: only fetchManifest from the
-            // SW reaches the network. The SW writes dh_team_manifest back to
-            // chrome.storage so the dropdown auto-populates without a reload.
-            if (manifestUrlChanged) {
-                chrome.runtime.sendMessage(
-                    { type: "SYNC_TEAM_CATALOG", payload: { manifestOnly: true } },
-                    (response) => {
-                        if (chrome.runtime.lastError) {
-                            showError(`Manifest fetch failed: ${chrome.runtime.lastError.message}`, 5000);
-                            return;
-                        }
-                        if (!response || response.status !== "success") {
-                            showError(`Manifest fetch failed: ${response?.error || 'Unknown error'}`, 5000);
-                            return;
-                        }
-                        // Success path: fall through. showSuccess(saved) already
-                        // fired below; we do not stack a second toast for the
-                        // fetch result because the dropdown populating is the
-                        // visible confirmation.
-                    }
-                );
-            }
-
-            showSuccess(t('savedSuccess'), 2000);
-        });
-    };
-
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
             setPrefs(DEFAULT_PREFS);
@@ -987,6 +915,12 @@ const Options: React.FC = () => {
                 loadItems().then(setItems);
                 setTeamItems([]);
                 setTeamSynced("");
+                // Sync host with default prefs so config.json matches the
+                // freshly-reset extension state. persistPrefs writes dh_prefs
+                // back too — that's OK because we just removed it; the
+                // overwrite is the same defaults we'd otherwise hydrate from
+                // DEFAULT_PREFS on next load.
+                persistPrefs(DEFAULT_PREFS);
                 showSuccess(t('resetComplete'), 2000);
             });
         }
@@ -1517,9 +1451,6 @@ const Options: React.FC = () => {
                             )}
                              <button onClick={handleReset} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-800 rounded-lg text-sm font-medium transition-colors">
                                 <RotateCcw size={16} /> {t('reset')}
-                            </button>
-                            <button onClick={handleSave} className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white font-medium rounded-lg shadow-sm hover:bg-teal-700 text-sm transition-colors ring-offset-2 focus:ring-2 ring-teal-500">
-                                <Save size={16} /> {t('saveChanges')}
                             </button>
                         </div>
                     </div>
