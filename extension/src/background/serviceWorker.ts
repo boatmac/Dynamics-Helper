@@ -264,8 +264,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     await clearTeamBookmarks();
                     sendResponse({ status: "success", data: { items: [] } });
                 } else {
-                    const items = await syncTeamBookmarks(teamId);
-                    sendResponse({ status: "success", data: { items, teamId } });
+                    const prefsData = await new Promise<any>((resolve) => {
+                        chrome.storage.local.get(['dh_prefs'], resolve);
+                    });
+                    const manifestUrl = prefsData.dh_prefs?.teamManifestUrl || '';
+                    if (!manifestUrl) {
+                        sendResponse({ status: "error", error: "Manifest URL not configured" });
+                    } else {
+                        const items = await syncTeamBookmarks(manifestUrl, teamId);
+                        sendResponse({ status: "success", data: { items, teamId } });
+                    }
                 }
             } catch (e: any) {
                 console.error('[DH-SW] Team catalog sync error:', e);
@@ -284,11 +292,40 @@ async function syncTeamCatalogOnStartup() {
         const data = await new Promise<any>((resolve) => {
             chrome.storage.local.get(['dh_prefs'], resolve);
         });
-        const teamId = data.dh_prefs?.team;
-        if (!teamId) return; // No team selected, skip
+        const prefs = data.dh_prefs || {};
+        const enabled = prefs.teamCatalogEnabled === true;
+        const manifestUrl = prefs.teamManifestUrl || '';
+        const teamId = prefs.team;
+
+        if (!enabled) {
+            // Toggle off - do not touch network. This is the default state.
+            return;
+        }
+        if (!manifestUrl) {
+            // Toggle on but URL not yet configured - no-op.
+            return;
+        }
+        if (!teamId) {
+            // No team selected - still refresh manifest so the dropdown gets
+            // populated next time the user opens Options.
+            const { fetchManifest } = await import('../utils/teamCatalog');
+            const cached = await new Promise<any>((resolve) => {
+                chrome.storage.local.get(['dh_team_manifest_etag'], resolve);
+            });
+            const result = await fetchManifest(manifestUrl, cached.dh_team_manifest_etag);
+            if (result && result.changed && result.manifest) {
+                await new Promise<void>((resolve) => {
+                    chrome.storage.local.set({
+                        dh_team_manifest: result.manifest,
+                        dh_team_manifest_etag: result.etag,
+                    }, resolve);
+                });
+            }
+            return;
+        }
 
         const { syncTeamBookmarks } = await import('../utils/teamCatalog');
-        const items = await syncTeamBookmarks(teamId);
+        const items = await syncTeamBookmarks(manifestUrl, teamId);
         console.log(`[DH-SW] Team catalog synced: ${items.length} items for team '${teamId}'`);
     } catch (e) {
         console.warn('[DH-SW] Team catalog sync failed:', e);
@@ -300,5 +337,10 @@ syncTeamCatalogOnStartup();
 
 // Also sync on install/update
 chrome.runtime.onInstalled.addListener(() => {
+    syncTeamCatalogOnStartup();
+});
+
+// Also sync on browser startup (when service worker is woken up cold)
+chrome.runtime.onStartup.addListener(() => {
     syncTeamCatalogOnStartup();
 });
