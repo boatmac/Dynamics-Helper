@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { useTranslation, LanguageCode } from '../utils/i18n';
+import { useTranslation, LanguageCode, PrefsLanguageProvider } from '../utils/i18n';
 import MarkdownPreview from './MarkdownPreview';
 import { trackEvent } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
@@ -1322,7 +1322,8 @@ const Options: React.FC = () => {
     }, [items, teamItems, prefs.teamCatalogEnabled]);
 
     return (
-        <DndProvider backend={HTML5Backend}>
+        <PrefsLanguageProvider language={prefs.language ?? 'auto'}>
+            <DndProvider backend={HTML5Backend}>
             <div className="min-h-screen bg-slate-50 py-10 px-6 font-[family-name:var(--font-jakarta)]">
                 <style dangerouslySetInnerHTML={{__html: `@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'); :root { --font-jakarta: 'Plus Jakarta Sans', sans-serif; } body { font-family: var(--font-jakarta); }`}} />
                 
@@ -1884,6 +1885,7 @@ const Options: React.FC = () => {
                 </div>
             </div>
         </DndProvider>
+        </PrefsLanguageProvider>
     );
 };
 
