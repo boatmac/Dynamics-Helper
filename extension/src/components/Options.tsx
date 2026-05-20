@@ -1748,6 +1748,23 @@ const Options: React.FC = () => {
                                                         value={prefs.teamManifestUrl || ''}
                                                         placeholder={t('manifestUrlPlaceholder')}
                                                         onChange={(e) => setPrefs(prev => ({ ...prev, teamManifestUrl: e.target.value }))}
+                                                        onBlur={() => {
+                                                            // Plan A: persist on focus loss. Manifest URL
+                                                            // also triggers fetch when actually changed
+                                                            // (lastFetchedManifestUrlRef diff inside
+                                                            // persistPrefs). Validate format first so a
+                                                            // half-typed "https://" doesn't burn a 404.
+                                                            setPrefs(prev => {
+                                                                const url = prev.teamManifestUrl || '';
+                                                                let valid = !url; // empty is fine, clears manifest
+                                                                if (url) {
+                                                                    try { new URL(url); valid = true; }
+                                                                    catch { valid = false; }
+                                                                }
+                                                                persistPrefs(prev, { fetchManifest: valid });
+                                                                return prev;
+                                                            });
+                                                        }}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
                                                     />
                                                     {teamFetchError && (
@@ -1810,7 +1827,7 @@ const Options: React.FC = () => {
                                                 <input
                                                     type="text"
                                                     value={prefs.rootPath || ""}
-                                                    onChange={(e) => setPrefs(prev => ({ ...prev, rootPath: e.target.value }))}
+                                                    onChange={(e) => setPrefs(prev => ({ ...prev, rootPath: e.target.value }))} onBlur={handlePrefBlur}
                                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
                                                 placeholder="C:\MyCases"
                                             />
@@ -1838,7 +1855,7 @@ const Options: React.FC = () => {
                                                 <input
                                                     type="text"
                                                     value={prefs.skillDirectories || ""}
-                                                    onChange={(e) => setPrefs(prev => ({ ...prev, skillDirectories: e.target.value }))}
+                                                    onChange={(e) => setPrefs(prev => ({ ...prev, skillDirectories: e.target.value }))} onBlur={handlePrefBlur}
                                                     disabled={prefs.useWorkspaceOnly !== false}
                                                     className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${prefs.useWorkspaceOnly !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/skills"
@@ -1854,7 +1871,7 @@ const Options: React.FC = () => {
                                                 <input
                                                     type="text"
                                                     value={prefs.mcpConfigPath || ""}
-                                                    onChange={(e) => setPrefs(prev => ({ ...prev, mcpConfigPath: e.target.value }))}
+                                                    onChange={(e) => setPrefs(prev => ({ ...prev, mcpConfigPath: e.target.value }))} onBlur={handlePrefBlur}
                                                     disabled={prefs.useWorkspaceOnly !== false}
                                                     className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${prefs.useWorkspaceOnly !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/mcp-config.json"
@@ -1893,7 +1910,7 @@ const Options: React.FC = () => {
                                                 ) : (
                                                     <textarea
                                                         value={prefs.userInstructions || ""}
-                                                        onChange={(e) => setPrefs(prev => ({ ...prev, userInstructions: e.target.value }))}
+                                                        onChange={(e) => setPrefs(prev => ({ ...prev, userInstructions: e.target.value }))} onBlur={handlePrefBlur}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
                                                         placeholder="Enter your custom instructions here..."
                                                     />
@@ -1932,7 +1949,7 @@ const Options: React.FC = () => {
                                                 ) : (
                                                     <textarea
                                                         value={prefs.userPrompt || ""}
-                                                        onChange={(e) => setPrefs(prev => ({ ...prev, userPrompt: e.target.value }))}
+                                                        onChange={(e) => setPrefs(prev => ({ ...prev, userPrompt: e.target.value }))} onBlur={handlePrefBlur}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
                                                         placeholder={t('userPromptPlaceholder')}
                                                     />
