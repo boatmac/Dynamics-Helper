@@ -9,7 +9,7 @@ import { TEAM_CATALOG_BASE_URL, TEAM_CATALOG_SAS_TOKEN } from './constants';
 export interface TeamManifestEntry {
     id: string;
     label: string;
-    file: string;
+    url: string;  // Absolute URL to the team's bookmark JSON (was: relative `file`)
 }
 
 export interface TeamManifest {
