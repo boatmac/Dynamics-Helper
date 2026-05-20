@@ -995,11 +995,16 @@ const Options: React.FC = () => {
     // --- Team Catalog Handlers ---
     const handleTeamChange = (teamId: string) => {
         const selectedTeam = teamList.find(t => t.id === teamId);
-        setPrefs(prev => ({
-            ...prev,
+        // Plan A: team selection is "instant persist". Symptom 3 fix —
+        // previously this only called setPrefs (React state), so refreshing
+        // the page would show the dropdown reverted to the old team while
+        // dh_team_items was already cleared (the SW message below ran
+        // immediately). Now updatePref writes dh_prefs to storage AND fires
+        // update_config to host in a single shot, keeping state aligned.
+        updatePref({
             team: teamId || undefined,
             teamLabel: selectedTeam?.label || undefined,
-        }));
+        });
 
         if (!teamId) {
             // Clear team data
