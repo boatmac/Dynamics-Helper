@@ -629,7 +629,7 @@ const Options: React.FC = () => {
                         // 2. Skill Directories (Array -> CSV String)
                         if (Array.isArray(hostConfig.skill_directories)) {
                             // Check incoming preference first
-                            const incomingWorkspaceOnly = hostConfig.extension_preferences?.useWorkspaceOnly ?? prev.useWorkspaceOnly;
+                            const incomingWorkspaceOnly = hostConfig.extension_preferences?.use_workspace_only ?? prev.useWorkspaceOnly;
 
                             // Only sync skillDirectories if we are NOT in workspace-only mode
                             if (incomingWorkspaceOnly !== true) {
@@ -671,16 +671,22 @@ const Options: React.FC = () => {
                             if (extPrefs.user_prompt !== undefined) newPrefs.userPrompt = extPrefs.user_prompt;
                             if (extPrefs.enable_status_bubble !== undefined) newPrefs.enableStatusBubble = extPrefs.enable_status_bubble;
                             if (extPrefs.beta_channel_enabled !== undefined) newPrefs.betaChannelEnabled = extPrefs.beta_channel_enabled;
-                            if (extPrefs.useWorkspaceOnly !== undefined) newPrefs.useWorkspaceOnly = extPrefs.useWorkspaceOnly;
+                            if (extPrefs.use_workspace_only !== undefined) newPrefs.useWorkspaceOnly = extPrefs.use_workspace_only;
                             if (extPrefs.log_level) newPrefs.logLevel = extPrefs.log_level;
                             
                             // Visual Settings (Now synced)
                             if (extPrefs.language) newPrefs.language = extPrefs.language;
-                            if (extPrefs.primaryColor) newPrefs.primaryColor = extPrefs.primaryColor;
-                            if (extPrefs.buttonText) newPrefs.buttonText = extPrefs.buttonText;
-                            if (extPrefs.offsetBottom !== undefined) newPrefs.offsetBottom = extPrefs.offsetBottom;
-                            if (extPrefs.offsetRight !== undefined) newPrefs.offsetRight = extPrefs.offsetRight;
-                            
+                            if (extPrefs.primary_color) newPrefs.primaryColor = extPrefs.primary_color;
+                            if (extPrefs.button_text) newPrefs.buttonText = extPrefs.button_text;
+                            if (extPrefs.offset_bottom !== undefined) newPrefs.offsetBottom = extPrefs.offset_bottom;
+                            if (extPrefs.offset_right !== undefined) newPrefs.offsetRight = extPrefs.offset_right;
+
+                            // Team Catalog (mirrored as backup; host does not read these)
+                            if (extPrefs.team_catalog_enabled !== undefined) newPrefs.teamCatalogEnabled = extPrefs.team_catalog_enabled;
+                            if (extPrefs.team_manifest_url !== undefined) newPrefs.teamManifestUrl = extPrefs.team_manifest_url;
+                            if (extPrefs.team !== undefined) newPrefs.team = extPrefs.team;
+                            if (extPrefs.team_label !== undefined) newPrefs.teamLabel = extPrefs.team_label;
+
                             changed = true;
                         }
 
@@ -759,13 +765,17 @@ const Options: React.FC = () => {
                                     user_prompt: prefs.userPrompt, // Keep in preferences for now (backend handles cleanup/sanitization)
                                     enable_status_bubble: prefs.enableStatusBubble,
                                     beta_channel_enabled: prefs.betaChannelEnabled,
-                                    useWorkspaceOnly: prefs.useWorkspaceOnly,
+                                    use_workspace_only: prefs.useWorkspaceOnly,
                                     log_level: prefs.logLevel,
                                     language: prefs.language,
-                                    primaryColor: prefs.primaryColor,
-                                    buttonText: prefs.buttonText,
-                                    offsetBottom: prefs.offsetBottom,
-                                    offsetRight: prefs.offsetRight
+                                    primary_color: prefs.primaryColor,
+                                    button_text: prefs.buttonText,
+                                    offset_bottom: prefs.offsetBottom,
+                                    offset_right: prefs.offsetRight,
+                                    team_catalog_enabled: prefs.teamCatalogEnabled,
+                                    team_manifest_url: prefs.teamManifestUrl,
+                                    team: prefs.team,
+                                    team_label: prefs.teamLabel
                                 }
                             }
                         }

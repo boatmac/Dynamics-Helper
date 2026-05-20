@@ -798,7 +798,7 @@ class NativeHost:
 
         # Check Workspace Only Mode
         ext_prefs = final_data.get("extension_preferences", {})
-        use_workspace_only = ext_prefs.get("useWorkspaceOnly", True)
+        use_workspace_only = ext_prefs.get("use_workspace_only", True)
 
         # Apply log level from config (default: INFO for normal use)
         _apply_log_level(ext_prefs.get("log_level", "INFO"))
