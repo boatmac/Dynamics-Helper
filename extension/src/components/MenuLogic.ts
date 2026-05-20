@@ -15,6 +15,28 @@ export interface MenuItem {
     source?: 'team' | 'personal';
 }
 
+/**
+ * Flat-merge personal and team items at the top level.
+ *
+ * Order: personal first (preserves user order), then team items in their
+ * manifest order. Team items whose top-level label matches any personal
+ * item's top-level label are dropped entirely (including their subtree).
+ * No deep merge - if both have a "Favorite" folder, the team's Favorite
+ * and all its children are silently omitted (per spec § 2 non-goals).
+ *
+ * Important invariant: personal items always occupy the first
+ * `personal.length` slots of the result. Callers that index into the
+ * merged array using personal-only paths (e.g. setItems(prev =>
+ * updateItemAt(path, ...))) remain correct without translation.
+ *
+ * Pure function: no I/O, no side effects.
+ */
+export function mergeMenus(personal: MenuItem[], team: MenuItem[]): MenuItem[] {
+    const personalLabels = new Set(personal.map(item => item.label));
+    const teamFiltered = team.filter(item => !personalLabels.has(item.label));
+    return [...personal, ...teamFiltered];
+}
+
 export function useMenuLogic() {
     const [items, setItems] = useState<MenuItem[]>([]);
     const [navStack, setNavStack] = useState<MenuItem[][]>([]);
@@ -110,7 +132,7 @@ async function loadItems(): Promise<MenuItem[]> {
     }
 
     // 2. Load team items from cache
-    let teamFolder: MenuItem | null = null;
+    let teamItems: MenuItem[] = [];
     try {
         if (chrome?.storage?.local) {
             const teamData = await new Promise<any>((resolve) => {
@@ -118,29 +140,18 @@ async function loadItems(): Promise<MenuItem[]> {
             });
             // Respect the team-catalog toggle: when disabled, do not surface
             // cached team data in the FAB even if dh_team_items still exists.
-            // Spec 2026-05-20-team-catalog-user-config-design.md § 3.7:
-            // "Disabling the toggle hides team data ... but does not delete
-            //  the local cache - turning it back on restores your previous
-            //  selection."
+            // Spec 2026-05-20-team-catalog-user-config-design.md § 3.7.
             const enabled = teamData.dh_prefs?.teamCatalogEnabled === true;
-            if (enabled && Array.isArray(teamData.dh_team_items) && teamData.dh_team_items.length > 0) {
-                const teamLabel = teamData.dh_prefs?.teamLabel || 'Team';
-                teamFolder = {
-                    type: 'folder',
-                    label: teamLabel,
-                    icon: 'building',
-                    source: 'team',
-                    children: teamData.dh_team_items,
-                };
+            if (enabled && Array.isArray(teamData.dh_team_items)) {
+                teamItems = teamData.dh_team_items;
             }
         }
     } catch (_) { }
 
-    // 3. Merge: team folder first, then personal items
-    if (teamFolder) {
-        return [teamFolder, ...personalItems];
-    }
-    return personalItems;
+    // 3. Flat-merge: personal first, team appended, label collisions
+    // resolved by personal-wins (team's same-label item dropped entirely).
+    // See mergeMenus() docstring + spec § 3.1.
+    return mergeMenus(personalItems, teamItems);
 }
 
 export async function resolveDynamicUrl(rawUrl: string): Promise<string | null> {
