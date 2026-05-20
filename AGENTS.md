@@ -112,7 +112,15 @@ This file defines the operational rules, development workflows, and coding stand
   * The flag should reset only on: (a) identity change (new case number/ticket), (b) explicit user-triggered refresh.
   * See `FAB.tsx` for the canonical implementation of this pattern.
   * **Beta channel preference** (`prefs.betaChannelEnabled`): plain user preference, no `isUserEdited` guard needed — there is no background refresh path that overwrites it. Mirrored to host `config.json` as `extension_preferences.beta_channel_enabled`.
-  * **Team catalog preferences** (`prefs.teamCatalogEnabled`, `prefs.teamManifestUrl`): plain user preferences, no `isUserEdited` guard needed. These are NOT mirrored to host `config.json` — team catalog is a purely extension-side feature; the host process never reads team data. See `docs/superpowers/specs/2026-05-20-team-catalog-user-config-design.md`.
+  * **Team catalog preferences** (`prefs.teamCatalogEnabled`, `prefs.teamManifestUrl`, `prefs.team`, `prefs.teamLabel`): plain user preferences, no `isUserEdited` guard needed. Mirrored to host `config.json` as `extension_preferences.team_catalog_enabled` / `team_manifest_url` / `team` / `team_label`. Host treats these as passive holders (does not read them) — purpose is backup/restore parity. See `docs/superpowers/specs/2026-05-21-team-prefs-config-mirror-design.md`.
+* **Options config persistence principle:**
+  * `%LOCALAPPDATA%\DynamicsHelper\config.json` is the canonical backing store for Options page configuration. It is the file users back up, copy across machines, or restore after clearing browser cache.
+  * **Default rule:** New Options fields are mirrored to `extension_preferences` in `config.json` unless explicitly excluded.
+  * **Current exclusions (3):**
+    * `userInstructions` — stored separately in `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md` (markdown file).
+    * `userPrompt` — stored separately in `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md`.
+    * `dh_items` (bookmark menu) — only in `chrome.storage.local`, not currently persisted to host.
+  * **Naming convention:** Field keys inside `extension_preferences` use **snake_case** (matches Python host PEP 8 style). The TypeScript-side `prefs` object uses camelCase; the Options.tsx host-sync block translates between them. Historical camelCase keys (`useWorkspaceOnly`, `primaryColor`, `buttonText`, `offsetBottom`, `offsetRight`) were normalized to snake_case in v2.0.70; pre-normalization config files lose those 5 values until the next Save Changes click rewrites them with the new names.
 * **Styling:**
   * **Hybrid Approach:** The project uses a mix of inline styles (`style={{...}}`) and utility classes (`clsx`, `tailwind-merge`).
   * **Preference:** New UI elements should prefer Tailwind classes via `className` where possible, but consistency with existing inline styles is acceptable for complex dynamic positioning.
