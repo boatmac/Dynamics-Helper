@@ -207,6 +207,8 @@ interface DraggableItemProps {
     moveItem: (dragPath: number[], hoverPath: number[], placement: 'before' | 'after' | 'inside') => void;
     renderList: (list: MenuItem[], pathPrefix: number[]) => React.ReactNode;
     setItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
+    setTeamItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
+    personalCount: number;
     setEditingItemPath: React.Dispatch<React.SetStateAction<number[] | null>>;
     editingItemPath: number[] | null;
     updateItemAt: (path: number[], newItem: MenuItem, list: MenuItem[]) => MenuItem[];
@@ -223,6 +225,8 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     moveItem, 
     renderList, 
     setItems, 
+    setTeamItems,
+    personalCount,
     setEditingItemPath, 
     editingItemPath, 
     updateItemAt, 
@@ -385,19 +389,22 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                         onClick={(e) => {
                              e.stopPropagation();
                              if (item.type === 'folder') {
-                                 // Team items are read-only - never mutate setItems
-                                 // with a path that indexes into the team region of
-                                 // the merged view (it would be out-of-bounds in
-                                 // personal-only `items` state and crash the page).
-                                 // Just allow selection visual state.
-                                 if (isTeamItem) {
-                                     setSelectedPath(currentPath);
-                                     return;
-                                 }
-                                 // Toggle collapse
+                                 // Toggle collapse. Personal vs team folders
+                                 // live in different state arrays; pick the
+                                 // right setter and translate the path.
+                                 // Team items occupy merged indices
+                                 // [personalCount, personalCount + teamCount);
+                                 // subtract personalCount to get the team-only
+                                 // index. This keeps the page from crashing
+                                 // (the previous bug: writing a team path
+                                 // into personal state corrupted the array).
                                  const newItem = { ...item, collapsed: !item.collapsed };
-                                 setItems(prev => updateItemAt(currentPath, newItem, prev));
-                                 // Also select it
+                                 if (isTeamItem) {
+                                     const teamPath = [currentPath[0] - personalCount, ...currentPath.slice(1)];
+                                     setTeamItems(prev => updateItemAt(teamPath, newItem, prev));
+                                 } else {
+                                     setItems(prev => updateItemAt(currentPath, newItem, prev));
+                                 }
                                  setSelectedPath(currentPath);
                              } else {
                                  setSelectedPath(null);
@@ -1163,6 +1170,8 @@ const Options: React.FC = () => {
                         moveItem={moveItem}
                         renderList={renderList}
                         setItems={setItems}
+                        setTeamItems={setTeamItems}
+                        personalCount={items.length}
                         setEditingItemPath={setEditingItemPath}
                         editingItemPath={editingItemPath}
                         updateItemAt={updateItemAt}
