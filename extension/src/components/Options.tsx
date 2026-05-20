@@ -524,12 +524,12 @@ const Options: React.FC = () => {
     type StatusMessage = { message: string; type: 'success' | 'error' } | null;
     const [status, setStatus] = useState<StatusMessage>(null);
     const statusTimerRef = useRef<number | null>(null);
-    // Track the manifest URL as it was at the moment of last load/save. When
-    // handleSave detects a change vs. this ref it triggers a manifest fetch.
-    // Sentinel '__unset__' means "we haven't seen storage yet" so the very
-    // first save (which loads dh_prefs and writes it back unchanged) does not
-    // count as a URL change.
-    const lastSavedManifestUrlRef = useRef<string>('__unset__');
+    // Track the manifest URL of the last successful fetch. When persistPrefs
+    // sees a different teamManifestUrl come through, it triggers a fresh
+    // manifest fetch. Sentinel '__unset__' means "no load/save has happened
+    // yet" so the very first storage hydration (which writes prefs back
+    // unchanged) does not spuriously count as a URL change.
+    const lastFetchedManifestUrlRef = useRef<string>('__unset__');
 
     // Status toast helpers - centralize timer cleanup and type tagging.
     // Use these instead of calling setStatus directly so success/error colors
@@ -605,7 +605,7 @@ const Options: React.FC = () => {
                 // Seed the change-detection ref with whatever is on disk so the
                 // very first save after page open is a no-op for manifest fetch
                 // (only an explicit user-driven URL change should trigger fetch).
-                lastSavedManifestUrlRef.current = loadedPrefs.teamManifestUrl || '';
+                lastFetchedManifestUrlRef.current = loadedPrefs.teamManifestUrl || '';
                 
                 setPrefs(prev => {
                     // Merge strategy: Default -> Loaded -> User Edits (prev)
@@ -629,7 +629,7 @@ const Options: React.FC = () => {
             } else {
                 // No saved prefs yet (first run). The ref defaults to '' so the
                 // first save with a non-empty manifest URL triggers a fetch.
-                lastSavedManifestUrlRef.current = '';
+                lastFetchedManifestUrlRef.current = '';
             }
 
             // Sync with Native Host (Source of Truth for backend config)
@@ -721,7 +721,7 @@ const Options: React.FC = () => {
                                 newPrefs.teamManifestUrl = extPrefs.team_manifest_url;
                                 // Re-seed the change-detection ref so a host-driven URL
                                 // does not look like a user edit on the next save.
-                                lastSavedManifestUrlRef.current = extPrefs.team_manifest_url || '';
+                                lastFetchedManifestUrlRef.current = extPrefs.team_manifest_url || '';
                             }
                             if (extPrefs.team !== undefined) newPrefs.team = extPrefs.team;
                             if (extPrefs.team_label !== undefined) newPrefs.teamLabel = extPrefs.team_label;
@@ -775,6 +775,11 @@ const Options: React.FC = () => {
     }, []);
 
     // --- Prefs Handlers ---
+    // Generic onChange for text/number inputs and the color picker. Plan A:
+    // these are text-ish fields, so onChange only mutates local state.
+    // Persistence happens in handlePrefBlur when the field loses focus —
+    // prevents storms of chrome.storage.set + host RPC during typing /
+    // color-picker drag.
     const handlePrefChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
         setPrefs(prev => ({
@@ -783,14 +788,122 @@ const Options: React.FC = () => {
         }));
     };
 
+    // onBlur sibling of handlePrefChange — commits whatever the user typed
+    // by routing through persistPrefs against the latest state snapshot.
+    const handlePrefBlur = () => {
+        setPrefs(prev => {
+            persistPrefs(prev);
+            return prev;
+        });
+    };
+
+    // --- Persistence: single entry point for ALL prefs writes ---
+    //
+    // Plan A: Options runs in "instant persistence" mode. Every onChange
+    // (selects/checkboxes) and every onBlur (text inputs) routes through
+    // persistPrefs(), which:
+    //
+    //   1. Writes dh_prefs to chrome.storage.local
+    //   2. Fires update_config to the host (fire-and-forget; host loads the
+    //      file on startup anyway so transient failure is recoverable)
+    //   3. If teamManifestUrl differs from lastFetchedManifestUrlRef AND
+    //      team catalog is enabled, asks the SW to fetch the manifest.
+    //      Caller opts into this with { fetchManifest: true } so e.g. a
+    //      colour-picker change does not waste an HTTP call.
+    //
+    // Items (dh_items) are NOT written here — the bookmark editor uses
+    // setItems directly into chrome.storage via its own useEffect (see
+    // dh_items persistence above). Mixing the two would create double-writes
+    // on every editor click. Spec § 3.5 / AGENTS.md § 3 (after C7 update).
+    const buildHostConfigPayload = (nextPrefs: Preferences) => ({
+        action: "update_config",
+        payload: {
+            user_instructions: nextPrefs.userInstructions,
+            user_prompt: nextPrefs.userPrompt,
+            config: {
+                root_path: nextPrefs.rootPath,
+                skill_directories: nextPrefs.skillDirectories ? nextPrefs.skillDirectories.split(',').map(s => s.trim()).filter(Boolean) : [],
+                mcp_config_path: nextPrefs.mcpConfigPath,
+                extension_preferences: {
+                    auto_analyze_mode: nextPrefs.autoAnalyzeMode,
+                    user_prompt: nextPrefs.userPrompt,
+                    enable_status_bubble: nextPrefs.enableStatusBubble,
+                    beta_channel_enabled: nextPrefs.betaChannelEnabled,
+                    use_workspace_only: nextPrefs.useWorkspaceOnly,
+                    log_level: nextPrefs.logLevel,
+                    language: nextPrefs.language,
+                    primary_color: nextPrefs.primaryColor,
+                    button_text: nextPrefs.buttonText,
+                    offset_bottom: nextPrefs.offsetBottom,
+                    offset_right: nextPrefs.offsetRight,
+                    team_catalog_enabled: nextPrefs.teamCatalogEnabled,
+                    team_manifest_url: nextPrefs.teamManifestUrl,
+                    team: nextPrefs.team,
+                    team_label: nextPrefs.teamLabel,
+                }
+            }
+        }
+    });
+
+    const persistPrefs = (nextPrefs: Preferences, opts?: { fetchManifest?: boolean }) => {
+        chrome.storage.local.set({ dh_prefs: nextPrefs }, () => {
+            // Host update — fire-and-forget. Failures are logged but don't
+            // surface to the user because the host re-reads config.json on
+            // next startup. A red toast would be noisy for every keystroke
+            // in dev when the host isn't running.
+            chrome.runtime.sendMessage({
+                type: "NATIVE_MSG",
+                payload: buildHostConfigPayload(nextPrefs)
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    console.warn("Could not update host immediately:", chrome.runtime.lastError.message);
+                }
+            });
+
+            // Manifest fetch — only when caller opts in AND URL actually
+            // changed since last fetch. Diff guard prevents a refetch when
+            // the user toggles e.g. teamCatalogEnabled without touching URL.
+            if (opts?.fetchManifest && nextPrefs.teamCatalogEnabled && nextPrefs.teamManifestUrl) {
+                const previousUrl = lastFetchedManifestUrlRef.current;
+                const currentUrl = nextPrefs.teamManifestUrl;
+                if (currentUrl !== previousUrl) {
+                    lastFetchedManifestUrlRef.current = currentUrl;
+                    chrome.runtime.sendMessage(
+                        { type: "SYNC_TEAM_CATALOG", payload: { manifestOnly: true } },
+                        (response) => {
+                            if (chrome.runtime.lastError) {
+                                showError(`Manifest fetch failed: ${chrome.runtime.lastError.message}`, 5000);
+                                return;
+                            }
+                            if (!response || response.status !== "success") {
+                                showError(`Manifest fetch failed: ${response?.error || 'Unknown error'}`, 5000);
+                            }
+                        }
+                    );
+                }
+            }
+        });
+    };
+
+    // Convenience: setPrefs + persist in one call. All instant-persist
+    // sites (selects, checkboxes, toggles) use this. Text-input onBlur
+    // handlers also use it after their onChange-only setPrefs.
+    const updatePref = (patch: Partial<Preferences>, opts?: { fetchManifest?: boolean }) => {
+        setPrefs(prev => {
+            const next = { ...prev, ...patch };
+            persistPrefs(next, opts);
+            return next;
+        });
+    };
+
     const handleSave = () => {
         // Snapshot manifest URL before write so we can detect a user edit
         // independently of the async storage callback ordering.
-        const previousManifestUrl = lastSavedManifestUrlRef.current;
+        const previousManifestUrl = lastFetchedManifestUrlRef.current;
         const currentManifestUrl = prefs.teamManifestUrl || '';
         const manifestUrlChanged = prefs.teamCatalogEnabled && currentManifestUrl !== '' && currentManifestUrl !== previousManifestUrl;
         // Update ref immediately so a rapid second save does not double-fire.
-        lastSavedManifestUrlRef.current = currentManifestUrl;
+        lastFetchedManifestUrlRef.current = currentManifestUrl;
 
         chrome.storage.local.set({ dh_prefs: prefs, dh_items: items }, () => {
             // Also notify the Host via Service Worker if instructions changed
@@ -1450,7 +1563,7 @@ const Options: React.FC = () => {
                                         <select
                                             name="language"
                                             value={prefs.language || 'auto'}
-                                            onChange={(e) => setPrefs(prev => ({ ...prev, language: e.target.value as LanguageCode }))}
+                                            onChange={(e) => updatePref({ language: e.target.value as LanguageCode })}
                                             className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
                                         >
                                             <option value="auto">{t('auto')}</option>
@@ -1467,7 +1580,7 @@ const Options: React.FC = () => {
                                                 type="text"
                                                 name="buttonText"
                                                 value={prefs.buttonText}
-                                                onChange={handlePrefChange}
+                                                onChange={handlePrefChange} onBlur={handlePrefBlur}
                                                 maxLength={3}
                                                 className="w-full pl-9 px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-medium"
                                                 placeholder="DH"
@@ -1483,7 +1596,7 @@ const Options: React.FC = () => {
                                                     type="color"
                                                     name="primaryColor"
                                                     value={prefs.primaryColor}
-                                                    onChange={handlePrefChange}
+                                                    onChange={handlePrefChange} onBlur={handlePrefBlur}
                                                     className="absolute -top-2 -left-2 w-16 h-16 cursor-pointer p-0 border-0"
                                                 />
                                             </div>
@@ -1491,7 +1604,7 @@ const Options: React.FC = () => {
                                                 type="text"
                                                 name="primaryColor"
                                                 value={prefs.primaryColor}
-                                                onChange={handlePrefChange}
+                                                onChange={handlePrefChange} onBlur={handlePrefBlur}
                                                 className="flex-1 px-3 py-2 border border-slate-200 rounded-lg outline-none uppercase font-mono text-sm text-slate-600 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all"
                                             />
                                         </div>
@@ -1504,7 +1617,7 @@ const Options: React.FC = () => {
                                                 type="number"
                                                 name="offsetBottom"
                                                 value={prefs.offsetBottom}
-                                                onChange={handlePrefChange}
+                                                onChange={handlePrefChange} onBlur={handlePrefBlur}
                                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm"
                                             />
                                         </div>
@@ -1514,7 +1627,7 @@ const Options: React.FC = () => {
                                                 type="number"
                                                 name="offsetRight"
                                                 value={prefs.offsetRight}
-                                                onChange={handlePrefChange}
+                                                onChange={handlePrefChange} onBlur={handlePrefBlur}
                                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm"
                                             />
                                         </div>
@@ -1534,7 +1647,7 @@ const Options: React.FC = () => {
                                             <select
                                                 name="autoAnalyzeMode"
                                                 value={prefs.autoAnalyzeMode || 'disabled'}
-                                                onChange={(e) => setPrefs(prev => ({ ...prev, autoAnalyzeMode: e.target.value as any }))}
+                                                onChange={(e) => updatePref({ autoAnalyzeMode: e.target.value as any })}
                                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
                                             >
                                                 <option value="disabled">{t('modeDisabled')}</option>
@@ -1549,7 +1662,7 @@ const Options: React.FC = () => {
                                                 type="checkbox"
                                                 id="enableStatusBubble"
                                                 checked={prefs.enableStatusBubble !== false}
-                                                onChange={(e) => setPrefs(prev => ({ ...prev, enableStatusBubble: e.target.checked }))}
+                                                onChange={(e) => updatePref({ enableStatusBubble: e.target.checked })}
                                                 className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
                                             />
                                             <label htmlFor="enableStatusBubble" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
@@ -1564,7 +1677,7 @@ const Options: React.FC = () => {
                                                 checked={prefs.betaChannelEnabled === true}
                                                 onChange={(e) => {
                                                     const enabled = e.target.checked;
-                                                    setPrefs(prev => ({ ...prev, betaChannelEnabled: enabled }));
+                                                    updatePref({ betaChannelEnabled: enabled });
                                                     try {
                                                         trackEvent('Beta Channel Toggled', { enabled });
                                                     } catch { /* telemetry never blocks UX */ }
@@ -1587,7 +1700,7 @@ const Options: React.FC = () => {
                                             </p>
                                             <select
                                                 value={prefs.logLevel || 'INFO'}
-                                                onChange={(e) => setPrefs(prev => ({ ...prev, logLevel: e.target.value as Preferences['logLevel'] }))}
+                                                onChange={(e) => updatePref({ logLevel: e.target.value as Preferences['logLevel'] })}
                                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
                                             >
                                                 <option value="DEBUG">DEBUG</option>
@@ -1611,7 +1724,7 @@ const Options: React.FC = () => {
                                                     checked={prefs.teamCatalogEnabled === true}
                                                     onChange={(e) => {
                                                         const enabled = e.target.checked;
-                                                        setPrefs(prev => ({ ...prev, teamCatalogEnabled: enabled }));
+                                                        updatePref({ teamCatalogEnabled: enabled });
                                                         try {
                                                             trackEvent('Team Catalog Toggled', { enabled });
                                                         } catch { /* telemetry never blocks UX */ }
@@ -1708,7 +1821,7 @@ const Options: React.FC = () => {
                                                 type="checkbox"
                                                 id="useWorkspaceOnly"
                                                 checked={prefs.useWorkspaceOnly !== false}
-                                                onChange={(e) => setPrefs(prev => ({ ...prev, useWorkspaceOnly: e.target.checked }))}
+                                                onChange={(e) => updatePref({ useWorkspaceOnly: e.target.checked })}
                                                 className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
                                             />
                                             <label htmlFor="useWorkspaceOnly" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
