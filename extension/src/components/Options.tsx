@@ -751,7 +751,7 @@ const Options: React.FC = () => {
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
             setPrefs(DEFAULT_PREFS);
-            chrome.storage.local.remove(["dh_prefs", "dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_synced"], () => {
+            chrome.storage.local.remove(["dh_prefs", "dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced"], () => {
                 loadItems().then(setItems);
                 setTeamItems([]);
                 setTeamSynced("");

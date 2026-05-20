@@ -116,7 +116,14 @@ async function loadItems(): Promise<MenuItem[]> {
             const teamData = await new Promise<any>((resolve) => {
                 chrome.storage.local.get(['dh_team_items', 'dh_prefs'], resolve);
             });
-            if (Array.isArray(teamData.dh_team_items) && teamData.dh_team_items.length > 0) {
+            // Respect the team-catalog toggle: when disabled, do not surface
+            // cached team data in the FAB even if dh_team_items still exists.
+            // Spec 2026-05-20-team-catalog-user-config-design.md § 3.7:
+            // "Disabling the toggle hides team data ... but does not delete
+            //  the local cache - turning it back on restores your previous
+            //  selection."
+            const enabled = teamData.dh_prefs?.teamCatalogEnabled === true;
+            if (enabled && Array.isArray(teamData.dh_team_items) && teamData.dh_team_items.length > 0) {
                 const teamLabel = teamData.dh_prefs?.teamLabel || 'Team';
                 teamFolder = {
                     type: 'folder',
