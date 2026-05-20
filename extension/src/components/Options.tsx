@@ -529,7 +529,35 @@ const Options: React.FC = () => {
     const { t } = useTranslation();
     const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
     const [items, setItems] = useState<MenuItem[]>([]);
-    const [status, setStatus] = useState<string>("");
+    type StatusMessage = { message: string; type: 'success' | 'error' } | null;
+    const [status, setStatus] = useState<StatusMessage>(null);
+    const statusTimerRef = useRef<number | null>(null);
+
+    // Status toast helpers - centralize timer cleanup and type tagging.
+    // Use these instead of calling setStatus directly so success/error colors
+    // and auto-dismiss timing stay consistent across the file.
+    const clearStatus = () => {
+        if (statusTimerRef.current !== null) {
+            clearTimeout(statusTimerRef.current);
+            statusTimerRef.current = null;
+        }
+        setStatus(null);
+    };
+    const showStatus = (message: string, type: 'success' | 'error', autoDismissMs?: number) => {
+        if (statusTimerRef.current !== null) {
+            clearTimeout(statusTimerRef.current);
+            statusTimerRef.current = null;
+        }
+        setStatus({ message, type });
+        if (autoDismissMs !== undefined) {
+            statusTimerRef.current = window.setTimeout(() => {
+                setStatus(null);
+                statusTimerRef.current = null;
+            }, autoDismissMs);
+        }
+    };
+    const showSuccess = (message: string, autoDismissMs?: number) => showStatus(message, 'success', autoDismissMs);
+    const showError = (message: string, autoDismissMs?: number) => showStatus(message, 'error', autoDismissMs);
     const [hostVersion, setHostVersion] = useState<string>("");
     const [updateAvailable, setUpdateAvailable] = useState<{version: string, url: string} | null>(null);
     const [isUpdating, setIsUpdating] = useState(false);
@@ -791,8 +819,7 @@ const Options: React.FC = () => {
                  });
              }
 
-            setStatus(t('savedSuccess'));
-            setTimeout(() => setStatus(""), 2000);
+            showSuccess(t('savedSuccess'), 2000);
         });
     };
 
@@ -803,7 +830,7 @@ const Options: React.FC = () => {
                 loadItems().then(setItems);
                 setTeamItems([]);
                 setTeamSynced("");
-                setStatus(t('resetComplete'));
+                showSuccess(t('resetComplete'), 2000);
             });
         }
     };
@@ -836,16 +863,14 @@ const Options: React.FC = () => {
         }, (response) => {
             setIsSyncingTeam(false);
             if (chrome.runtime.lastError) {
-                setStatus(`Team sync failed: ${chrome.runtime.lastError.message}`);
-                setTimeout(() => setStatus(""), 3000);
+                showError(`Team sync failed: ${chrome.runtime.lastError.message}`, 3000);
                 return;
             }
             if (response?.status === "success") {
                 setTeamItems(response.data.items || []);
                 setTeamSynced(new Date().toISOString());
             } else {
-                setStatus(`Team sync failed: ${response?.error || 'Unknown error'}`);
-                setTimeout(() => setStatus(""), 3000);
+                showError(`Team sync failed: ${response?.error || 'Unknown error'}`, 3000);
             }
         });
     };
@@ -888,18 +913,15 @@ const Options: React.FC = () => {
                 }
                 console.log("[Options] Received update available:", message.payload);
                 setUpdateAvailable(message.payload);
-                setStatus(`v${message.payload.version} ${t('availableForUpdate')}`);
-                setTimeout(() => setStatus(""), 5000);
+                showSuccess(`v${message.payload.version} ${t('availableForUpdate')}`, 5000);
             }
             
             if (message.type === "NATIVE_UPDATE_NOT_AVAILABLE") {
-                setStatus(t('upToDate'));
-                setTimeout(() => setStatus(""), 3000);
+                showSuccess(t('upToDate'), 3000);
             }
 
             if (message.type === "NATIVE_UPDATE_ERROR") {
-                setStatus(`${t('checkFailed')}: ${message.payload.error}`);
-                setTimeout(() => setStatus(""), 5000);
+                showError(`${t('checkFailed')}: ${message.payload.error}`, 5000);
             }
         };
 
@@ -936,7 +958,7 @@ const Options: React.FC = () => {
         if (!confirm(`Update to version ${updateAvailable.version}? This will restart the extension.`)) return;
 
         setIsUpdating(true);
-        setStatus(t('downloadingUpdate'));
+        showSuccess(t('downloadingUpdate'));
 
         chrome.runtime.sendMessage({
             type: "NATIVE_MSG",
@@ -947,36 +969,38 @@ const Options: React.FC = () => {
         }, (response) => {
             setIsUpdating(false);
             if (chrome.runtime.lastError) {
-                setStatus(`${t('updateFailed')}: ` + chrome.runtime.lastError.message);
+                showError(`${t('updateFailed')}: ` + chrome.runtime.lastError.message);
                 return;
             }
             
             if (response && response.status === "success") {
                 setUpdateAvailable(null);
                 chrome.storage.local.remove("pending_update");
-                setStatus(t('updateSuccess'));
+                showSuccess(t('updateSuccess'));
                 setTimeout(() => {
                     chrome.runtime.reload();
                 }, 1000);
             } else {
-                setStatus(`${t('updateFailed')}: ` + (response?.error || "Unknown error"));
+                showError(`${t('updateFailed')}: ` + (response?.error || "Unknown error"));
             }
         });
     };
 
     const handleCheckUpdates = () => {
-        setStatus(t('checkingForUpdates'));
+        showSuccess(t('checkingForUpdates'));
         chrome.runtime.sendMessage({ 
             type: "NATIVE_MSG", 
             payload: { action: "check_updates" } 
         });
         
-        // Safety timeout (60s) in case host doesn't respond
+        // Safety timeout (60s) in case host doesn't respond.
+        // Only flip to "timed out" if the status is still the "checking" message
+        // (i.e. user hasn't received a real response in the meantime).
         const checkingMsg = t('checkingForUpdates');
         const timedOutMsg = t('checkTimedOut');
         setTimeout(() => {
-            setStatus(prev => prev === checkingMsg ? timedOutMsg : prev);
-            setTimeout(() => setStatus(prev => prev === timedOutMsg ? "" : prev), 3000);
+            setStatus(prev => (prev?.message === checkingMsg ? { message: timedOutMsg, type: 'error' } : prev));
+            setTimeout(() => setStatus(prev => (prev?.message === timedOutMsg ? null : prev)), 3000);
         }, 60000);
     };
 
@@ -1178,8 +1202,7 @@ const Options: React.FC = () => {
                 const json = JSON.parse(text);
                 const newItems = Array.isArray(json) ? json : (json.items || []);
                 setItems(newItems);
-                setStatus(t('importSuccess'));
-                setTimeout(() => setStatus(""), 2000);
+                showSuccess(t('importSuccess'), 2000);
             } catch (err) {
                 alert("Failed to parse JSON");
             }
@@ -1294,9 +1317,16 @@ const Options: React.FC = () => {
                     </div>
 
                     {status && (
-                        <div className="bg-emerald-50 text-emerald-700 text-center py-3 font-medium text-sm border-b border-emerald-100 flex items-center justify-center gap-2 animate-fade-in-down">
-                            <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-                            {t('savedSuccess') === status || t('savedSuccess') === status ? status : status}
+                        <div
+                            className={
+                                status.type === 'error'
+                                    ? "bg-red-50 text-red-700 text-center py-3 font-medium text-sm border-b border-red-100 flex items-center justify-center gap-2 animate-fade-in-down"
+                                    : "bg-emerald-50 text-emerald-700 text-center py-3 font-medium text-sm border-b border-emerald-100 flex items-center justify-center gap-2 animate-fade-in-down"
+                            }
+                            role={status.type === 'error' ? 'alert' : 'status'}
+                        >
+                            <div className={status.type === 'error' ? "w-2 h-2 bg-red-500 rounded-full" : "w-2 h-2 bg-emerald-500 rounded-full"}></div>
+                            {status.message}
                         </div>
                     )}
 
