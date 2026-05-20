@@ -158,8 +158,13 @@ export class PageReader {
         // 3. Try to find Case Number / Ticket ID
         const idLabels = ['Case number', 'Work Order Number', 'Incident Number', 'Ticket Number'];
         
-        // Regex for 16-digit case number (e.g. 2601190030003106) OR common formats like WO-12345, INC-1234, CAS-01234-A1B2
-        const idRegex = /(\b\d{16}\b)|(\b[A-Z]{2,10}-?\d{3,}[-\w]*\b)/;
+        // Regex for case/task IDs:
+        //   - 16-digit case number (e.g. 2601190030003106)
+        //   - 19-digit task ID (e.g. 2601190030003106001) - prefix to its parent case
+        //   - Or common alpha-prefixed formats like WO-12345, INC-1234, CAS-01234-A1B2
+        // \b boundaries make sure we don't grab a digit run that's adjacent to more
+        // digits we don't want (e.g. a 20-digit blob).
+        const idRegex = /(\b\d{16}(?:\d{3})?\b)|(\b[A-Z]{2,10}-?\d{3,}[-\w]*\b)/;
 
         // Strategy A: Check specific header container if it exists (Case Number specific)
         const headerControls = document.querySelector('[id^="headerControlsList_"]');
@@ -196,14 +201,21 @@ export class PageReader {
                 const parent = node.parentElement;
                 if (parent && parent.parentElement) {
                      // Look for numbers or ID-like patterns
-                     // Relaxed regex for this search: just look for the label's value which might be a simple number or string
-                     
                      // OPTIMIZED: Use extractValueFromNeighbors directly on the node we just found
                      // instead of recursively searching the entire tree again with findValueForLabel.
-                     const value = this.extractValueFromNeighbors(node as Element);
-                     
+                     // IMPORTANT: pass idRegex as the validator. Without it, D365 cells that pack
+                     // the case ID together with the SKU into one text node
+                     // ("2605080030003014001 | Unfd AddOn | ProSv Ente - China Cld") would slip
+                     // through verbatim and break the host's _extract_case_id contract.
+                     const value = this.extractValueFromNeighbors(node as Element, idRegex);
+
                      if (value && value.length > 3) { // Basic length check
-                         data.caseNumber = value;
+                         // extractValueFromNeighbors with a regex returns the raw matched
+                         // string when the value passes test(); narrow it via match() so we
+                         // strip any surrounding noise (extractValueFromNode currently passes
+                         // the full text - this is the belt-and-braces guard).
+                         const m = value.match(idRegex);
+                         data.caseNumber = m ? m[0] : value;
                          break;
                      }
                 }
