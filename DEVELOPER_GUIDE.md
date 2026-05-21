@@ -198,6 +198,14 @@ Do **not** call `chrome.storage.local.get('dh_prefs')` directly inside a React c
 
 Only `Options.tsx::persistPrefs(nextPrefs, opts?)` writes. It (a) calls `chrome.storage.local.set({ dh_prefs })`, (b) fires `update_config` RPC to the host so `config.json` is mirrored (see AGENTS.md § 3 "Options config persistence principle"), (c) optionally re-fetches the team manifest if `opts.fetchManifest` is set. Other components do **not** write to `dh_prefs`.
 
+#### Hydration guard (v2.0.70-beta.4+)
+
+`persistPrefs` checks `prefsHydratedRef.current` at entry and **no-ops if false**. The ref starts `false` at mount and flips to `true` only after the host's `get_config` response is merged into state (success branch). It also flips to `true` on the `chrome.runtime.lastError` branch and the non-success-response branch — those are "host down / broken" fallbacks so the user can still operate Options without deadlocking, accepting that `dh_prefs` is the only source of truth in that session.
+
+Why: between OptionsInner mount and the host's `get_config` response (≈100ms typical, multi-second if host is cold-starting or crashed), `prefs` holds `DEFAULT_PREFS` merged with `chrome.storage.local.dh_prefs`. If both are empty (fresh install, Remove+Load Unpacked, or any cache clear), fields like `rootPath` / `teamManifestUrl` / `team` / `userPrompt` are empty strings. A fast user click on a Language dropdown / toggle in that window would call `persistPrefs(DEFAULT_PREFS-merged)` and shallow-merge those empty values into `config.json` + truncate `user_prompt.md` (because the host's `handle_update_config` does `current_data.update(payload["config"])` and writes `user_prompt.md` whenever `user_prompt is not None` — empty string is not None).
+
+If you add a new code path that writes prefs before hydration finishes — e.g. an effect that calls `updatePref` based on URL params — you must either wait for hydration or accept that the write will be silently dropped. The guard does not retry queued writes; the next user-triggered `persistPrefs` after hydration is what will sync state. UI local state is unaffected by the guard, so the user still sees their click take effect — only the disk write is suppressed.
+
 ### Documented exception — runtime overrides
 
 FAB derives `rootPath` from the active D365 page URL at runtime. This override is a component-local `useState` (not a write to storage) and intentionally does not propagate to Options or to `config.json`. Pattern:

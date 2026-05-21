@@ -498,6 +498,34 @@ const OptionsInner: React.FC = () => {
     // unchanged) does not spuriously count as a URL change.
     const lastFetchedManifestUrlRef = useRef<string>('__unset__');
 
+    // Hydration guard: prefs state is fully populated only AFTER the host
+    // get_config response merges its fields into state (see mount useEffect
+    // ~line 612). Before that, prefs holds DEFAULT_PREFS (mostly empty
+    // strings for rootPath / teamManifestUrl / team / userPrompt) merged
+    // with whatever dh_prefs had on disk (also empty if the extension was
+    // just Remove+Load Unpacked, or installed for the first time).
+    //
+    // Without this guard, if the user clicks a Language dropdown / toggle
+    // / etc. inside the ~few-hundred-ms window between mount and the
+    // host's get_config response, persistPrefs would send a payload whose
+    // empty-by-default fields wipe out the corresponding host config.json
+    // values + user_prompt.md content. See investigation in conversation
+    // 2026-05-21 for the failure mode (root_path / team_manifest_url /
+    // user_prompt.md all observed cleared).
+    //
+    // Flow:
+    //   1. Mount → ref = false → DEFAULT_PREFS in state
+    //   2. (optional) chrome.storage dh_prefs loaded → merged into state
+    //   3. host get_config response → merged into state → ref = true
+    //   4. Any subsequent user-triggered persistPrefs() proceeds normally
+    //
+    // If hydration fails (host down, error response, etc.) the ref stays
+    // false and persistPrefs is no-op'd. Local state still updates so the
+    // UI is responsive, but nothing is written to disk until hydration
+    // succeeds on a later session. This is the right trade-off: writing
+    // unhydrated state is the failure mode we are trying to prevent.
+    const prefsHydratedRef = useRef(false);
+
     // Status toast helpers - centralize timer cleanup and type tagging.
     // Use these instead of calling setStatus directly so success/error colors
     // and auto-dismiss timing stay consistent across the file.
@@ -616,6 +644,14 @@ const OptionsInner: React.FC = () => {
             }, (response) => {
                 if (chrome.runtime.lastError) {
                      console.warn("Could not sync with host:", chrome.runtime.lastError.message);
+                     // Host unreachable — fall back to "hydrated" so the
+                     // user can still operate Options. Local dh_prefs (if
+                     // any) is the only data we have; future persistPrefs
+                     // calls will write that. If the host comes back later,
+                     // its config.json will be re-merged on next Options
+                     // open. Without this fallback the guard would deadlock
+                     // the user when host crashes / starts up slowly.
+                     prefsHydratedRef.current = true;
                      return;
                 }
                 
@@ -721,6 +757,24 @@ const OptionsInner: React.FC = () => {
 
                         return changed ? newPrefs : prev;
                     });
+
+                    // Mark prefs as hydrated so subsequent user-triggered
+                    // persistPrefs calls proceed. See prefsHydratedRef
+                    // declaration for the failure mode this guards against.
+                    // Set unconditionally on a successful host response —
+                    // even if `changed` was false (e.g. host config already
+                    // matches dh_prefs), state is now known-good.
+                    prefsHydratedRef.current = true;
+                } else {
+                    // Host responded but not with success+data. Same
+                    // rationale as the lastError branch above — don't
+                    // deadlock the user. Local dh_prefs is what we have.
+                    console.warn(
+                        "[Options] Host get_config returned non-success; " +
+                        "marking prefs hydrated to unblock user actions.",
+                        response,
+                    );
+                    prefsHydratedRef.current = true;
                 }
             });
         });
@@ -899,6 +953,21 @@ const OptionsInner: React.FC = () => {
     });
 
     const persistPrefs = (nextPrefs: Preferences, opts?: { fetchManifest?: boolean }) => {
+        // Hydration guard: refuse to write before host get_config has
+        // populated state. Otherwise a fast user click in the mount
+        // window would send DEFAULT_PREFS-empty values for rootPath /
+        // teamManifestUrl / team / userPrompt and wipe out the user's
+        // host-side config.json + user_prompt.md. See prefsHydratedRef
+        // declaration (~line 504) for full rationale.
+        if (!prefsHydratedRef.current) {
+            console.warn(
+                '[DH] persistPrefs called before hydration completed; ' +
+                'skipping write to avoid clobbering host config. ' +
+                'Local state is preserved; next persistPrefs after ' +
+                'hydration will sync.'
+            );
+            return;
+        }
         chrome.storage.local.set({ dh_prefs: nextPrefs }, () => {
             // Host update — fire-and-forget. Failures are logged but don't
             // surface to the user because the host re-reads config.json on
