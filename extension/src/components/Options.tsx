@@ -27,6 +27,7 @@ import {
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useTranslation, LanguageCode, PrefsLanguageProvider } from '../utils/i18n';
+import { Preferences, DEFAULT_PREFS } from '../utils/prefs';
 import MarkdownPreview from './MarkdownPreview';
 import { trackEvent } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
@@ -35,49 +36,6 @@ import { getExtensionVersion } from '../utils/version';
 function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
-
-// --- Types ---
-interface Preferences {
-    buttonText: string;
-    primaryColor: string;
-    offsetBottom: number;
-    offsetRight: number;
-    userInstructions?: string; // Was systemInstructions
-    userPrompt?: string;
-    rootPath?: string;
-    skillDirectories?: string;
-    mcpConfigPath?: string;
-    useWorkspaceOnly?: boolean;
-    autoAnalyzeMode?: 'disabled' | 'critical' | 'always' | 'new_cases';
-    enableStatusBubble?: boolean;
-    betaChannelEnabled?: boolean;
-    logLevel?: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
-    language?: LanguageCode;
-    team?: string;        // Selected team catalog ID (e.g. "dnai")
-    teamCatalogEnabled?: boolean;   // Master toggle for the Team Catalog feature
-    teamManifestUrl?: string;       // User-supplied manifest URL
-    teamLabel?: string;   // Display name for selected team
-}
-
-const DEFAULT_PREFS: Preferences = {
-    buttonText: "DH",
-    primaryColor: "#0D9488", // Teal-600 to match design system
-    offsetBottom: 24,
-    offsetRight: 24,
-    userInstructions: "",
-    userPrompt: "",
-    rootPath: "",
-    skillDirectories: "~/.copilot/skills",
-    mcpConfigPath: "~/.copilot/mcp-config.json",
-    useWorkspaceOnly: true,
-    autoAnalyzeMode: 'disabled',
-    enableStatusBubble: true,
-    betaChannelEnabled: false,
-    logLevel: 'INFO',
-    language: 'auto',
-    teamCatalogEnabled: false,
-    teamManifestUrl: ''
-};
 
 // --- Helpers ---
 async function loadItems(): Promise<MenuItem[]> {
