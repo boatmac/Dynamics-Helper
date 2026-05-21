@@ -171,6 +171,53 @@ Background scans (MutationObserver, `useEffect` on `isOpen`) continuously scrape
 
 ---
 
+## Preferences State Management
+
+All extension preferences (the `dh_prefs` chrome.storage.local key) are typed and managed through `extension/src/utils/prefs.ts`:
+
+- **`Preferences` interface** — the canonical type. Add new fields here, never in component-local state declarations.
+- **`DEFAULT_PREFS`** — single source of truth for default values. Components must not declare their own default dictionaries.
+- **`usePrefs()` hook** — read-only React hook returning `{ prefs }`. Subscribes to `chrome.storage.onChanged` and re-renders consumers on any `dh_prefs` change.
+
+### Reading prefs
+
+Any component (FAB, future overlays, etc.) calls `usePrefs()`:
+
+```typescript
+import { usePrefs } from '../utils/prefs';
+
+const MyComponent = () => {
+    const { prefs } = usePrefs();
+    return <div>{prefs.buttonText}</div>;
+};
+```
+
+Do **not** call `chrome.storage.local.get('dh_prefs')` directly inside a React component. That bypasses the hook's onChanged subscription and creates the same two-sided default-value drift the refactor eliminated.
+
+### Writing prefs
+
+Only `Options.tsx::persistPrefs(nextPrefs, opts?)` writes. It (a) calls `chrome.storage.local.set({ dh_prefs })`, (b) fires `update_config` RPC to the host so `config.json` is mirrored (see AGENTS.md § 3 "Options config persistence principle"), (c) optionally re-fetches the team manifest if `opts.fetchManifest` is set. Other components do **not** write to `dh_prefs`.
+
+### Documented exception — runtime overrides
+
+FAB derives `rootPath` from the active D365 page URL at runtime. This override is a component-local `useState` (not a write to storage) and intentionally does not propagate to Options or to `config.json`. Pattern:
+
+```typescript
+const { prefs } = usePrefs();
+const [rootPathOverride, setRootPathOverride] = useState<string | null>(null);
+const effectivePrefs = rootPathOverride !== null
+    ? { ...prefs, rootPath: rootPathOverride }
+    : prefs;
+```
+
+Any future runtime-only override (a value that's component-derived rather than user-configured) must follow the same pattern: separate local state + merged `effectivePrefs` view. Do **not** call any setter on the hook's state — the hook is read-only by design.
+
+### Service workers
+
+`serviceWorker.ts` cannot use React hooks. If a service worker ever needs prefs, it reads `chrome.storage.local.get('dh_prefs')` directly. The "use the hook" convention applies to React-rendered contexts only.
+
+---
+
 ## Self-Update Mechanism
 
 The extension checks for updates on startup (via `health_check` action) and displays an "Update Available" notification in the Options page and FAB.
