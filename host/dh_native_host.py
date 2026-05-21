@@ -250,6 +250,9 @@ try:
     # Patch from_dict to detect ISO strings and convert to epoch-ms first.
     # protocolVersion remains int(); only timestamp needs the workaround.
     # Remove this shim once SDK ships a release that handles ISO timestamps.
+    # Last verified still needed: SDK 0.3.0 on 2026-05-21 — source still
+    # does `int(timestamp)` with no string handling. See follow-up #1 in
+    # docs/superpowers/plans/2026-05-11-beta-channel-toggle.md.
     try:
         import copilot.client as _copilot_client
         from datetime import datetime as _datetime
