@@ -706,6 +706,19 @@ const OptionsInner: React.FC = () => {
                             changed = true;
                         }
 
+                        // Mirror the host-derived prefs back to chrome.storage.local
+                        // so other prefs consumers (FAB, the outer Options wrapper's
+                        // usePrefs() that feeds PrefsLanguageProvider) see them
+                        // without waiting for the next persistPrefs write. This is
+                        // what makes Auto-detected language take effect on first
+                        // load after Remove + Load Unpacked (when dh_prefs is empty
+                        // but host config.json already has language='zh').
+                        // Storage-only write (no host update_config) avoids echoing
+                        // back the same data we just read.
+                        if (changed) {
+                            chrome.storage.local.set({ dh_prefs: newPrefs });
+                        }
+
                         return changed ? newPrefs : prev;
                     });
                 }
