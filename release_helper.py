@@ -324,6 +324,12 @@ def main():
 
     args = parser.parse_args()
 
+    # Fail fast on --notes-file pointing nowhere. Must run BEFORE
+    # clean_releases_folder() so a typo cannot trigger pointless cleanup.
+    if args.notes_file and not os.path.isfile(args.notes_file):
+        print(f"Error: --notes-file '{args.notes_file}' does not exist.")
+        sys.exit(1)
+
     # 0. Clean Releases Folder
     releases_dir = os.path.join(ROOT_DIR, "releases")
     clean_releases_folder(releases_dir)
