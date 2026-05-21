@@ -526,6 +526,31 @@ const OptionsInner: React.FC = () => {
     // unhydrated state is the failure mode we are trying to prevent.
     const prefsHydratedRef = useRef(false);
 
+    // Hydration-window edit protection. Tracks which dh_prefs keys the user
+    // has edited during this Options session. Used by:
+    //   1. The host get_config merge — fields in this set are NOT overwritten
+    //      by host config values (user's in-flight edit wins). Without this,
+    //      a user click in the ~few-second window between mount and
+    //      hydration COMPLETE would be silently reverted when the host
+    //      response arrives.
+    //   2. The post-hydration catch-up RPC — non-empty set means the user
+    //      edited something while persistPrefs's host RPC was guard-skipped.
+    //      Catch-up pushes the merged state to host so config.json matches
+    //      the user's clicks.
+    //
+    // Set (not Map): we only need 'did the user touch this field', not the
+    // original value. The user's current value is in prefs state, which is
+    // what catch-up sends.
+    //
+    // Lifetime: lives for the Options page session. Cleared only by
+    // handleReset (which marks ALL keys touched so reset survives hydration
+    // merge — DEFAULT_PREFS is the user's explicit choice). NOT cleared on
+    // hydration COMPLETE: post-hydration edits don't need merge protection
+    // (no more merges) but keeping them in the set is harmless.
+    //
+    // See docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md
+    const userTouchedFieldsRef = useRef<Set<keyof Preferences>>(new Set());
+
     // Status toast helpers - centralize timer cleanup and type tagging.
     // Use these instead of calling setStatus directly so success/error colors
     // and auto-dismiss timing stay consistent across the file.
@@ -652,6 +677,24 @@ const OptionsInner: React.FC = () => {
                      // open. Without this fallback the guard would deadlock
                      // the user when host crashes / starts up slowly.
                      prefsHydratedRef.current = true;
+
+                     // Catch-up attempt for user edits made during the window.
+                     // Host is unreachable so this RPC will almost certainly
+                     // also fail, but it's a no-op cost and recovers when
+                     // host comes back within the same Options session.
+                     if (userTouchedFieldsRef.current.size > 0) {
+                         setPrefs(currentPrefs => {
+                             chrome.runtime.sendMessage({
+                                 type: "NATIVE_MSG",
+                                 payload: buildHostConfigPayload(currentPrefs)
+                             }, () => {
+                                 if (chrome.runtime.lastError) {
+                                     // Expected — host is down. Storage is correct.
+                                 }
+                             });
+                             return currentPrefs;
+                         });
+                     }
                      return;
                 }
                 
@@ -663,18 +706,25 @@ const OptionsInner: React.FC = () => {
                         setHostVersion(hostConfig.host_version);
                     }
 
+                    // Capture the post-merge prefs for the catch-up RPC below.
+                    // setPrefs's callback runs synchronously but state commit
+                    // is batched, so we cannot read `prefs` after this block.
+                    // Stash the merged value in a closure variable instead.
+                    let mergedPrefs: Preferences | null = null;
+
                     setPrefs(prev => {
                         const newPrefs = { ...prev };
                         let changed = false;
+                        const touched = userTouchedFieldsRef.current;
 
-                        // 1. Root Path
-                        if (hostConfig.root_path && hostConfig.root_path !== prev.rootPath) {
+                        // 1. Root Path — skip if user edited rootPath during hydration window
+                        if (hostConfig.root_path && hostConfig.root_path !== prev.rootPath && !touched.has('rootPath')) {
                             newPrefs.rootPath = hostConfig.root_path;
                             changed = true;
                         }
 
                         // 2. Skill Directories (Array -> CSV String)
-                        if (Array.isArray(hostConfig.skill_directories)) {
+                        if (Array.isArray(hostConfig.skill_directories) && !touched.has('skillDirectories')) {
                             // Check incoming preference first
                             const incomingWorkspaceOnly = hostConfig.extension_preferences?.use_workspace_only ?? prev.useWorkspaceOnly;
 
@@ -689,7 +739,7 @@ const OptionsInner: React.FC = () => {
                         }
 
                         // 3. MCP Config Path
-                        if (hostConfig.mcp_config_path && hostConfig.mcp_config_path !== prev.mcpConfigPath) {
+                        if (hostConfig.mcp_config_path && hostConfig.mcp_config_path !== prev.mcpConfigPath && !touched.has('mcpConfigPath')) {
                             newPrefs.mcpConfigPath = hostConfig.mcp_config_path;
                             changed = true;
                         }
@@ -697,49 +747,51 @@ const OptionsInner: React.FC = () => {
                         // 4. User Instructions (Split Prompt)
                         // Host now returns _user_instructions_raw for the editable part
                         // Fallback to system_message if raw is missing (legacy host)
-                        if (hostConfig._user_instructions_raw !== undefined) {
-                            if (hostConfig._user_instructions_raw !== prev.userInstructions) {
-                                newPrefs.userInstructions = hostConfig._user_instructions_raw;
-                                changed = true;
-                            }
-                        } else if (hostConfig.system_message && hostConfig.system_message.content) {
-                            // Legacy fallback
-                            if (hostConfig.system_message.content !== prev.userInstructions) {
-                                newPrefs.userInstructions = hostConfig.system_message.content;
-                                changed = true;
+                        if (!touched.has('userInstructions')) {
+                            if (hostConfig._user_instructions_raw !== undefined) {
+                                if (hostConfig._user_instructions_raw !== prev.userInstructions) {
+                                    newPrefs.userInstructions = hostConfig._user_instructions_raw;
+                                    changed = true;
+                                }
+                            } else if (hostConfig.system_message && hostConfig.system_message.content) {
+                                // Legacy fallback
+                                if (hostConfig.system_message.content !== prev.userInstructions) {
+                                    newPrefs.userInstructions = hostConfig.system_message.content;
+                                    changed = true;
+                                }
                             }
                         }
 
                         // 4. Extension Preferences (Synced from Host - Source of Truth)
+                        // Per-field touched guard: user's in-flight edit wins.
                         if (hostConfig.extension_preferences) {
                             const extPrefs = hostConfig.extension_preferences;
-                            
-                            if (extPrefs.auto_analyze_mode) newPrefs.autoAnalyzeMode = extPrefs.auto_analyze_mode;
-                            if (extPrefs.user_prompt !== undefined) newPrefs.userPrompt = extPrefs.user_prompt;
-                            if (extPrefs.enable_status_bubble !== undefined) newPrefs.enableStatusBubble = extPrefs.enable_status_bubble;
-                            if (extPrefs.beta_channel_enabled !== undefined) newPrefs.betaChannelEnabled = extPrefs.beta_channel_enabled;
-                            if (extPrefs.use_workspace_only !== undefined) newPrefs.useWorkspaceOnly = extPrefs.use_workspace_only;
-                            if (extPrefs.log_level) newPrefs.logLevel = extPrefs.log_level;
-                            
+
+                            if (extPrefs.auto_analyze_mode && !touched.has('autoAnalyzeMode')) { newPrefs.autoAnalyzeMode = extPrefs.auto_analyze_mode; changed = true; }
+                            if (extPrefs.user_prompt !== undefined && !touched.has('userPrompt')) { newPrefs.userPrompt = extPrefs.user_prompt; changed = true; }
+                            if (extPrefs.enable_status_bubble !== undefined && !touched.has('enableStatusBubble')) { newPrefs.enableStatusBubble = extPrefs.enable_status_bubble; changed = true; }
+                            if (extPrefs.beta_channel_enabled !== undefined && !touched.has('betaChannelEnabled')) { newPrefs.betaChannelEnabled = extPrefs.beta_channel_enabled; changed = true; }
+                            if (extPrefs.use_workspace_only !== undefined && !touched.has('useWorkspaceOnly')) { newPrefs.useWorkspaceOnly = extPrefs.use_workspace_only; changed = true; }
+                            if (extPrefs.log_level && !touched.has('logLevel')) { newPrefs.logLevel = extPrefs.log_level; changed = true; }
+
                             // Visual Settings (Now synced)
-                            if (extPrefs.language) newPrefs.language = extPrefs.language;
-                            if (extPrefs.primary_color) newPrefs.primaryColor = extPrefs.primary_color;
-                            if (extPrefs.button_text) newPrefs.buttonText = extPrefs.button_text;
-                            if (extPrefs.offset_bottom !== undefined) newPrefs.offsetBottom = extPrefs.offset_bottom;
-                            if (extPrefs.offset_right !== undefined) newPrefs.offsetRight = extPrefs.offset_right;
+                            if (extPrefs.language && !touched.has('language')) { newPrefs.language = extPrefs.language; changed = true; }
+                            if (extPrefs.primary_color && !touched.has('primaryColor')) { newPrefs.primaryColor = extPrefs.primary_color; changed = true; }
+                            if (extPrefs.button_text && !touched.has('buttonText')) { newPrefs.buttonText = extPrefs.button_text; changed = true; }
+                            if (extPrefs.offset_bottom !== undefined && !touched.has('offsetBottom')) { newPrefs.offsetBottom = extPrefs.offset_bottom; changed = true; }
+                            if (extPrefs.offset_right !== undefined && !touched.has('offsetRight')) { newPrefs.offsetRight = extPrefs.offset_right; changed = true; }
 
                             // Team Catalog (mirrored as backup; host does not read these)
-                            if (extPrefs.team_catalog_enabled !== undefined) newPrefs.teamCatalogEnabled = extPrefs.team_catalog_enabled;
-                            if (extPrefs.team_manifest_url !== undefined) {
+                            if (extPrefs.team_catalog_enabled !== undefined && !touched.has('teamCatalogEnabled')) { newPrefs.teamCatalogEnabled = extPrefs.team_catalog_enabled; changed = true; }
+                            if (extPrefs.team_manifest_url !== undefined && !touched.has('teamManifestUrl')) {
                                 newPrefs.teamManifestUrl = extPrefs.team_manifest_url;
                                 // Re-seed the change-detection ref so a host-driven URL
                                 // does not look like a user edit on the next save.
                                 lastFetchedManifestUrlRef.current = extPrefs.team_manifest_url || '';
+                                changed = true;
                             }
-                            if (extPrefs.team !== undefined) newPrefs.team = extPrefs.team;
-                            if (extPrefs.team_label !== undefined) newPrefs.teamLabel = extPrefs.team_label;
-
-                            changed = true;
+                            if (extPrefs.team !== undefined && !touched.has('team')) { newPrefs.team = extPrefs.team; changed = true; }
+                            if (extPrefs.team_label !== undefined && !touched.has('teamLabel')) { newPrefs.teamLabel = extPrefs.team_label; changed = true; }
                         }
 
                         // Mirror the host-derived prefs back to chrome.storage.local
@@ -755,7 +807,8 @@ const OptionsInner: React.FC = () => {
                             chrome.storage.local.set({ dh_prefs: newPrefs });
                         }
 
-                        return changed ? newPrefs : prev;
+                        mergedPrefs = changed ? newPrefs : prev;
+                        return mergedPrefs;
                     });
 
                     // Mark prefs as hydrated so subsequent user-triggered
@@ -765,6 +818,24 @@ const OptionsInner: React.FC = () => {
                     // even if `changed` was false (e.g. host config already
                     // matches dh_prefs), state is now known-good.
                     prefsHydratedRef.current = true;
+
+                    // Catch-up RPC: if the user edited any field during the
+                    // hydration window, persistPrefs skipped the host RPC for
+                    // those writes. Push the merged state to host now so
+                    // config.json matches what the user actually clicked.
+                    // See spec § 4.4. Empty touched set = no edits during
+                    // window = no RPC needed (avoid noise).
+                    if (userTouchedFieldsRef.current.size > 0 && mergedPrefs) {
+                        console.log('[DH] Hydration catch-up: pushing', userTouchedFieldsRef.current.size, 'user-touched field(s) to host');
+                        chrome.runtime.sendMessage({
+                            type: "NATIVE_MSG",
+                            payload: buildHostConfigPayload(mergedPrefs)
+                        }, () => {
+                            if (chrome.runtime.lastError) {
+                                console.warn('[DH] Catch-up RPC failed:', chrome.runtime.lastError.message, '— storage holds truth; next Options open will retry.');
+                            }
+                        });
+                    }
                 } else {
                     // Host responded but not with success+data. Same
                     // rationale as the lastError branch above — don't
@@ -775,6 +846,30 @@ const OptionsInner: React.FC = () => {
                         response,
                     );
                     prefsHydratedRef.current = true;
+
+                    // Catch-up still attempted in the non-success branch — if
+                    // the user edited during the window, their changes are in
+                    // local state but host has not been told. The RPC will
+                    // probably also fail (host is broken), but it's a no-op
+                    // cost and keeps storage-vs-host eventually consistent
+                    // when host recovers within the same Options session.
+                    if (userTouchedFieldsRef.current.size > 0) {
+                        // Read state via functional setPrefs (state may not be
+                        // committed yet from the merge above; we ran with prev
+                        // and bailed). Re-enter setPrefs to capture current
+                        // value as 'prev'.
+                        setPrefs(currentPrefs => {
+                            chrome.runtime.sendMessage({
+                                type: "NATIVE_MSG",
+                                payload: buildHostConfigPayload(currentPrefs)
+                            }, () => {
+                                if (chrome.runtime.lastError) {
+                                    console.warn('[DH] Catch-up RPC failed (host non-success path):', chrome.runtime.lastError.message);
+                                }
+                            });
+                            return currentPrefs;
+                        });
+                    }
                 }
             });
         });
@@ -889,6 +984,12 @@ const OptionsInner: React.FC = () => {
     // color-picker drag.
     const handlePrefChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
+        // Mark touched on every keystroke (Set is idempotent). The actual
+        // persistPrefs happens in handlePrefBlur, but the merge-protection
+        // ref must be set NOW: if hydration completes mid-typing, the
+        // host's stale value would otherwise clobber what the user is
+        // currently editing.
+        userTouchedFieldsRef.current.add(name as keyof Preferences);
         setPrefs(prev => ({
             ...prev,
             [name]: name.startsWith('offset') ? Number(value) : value
@@ -953,22 +1054,34 @@ const OptionsInner: React.FC = () => {
     });
 
     const persistPrefs = (nextPrefs: Preferences, opts?: { fetchManifest?: boolean }) => {
-        // Hydration guard: refuse to write before host get_config has
-        // populated state. Otherwise a fast user click in the mount
-        // window would send DEFAULT_PREFS-empty values for rootPath /
-        // teamManifestUrl / team / userPrompt and wipe out the user's
-        // host-side config.json + user_prompt.md. See prefsHydratedRef
-        // declaration (~line 504) for full rationale.
-        if (!prefsHydratedRef.current) {
-            console.warn(
-                '[DH] persistPrefs called before hydration completed; ' +
-                'skipping write to avoid clobbering host config. ' +
-                'Local state is preserved; next persistPrefs after ' +
-                'hydration will sync.'
-            );
-            return;
-        }
+        // Three-segment persist (see spec § 4.1):
+        //
+        //   Segment 1: storage write — always runs (safe, storage is just a
+        //     mirror). Required so the outer Options wrapper's usePrefs()
+        //     subscription receives onChanged events and cross-tree consumers
+        //     (PrefsLanguageProvider, FAB) see edits immediately, even
+        //     during the hydration window.
+        //
+        //   Segment 2: host RPC — only after hydration. Pre-hydration writes
+        //     would send DEFAULT_PREFS-empty values to host and clobber
+        //     config.json + user_prompt.md. The post-hydration catch-up RPC
+        //     in the mount useEffect picks up window-edits — see § 4.4.
+        //
+        //   Segment 3: manifest fetch — only after hydration + opts + URL
+        //     change. Pre-hydration manifest fetch could race with host
+        //     get_config returning a different teamManifestUrl.
+        //
+        // The pre-hydration warn that used to live here was removed because
+        // hitting it during normal cold start is expected, not exceptional.
+        // See docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md
         chrome.storage.local.set({ dh_prefs: nextPrefs }, () => {
+            if (!prefsHydratedRef.current) {
+                // Window edit — touched ref will route it through the
+                // catch-up RPC once hydration completes. Storage is
+                // up-to-date; host will catch up.
+                return;
+            }
+
             // Host update — fire-and-forget. Failures are logged but don't
             // surface to the user because the host re-reads config.json on
             // next startup. A red toast would be noisy for every keystroke
@@ -1011,6 +1124,10 @@ const OptionsInner: React.FC = () => {
     // sites (selects, checkboxes, toggles) use this. Text-input onBlur
     // handlers also use it after their onChange-only setPrefs.
     const updatePref = (patch: Partial<Preferences>, opts?: { fetchManifest?: boolean }) => {
+        // Mark every patched key as user-touched so the host hydration merge
+        // (if still pending) does not overwrite our value, and so the
+        // catch-up RPC knows to push these fields after hydration.
+        (Object.keys(patch) as Array<keyof Preferences>).forEach(k => userTouchedFieldsRef.current.add(k));
         setPrefs(prev => {
             const next = { ...prev, ...patch };
             persistPrefs(next, opts);
@@ -1020,6 +1137,14 @@ const OptionsInner: React.FC = () => {
 
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
+            // Mark ALL prefs keys as user-touched so a late host hydration
+            // response cannot un-reset us. DEFAULT_PREFS is the user's
+            // explicit choice — protect it from being merged-over. Without
+            // this, a reset during the hydration window would be reverted
+            // when host get_config returns the pre-reset values.
+            (Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>).forEach(
+                k => userTouchedFieldsRef.current.add(k)
+            );
             setPrefs(DEFAULT_PREFS);
             chrome.storage.local.remove(["dh_prefs", "dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels"], () => {
                 loadItems().then(setItems);
@@ -1799,6 +1924,7 @@ const OptionsInner: React.FC = () => {
                                                             // staring at it after they've already started
                                                             // fixing the typo.
                                                             if (manifestUrlInvalid) setManifestUrlInvalid(false);
+                                                            userTouchedFieldsRef.current.add('teamManifestUrl');
                                                             setPrefs(prev => ({ ...prev, teamManifestUrl: e.target.value }));
                                                         }}
                                                         onBlur={() => {
@@ -1917,7 +2043,7 @@ const OptionsInner: React.FC = () => {
                                                 <input
                                                     type="text"
                                                     value={prefs.rootPath || ""}
-                                                    onChange={(e) => setPrefs(prev => ({ ...prev, rootPath: e.target.value }))} onBlur={handlePrefBlur}
+                                                    onChange={(e) => { userTouchedFieldsRef.current.add('rootPath'); setPrefs(prev => ({ ...prev, rootPath: e.target.value })); }} onBlur={handlePrefBlur}
                                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
                                                 placeholder="C:\MyCases"
                                             />
@@ -1945,7 +2071,7 @@ const OptionsInner: React.FC = () => {
                                                 <input
                                                     type="text"
                                                     value={prefs.skillDirectories || ""}
-                                                    onChange={(e) => setPrefs(prev => ({ ...prev, skillDirectories: e.target.value }))} onBlur={handlePrefBlur}
+                                                    onChange={(e) => { userTouchedFieldsRef.current.add('skillDirectories'); setPrefs(prev => ({ ...prev, skillDirectories: e.target.value })); }} onBlur={handlePrefBlur}
                                                     disabled={prefs.useWorkspaceOnly !== false}
                                                     className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${prefs.useWorkspaceOnly !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/skills"
@@ -1961,7 +2087,7 @@ const OptionsInner: React.FC = () => {
                                                 <input
                                                     type="text"
                                                     value={prefs.mcpConfigPath || ""}
-                                                    onChange={(e) => setPrefs(prev => ({ ...prev, mcpConfigPath: e.target.value }))} onBlur={handlePrefBlur}
+                                                    onChange={(e) => { userTouchedFieldsRef.current.add('mcpConfigPath'); setPrefs(prev => ({ ...prev, mcpConfigPath: e.target.value })); }} onBlur={handlePrefBlur}
                                                     disabled={prefs.useWorkspaceOnly !== false}
                                                     className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${prefs.useWorkspaceOnly !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/mcp-config.json"
@@ -2000,7 +2126,7 @@ const OptionsInner: React.FC = () => {
                                                 ) : (
                                                     <textarea
                                                         value={prefs.userInstructions || ""}
-                                                        onChange={(e) => setPrefs(prev => ({ ...prev, userInstructions: e.target.value }))} onBlur={handlePrefBlur}
+                                                        onChange={(e) => { userTouchedFieldsRef.current.add('userInstructions'); setPrefs(prev => ({ ...prev, userInstructions: e.target.value })); }} onBlur={handlePrefBlur}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
                                                         placeholder="Enter your custom instructions here..."
                                                     />
@@ -2039,7 +2165,7 @@ const OptionsInner: React.FC = () => {
                                                 ) : (
                                                     <textarea
                                                         value={prefs.userPrompt || ""}
-                                                        onChange={(e) => setPrefs(prev => ({ ...prev, userPrompt: e.target.value }))} onBlur={handlePrefBlur}
+                                                        onChange={(e) => { userTouchedFieldsRef.current.add('userPrompt'); setPrefs(prev => ({ ...prev, userPrompt: e.target.value })); }} onBlur={handlePrefBlur}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
                                                         placeholder={t('userPromptPlaceholder')}
                                                     />
