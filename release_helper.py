@@ -299,23 +299,37 @@ def publish_to_github(version, zip_path, prerelease=False, notes_file=None):
 
 
 def clean_releases_folder(release_folder):
+    """Delete only build artifacts (*.zip and DynamicsHelper_v* staging dirs).
+
+    Preserves release-notes markdown and any other user-curated files placed
+    in releases/. Callers may safely keep `notes-v<version>.md` next to the
+    zip without losing it on the next build.
+
+    Previously this function indiscriminately wiped everything under
+    release_folder, which forced release notes to live outside the repo
+    during the v2.0.70-beta.3 release. Allowlist behaviour fixes that
+    papercut (follow-up #10).
     """
-    Cleans up the releases/ folder by deleting old zip files and folders.
-    Keeps the release folder itself.
-    """
-    if os.path.exists(release_folder):
-        print(f"Cleaning up {release_folder}...")
-        for item in os.listdir(release_folder):
-            item_path = os.path.join(release_folder, item)
-            try:
-                if os.path.isfile(item_path) or os.path.islink(item_path):
-                    os.unlink(item_path)
-                elif os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
-            except Exception as e:
-                print(f"Failed to delete {item_path}. Reason: {e}")
-    else:
+    if not os.path.exists(release_folder):
         os.makedirs(release_folder)
+        return
+
+    print(f"Cleaning build artifacts in {release_folder}...")
+    for item in os.listdir(release_folder):
+        item_path = os.path.join(release_folder, item)
+        is_zip = os.path.isfile(item_path) and item.lower().endswith(".zip")
+        is_staging_dir = (
+            os.path.isdir(item_path) and item.startswith("DynamicsHelper_v")
+        )
+        if not (is_zip or is_staging_dir):
+            continue
+        try:
+            if is_zip:
+                os.unlink(item_path)
+            else:
+                shutil.rmtree(item_path)
+        except Exception as e:
+            print(f"Failed to delete {item_path}. Reason: {e}")
 
 
 def main():
