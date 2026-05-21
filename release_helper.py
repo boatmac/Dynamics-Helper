@@ -243,7 +243,7 @@ def create_zip(version):
     return zip_file_path
 
 
-def publish_to_github(version, zip_path, prerelease=False):
+def publish_to_github(version, zip_path, prerelease=False, notes_file=None):
     print(f"\n--- Publishing v{version} to GitHub ---")
 
     try:
@@ -258,24 +258,38 @@ def publish_to_github(version, zip_path, prerelease=False):
 
     tag = f"v{version}"
     title = f"v{version}"
-    notes = (
-        f"Release {tag}\n\n"
-        "## Installation\n"
-        "1. Download and extract the zip file.\n"
-        "2. Double-click `install.bat` (Safely bypasses PowerShell restrictions).\n"
-        "3. Follow the on-screen instructions."
-    )
 
-    # Use argv-list form (NOT shell=True) so the multi-line --notes string
-    # cannot swallow the trailing --prerelease flag. Previously
-    # `shell=True` with a single f-string command silently dropped
-    # --prerelease on Windows; verified by observing isPrerelease=false
-    # on the v2.0.70-beta release.
-    cmd = ["gh", "release", "create", tag, zip_path, "--title", title, "--notes", notes]
+    if notes_file:
+        # Path was validated for existence at startup (main() guard).
+        cmd = [
+            "gh", "release", "create", tag, zip_path,
+            "--title", title, "--notes-file", notes_file,
+        ]
+    else:
+        notes = (
+            f"Release {tag}\n\n"
+            "## Installation\n"
+            "1. Download and extract the zip file.\n"
+            "2. Double-click `install.bat` (Safely bypasses PowerShell restrictions).\n"
+            "3. Follow the on-screen instructions."
+        )
+        # Use argv-list form (NOT shell=True) so the multi-line --notes string
+        # cannot swallow the trailing --prerelease flag. Previously
+        # `shell=True` with a single f-string command silently dropped
+        # --prerelease on Windows; verified by observing isPrerelease=false
+        # on the v2.0.70-beta release.
+        cmd = [
+            "gh", "release", "create", tag, zip_path,
+            "--title", title, "--notes", notes,
+        ]
+
     if prerelease:
         cmd.append("--prerelease")
 
-    print(f"Executing: {' '.join(cmd[:5])} ... (prerelease={prerelease})")
+    print(
+        f"Executing: {' '.join(cmd[:5])} ... "
+        f"(prerelease={prerelease}, notes_file={notes_file})"
+    )
 
     try:
         subprocess.run(cmd, check=True)
@@ -389,7 +403,7 @@ def main():
         zip_path = create_zip(args.version)
 
     if args.publish and zip_path:
-        publish_to_github(args.version, zip_path, args.prerelease)
+        publish_to_github(args.version, zip_path, args.prerelease, args.notes_file)
     elif args.publish and not zip_path:
         print("Error: Cannot publish without building.")
 
