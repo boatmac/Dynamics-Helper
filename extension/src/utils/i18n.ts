@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useContext, createContext } from 'react';
+import React, { useContext, createContext } from 'react';
 import { translations, resolveLanguage, getTranslation, LanguageCode, TranslationDictionary } from './translations';
+import { usePrefs } from './prefs';
 
 export { resolveLanguage, getTranslation };
 export type { LanguageCode, TranslationDictionary };
@@ -14,7 +15,7 @@ export type { LanguageCode, TranslationDictionary };
 // was a 'switch language -> nothing happens until Save' UX bug.
 //
 // FAB.tsx is unaffected: when no Provider wraps the tree the hook falls back
-// to the storage-driven implementation as before.
+// to the usePrefs() storage subscription as before.
 export const PrefsLanguageContext = createContext<LanguageCode | null>(null);
 
 export interface PrefsLanguageProviderProps {
@@ -28,51 +29,25 @@ export function PrefsLanguageProvider({ language, children }: PrefsLanguageProvi
 
 export function useTranslation() {
     // Context override: when present this wins over the storage-driven state.
-    // null means 'no provider in tree, behave like before'.
+    // null means 'no provider in tree, fall back to usePrefs()'.
     const ctxLanguage = useContext(PrefsLanguageContext);
 
-    const [language, setLanguage] = useState<LanguageCode>('auto');
-    const [resolvedLang, setResolvedLang] = useState<'en' | 'zh'>('en');
+    // usePrefs() is the single source of truth for chrome.storage.dh_prefs.
+    // We always subscribe (Rules of Hooks: cannot call conditionally), but
+    // when a Provider wraps the tree we ignore the storage value and use
+    // ctxLanguage instead. This costs one extra subscriber when inside an
+    // Options-style tree, but i18n storage events are rare (only on language
+    // dropdown change) and usePrefs already de-dupes by memoising the prefs
+    // object reference.
+    const { prefs } = usePrefs();
+    const storageLanguage: LanguageCode = prefs.language ?? 'auto';
 
-    useEffect(() => {
-        // Only consult storage when no context is available. Inside the
-        // Options tree the provider is the source of truth and we skip the
-        // storage read+listener entirely.
-        if (ctxLanguage !== null) {
-            return;
-        }
-
-        // Load preference
-        chrome.storage.local.get("dh_prefs", (result) => {
-            const prefs = result.dh_prefs as any;
-            if (prefs && prefs.language) {
-                setLanguage(prefs.language);
-            }
-        });
-
-        // Listen for changes
-        const listener = (changes: any, area: string) => {
-            if (area === 'local' && changes.dh_prefs) {
-                const newPrefs = changes.dh_prefs.newValue;
-                if (newPrefs && newPrefs.language) {
-                    setLanguage(newPrefs.language);
-                }
-            }
-        };
-        chrome.storage.onChanged.addListener(listener);
-        return () => chrome.storage.onChanged.removeListener(listener);
-    }, [ctxLanguage]);
-
-    // Resolve 'auto' to actual language. When the context override is present
-    // it takes priority over the storage-fed state on every render.
-    const effectiveLanguage: LanguageCode = ctxLanguage !== null ? ctxLanguage : language;
-    useEffect(() => {
-        setResolvedLang(resolveLanguage(effectiveLanguage));
-    }, [effectiveLanguage]);
+    const effectiveLanguage: LanguageCode = ctxLanguage !== null ? ctxLanguage : storageLanguage;
+    const resolvedLang = resolveLanguage(effectiveLanguage);
 
     const t = (key: string): string => {
         return getTranslation(key, resolvedLang);
     };
 
-    return { t, language: effectiveLanguage, setLanguage };
+    return { t, language: effectiveLanguage };
 }
