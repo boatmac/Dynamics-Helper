@@ -267,6 +267,14 @@ This script automates version bumping, git operations, building, and publishing.
     python release_helper.py 2.0.58-beta --publish --prerelease
     ```
 
+* **Release with markdown notes (recommended for major/beta releases):**
+
+    ```bash
+    python release_helper.py 2.0.71 --publish --prerelease --notes-file releases/notes-v2.0.71.md
+    ```
+
+    The `--notes-file` flag passes the markdown file to `gh release create --notes-file`, so the GitHub release body matches the file's content verbatim. Without this flag the script falls back to a 4-line hardcoded template ("Release vX.X.X / Installation / ..."). Place the notes file under `releases/` — the build step's clean phase now preserves it (only `*.zip` and `DynamicsHelper_v*` staging dirs are deleted).
+
 **What it does:**
 
 1. Updates version in `package.json`, `manifest.json`, and `dh_native_host.py`.
