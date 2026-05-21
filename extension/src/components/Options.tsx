@@ -27,7 +27,7 @@ import {
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useTranslation, LanguageCode, PrefsLanguageProvider } from '../utils/i18n';
-import { Preferences, DEFAULT_PREFS } from '../utils/prefs';
+import { Preferences, DEFAULT_PREFS, usePrefs } from '../utils/prefs';
 import MarkdownPreview from './MarkdownPreview';
 import { trackEvent } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
@@ -474,7 +474,7 @@ const EmptyDropZone: React.FC<{
 };
 
 // --- Main Options Component ---
-const Options: React.FC = () => {
+const OptionsInner: React.FC = () => {
     // State
     const { t } = useTranslation();
     const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
@@ -1440,7 +1440,6 @@ const Options: React.FC = () => {
     };
 
     return (
-        <PrefsLanguageProvider language={prefs.language ?? 'auto'}>
             <DndProvider backend={HTML5Backend}>
             <div className="min-h-screen bg-slate-50 py-10 px-6 font-[family-name:var(--font-jakarta)]">
                 <style dangerouslySetInnerHTML={{__html: `@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap'); :root { --font-jakarta: 'Plus Jakarta Sans', sans-serif; } body { font-family: var(--font-jakarta); }`}} />
@@ -2077,6 +2076,21 @@ const Options: React.FC = () => {
                 </div>
             </div>
         </DndProvider>
+    );
+};
+
+// Outer wrapper: reads prefs.language and provides it via context to the
+// entire OptionsInner subtree. This is required because OptionsInner itself
+// calls useTranslation() at its top level — if the Provider lived inside
+// OptionsInner's JSX (as it did pre-2.0.71), the top-level useTranslation
+// would be an ancestor of the Provider rather than a descendant, so its
+// useContext(PrefsLanguageContext) call would return null and fall back to
+// the storage-driven path that only updates after Save (the bug fixed here).
+const Options: React.FC = () => {
+    const { prefs } = usePrefs();
+    return (
+        <PrefsLanguageProvider language={prefs.language ?? 'auto'}>
+            <OptionsInner />
         </PrefsLanguageProvider>
     );
 };
