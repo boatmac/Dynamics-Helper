@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 import { useTranslation } from '../utils/i18n';
+import { usePrefs } from '../utils/prefs';
 import { trackEvent, trackException, hashCaseId } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { 
@@ -357,16 +358,11 @@ const FAB: React.FC = () => {
         }
     };
     
-    const [prefs, setPrefs] = useState({
-        primaryColor: "#0D9488",
-        buttonText: "DH",
-        offsetBottom: 24,
-        offsetRight: 24,
-        userPrompt: "",
-        rootPath: "",
-        autoAnalyzeMode: 'disabled',
-        enableStatusBubble: true
-    });
+    const { prefs } = usePrefs();
+    const [rootPathOverride, setRootPathOverride] = useState<string | null>(null);
+    const effectivePrefs = rootPathOverride !== null
+        ? { ...prefs, rootPath: rootPathOverride }
+        : prefs;
     
     // UI States
     const [isContextExpanded, setIsContextExpanded] = useState(false);
@@ -378,33 +374,6 @@ const FAB: React.FC = () => {
 
     // Menu Logic
     const { currentItems, canGoBack, navigateTo, navigateBack } = useMenuLogic();
-
-    // Load preferences on mount and listen for changes
-    useEffect(() => {
-        const loadPrefs = () => {
-             chrome.storage.local.get("dh_prefs", (result) => {
-                if (result.dh_prefs && typeof result.dh_prefs === 'object') {
-                    setPrefs(prev => ({ ...prev, ...(result.dh_prefs as object) }));
-                }
-            });
-        };
-
-        loadPrefs();
-
-        const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
-            if (areaName === 'local' && changes.dh_prefs) {
-                 const newPrefs = changes.dh_prefs.newValue;
-                 if (newPrefs && typeof newPrefs === 'object') {
-                     setPrefs(prev => ({ ...prev, ...(newPrefs as object) }));
-                 }
-            }
-        };
-
-        chrome.storage.onChanged.addListener(handleStorageChange);
-        return () => {
-            chrome.storage.onChanged.removeListener(handleStorageChange);
-        };
-    }, []);
 
     // Helper to check if text is already a formatted template
     const isFormattedTemplate = (text: string) => {
@@ -477,8 +446,8 @@ const FAB: React.FC = () => {
             console.log("[DH] Context Menu Triggered:", { selectionText, rootPath });
 
             // If rootPath is provided, ensure our prefs are consistent
-            if (rootPath && rootPath !== prefs.rootPath) {
-                setPrefs(prev => ({ ...prev, rootPath }));
+            if (rootPath && rootPath !== effectivePrefs.rootPath) {
+                setRootPathOverride(rootPath);
             }
 
             if (selectionText) {
@@ -522,7 +491,7 @@ const FAB: React.FC = () => {
         return () => {
             window.removeEventListener('dh-trigger-analyze', handleTriggerAnalyze);
         };
-    }, [prefs.rootPath, scrapedData]); // Dependencies for the listener
+    }, [effectivePrefs.rootPath, scrapedData]); // Dependencies for the listener
 
     // Optimized: Use MutationObserver + Debounce instead of fixed interval polling
     useEffect(() => {
@@ -778,7 +747,7 @@ const FAB: React.FC = () => {
                         text: fullContext,
                         context: targetData.source || "Unknown Context",
                         timestamp: new Date().toLocaleString(),
-                        rootPath: prefs.rootPath,
+                        rootPath: effectivePrefs.rootPath,
                         product: targetData.productCategory,
                         caseNumber: targetData.caseNumber
                     },
