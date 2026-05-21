@@ -316,6 +316,11 @@ def main():
     parser.add_argument(
         "--prerelease", action="store_true", help="Mark as pre-release on GitHub"
     )
+    parser.add_argument(
+        "--notes-file",
+        help="Path to a markdown file used as the GitHub release body. "
+             "Without this flag, falls back to the hardcoded 4-line template.",
+    )
 
     args = parser.parse_args()
 
