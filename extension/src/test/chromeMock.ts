@@ -165,13 +165,22 @@ export function installChromeMock(): void {
     runtime: {
       sendMessage,
       getManifest: () => ({ version: '2.0.70-beta.4-test' }),
+      getURL: (path: string) => `chrome-extension://test/${path}`,
       lastError: undefined,
+      onMessage: {
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+      },
     },
     storage: {
       local: {
         get: storageGet,
         set: storageSet,
         remove: storageRemove,
+      },
+      onChanged: {
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
       },
     },
   }
