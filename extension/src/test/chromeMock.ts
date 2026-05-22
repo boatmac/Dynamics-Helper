@@ -37,6 +37,10 @@ export function resetChromeMock(): void {
   pendingByAction = new Map()
   storageData = {}
   messageLog = []
+  sendMessage.mockClear()
+  storageGet.mockClear()
+  storageSet.mockClear()
+  storageRemove.mockClear()
 }
 
 /**
