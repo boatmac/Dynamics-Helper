@@ -13,6 +13,20 @@ export interface ScrapedData {
     source?: string;
 }
 
+/**
+ * Regex for case/task IDs scraped from D365 pages:
+ *   - 16-digit case number (e.g. 2601190030003106)
+ *   - 19-digit task ID (e.g. 2601190030003106001) — prefix maps to parent case
+ *   - Alpha-prefixed formats like WO-12345, INC-1234, CAS-01234-A1B2
+ *
+ * \b boundaries prevent matching digit runs adjacent to additional digits
+ * (e.g. a 20-digit blob would not match).
+ *
+ * Exported at module scope so unit tests can assert against it directly
+ * without spinning up a full jsdom document. See pageReader.test.ts.
+ */
+export const ID_REGEX = /(\b\d{16}(?:\d{3})?\b)|(\b[A-Z]{2,10}-?\d{3,}[-\w]*\b)/;
+
 export class PageReader {
     /**
      * Helper to yield control to the main thread to prevent freezing
@@ -158,13 +172,9 @@ export class PageReader {
         // 3. Try to find Case Number / Ticket ID
         const idLabels = ['Case number', 'Work Order Number', 'Incident Number', 'Ticket Number'];
         
-        // Regex for case/task IDs:
-        //   - 16-digit case number (e.g. 2601190030003106)
-        //   - 19-digit task ID (e.g. 2601190030003106001) - prefix to its parent case
-        //   - Or common alpha-prefixed formats like WO-12345, INC-1234, CAS-01234-A1B2
-        // \b boundaries make sure we don't grab a digit run that's adjacent to more
-        // digits we don't want (e.g. a 20-digit blob).
-        const idRegex = /(\b\d{16}(?:\d{3})?\b)|(\b[A-Z]{2,10}-?\d{3,}[-\w]*\b)/;
+        // Regex hoisted to module-level ID_REGEX (see top of file) so tests
+        // can target the pattern directly.
+        const idRegex = ID_REGEX;
 
         // Strategy A: Check specific header container if it exists (Case Number specific)
         const headerControls = document.querySelector('[id^="headerControlsList_"]');
