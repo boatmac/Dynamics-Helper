@@ -706,12 +706,6 @@ const OptionsInner: React.FC = () => {
                         setHostVersion(hostConfig.host_version);
                     }
 
-                    // Capture the post-merge prefs for the catch-up RPC below.
-                    // setPrefs's callback runs synchronously but state commit
-                    // is batched, so we cannot read `prefs` after this block.
-                    // Stash the merged value in a closure variable instead.
-                    let mergedPrefs: Preferences | null = null;
-
                     setPrefs(prev => {
                         const newPrefs = { ...prev };
                         let changed = false;
@@ -807,35 +801,49 @@ const OptionsInner: React.FC = () => {
                             chrome.storage.local.set({ dh_prefs: newPrefs });
                         }
 
-                        mergedPrefs = changed ? newPrefs : prev;
-                        return mergedPrefs;
+                        // Mark prefs as hydrated so subsequent user-triggered
+                        // persistPrefs calls proceed. See prefsHydratedRef
+                        // declaration for the failure mode this guards against.
+                        // Set unconditionally on a successful host response —
+                        // even if `changed` was false (e.g. host config already
+                        // matches dh_prefs), state is now known-good.
+                        //
+                        // Placed INSIDE the updater so it runs synchronously
+                        // with the state merge. React 19 + StrictMode-style
+                        // double-invoke can schedule updaters across multiple
+                        // microtask ticks; placing the ref flip and catch-up
+                        // RPC inside the same updater closure guarantees they
+                        // observe the just-merged value.
+                        prefsHydratedRef.current = true;
+
+                        // Catch-up RPC: if the user edited any field during the
+                        // hydration window, persistPrefs skipped the host RPC
+                        // for those writes. Push the merged state to host now
+                        // so config.json matches what the user actually
+                        // clicked. See spec § 4.4. Empty touched set = no edits
+                        // during window = no RPC needed (avoid noise).
+                        //
+                        // Inside the updater closure so we read `newPrefs`
+                        // (or `prev` when nothing changed) directly without
+                        // relying on a closure variable assigned by the
+                        // updater — that pattern is racy when React schedules
+                        // the updater on a later microtask tick (verified by
+                        // T7 Options hydration test in jsdom + React 19).
+                        const merged = changed ? newPrefs : prev;
+                        if (userTouchedFieldsRef.current.size > 0) {
+                            console.log('[DH] Hydration catch-up: pushing', userTouchedFieldsRef.current.size, 'user-touched field(s) to host');
+                            chrome.runtime.sendMessage({
+                                type: "NATIVE_MSG",
+                                payload: buildHostConfigPayload(merged)
+                            }, () => {
+                                if (chrome.runtime.lastError) {
+                                    console.warn('[DH] Catch-up RPC failed:', chrome.runtime.lastError.message, '— storage holds truth; next Options open will retry.');
+                                }
+                            });
+                        }
+
+                        return merged;
                     });
-
-                    // Mark prefs as hydrated so subsequent user-triggered
-                    // persistPrefs calls proceed. See prefsHydratedRef
-                    // declaration for the failure mode this guards against.
-                    // Set unconditionally on a successful host response —
-                    // even if `changed` was false (e.g. host config already
-                    // matches dh_prefs), state is now known-good.
-                    prefsHydratedRef.current = true;
-
-                    // Catch-up RPC: if the user edited any field during the
-                    // hydration window, persistPrefs skipped the host RPC for
-                    // those writes. Push the merged state to host now so
-                    // config.json matches what the user actually clicked.
-                    // See spec § 4.4. Empty touched set = no edits during
-                    // window = no RPC needed (avoid noise).
-                    if (userTouchedFieldsRef.current.size > 0 && mergedPrefs) {
-                        console.log('[DH] Hydration catch-up: pushing', userTouchedFieldsRef.current.size, 'user-touched field(s) to host');
-                        chrome.runtime.sendMessage({
-                            type: "NATIVE_MSG",
-                            payload: buildHostConfigPayload(mergedPrefs)
-                        }, () => {
-                            if (chrome.runtime.lastError) {
-                                console.warn('[DH] Catch-up RPC failed:', chrome.runtime.lastError.message, '— storage holds truth; next Options open will retry.');
-                            }
-                        });
-                    }
                 } else {
                     // Host responded but not with success+data. Same
                     // rationale as the lastError branch above — don't

@@ -103,17 +103,34 @@ describe('Options hydration window (I1: language edit preserved)', () => {
     // host-conflicting merge attempt.
     expect(languageSelect.value).toBe('en')
 
-    // NOTE: We do NOT assert that the catch-up update_config RPC fires.
-    // The production code at Options.tsx:828 uses a closure variable
-    // (mergedPrefs) captured inside a setPrefs(prev => ...) updater
-    // function. In real Chrome, the IPC round-trip gives React time to
-    // flush the updater synchronously before the catch-up check runs.
-    // In jsdom + Vitest, the deferred resolve fires too fast: the catch-
-    // up check runs while mergedPrefs is still null, so the RPC is
-    // skipped. This is a latent production race ("works because chrome
-    // IPC is slow") that the test exposes. Tracking as a follow-up to
-    // restructure the merge effect so the catch-up RPC fires inside the
-    // setPrefs updater rather than after it. The user-facing invariant
-    // (storage + UI hold 'en') is what matters for I1.
+    // Catch-up RPC: hydration window saw 1 user-touched field, so after
+    // the merge the host must receive an update_config carrying the
+    // user's value ('en'), NOT the host's conflicting value ('zh').
+    // This was previously a latent production race — closure variable
+    // mergedPrefs was assigned inside a setPrefs(prev => ...) updater
+    // and read by the catch-up block AFTER setPrefs returned. React 19
+    // schedules updaters on later microtask ticks, so mergedPrefs was
+    // null when the catch-up check ran and the RPC was silently skipped.
+    // Real Chrome happened to mask the bug because IPC latency gave
+    // React time to flush. The fix moves the catch-up RPC inside the
+    // updater closure (Options.tsx ~819) so it reads newPrefs/prev
+    // directly.
+    await waitFor(() => {
+      const catchUpCall = chromeMockSpies.sendMessage.mock.calls.find((c) => {
+        const msg = c[0] as {
+          type?: string
+          payload?: {
+            action?: string
+            payload?: { config?: { extension_preferences?: { language?: string } } }
+          }
+        }
+        return (
+          msg?.type === 'NATIVE_MSG' &&
+          msg?.payload?.action === 'update_config' &&
+          msg?.payload?.payload?.config?.extension_preferences?.language === 'en'
+        )
+      })
+      expect(catchUpCall).toBeDefined()
+    })
   })
 })
