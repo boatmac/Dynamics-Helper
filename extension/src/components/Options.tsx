@@ -1878,6 +1878,7 @@ const OptionsInner: React.FC = () => {
                                                 {t('logLevelDesc')}
                                             </p>
                                             <select
+                                                name="logLevel"
                                                 value={prefs.logLevel || 'INFO'}
                                                 onChange={(e) => updatePref({ logLevel: e.target.value as Preferences['logLevel'] })}
                                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
