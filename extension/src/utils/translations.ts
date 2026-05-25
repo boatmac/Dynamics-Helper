@@ -14,7 +14,7 @@ export const translations: TranslationDictionary = {
     reset: { en: "Reset", zh: "重置" },
     cancel: { en: "Cancel", zh: "取消" },
     savedSuccess: { en: "Settings saved successfully!", zh: "设置已保存！" },
-    resetConfirm: { en: "Reset everything to default? This will clear your custom bookmarks.", zh: "重置所有设置为默认值？这将清除您的自定义书签。" },
+    resetConfirm: { en: "Reset everything to default?\n\nThis will permanently clear:\n  • All custom bookmarks (returns to default menu)\n  • Team Catalog config (URL, selected team, cached items)\n  • All preferences (colors, button position, language, log level, paths)\n  • User Instructions (copilot-instructions.md will be wiped)\n  • User Prompt (user_prompt.md will be wiped)\n\nThis action cannot be undone.", zh: "重置所有设置为默认值？\n\n以下内容将被永久清除：\n  • 全部自定义书签（恢复为默认菜单）\n  • 团队目录配置（URL、所选团队、缓存）\n  • 所有偏好设置（颜色、按钮位置、语言、日志级别、路径）\n  • 用户指令（copilot-instructions.md 将被清空）\n  • 用户提示词（user_prompt.md 将被清空）\n\n此操作不可撤销。" },
     
     // --- Options Page ---
     appearance: { en: "Appearance", zh: "外观设置" },
