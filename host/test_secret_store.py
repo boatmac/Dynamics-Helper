@@ -38,11 +38,18 @@ class TestSecretStore(unittest.TestCase):
         base64.b64decode(blob, validate=True)
 
     def test_SS_T4_encrypt_output_differs_from_input(self):
-        """SS-T4: output != input (sanity check that something happened)."""
+        """SS-T4: output != input, and decoded bytes do not contain the
+        plaintext (catches a fake implementation that just base64-encodes
+        the input without actual encryption)."""
         plaintext = "the quick brown fox"
         blob = self.secret_store.encrypt(plaintext)
         self.assertNotEqual(blob, plaintext)
         self.assertNotIn(plaintext, blob)
+        # The strong check: base64-decode the blob and confirm the raw
+        # bytes do not contain the plaintext. A real DPAPI blob is an
+        # opaque ciphertext + IV + MAC; the plaintext must not appear.
+        decoded = base64.b64decode(blob)
+        self.assertNotIn(plaintext.encode("utf-8"), decoded)
 
     def test_SS_T5_decrypt_corrupt_blob_raises(self):
         """SS-T5: non-base64 input raises DecryptError."""

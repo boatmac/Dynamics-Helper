@@ -13,6 +13,7 @@ Public surface:
 """
 
 import base64
+import binascii
 import ctypes
 from ctypes import wintypes
 
@@ -113,7 +114,7 @@ def decrypt(b64_blob: str) -> str:
     """Decrypt a base64-encoded DPAPI blob produced by `encrypt`."""
     try:
         data = base64.b64decode(b64_blob, validate=True)
-    except (ValueError, base64.binascii.Error) as e:
+    except (ValueError, binascii.Error) as e:
         raise DecryptError(f"Input is not valid base64: {e}") from e
 
     blob_in = _make_blob(data)
