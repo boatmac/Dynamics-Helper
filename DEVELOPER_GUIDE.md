@@ -171,6 +171,72 @@ Background scans (MutationObserver, `useEffect` on `isOpen`) continuously scrape
 
 ---
 
+## Extension Testing
+
+The extension test suite uses **Vitest 3 + Testing Library (React 16) + jsdom**. Tests live next to source as `*.test.ts` / `*.test.tsx`.
+
+### Running
+
+```bash
+cd extension && npm run test:run        # CI mode (one-shot)
+cd extension && npm test                # watch mode (dev)
+cd extension && npm run test:coverage   # with V8 coverage
+```
+
+### Config (`vitest.config.ts`)
+
+Standalone config — **does NOT extend `vite.config.ts`**. The CRXJS plugin used for the extension build is incompatible with jsdom (it tries to resolve `chrome.runtime.getManifest()` at evaluate-time and crashes). The test config only enables the React plugin + jsdom environment.
+
+`pool: 'forks'` is used instead of the default threads pool because some chrome mock state is module-level and benefits from per-worker isolation.
+
+### Chrome API Mock (`src/test/chromeMock.ts`)
+
+Provides a complete mock of the chrome.runtime + chrome.storage surfaces used by the extension. Public API:
+
+* `installChromeMock()` — call in `beforeEach`. Wires `globalThis.chrome` to the mock.
+* `resetChromeMock()` — clears storage, pending responses, message log, **and spy call counts**.
+* `seedStorage({ ... })` — pre-populate `chrome.storage.local` before render.
+* `deferNextResponse(action)` — pause the next outgoing message with the given `action`. Returns a controller with `.resolve(response)` / `.reject(error)`. Used to hold `get_config` open while the test simulates user edits inside the hydration window.
+* `chromeMockSpies` — `{ sendMessage, storageGet, storageSet, storageRemove }`, each a `vi.fn()`. Used for call-count assertions and inspecting outgoing payloads.
+
+The mock supports **both callback-style** (`chrome.runtime.sendMessage(msg, cb)`) and **Promise-style** (`await chrome.runtime.sendMessage(msg)`) APIs. Pick the matching style for the code under test — the production code uses callback style for `sendMessage` and Promise style for `chrome.storage.local`.
+
+**Spy reset is mandatory.** `resetChromeMock()` calls `.mockClear()` on all four spies. Without this, spy counts accumulate across tests in the same file because the spy objects themselves are module-level singletons. The 6-invariant `Options.test.tsx` suite depends on per-test call counting and will silently report false positives if spies leak.
+
+### The 6-Invariant Pattern for `Options.test.tsx`
+
+The Options page hydration window has 6 distinct invariants documented in `docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md` (§ 4 + § 5 test matrix). Each invariant gets exactly one test:
+
+| ID | What it asserts | Failure mode it catches |
+|---|---|---|
+| Inv1 | storage.set succeeds during hydration window (segment 1 ungated) | Adding a hydration gate to segment 1 breaks fast local persistence |
+| Inv2 | host RPC is gated during hydration window (segment 2 gated) | Removing the gate clobbers `config.json` with DEFAULT_PREFS values |
+| Inv3 | hydration merge skips user-touched fields | Removing `!touched.has('X')` overwrites user edits |
+| Inv4 | catch-up RPC at hydration COMPLETE sends user value | Reading stale outer-closure `prefs` instead of `merged` (the React 19 race fixed in `0265a74`) |
+| Inv5 | no catch-up RPC fires when nothing touched during window | Catch-up running unconditionally spams the host every Options open |
+| Inv6 | Reset during window survives the late hydration merge | `handleReset` not marking DEFAULT_PREFS keys as touched lets late host response un-reset the user |
+
+**Adding new tests:** Map 1:1 to a spec invariant. Don't write the same invariant twice with different fields (e.g., one test for `language`, one for `logLevel`, one for `enableStatusBubble`) — they all verify Inv3 with different payloads. Pick the field that exercises the path most cleanly.
+
+**Break-and-fail verification** (required for new invariant tests): After the test passes, **temporarily break** the corresponding source code in `Options.tsx` and re-run the test to confirm it fails with a useful message. Then revert. This proves the test catches the regression named in its title. Commit `673b5aa` records the canonical break-and-fail table for all 6 invariants. Future invariants must include the same verification in the commit message.
+
+### Race-Fix Regression Test (Inv4)
+
+Inv4 specifically guards commit `0265a74`. The pre-fix bug: the post-hydration catch-up RPC was reading `mergedPrefs` from an outer-scope variable assigned **inside** a `setPrefs(prev => ...)` updater. React 19 sometimes schedules the updater on a later microtask tick, so the catch-up RPC ran before the assignment and silently sent stale state. Production "worked" because chrome IPC latency masked the race in the common case.
+
+The fix relocates the catch-up RPC + `prefsHydratedRef.current = true` flip **inside** the success-branch `setPrefs` updater closure, reading `merged = changed ? newPrefs : prev` directly. Inv4 verifies this by deferring `get_config`, simulating a `language` edit during the window, then asserting the catch-up payload carries the user's new value.
+
+If a future refactor moves the catch-up RPC back outside the updater closure (because "it looks cleaner") Inv4 will fail and tell you not to.
+
+### Test File Conventions
+
+* Tests live next to source: `Options.tsx` → `Options.test.tsx`, `pageReader.ts` → `pageReader.test.ts`.
+* Use `installChromeMock()` + `resetChromeMock()` in `beforeEach` — every test must start with a clean chrome surface.
+* Use `import.meta.env.DEV` checks sparingly in source code being tested; jsdom doesn't set MV3 service-worker globals so anything gated on those will throw.
+* The `items.json` fetch warnings in test output are harmless (`unknown scheme` errors from jsdom's fetch implementation). Don't try to silence them in source — they're a jsdom limitation, not a real bug.
+
+---
+
 ## Preferences State Management
 
 All extension preferences (the `dh_prefs` chrome.storage.local key) are typed and managed through `extension/src/utils/prefs.ts`:

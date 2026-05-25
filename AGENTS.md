@@ -49,6 +49,32 @@ This file defines the operational rules, development workflows, and coding stand
 
 * **Linting:**
   * No explicit lint script is configured. Follow standard ESLint/Prettier patterns for React/TS.
+* **Run Tests:**
+  * **Run All Tests (CI mode):**
+
+    ```bash
+    cd extension && npm run test:run
+    ```
+
+  * **Watch Mode (dev):**
+
+    ```bash
+    cd extension && npm test
+    ```
+
+  * **Coverage:**
+
+    ```bash
+    cd extension && npm run test:coverage
+    ```
+
+  * **Test Stack:** Vitest 3 + Testing Library (React 16) + jsdom. Standalone `vitest.config.ts` (does NOT extend `vite.config.ts` — CRXJS plugin breaks jsdom).
+  * **Chrome API Mock:** `src/test/chromeMock.ts` provides `installChromeMock()`, `resetChromeMock()`, `deferNextResponse(action)`, `seedStorage()`, and `chromeMockSpies` (sendMessage / storageGet / storageSet / storageRemove). Supports both callback and Promise-style chrome APIs. **`resetChromeMock()` clears spy call counts** — without this, spy counts leak across tests in the same file.
+  * **Current Test Files:**
+    * `src/utils/pageReader.test.ts` — `ID_REGEX` accept/reject behavior (case ID extraction).
+    * `src/components/Options.test.tsx` — 6 hydration-window invariants (T-Inv1…T-Inv6) per `docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md` § 4 + § 5.
+  * **Adding New Tests for `Options.tsx`:** Follow the 6-invariant model. Each test must map 1:1 to a spec invariant — don't duplicate one invariant across multiple fields. Use `deferNextResponse('get_config')` to control hydration timing, then `fireEvent.change` between `render()` and `resolveHostConfig(...)` to simulate edits inside the window.
+  * **Break-and-Fail Verification (Required for new spec invariant tests):** After a new test passes, temporarily break the corresponding source code (e.g., remove a gate, change a closure variable) and re-run the test to confirm it fails. Then revert. This proves the test catches the regression it's named after. See commit `673b5aa` for the canonical 6-invariant break-and-fail table.
 
 ### Host (`host/`)
 
