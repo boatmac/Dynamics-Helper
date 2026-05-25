@@ -46,8 +46,22 @@ async function initTelemetry(): Promise<void> {
         appInsights.loadAppInsights();
 
         // 3. Set user context so SDK populates user_Id in the schema.
-        appInsights.context.user.id = stableUserId;
-        appInsights.context.user.authenticatedId = stableUserId;
+        // In a service worker the Properties plugin can fail to initialize the
+        // `user` sub-context (it relies on `document`/cookies which SWs lack),
+        // leaving `appInsights.context` or `appInsights.context.user` as
+        // `undefined`. A direct property assignment in that state throws
+        // "Cannot set properties of undefined (setting 'id')" and aborts the
+        // whole init (no telemetryInitializer is registered, so even the
+        // custom-dimension fallback below never fires). Guard the assignment
+        // and rely on the `item.data.userId` stamping in step 4 as the source
+        // of truth — the App Insights backend reads the userId from custom
+        // dimensions when the schema field is absent.
+        if (appInsights.context && appInsights.context.user) {
+            appInsights.context.user.id = stableUserId;
+            appInsights.context.user.authenticatedId = stableUserId;
+        } else {
+            console.warn("[DH-SW] App Insights user context unavailable in SW; relying on telemetryInitializer for userId.");
+        }
 
         // 4. Stamp every telemetry item with extensionVersion AND userId
         // as custom dimensions (backup - guarantees they appear even if
