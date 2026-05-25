@@ -900,6 +900,11 @@ class NativeHost:
             logging.info(f"User config file not found at: {user_config_path}")
             user_data = {}
 
+        # Decrypt secret fields (e.g. team_manifest_url_encrypted) in place
+        # so downstream merge/read code sees the legacy plaintext key names.
+        # On decrypt failure the field becomes "" and the user repastes via UI.
+        self._decrypt_secrets_in_memory(user_data)
+
         # C. Merge Logic
         # Start with default data
         final_data = default_data.copy()
@@ -1510,6 +1515,20 @@ class NativeHost:
                         f"Sanitized skills: {len(incoming_skills)} -> {len(filtered_skills)} (Removed {len(incoming_skills) - len(filtered_skills)} workspace skills)"
                     )
                     payload["config"]["skill_directories"] = filtered_skills
+
+                # Encrypt secret fields (team_manifest_url -> _encrypted)
+                # before merging. EncryptError aborts the entire write per
+                # spec § "EncryptError handling".
+                try:
+                    self._encrypt_secrets_before_write(payload["config"])
+                except secret_store.EncryptError as e:
+                    logging.error(
+                        "Failed to encrypt secret field; aborting config write. "
+                        "Error: %s", e
+                    )
+                    return {
+                        "error": "Failed to encrypt secret field; configuration not saved."
+                    }
 
                 # Merge new config
                 current_data.update(payload["config"])
