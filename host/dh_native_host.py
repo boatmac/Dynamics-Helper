@@ -775,6 +775,11 @@ class NativeHost:
             )
             del ext["team_manifest_url"]
 
+        # pop (not get) removes the encrypted key from the in-memory dict
+        # unconditionally — either we'll re-add `team_manifest_url` (success
+        # path) or leave it absent (failure path so the caller's next save
+        # doesn't re-persist the bad blob). The disk copy is untouched
+        # either way; we only mutate this dict.
         blob = ext.pop("team_manifest_url_encrypted", None)
         if blob is None:
             return  # nothing to decrypt
