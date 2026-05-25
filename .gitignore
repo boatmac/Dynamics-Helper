@@ -34,7 +34,8 @@ local.settings.json
 
 # Build Artifacts & Release
 release/
-releases/
+releases/*
+!releases/notes-*.md
 
 # Legacy
 legacy_backup/
