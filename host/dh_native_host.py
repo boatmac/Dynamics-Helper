@@ -308,6 +308,15 @@ try:
     log_emergency("Attempting to import PiiScrubber...")
     from pii_scrubber import PiiScrubber
     import updater  # Import the new updater module
+    import secret_store
+    # Ensure `host.secret_store` (used by tests and any caller using the
+    # package path) resolves to the same module object as the bare
+    # `secret_store` name this file uses. Without this, `mock.patch
+    # ("host.secret_store.encrypt")` would patch a sibling copy and never
+    # affect calls dispatched from here. Use direct assignment (not
+    # setdefault) so we win even if some earlier code imported the package
+    # path first.
+    sys.modules["host.secret_store"] = secret_store
 
     logging.info("Successfully imported PiiScrubber and Updater.")
     log_emergency("Successfully imported PiiScrubber and Updater.")
@@ -718,6 +727,109 @@ class NativeHost:
             logging.error(f"Failed to initialize SDK: {e}")
             self.client = None  # Ensure client is None so null checks catch it
             self.session = None  # Ensure it's None on failure
+
+    # ------------------------------------------------------------------
+    # Secret field encryption boundary
+    # ------------------------------------------------------------------
+    # `team_manifest_url` is an Azure Blob SAS URL containing a sensitive
+    # `sig=` HMAC. We persist it to disk encrypted via DPAPI so a screenshot
+    # of config.json, a backup-tool upload, or a DLP scan of %LOCALAPPDATA%
+    # cannot leak it. Encryption is on-disk only; in-memory state (and the
+    # IPC payload to the extension) still uses plaintext.
+    #
+    # DO NOT log plaintext URLs inside these methods.
+    #
+    # Spec: docs/superpowers/specs/2026-05-25-team-manifest-url-encryption-design.md
+
+    def _decrypt_secrets_in_memory(self, config: dict) -> None:
+        """Replace on-disk encrypted secret fields with in-memory plaintext.
+
+        Mutates `config` in place. Must be called immediately after loading
+        config.json. After this call, downstream code sees the legacy
+        plaintext key names (`team_manifest_url`) and is oblivious to
+        encryption.
+
+        Behavior:
+        - If `team_manifest_url_encrypted` is present and decrypts cleanly:
+          set `team_manifest_url` to the plaintext, delete the encrypted key
+          (in memory only).
+        - If decryption fails (cross-machine copy, corrupt blob, lost key):
+          log a WARNING, set `team_manifest_url` to "", and remove the
+          encrypted key from the in-memory dict so downstream code does not
+          see the unusable blob. The on-disk blob is NOT touched; the user
+          self-heals by repasting the URL.
+        - Any pre-existing plaintext `team_manifest_url` key in config.json
+          is treated as legacy/invalid and discarded (never released with
+          plaintext persistence; presence indicates stale or tampered
+          state).
+        """
+        ext = config.get("extension_preferences")
+        if not isinstance(ext, dict):
+            return
+
+        # Discard any stale plaintext key — never trust it (spec § Migration).
+        if "team_manifest_url" in ext:
+            logging.warning(
+                "Discarding stale plaintext team_manifest_url from config.json; "
+                "encrypted form is the only persistence path."
+            )
+            del ext["team_manifest_url"]
+
+        blob = ext.pop("team_manifest_url_encrypted", None)
+        if blob is None:
+            return  # nothing to decrypt
+
+        try:
+            ext["team_manifest_url"] = secret_store.decrypt(blob)
+        except secret_store.DecryptError as e:
+            logging.warning(
+                "Failed to decrypt team_manifest_url (likely cross-machine "
+                "copy or key reset); treating as unconfigured. Error: %s",
+                e,
+            )
+            ext["team_manifest_url"] = ""
+            # NOTE: Intentionally do NOT write the encrypted blob back to
+            # `ext` — downstream code would re-persist it on the next
+            # config save and we want self-heal to be one user action.
+
+    def _encrypt_secrets_before_write(self, payload_config: dict) -> None:
+        """Replace in-memory plaintext secret fields with encrypted form.
+
+        Mutates `payload_config` in place. Must be called inside
+        handle_update_config before merging the payload into the on-disk
+        config. After this call, the dict carries only encrypted keys for
+        secret fields.
+
+        Behavior:
+        - Non-empty plaintext `team_manifest_url`: encrypt, store under
+          `team_manifest_url_encrypted`, delete the plaintext key.
+        - Empty-string plaintext (user cleared the field, or Reset): delete
+          both keys so neither persists.
+        - EncryptError propagates to the caller — handle_update_config
+          MUST abort the entire write on this exception. There is no
+          plaintext fallback path.
+        """
+        ext = payload_config.get("extension_preferences")
+        if not isinstance(ext, dict):
+            return
+        if "team_manifest_url" not in ext:
+            return  # extension didn't send the field; nothing to do
+
+        url = ext["team_manifest_url"]
+
+        if url == "":
+            # Reset / clear semantics: drop both keys.
+            del ext["team_manifest_url"]
+            ext.pop("team_manifest_url_encrypted", None)
+            return
+
+        # Encrypt and swap keys atomically. If encrypt raises, we leave
+        # `team_manifest_url` in place so the caller's exception handler
+        # sees the dict unchanged from what it received — easier to reason
+        # about than half-mutated state.
+        blob = secret_store.encrypt(url)  # may raise EncryptError
+        ext["team_manifest_url_encrypted"] = blob
+        del ext["team_manifest_url"]
 
     def _get_session_config(self) -> dict:
         """Constructs the session configuration from disk."""
