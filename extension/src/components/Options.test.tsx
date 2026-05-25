@@ -25,7 +25,7 @@ vi.mock('./MarkdownPreview', () => ({
 }))
 
 vi.mock('../utils/version', () => ({
-  getExtensionVersion: () => '2.0.70-beta.4-test',
+  getExtensionVersion: () => '2.0.70-beta.5-test',
 }))
 
 // Import AFTER mocks so they take effect.

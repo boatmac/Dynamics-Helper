@@ -168,7 +168,7 @@ export function installChromeMock(): void {
   ;(globalThis as unknown as { chrome: unknown }).chrome = {
     runtime: {
       sendMessage,
-      getManifest: () => ({ version: '2.0.70-beta.4-test' }),
+      getManifest: () => ({ version: '2.0.70-beta.5-test' }),
       getURL: (path: string) => `chrome-extension://test/${path}`,
       lastError: undefined,
       onMessage: {
