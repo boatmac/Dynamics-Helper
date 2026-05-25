@@ -38,6 +38,23 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 }
 
 // --- Helpers ---
+// Force every folder in the tree to start collapsed. Called from both the
+// initial mount load AND the Reset handler so default folders never appear
+// in a fully-expanded state. Previously inlined inside the mount useEffect,
+// which caused Reset to skip collapsing — see commit log.
+export function collapseFolders(list: MenuItem[]): MenuItem[] {
+    return list.map(item => {
+        if (item.type === 'folder') {
+            return {
+                ...item,
+                collapsed: item.collapsed ?? true,
+                children: item.children ? collapseFolders(item.children) : []
+            };
+        }
+        return item;
+    });
+}
+
 async function loadItems(): Promise<MenuItem[]> {
     // 1. Try local storage
     try {
@@ -882,24 +899,9 @@ const OptionsInner: React.FC = () => {
             });
         });
 
-        // Load Items and ensure collapsed by default
+        // Load Items and ensure collapsed by default. collapseFolders is the
+        // module-level helper so handleReset can reuse it.
         loadItems().then(loadedItems => {
-            const collapseFolders = (list: MenuItem[]): MenuItem[] => {
-                return list.map(item => {
-                    if (item.type === 'folder') {
-                        return {
-                            ...item,
-                            // Default to collapsed if undefined, or force collapsed if desired? 
-                            // User request: "make it collapsed by default". 
-                            // I'll default to true if it's not explicitly false (or maybe just force it true on initial load for cleaner look).
-                            // Let's set it to true if undefined.
-                            collapsed: item.collapsed ?? true, 
-                            children: item.children ? collapseFolders(item.children) : []
-                        };
-                    }
-                    return item;
-                });
-            };
             setItems(collapseFolders(loadedItems));
             // Mark hydration complete — subsequent setItems calls will now
             // fall through the persist-on-change useEffect above.
@@ -1155,7 +1157,13 @@ const OptionsInner: React.FC = () => {
             );
             setPrefs(DEFAULT_PREFS);
             chrome.storage.local.remove(["dh_prefs", "dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels"], () => {
-                loadItems().then(setItems);
+                // Wrap loaded items in collapseFolders so Reset produces the
+                // same folded-by-default tree the mount path produces. Without
+                // this, items.json defaults render fully expanded after Reset
+                // because items.json ships no `collapsed` keys — every folder
+                // resolves to `undefined`, which `effectiveCollapsed` treats
+                // as expanded.
+                loadItems().then(loaded => setItems(collapseFolders(loaded)));
                 setTeamItems([]);
                 setTeamSynced("");
                 setTeamCollapsedLabels(new Set());
