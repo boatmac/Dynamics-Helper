@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 import { useTranslation } from '../utils/i18n';
-import { usePrefs } from '../utils/prefs';
+import { usePrefs, mergeRootPathOverride } from '../utils/prefs';
 import { trackEvent, trackException, hashCaseId } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { 
@@ -360,9 +360,7 @@ const FAB: React.FC = () => {
     
     const { prefs } = usePrefs();
     const [rootPathOverride, setRootPathOverride] = useState<string | null>(null);
-    const effectivePrefs = rootPathOverride !== null
-        ? { ...prefs, rootPath: rootPathOverride }
-        : prefs;
+    const effectivePrefs = mergeRootPathOverride(prefs, rootPathOverride);
     
     // UI States
     const [isContextExpanded, setIsContextExpanded] = useState(false);

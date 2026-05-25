@@ -87,3 +87,37 @@ export function usePrefs(): { prefs: Preferences } {
 
     return { prefs };
 }
+
+/**
+ * Merge a runtime rootPath override over a Preferences object.
+ *
+ * Used by FAB.tsx to support context-menu invocations that specify a
+ * rootPath different from the Options-configured one (e.g. a right-click
+ * "Analyze Error" from a different workspace). The override is a React
+ * useState in FAB, deliberately kept OUT of the usePrefs hook and OUT of
+ * chrome.storage — it must not persist, and it must not leak across
+ * tabs, components, or page reloads.
+ *
+ * This function is a pure expression extracted from FAB.tsx (was an
+ * inline ternary). Extracting it serves two purposes:
+ *   1. Single source of truth for the override-merge semantics.
+ *   2. A stable import surface for the regression tests in
+ *      FAB.rootPathOverride.test.ts that lock the three follow-up #5
+ *      invariants.
+ *
+ * Contract:
+ *   - override === null → return the input prefs by reference (preserves
+ *     identity for downstream useEffect dependency arrays).
+ *   - override is a string → return a NEW object with rootPath replaced
+ *     and all other fields shallow-spread.
+ *   - No side effects. No storage I/O. No chrome.runtime calls.
+ */
+export function mergeRootPathOverride(
+    prefs: Preferences,
+    override: string | null,
+): Preferences {
+    if (override === null) {
+        return prefs;
+    }
+    return { ...prefs, rootPath: override };
+}
