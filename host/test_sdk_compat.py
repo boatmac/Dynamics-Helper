@@ -116,7 +116,12 @@ class TestMcpTypeMigration(unittest.TestCase):
         # Read the constant directly from the source for the simplest possible
         # regression: if someone deletes the migration block, this test loses
         # its anchor and fails on import / attribute lookup.
-        import dh_native_host  # noqa: F401
+        # Import via the host package (matches other host tests). Using a
+        # top-level `import dh_native_host` would cause Python to register a
+        # second module entry distinct from `host.dh_native_host`, re-running
+        # all module-level setup (handler attach, SDK shim install, etc.)
+        # and doubling log writes during the test suite.
+        from host import dh_native_host  # noqa: F401
 
         # The migration happens inline inside start_session; the test below
         # exercises it end-to-end by reaching into the surrounding helper.

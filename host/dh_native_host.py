@@ -174,26 +174,45 @@ _log_handler = _SafeRotatingFileHandler(
 _log_handler.setFormatter(
     logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 )
-logging.root.addHandler(_log_handler)
-logging.root.setLevel(logging.DEBUG)
+
+# Scoped logger: attach file handler to "dh" namespace, NOT root.
+# Why: previously the handler lived on root, so every third-party library
+# (SDK, httpx, asyncio, etc.) flushed INFO/DEBUG into native_host.log,
+# polluting it during normal operation AND during test runs. With a named
+# logger + propagate=False, only dh's own messages plus dh.* sub-loggers
+# (updater, pii_scrubber, secret_store) reach the file.
+# Trade-off: Options log_level only controls dh's verbosity. To see SDK
+# internals, attach a separate handler to logging.getLogger("copilot") —
+# tracked as future "verbose SDK" toggle, not in this refactor.
+logger = logging.getLogger("dh")
+# Guard against double-attach if the module is somehow re-imported under a
+# different name (e.g., `import dh_native_host` vs `from host import
+# dh_native_host`). Without the guard, every emit would write N times.
+if not logger.handlers:
+    logger.addHandler(_log_handler)
+logger.setLevel(logging.DEBUG)
+logger.propagate = False
 
 # Valid log levels that can be set via config
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 
 def _apply_log_level(level_name: str) -> None:
-    """Set the root logger level from a string name (e.g., 'INFO', 'DEBUG').
+    """Set the 'dh' logger level from a string name (e.g., 'INFO', 'DEBUG').
 
     Validated against _VALID_LOG_LEVELS; defaults to INFO if invalid.
+    Only affects dh and dh.* sub-loggers; third-party libraries are
+    unaffected (their default WARNING level applies, and they don't
+    reach our file anyway since propagate=False on the dh logger).
     """
     level_name = (level_name or "INFO").upper()
     if level_name not in _VALID_LOG_LEVELS:
-        logging.warning(f"Invalid log level '{level_name}', defaulting to INFO")
+        logger.warning(f"Invalid log level '{level_name}', defaulting to INFO")
         level_name = "INFO"
     numeric_level = getattr(logging, level_name)
-    if logging.root.level != numeric_level:
-        logging.info(f"Log level changed to {level_name}")
-        logging.root.setLevel(numeric_level)
+    if logger.level != numeric_level:
+        logger.info(f"Log level changed to {level_name}")
+        logger.setLevel(numeric_level)
 
 
 # Apply user's saved log level from config.json at startup (before any analyze).
@@ -215,16 +234,16 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
-    logging.critical(
+    logger.critical(
         "Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback)
     )
 
 
 sys.excepthook = handle_exception
 
-logging.info("----------------------------------------------------------------")
-logging.info(f"Host process started. PID: {os.getpid()}")
-logging.info(f"Python Executable: {sys.executable}")
+logger.info("----------------------------------------------------------------")
+logger.info(f"Host process started. PID: {os.getpid()}")
+logger.info(f"Python Executable: {sys.executable}")
 
 # Import the SDK from the correct package name we discovered: 'copilot'
 try:
@@ -273,35 +292,35 @@ try:
                         # convert to epoch ms (SDK's contract)
                         obj = {**obj, "timestamp": int(dt.timestamp() * 1000)}
                     except Exception as _conv_err:
-                        logging.warning(
+                        logger.warning(
                             f"PingResponse timestamp ISO parse failed for {ts!r}: "
                             f"{_conv_err}; letting original cast surface."
                         )
             return _orig_ping_from_dict(obj)
 
         _copilot_client.PingResponse.from_dict = staticmethod(_patched_ping_from_dict)
-        logging.info(
+        logger.info(
             "Applied SDK shim: PingResponse.from_dict tolerates ISO timestamps "
             "(CLI 1.0.46+ wire format)."
         )
     except Exception as _shim_err:
-        logging.warning(
+        logger.warning(
             f"Could not apply SDK ping-timestamp shim: {_shim_err}. "
             "DH will likely fail at client.start() if CLI >= 1.0.46."
         )
     # --- end shim ---
 
-    logging.info("Successfully imported copilot SDK.")
+    logger.info("Successfully imported copilot SDK.")
     log_emergency("Successfully imported copilot SDK.")
 except ImportError as e:
     msg = f"Failed to import copilot SDK: {e}\n{traceback.format_exc()}"
-    logging.critical(msg)
+    logger.critical(msg)
     log_emergency(msg)
     # We exit here because the app cannot function without it
     sys.exit(1)
 except Exception as e:
     msg = f"Unexpected error importing copilot SDK: {e}\n{traceback.format_exc()}"
-    logging.critical(msg)
+    logger.critical(msg)
     log_emergency(msg)
     sys.exit(1)
 
@@ -320,11 +339,11 @@ try:
     # path first.
     sys.modules["host.secret_store"] = secret_store
 
-    logging.info("Successfully imported PiiScrubber and Updater.")
+    logger.info("Successfully imported PiiScrubber and Updater.")
     log_emergency("Successfully imported PiiScrubber and Updater.")
 except ImportError as e:
     msg = f"Failed to import PiiScrubber or Updater: {e}\n{traceback.format_exc()}"
-    logging.critical(msg)
+    logger.critical(msg)
     log_emergency(msg)
     sys.exit(1)
 
@@ -424,10 +443,10 @@ class NativeHost:
         self.current_case_id = None  # Track which case the current session belongs to
 
         # Log startup location
-        logging.info(
+        logger.info(
             f"Host started. Installation Dir: {os.path.dirname(os.path.abspath(__file__))}"
         )
-        logging.info(f"User Data Dir: {USER_DATA_DIR}")
+        logger.info(f"User Data Dir: {USER_DATA_DIR}")
 
         # Cleanup old version if exists (Atomic Update)
         try:
@@ -435,7 +454,7 @@ class NativeHost:
 
             Updater.cleanup_old_version(sys.executable)
         except Exception as e:
-            logging.error(f"Failed to cleanup old version: {e}")
+            logger.error(f"Failed to cleanup old version: {e}")
 
         # Fix for v2.0.45 Updater Bug (Wrong Directory) & Nested Extension
         # v2.0.45 erroneously extracted extension to ../extension (AppData/Local/extension)
@@ -461,7 +480,7 @@ class NativeHost:
                 nested_manifest = os.path.join(nested_ext_dir, "manifest.json")
 
                 if os.path.exists(nested_manifest):
-                    logging.info(
+                    logger.info(
                         f"Detected nested extension at {nested_ext_dir}. Attempting repair..."
                     )
                     # We need to move content from extension/extension/* to extension/*
@@ -490,22 +509,22 @@ class NativeHost:
                                     shutil.copy2(src, dst)  # Overwrite
                                     os.remove(src)
                             except Exception as ex:
-                                logging.warning(f"Failed to move {item} up: {ex}")
+                                logger.warning(f"Failed to move {item} up: {ex}")
 
                         # Clean up the empty nested folder
                         try:
                             os.rmdir(nested_ext_dir)
-                            logging.info("Nested extension repair complete.")
+                            logger.info("Nested extension repair complete.")
                         except:
                             pass
 
                     except Exception as e:
-                        logging.error(f"Nested extension repair failed: {e}")
+                        logger.error(f"Nested extension repair failed: {e}")
 
                 # 2. FIX MISPLACED EXTENSION (v2.0.45 bug)
                 # Only migrate if the wrong directory exists and contains a manifest
                 if os.path.exists(os.path.join(wrong_ext_dir, "manifest.json")):
-                    logging.info(
+                    logger.info(
                         f"Detected misplaced extension files at {wrong_ext_dir}. Migrating to {right_ext_dir}..."
                     )
 
@@ -517,16 +536,16 @@ class NativeHost:
                             shutil.copytree(
                                 wrong_ext_dir, right_ext_dir, dirs_exist_ok=True
                             )
-                            logging.info(
+                            logger.info(
                                 "Extension files updated via copytree (overwrite)."
                             )
 
                             # Now safe to remove the wrong dir
                             shutil.rmtree(wrong_ext_dir)
-                            logging.info("Cleaned up misplaced extension folder.")
+                            logger.info("Cleaned up misplaced extension folder.")
 
                         except Exception as e:
-                            logging.error(
+                            logger.error(
                                 f"Failed to overwrite extension files (likely locked by Chrome): {e}"
                             )
                             # If we can't overwrite, we leave the 'wrong' folder there
@@ -535,10 +554,10 @@ class NativeHost:
                     else:
                         # Destination doesn't exist, safe to move
                         shutil.move(wrong_ext_dir, right_ext_dir)
-                        logging.info("Extension migration successful (move).")
+                        logger.info("Extension migration successful (move).")
 
         except Exception as e:
-            logging.error(f"Extension migration/repair failed: {e}")
+            logger.error(f"Extension migration/repair failed: {e}")
 
     def _read_beta_channel_pref(self) -> bool:
         """Best-effort read of the beta-channel preference from config.json.
@@ -555,7 +574,7 @@ class NativeHost:
             ext = data.get("extension_preferences", {})
             return bool(ext.get("beta_channel_enabled", False))
         except Exception as e:
-            logging.warning(f"Could not read beta_channel_enabled: {e}")
+            logger.warning(f"Could not read beta_channel_enabled: {e}")
             return False
 
     async def check_for_updates(self, force=False):
@@ -584,7 +603,7 @@ class NativeHost:
                     "https://api.github.com/repos/boatmac/Dynamics-Helper/"
                     "releases/latest"
                 )
-            logging.info(
+            logger.info(
                 f"Checking for updates (beta_channel_enabled={beta_enabled})"
             )
 
@@ -597,7 +616,7 @@ class NativeHost:
                         if response.status == 200:
                             return json.loads(response.read().decode())
                 except Exception as e:
-                    logging.warning(f"Update check network error: {e}")
+                    logger.warning(f"Update check network error: {e}")
                 return None
 
             if not self.loop:
@@ -634,7 +653,7 @@ class NativeHost:
                     best_release = release
 
             if best_release is None:
-                logging.info(
+                logger.info(
                     f"No update available (Local: {VERSION}, "
                     f"checked {len(candidates)} release(s))"
                 )
@@ -647,7 +666,7 @@ class NativeHost:
                     )
                 return
 
-            logging.info(f"Update available: {best_tag}")
+            logger.info(f"Update available: {best_tag}")
 
             # Find the .zip asset URL on the chosen release.
             assets = best_release.get("assets", [])
@@ -674,7 +693,7 @@ class NativeHost:
             )
 
         except Exception as e:
-            logging.error(f"check_for_updates failed: {e}\n{traceback.format_exc()}")
+            logger.error(f"check_for_updates failed: {e}\n{traceback.format_exc()}")
             if force:
                 self.send_message(
                     {
@@ -694,14 +713,14 @@ class NativeHost:
             # But here we look for specific file
             npm_path_cmd = os.path.join(appdata, "npm", "copilot.cmd")
             if os.path.exists(npm_path_cmd):
-                logging.info(f"Found Copilot CLI at npm location: {npm_path_cmd}")
+                logger.info(f"Found Copilot CLI at npm location: {npm_path_cmd}")
                 return npm_path_cmd
 
         # Fallback to generic 'copilot' in PATH
         copilot_path = shutil.which("copilot")
 
         if copilot_path:
-            logging.info(f"Found Copilot CLI in PATH: {copilot_path}")
+            logger.info(f"Found Copilot CLI in PATH: {copilot_path}")
             return copilot_path
 
         return None
@@ -709,7 +728,7 @@ class NativeHost:
     async def initialize_sdk(self):
         """Initializes the Copilot Client and Session."""
         try:
-            logging.info("Initializing Copilot Client...")
+            logger.info("Initializing Copilot Client...")
 
             cli_path = self.find_copilot_cli()
             config = (
@@ -719,14 +738,14 @@ class NativeHost:
             self.client = CopilotClient(config)
 
             # Explicitly start the client to ensure connection before session creation
-            logging.info("Starting Copilot Client...")
+            logger.info("Starting Copilot Client...")
             await self.client.start()
-            logging.info("Copilot Client started.")
+            logger.info("Copilot Client started.")
 
             await self._refresh_session()
 
         except Exception as e:
-            logging.error(f"Failed to initialize SDK: {e}")
+            logger.error(f"Failed to initialize SDK: {e}")
             self.client = None  # Ensure client is None so null checks catch it
             self.session = None  # Ensure it's None on failure
 
@@ -771,7 +790,7 @@ class NativeHost:
 
         # Discard any stale plaintext key — never trust it (spec § Migration).
         if "team_manifest_url" in ext:
-            logging.warning(
+            logger.warning(
                 "Discarding stale plaintext team_manifest_url from config.json; "
                 "encrypted form is the only persistence path."
             )
@@ -789,7 +808,7 @@ class NativeHost:
         try:
             ext["team_manifest_url"] = secret_store.decrypt(blob)
         except secret_store.DecryptError as e:
-            logging.warning(
+            logger.warning(
                 "Failed to decrypt team_manifest_url (likely cross-machine "
                 "copy or key reset); treating as unconfigured. Error: %s",
                 e,
@@ -884,10 +903,10 @@ class NativeHost:
                             resolved_skills.append(os.path.normpath(expanded_path))
                     data["skill_directories"] = resolved_skills
 
-                logging.info(f"Loaded configuration from {path}")
+                logger.info(f"Loaded configuration from {path}")
                 return data
             except Exception as e:
-                logging.error(f"Failed to load config from {path}: {e}")
+                logger.error(f"Failed to load config from {path}: {e}")
                 return {}
 
         # --- Load and Merge Configurations ---
@@ -899,7 +918,7 @@ class NativeHost:
         if os.path.exists(user_config_path):
             user_data = load_config_file(user_config_path)
         else:
-            logging.info(f"User config file not found at: {user_config_path}")
+            logger.info(f"User config file not found at: {user_config_path}")
             user_data = {}
 
         # Decrypt secret fields (e.g. team_manifest_url_encrypted) in place
@@ -964,12 +983,12 @@ class NativeHost:
             ws_skills_path = os.path.join(current_root, ".github", "skills")
             if os.path.isdir(ws_skills_path):
                 workspace_skills.append(ws_skills_path)
-                logging.info(f"Detected workspace skills at: {ws_skills_path}")
+                logger.info(f"Detected workspace skills at: {ws_skills_path}")
 
         # E. Apply "Repository ONLY" Logic
         if use_workspace_only and has_root_path:
             final_data["skill_directories"] = workspace_skills
-            logging.info("Repository ONLY Mode: Using ONLY workspace skills.")
+            logger.info("Repository ONLY Mode: Using ONLY workspace skills.")
         else:
             # Merge Base + Workspace
             final_data["skill_directories"] = list(set(base_skills + workspace_skills))
@@ -994,7 +1013,7 @@ class NativeHost:
         should_load_global = True
         if use_workspace_only and has_root_path:
             should_load_global = False
-            logging.info("Repository ONLY Mode: Ignoring global MCP config.")
+            logger.info("Repository ONLY Mode: Ignoring global MCP config.")
 
         if should_load_global:
             if os.path.exists(base_mcp_path):
@@ -1003,13 +1022,13 @@ class NativeHost:
                         base_mcp_data = json.load(f)
                         if "mcpServers" in base_mcp_data:
                             mcp_servers.update(base_mcp_data["mcpServers"])
-                            logging.info(
+                            logger.info(
                                 f"Loaded Global MCP config from {base_mcp_path}"
                             )
                 except Exception as e:
-                    logging.error(f"Failed to load Global MCP config: {e}")
+                    logger.error(f"Failed to load Global MCP config: {e}")
             else:
-                logging.info(f"Global MCP config not found at {base_mcp_path}")
+                logger.info(f"Global MCP config not found at {base_mcp_path}")
 
         # --- Apply to Instance and Session ---
 
@@ -1026,11 +1045,11 @@ class NativeHost:
                         if "mcpServers" in ws_mcp_data:
                             # Update (Merge/Override)
                             mcp_servers.update(ws_mcp_data["mcpServers"])
-                            logging.info(
+                            logger.info(
                                 f"Loaded Workspace MCP config from {ws_mcp_path}"
                             )
                 except Exception as e:
-                    logging.error(f"Failed to load Workspace MCP config: {e}")
+                    logger.error(f"Failed to load Workspace MCP config: {e}")
 
         # Assign merged MCP servers to session config
         # IMPORTANT: SDK reads "mcp_servers" (snake_case) and converts to "mcpServers" on the wire
@@ -1051,7 +1070,7 @@ class NativeHost:
                     remapped.append((srv_name, old_type, srv_cfg["type"]))
             if remapped:
                 for srv_name, old_type, new_type in remapped:
-                    logging.warning(
+                    logger.warning(
                         "MCP server '%s' uses legacy type=%r; remapping "
                         "in-memory to %r. Update your mcp.json to silence "
                         "this warning. See docs/sdk-upgrade-2026-05-0.3.0.md "
@@ -1064,7 +1083,7 @@ class NativeHost:
         # Tells Copilot where to anchor file operations (e.g., filesystem MCP)
         if self.root_path:
             session_config["working_directory"] = self.root_path
-            logging.info(f"Set working_directory to: {self.root_path}")
+            logger.info(f"Set working_directory to: {self.root_path}")
 
         # --- System Instructions (Split Prompt Architecture) ---
 
@@ -1078,7 +1097,7 @@ class NativeHost:
                 with open(system_instr_path, "r", encoding="utf-8") as f:
                     sys_content = f.read()
             except Exception as e:
-                logging.error(f"Failed to read system instructions: {e}")
+                logger.error(f"Failed to read system instructions: {e}")
 
         # 3. Load User Instructions (Managed by User)
         user_content = ""
@@ -1087,9 +1106,9 @@ class NativeHost:
                 with open(user_instr_path, "r", encoding="utf-8") as f:
                     user_content = f.read()
             except Exception as e:
-                logging.error(f"Failed to read user instructions: {e}")
+                logger.error(f"Failed to read user instructions: {e}")
         else:
-            logging.info(f"User instructions file not found at: {user_instr_path}")
+            logger.info(f"User instructions file not found at: {user_instr_path}")
 
         # 4. Combine
         final_content = sys_content
@@ -1102,7 +1121,7 @@ class NativeHost:
                 "mode": "append",
                 "content": final_content,
             }
-            logging.info("Loaded system instructions (System + User).")
+            logger.info("Loaded system instructions (System + User).")
 
         # Store raw user content in config for the UI to retrieve
         session_config["_user_instructions_raw"] = user_content
@@ -1137,11 +1156,11 @@ class NativeHost:
                             "mode": "append",
                             "content": new_content,
                         }
-                        logging.info(
+                        logger.info(
                             f"Loaded workspace instructions from {ws_instr_path}"
                         )
                 except Exception as e:
-                    logging.error(
+                    logger.error(
                         f"Failed to load workspace instructions from {ws_instr_path}: {e}"
                     )
 
@@ -1156,11 +1175,11 @@ class NativeHost:
 
         if legacy_prompt and not os.path.exists(user_prompt_path):
             try:
-                logging.info(f"Migrating legacy user_prompt to {user_prompt_path}")
+                logger.info(f"Migrating legacy user_prompt to {user_prompt_path}")
                 with open(user_prompt_path, "w", encoding="utf-8") as f:
                     f.write(legacy_prompt)
             except Exception as e:
-                logging.error(f"Failed to migrate user_prompt: {e}")
+                logger.error(f"Failed to migrate user_prompt: {e}")
 
         # 3. Read from File (Source of Truth)
         current_prompt_content = ""
@@ -1169,7 +1188,7 @@ class NativeHost:
                 with open(user_prompt_path, "r", encoding="utf-8") as f:
                     current_prompt_content = f.read()
             except Exception as e:
-                logging.error(f"Failed to read user_prompt.md: {e}")
+                logger.error(f"Failed to read user_prompt.md: {e}")
 
         # 4. Inject into extension_preferences for Frontend Sync
         if "extension_preferences" not in session_config:
@@ -1186,8 +1205,8 @@ class NativeHost:
         Auto-approves permissions to prevent headless hangs.
         Fallback safety net — if pre_tool_use hook doesn't catch it.
         """
-        logging.info(f"Permission requested (fallback handler): {request}")
-        logging.info("Auto-approving permission request to prevent headless hang.")
+        logger.info(f"Permission requested (fallback handler): {request}")
+        logger.info("Auto-approving permission request to prevent headless hang.")
         # SDK 0.3.0 renamed the approval vocabulary: "approved" -> "approve-once".
         # See docs/sdk-upgrade-2026-05-0.3.0.md § 7 (B-1) and host/test_sdk_compat.py.
         return PermissionRequestResult(kind="approve-once")
@@ -1200,7 +1219,7 @@ class NativeHost:
         The _permission_handler above serves as a fallback safety net.
         """
         tool_name = hook_input.get("toolName", "unknown")
-        logging.info(f"Pre-tool-use hook: auto-allowing '{tool_name}'")
+        logger.info(f"Pre-tool-use hook: auto-allowing '{tool_name}'")
         return PreToolUseHookOutput(permissionDecision="allow")
 
     @staticmethod
@@ -1256,7 +1275,7 @@ class NativeHost:
             case_id:    The 16-digit case ID this session belongs to (for tracking).
         """
         if not self.client:
-            logging.warning("Client not initialized. Attempting re-initialization...")
+            logger.warning("Client not initialized. Attempting re-initialization...")
             try:
                 cli_path = self.find_copilot_cli()
                 config = (
@@ -1266,9 +1285,9 @@ class NativeHost:
                 )
                 self.client = CopilotClient(config)
                 await self.client.start()
-                logging.info("Client re-initialized successfully.")
+                logger.info("Client re-initialized successfully.")
             except Exception as e:
-                logging.error(f"Client re-initialization failed: {e}")
+                logger.error(f"Client re-initialization failed: {e}")
                 self.client = None
                 return False
 
@@ -1276,7 +1295,7 @@ class NativeHost:
         try:
             full_config = self._get_session_config()
         except Exception as e:
-            logging.error(f"Failed to build session config: {e}")
+            logger.error(f"Failed to build session config: {e}")
             return False
 
         # Inject session name into system message so the AI can reference it
@@ -1289,7 +1308,7 @@ class NativeHost:
                 sys_msg["content"] = (
                     prev + f"\n\n## Session Info\n\nSession Name: {session_id}"
                 )
-            logging.debug(f"Injected session name into system message: {session_id}")
+            logger.debug(f"Injected session name into system message: {session_id}")
 
         # Extract only SDK-compatible keyword arguments from the config dict.
         # This prevents passing unknown keys (root_path, extension_preferences, etc.)
@@ -1323,19 +1342,19 @@ class NativeHost:
                 )
                 # Track which case this session belongs to
                 self.current_case_id = case_id
-                logging.info(
+                logger.info(
                     f"Resumed existing session: {session_id} (Server ID: {self.current_session_id})"
                 )
                 return True
             except AttributeError:
-                logging.info(
+                logger.info(
                     "SDK does not support resume_session. Will create new session."
                 )
             except Exception as e:
-                logging.info(
+                logger.info(
                     f"No existing session to resume ({session_id}): {e}. Creating new session."
                 )
-                logging.debug(f"Resume traceback: {traceback.format_exc()}")
+                logger.debug(f"Resume traceback: {traceback.format_exc()}")
 
         try:
             # Inject the session-name (co-<case>) so the server uses it as
@@ -1346,7 +1365,7 @@ class NativeHost:
 
             # Debug: Log the config keys being sent to create_session
             safe_keys = {k: type(v).__name__ for k, v in sdk_kwargs.items()}
-            logging.info(f"create_session config keys: {safe_keys}")
+            logger.info(f"create_session config keys: {safe_keys}")
 
             self.session = await self.client.create_session(**sdk_kwargs)
             # Capture the server-returned session ID
@@ -1354,7 +1373,7 @@ class NativeHost:
 
             # Verify the server honored our named session ID
             if session_id and server_session_id != session_id:
-                logging.warning(
+                logger.warning(
                     f"Server did not honor named session ID. "
                     f"Requested: {session_id}, Got: {server_session_id}. "
                     f"Using server-assigned ID."
@@ -1364,7 +1383,7 @@ class NativeHost:
             # Track which case this session belongs to (for smart-refresh comparison)
             if case_id:
                 self.current_case_id = case_id
-            logging.info(
+            logger.info(
                 f"Copilot Session created successfully. "
                     f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
             )
@@ -1373,7 +1392,7 @@ class NativeHost:
             # OSError (e.g., [Errno 22] Invalid argument) typically means the CLI
             # subprocess pipe is broken/closed (process exited during idle period).
             # Re-initialize the client and retry once.
-            logging.warning(
+            logger.warning(
                 f"create_session failed with OSError: {e}. "
                 f"CLI process likely exited. Re-initializing client and retrying..."
             )
@@ -1386,28 +1405,28 @@ class NativeHost:
                 )
                 self.client = CopilotClient(reinit_config)
                 await self.client.start()
-                logging.info("Client re-initialized after OSError.")
+                logger.info("Client re-initialized after OSError.")
 
                 self.session = await self.client.create_session(**sdk_kwargs)
                 server_session_id = getattr(self.session, "session_id", None)
                 self.current_session_id = server_session_id
                 if case_id:
                     self.current_case_id = case_id
-                logging.info(
+                logger.info(
                     f"Copilot Session created successfully (after retry). "
                 f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
                 )
                 return True
             except Exception as retry_err:
-                logging.error(f"Retry after re-init also failed: {retry_err}")
-                logging.error(f"Full traceback: {traceback.format_exc()}")
+                logger.error(f"Retry after re-init also failed: {retry_err}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
                 self.session = None
                 self.current_session_id = None
                 self.current_case_id = None
                 return False
         except Exception as e:
-            logging.error(f"Failed to create/refresh session: {e}")
-            logging.error(f"Full traceback: {traceback.format_exc()}")
+            logger.error(f"Failed to create/refresh session: {e}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             self.session = None
             self.current_session_id = None
             self.current_case_id = None
@@ -1441,7 +1460,7 @@ class NativeHost:
                 instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
                 with open(instr_path, "w", encoding="utf-8") as f:
                     f.write(new_instr)
-                logging.info("Updated copilot-instructions.md")
+                logger.info("Updated copilot-instructions.md")
 
             # 1.5 Update User Prompt (New Architecture: user_prompt.md)
             # Check top-level payload first, then try to fish it out of extension_preferences if missing
@@ -1461,7 +1480,7 @@ class NativeHost:
                 prompt_path = os.path.join(USER_DATA_DIR, "user_prompt.md")
                 with open(prompt_path, "w", encoding="utf-8") as f:
                     f.write(new_prompt)
-                logging.info("Updated user_prompt.md")
+                logger.info("Updated user_prompt.md")
 
             # 2. Update Config (Model, etc)
             if "config" in payload:
@@ -1513,7 +1532,7 @@ class NativeHost:
                         if os.path.normpath(s) not in system_skills:
                             filtered_skills.append(s)
 
-                    logging.info(
+                    logger.info(
                         f"Sanitized skills: {len(incoming_skills)} -> {len(filtered_skills)} (Removed {len(incoming_skills) - len(filtered_skills)} workspace skills)"
                     )
                     payload["config"]["skill_directories"] = filtered_skills
@@ -1524,7 +1543,7 @@ class NativeHost:
                 try:
                     self._encrypt_secrets_before_write(payload["config"])
                 except secret_store.EncryptError as e:
-                    logging.error(
+                    logger.error(
                         "Failed to encrypt secret field; aborting config write. "
                         "Error: %s", e
                     )
@@ -1537,7 +1556,7 @@ class NativeHost:
 
                 with open(user_config_path, "w") as f:
                     json.dump(current_data, f, indent=2)
-                logging.info("Updated config.json")
+                logger.info("Updated config.json")
 
                 # Apply log level immediately (before session refresh)
                 ext_prefs = current_data.get("extension_preferences", {})
@@ -1555,14 +1574,14 @@ class NativeHost:
                 return {"error": "Configuration saved but session refresh failed."}
 
         except Exception as e:
-            logging.error(f"Error updating config: {e}")
+            logger.error(f"Error updating config: {e}")
             return {"error": str(e)}
 
     def start_input_thread(self):
         """Starts a daemon thread to read stdin without blocking the async loop."""
         t = threading.Thread(target=self._read_stdin_loop, daemon=True)
         t.start()
-        logging.info("Input thread started.")
+        logger.info("Input thread started.")
 
     def _read_stdin_loop(self):
         """Blocking loop that reads Native Messaging format from stdin."""
@@ -1572,7 +1591,7 @@ class NativeHost:
                 # sys.stdin.buffer.read is blocking
                 raw_length = sys.stdin.buffer.read(4)
                 if len(raw_length) == 0:
-                    logging.info("Stdin closed. Stopping.")
+                    logger.info("Stdin closed. Stopping.")
                     self.running = False
                     # Signal the main loop to exit
                     self.loop.call_soon_threadsafe(self.input_queue.put_nowait, None)
@@ -1589,14 +1608,14 @@ class NativeHost:
                 self.loop.call_soon_threadsafe(self.input_queue.put_nowait, message)
 
             except Exception as e:
-                logging.error(f"Error in input thread: {e}")
+                logger.error(f"Error in input thread: {e}")
                 self.running = False
                 break
 
     def send_message(self, message_content):
         """Writes a message to stdout in Native Messaging format."""
         try:
-            logging.debug(f"Sending message: {json.dumps(message_content)}")
+            logger.debug(f"Sending message: {json.dumps(message_content)}")
             encoded_content = json.dumps(message_content).encode("utf-8")
             encoded_length = struct.pack("@I", len(encoded_content))
 
@@ -1604,7 +1623,7 @@ class NativeHost:
             NATIVE_STDOUT.write(encoded_content)
             NATIVE_STDOUT.flush()
         except Exception as e:
-            logging.error(f"Error sending message: {e}")
+            logger.error(f"Error sending message: {e}")
 
     def send_progress(self, message):
         """Sends a progress update to the client."""
@@ -1627,7 +1646,7 @@ class NativeHost:
         # Diagnostic: log the identifying payload fields so we can correlate
         # cross-tab issues (e.g. Tab B sending stale caseNumber from Tab A).
         # text/error body is intentionally excluded to keep PII out of the log.
-        logging.info(
+        logger.info(
             "analyze payload: caseNumber=%r product=%r context=%r rootPath=%r textLen=%d",
             case_number,
             product,
@@ -1648,7 +1667,7 @@ class NativeHost:
 
         if payload_root_path:
             if self.root_path != payload_root_path:
-                logging.info(
+                logger.info(
                     f"Root path changed: {self.root_path} -> {payload_root_path}."
                 )
                 self.root_path = payload_root_path
@@ -1657,11 +1676,11 @@ class NativeHost:
                 self.root_path = payload_root_path
 
         if valid_case_id and valid_case_id != self.current_case_id:
-            logging.info(f"Case changed: {self.current_case_id} -> {valid_case_id}.")
+            logger.info(f"Case changed: {self.current_case_id} -> {valid_case_id}.")
             needs_refresh = True
 
         if needs_refresh:
-            logging.info(
+            logger.info(
                 f"Refreshing session for: {session_id or 'generic'} (case: {valid_case_id or 'none'})"
             )
             await self._refresh_session(session_id=session_id, case_id=valid_case_id)
@@ -1687,17 +1706,17 @@ class NativeHost:
             if not is_auth:
                 login_name = getattr(auth_status, "login", "Unknown")
                 status_msg = getattr(auth_status, "statusMessage", "Unknown")
-                logging.warning("Copilot is not authenticated.")
+                logger.warning("Copilot is not authenticated.")
                 return {
                     "status": "error",
                     "error": f"Copilot is not authenticated. Login: {login_name}. Status: {status_msg}. Please run 'copilot auth' in your terminal.",
                 }
-            logging.info("Authentication check passed.")
+            logger.info("Authentication check passed.")
         except asyncio.TimeoutError:
-            logging.warning("Auth status check timed out after 15s, continuing...")
+            logger.warning("Auth status check timed out after 15s, continuing...")
             self.send_progress("Auth check timed out, continuing...")
         except Exception as e:
-            logging.error(f"Failed to check auth status: {e}")
+            logger.error(f"Failed to check auth status: {e}")
             self.send_progress("Auth check skipped, continuing...")
 
         try:
@@ -1713,8 +1732,8 @@ class NativeHost:
                 else scrubbed_text
             )
 
-            logging.debug(f"Scrubbed Prompt content: {prompt}")
-            logging.info(f"Sending prompt to Copilot (length: {len(prompt)})")
+            logger.debug(f"Scrubbed Prompt content: {prompt}")
+            logger.info(f"Sending prompt to Copilot (length: {len(prompt)})")
 
             self.send_progress("Waiting for Copilot agent...")
 
@@ -1725,14 +1744,14 @@ class NativeHost:
             # Less aggressive sanitization:
             safe_prompt = prompt  # Trusting JSON serialization for now.
 
-            logging.info(f"Prompt length: {len(safe_prompt)}")
+            logger.info(f"Prompt length: {len(safe_prompt)}")
 
             # Timeout Strategy:
             # Frontend (FAB.tsx) has a safety timeout of 310 seconds.
             # We set the backend timeout to 600 seconds (10 minutes) to be safe.
             timeout_seconds = 600.0
 
-            logging.debug(
+            logger.debug(
                 f"Calling send_and_wait with prompt length={len(safe_prompt)} and timeout: {timeout_seconds}"
             )
             try:
@@ -1755,7 +1774,7 @@ class NativeHost:
                         if (
                             "Session not found" in str(e) or "-32603" in str(e)
                         ) and attempt == 0:
-                            logging.warning(
+                            logger.warning(
                                 f"Session error encountered: {e}. Refreshing session..."
                             )
                             await self._refresh_session(
@@ -1764,7 +1783,7 @@ class NativeHost:
                             continue
                         # Re-raise other errors (including TimeoutError) to be handled by outer blocks
                         raise e
-                logging.debug(f"Returned from send_and_wait. Event: {response_event}")
+                logger.debug(f"Returned from send_and_wait. Event: {response_event}")
 
                 self.send_progress("Processing response...")
 
@@ -1777,7 +1796,7 @@ class NativeHost:
                         "login_required",
                         "confirmation_required",
                     ]:
-                        logging.warning(
+                        logger.warning(
                             f"Copilot SDK requires interaction: {event_type}"
                         )
                         return {
@@ -1804,18 +1823,18 @@ class NativeHost:
                             f"Here is the raw event data for debugging:\n\n"
                             f"```text\n{debug_dump}\n```"
                         )
-                        logging.warning(
+                        logger.warning(
                             f"Response event data missing content: {response_event}"
                         )
                 else:
                     full_response = "No response event received (None)."
 
             except asyncio.TimeoutError:
-                logging.error(
+                logger.error(
                     f"Copilot request timed out after {timeout_seconds} seconds."
                 )
                 # Invalidate the session — the subprocess pipe is likely dead
-                logging.info("Invalidating session after timeout.")
+                logger.info("Invalidating session after timeout.")
                 self.session = None
                 self.client = None
                 self.current_session_id = None
@@ -1826,7 +1845,7 @@ class NativeHost:
                     "error": "Copilot request timed out. This often happens if Copilot is waiting for authentication or approval. Please run 'copilot' in your terminal to verify your login and skill permissions.",
                 }
 
-            logging.info("Received full response from Copilot.")
+            logger.info("Received full response from Copilot.")
 
             # Determine Save Location
             if self.root_path and os.path.exists(self.root_path):
@@ -1844,14 +1863,14 @@ class NativeHost:
                         candidate = os.path.join(self.root_path, entry, safe_case)
                         if os.path.isdir(candidate):
                             save_dir = candidate
-                            logging.info(f"Found Copilot-created folder: {save_dir}")
+                            logger.info(f"Found Copilot-created folder: {save_dir}")
                             break
                 except OSError as e:
-                    logging.warning(f"Error scanning root_path: {e}")
+                    logger.warning(f"Error scanning root_path: {e}")
 
                 # Strategy 2 (Fallback): Derive folder name from product string
                 if not save_dir:
-                    logging.info(
+                    logger.info(
                         "No existing case folder found. Falling back to product name cleanup."
                     )
                     # 1. Handle paths like "Azure / Data / Blob" -> "Blob"
@@ -1918,10 +1937,10 @@ class NativeHost:
             }
 
         except Exception as e:
-            logging.error(f"SDK Error: {e}")
+            logger.error(f"SDK Error: {e}")
             # Invalidate session on pipe/subprocess errors so next request reconnects
             if "Invalid argument" in str(e) or "Broken pipe" in str(e):
-                logging.info("Invalidating session due to broken pipe/subprocess.")
+                logger.info("Invalidating session due to broken pipe/subprocess.")
                 self.session = None
                 self.client = None
                 self.current_session_id = None
@@ -2009,7 +2028,7 @@ class NativeHost:
                             response["status"] = "error"
                             response["error"] = "Event loop not available"
                     except Exception as e:
-                        logging.error(f"Update failed: {e}")
+                        logger.error(f"Update failed: {e}")
                         response["status"] = "error"
                         response["error"] = str(e)
 
@@ -2041,7 +2060,7 @@ class NativeHost:
 
         # Use proactor loop on Windows for subprocess support if not already set
         # (Though usually asyncio.run handles this in Py 3.8+)
-        logging.debug(f"Using proactor: {self.loop.__class__.__name__}")
+        logger.debug(f"Using proactor: {self.loop.__class__.__name__}")
 
         await self.initialize_sdk()
         self.start_input_thread()
@@ -2050,14 +2069,14 @@ class NativeHost:
         if self.loop:
             self.loop.create_task(self.check_for_updates())
 
-        logging.info("Event loop running. Waiting for messages...")
+        logger.info("Event loop running. Waiting for messages...")
 
         while self.running:
             # Wait for next message from the input thread
             message = await self.input_queue.get()
 
             if message is None:
-                logging.info("Received exit signal.")
+                logger.info("Received exit signal.")
                 break
 
             await self.process_message(message)
@@ -2075,6 +2094,6 @@ if __name__ == "__main__":
         pass
     except Exception as e:
         msg = f"Fatal error in main loop: {e}\n{traceback.format_exc()}"
-        logging.critical(msg)
+        logger.critical(msg)
         log_emergency(msg)
         sys.exit(1)

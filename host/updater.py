@@ -8,6 +8,11 @@ import sys
 import time
 
 
+# Use dh.updater sub-logger: messages propagate up to "dh" (file handler),
+# but don't leak into root logger / third-party noise streams.
+logger = logging.getLogger("dh.updater")
+
+
 class Updater:
     def __init__(self, current_exe_path):
         self.current_exe = os.path.abspath(current_exe_path)
@@ -28,7 +33,7 @@ class Updater:
 
     def download_update(self, url):
         """Downloads the update zip to a temporary file."""
-        logging.info(f"Downloading update from {url}...")
+        logger.info(f"Downloading update from {url}...")
         try:
             # Create a temp file
             fd, temp_path = tempfile.mkstemp(suffix=".zip")
@@ -42,10 +47,10 @@ class Updater:
                 with open(temp_path, "wb") as f:
                     shutil.copyfileobj(response, f)
 
-            logging.info(f"Download complete: {temp_path}")
+            logger.info(f"Download complete: {temp_path}")
             return temp_path
         except Exception as e:
-            logging.error(f"Download failed: {e}")
+            logger.error(f"Download failed: {e}")
             raise
 
     # Files that must not be overwritten during self-update
@@ -60,7 +65,7 @@ class Updater:
 
     def apply_update(self, zip_path):
         """Extracts zip and swaps files."""
-        logging.info("Applying update...")
+        logger.info("Applying update...")
         temp_extract_dir = tempfile.mkdtemp()
 
         try:
@@ -80,19 +85,19 @@ class Updater:
                 raise Exception("Update zip missing 'host/dh_native_host.exe'")
 
             # 3. Update Extension Files
-            logging.info(f"Updating extension files in {self.extension_dir}...")
+            logger.info(f"Updating extension files in {self.extension_dir}...")
             if os.path.exists(self.extension_dir):
                 self._overwrite_directory(new_ext_src, self.extension_dir)
             else:
                 shutil.copytree(new_ext_src, self.extension_dir)
 
             # 4. Swap Host Binary (rename running exe so we can overwrite)
-            logging.info("Swapping host binary...")
+            logger.info("Swapping host binary...")
             self._swap_host_binary(new_host_exe)
 
             # 5. Copy remaining host files (DLLs, internal dirs, system_prompt.md)
             # This handles the --onedir layout where DLLs sit alongside the exe.
-            logging.info("Updating host runtime files...")
+            logger.info("Updating host runtime files...")
             for item in os.listdir(new_host_dir):
                 if item == "dh_native_host.exe":
                     continue  # Already handled by _swap_host_binary
@@ -105,7 +110,7 @@ class Updater:
                             os.path.join(new_host_dir, item),
                             os.path.join(self.host_dir, item),
                         )
-                        logging.info("Created default config.json")
+                        logger.info("Created default config.json")
                     continue
 
                 src_path = os.path.join(new_host_dir, item)
@@ -120,13 +125,13 @@ class Updater:
                     else:
                         shutil.copy2(src_path, dst_path)
                 except Exception as e:
-                    logging.warning(f"Could not update {item}: {e}")
+                    logger.warning(f"Could not update {item}: {e}")
 
-            logging.info("Host files updated successfully.")
+            logger.info("Host files updated successfully.")
             return True
 
         except Exception as e:
-            logging.error(f"Update failed: {e}")
+            logger.error(f"Update failed: {e}")
             raise
         finally:
             # Cleanup temp extract
@@ -147,9 +152,9 @@ class Updater:
                 try:
                     shutil.copy2(s, d)
                 except PermissionError:
-                    logging.debug(f"Skipped locked file: {d}")
+                    logger.debug(f"Skipped locked file: {d}")
                 except Exception as e:
-                    logging.warning(f"Could not copy {item}: {e}")
+                    logger.warning(f"Could not copy {item}: {e}")
 
     def _swap_host_binary(self, new_exe_source):
         """
@@ -158,7 +163,7 @@ class Updater:
         """
         # If we are running as a script (during dev), we can't swap the exe
         if not self.current_exe.endswith(".exe"):
-            logging.warning("Not running as executable. Skipping binary swap.")
+            logger.warning("Not running as executable. Skipping binary swap.")
             return
 
         # 1. Rename running exe -> .old
@@ -167,7 +172,7 @@ class Updater:
             try:
                 os.remove(old_exe)
             except OSError:
-                logging.warning(
+                logger.warning(
                     f"Could not remove existing {old_exe}, will try alternative names"
                 )
                 # Try alternative names if .old is locked
@@ -209,9 +214,9 @@ class Updater:
             if os.path.exists(old_exe):
                 try:
                     os.remove(old_exe)
-                    logging.info(f"Cleaned up old version: {old_exe}")
+                    logger.info(f"Cleaned up old version: {old_exe}")
                 except Exception as e:
-                    logging.debug(
+                    logger.debug(
                         f"Could not clean up {old_exe} (might be locked?): {e}"
                     )
 
@@ -223,8 +228,8 @@ class Updater:
                     bak_path = os.path.join(host_dir, item)
                     try:
                         os.remove(bak_path)
-                        logging.info(f"Cleaned up legacy backup: {item}")
+                        logger.info(f"Cleaned up legacy backup: {item}")
                     except Exception as e:
-                        logging.warning(f"Failed to remove backup {item}: {e}")
+                        logger.warning(f"Failed to remove backup {item}: {e}")
         except Exception as e:
-            logging.error(f"Error cleaning up backups: {e}")
+            logger.error(f"Error cleaning up backups: {e}")

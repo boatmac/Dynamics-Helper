@@ -6,7 +6,7 @@ Implementation: _parse_version() and _version_gt() in dh_native_host.py.
 
 import unittest
 
-from dh_native_host import _parse_version, _version_gt
+from host.dh_native_host import _parse_version, _version_gt
 
 
 class TestParseVersion(unittest.TestCase):

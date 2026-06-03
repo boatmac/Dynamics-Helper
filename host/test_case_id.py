@@ -1,6 +1,6 @@
 import re
 import unittest
-from dh_native_host import NativeHost
+from host.dh_native_host import NativeHost
 
 
 class TestExtractCaseId(unittest.TestCase):
