@@ -246,6 +246,15 @@ const FAB: React.FC = () => {
     // analyze flow (vs a bookmark markdown). Only analyze popovers should
     // call markSeen() on close — bookmark popovers have no persisted state.
     const popoverIsAnalyze = React.useRef(false);
+
+    // C2a+: ref-mirror of scrapedData.caseNumber for use inside async closures
+    // (handleAnalyze await + setTimeout callbacks). Plain state would be the
+    // stale snapshot captured when handleAnalyze was invoked. We need the
+    // LATEST case to detect "user navigated to a different case while analyze
+    // was in flight" — D365 internal tab switches don't change URL or
+    // re-mount FAB, so the only signal is scrapedData updating via the
+    // MutationObserver-driven re-scrape.
+    const currentCaseRef = React.useRef<string>('');
     
     // Status Bubble State
     const [statusBubble, setStatusBubble] = useState<{ 
@@ -273,6 +282,13 @@ const FAB: React.FC = () => {
     // (matching unseen result inside STALE_WINDOW_MS) or show the spinner
     // (matching pending marker inside MAX_PENDING_DISPLAY_AGE_MS).
     const hydration = useAnalysisHydration(scrapedData?.caseNumber || '');
+
+    // C2a+: keep currentCaseRef in sync with the latest scrapedData.caseNumber
+    // so async closures inside handleAnalyze (await response, setTimeout) can
+    // detect mid-flight case switches. See ref declaration above.
+    useEffect(() => {
+        currentCaseRef.current = scrapedData?.caseNumber || '';
+    }, [scrapedData?.caseNumber]);
 
     // When the hook surfaces a persisted result and no popover is open, mirror
     // it into the local resultPopover state. Then immediately mark it seen so
@@ -407,14 +423,33 @@ const FAB: React.FC = () => {
     // during long analysis runs — user walks away, bubble auto-hides, no
     // record). The bubble is kept as a brief visual flash; the popover
     // carries the full message and stays until dismissed.
-    const showAnalysisError = (msg: string) => {
-        setResultPopover({
-            isOpen: true,
-            title: `❌ ${t('analysisFailed')}`,
-            content: msg,
-        });
-        popoverIsAnalyze.current = true;
-        showStatusBubble(t('analysisFailed'), 'error', 4000);
+    //
+    // caseNumberOfRun (optional): the case the analyze run was launched on.
+    // When the user has switched to a different D365 tab while the analyze
+    // was in flight, we suppress the popover (it would be visually wrong on
+    // the unrelated case) and instead surface a bubble that names the
+    // originating case. The error is still persisted to dh_last_analysis by
+    // the SW, so navigating back to caseNumberOfRun re-hydrates the popover.
+    const showAnalysisError = (msg: string, caseNumberOfRun?: string) => {
+        const isStillOnRunCase =
+            !caseNumberOfRun ||
+            !currentCaseRef.current ||
+            currentCaseRef.current === caseNumberOfRun;
+        if (isStillOnRunCase) {
+            setResultPopover({
+                isOpen: true,
+                title: `❌ ${t('analysisFailed')}`,
+                content: msg,
+            });
+            popoverIsAnalyze.current = true;
+            showStatusBubble(t('analysisFailed'), 'error', 4000);
+        } else {
+            showStatusBubble(
+                `${t('analysisFailed')} — Case ${caseNumberOfRun}`,
+                'error',
+                5000,
+            );
+        }
     };
     
     const { prefs } = usePrefs();
@@ -760,12 +795,17 @@ const FAB: React.FC = () => {
 
         setIsAnalyzing(true);
         const startTime = Date.now();
+        // Snapshot the case this run was launched on. Used to detect mid-flight
+        // D365 tab switches: if the user moves to a different case, popovers
+        // and bubbles should reference the originating case rather than
+        // visually attach to the unrelated case currently on screen.
+        const caseNumberOfRun = targetData.caseNumber || '';
         
         // Safety timeout to prevent infinite "Analyzing..." state
         const timeoutId = setTimeout(() => {
             setIsAnalyzing(prev => {
                 if (prev) {
-                    showAnalysisError(t('analysisFailed'));
+                    showAnalysisError(t('analysisFailed'), caseNumberOfRun);
                     trackEvent('Analyze Timeout');
                     return false;
                 }
@@ -864,32 +904,51 @@ const FAB: React.FC = () => {
                             });
                         }
                         setLastDuration(`${duration.toFixed(1)}s`);
-                        showStatusBubble(`${t('analysisComplete')} (${duration.toFixed(1)}s)`, 'success', 3000);
 
-                        setResultPopover({
-                            isOpen: true,
-                            title: `🤖 Copilot ${t('analyze')}`,
-                            content: analysisData.markdown || JSON.stringify(analysisData, null, 2),
-                            path: analysisData.saved_to,
-                            duration: `${duration.toFixed(1)}s`
-                        });
-                        popoverIsAnalyze.current = true;
-                        setIsOpen(false); // Close menu to show result
+                        // C2a+: cross-case detection — if the user navigated to
+                        // a different D365 tab while this run was in flight,
+                        // suppress the popover (visually misleading on the
+                        // unrelated case) and surface a bubble that names the
+                        // originating case. SW already persisted the result to
+                        // dh_last_analysis; navigating back to caseNumberOfRun
+                        // re-hydrates the popover via useAnalysisHydration.
+                        const isStillOnRunCase =
+                            !caseNumberOfRun ||
+                            !currentCaseRef.current ||
+                            currentCaseRef.current === caseNumberOfRun;
+                        if (isStillOnRunCase) {
+                            showStatusBubble(`${t('analysisComplete')} (${duration.toFixed(1)}s)`, 'success', 3000);
+                            setResultPopover({
+                                isOpen: true,
+                                title: `🤖 Copilot ${t('analyze')}`,
+                                content: analysisData.markdown || JSON.stringify(analysisData, null, 2),
+                                path: analysisData.saved_to,
+                                duration: `${duration.toFixed(1)}s`
+                            });
+                            popoverIsAnalyze.current = true;
+                            setIsOpen(false); // Close menu to show result
+                        } else {
+                            showStatusBubble(
+                                `${t('analysisComplete')} — Case ${caseNumberOfRun} (${duration.toFixed(1)}s)`,
+                                'success',
+                                5000,
+                            );
+                        }
                     } else {
                         const errMsg = analysisData?.error || "Unknown analysis error";
-                        showAnalysisError(`${t('analysisFailed')}: ${errMsg}`);
+                        showAnalysisError(`${t('analysisFailed')}: ${errMsg}`, caseNumberOfRun);
                         trackEvent('Analyze Failed', { error: errMsg });
                     }
                 } else {
                     const hostError = nativeResp?.message || nativeResp?.error || "Unknown native host error";
-                    showAnalysisError(`Host Error: ${hostError}`);
+                    showAnalysisError(`Host Error: ${hostError}`, caseNumberOfRun);
                     trackEvent('Analyze Host Error', { error: hostError });
                 }
             } else {
-                showAnalysisError(`Error: ${response.error || response.message || 'Unknown error'}`);
+                showAnalysisError(`Error: ${response.error || response.message || 'Unknown error'}`, caseNumberOfRun);
             }
         } catch (e: any) {
-            showAnalysisError(`Error: ${e.message}`);
+            showAnalysisError(`Error: ${e.message}`, caseNumberOfRun);
             trackEvent('Analyze Exception', { error: e.message });
         } finally {
             setIsAnalyzing(false);
