@@ -801,7 +801,13 @@ const FAB: React.FC = () => {
         // visually attach to the unrelated case currently on screen.
         const caseNumberOfRun = targetData.caseNumber || '';
         
-        // Safety timeout to prevent infinite "Analyzing..." state
+        // Safety timeout to prevent infinite "Analyzing..." state.
+        // Derived from prefs.analyzeTimeoutSeconds (C2b-lite, user-
+        // configurable in Options, clamped [60, 3600]) + 10s grace so
+        // the host's truthful "Copilot did not finish within Ns" branch
+        // always fires before this generic fallback. Default 1200s → 1210s.
+        const _analyzeTimeoutSec = Math.max(60, Math.min(3600, prefs.analyzeTimeoutSeconds ?? 1200));
+        const _safetyTimeoutMs = (_analyzeTimeoutSec + 10) * 1000;
         const timeoutId = setTimeout(() => {
             setIsAnalyzing(prev => {
                 if (prev) {
@@ -811,7 +817,7 @@ const FAB: React.FC = () => {
                 }
                 return prev;
             });
-        }, 610000); // 610 seconds timeout (Backend is 600s)
+        }, _safetyTimeoutMs);
 
         try {
             // Construct payload

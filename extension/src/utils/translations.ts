@@ -95,6 +95,11 @@ export const translations: TranslationDictionary = {
         en: "Controls verbosity of the native host log file. DEBUG logs everything, INFO is recommended for normal use.",
         zh: "控制 Native Host 日志文件的详细程度。DEBUG 记录所有内容，INFO 建议日常使用。"
     },
+    analyzeTimeout: { en: "Analyze Timeout (seconds)", zh: "分析超时 (秒)" },
+    analyzeTimeoutDesc: {
+        en: "Max seconds the host waits for Copilot to finish a single analyze. Range 60-3600 (default 1200 = 20 min). Raise this if you see 'Copilot did not finish' errors on complex cases.",
+        zh: "Host 等待 Copilot 完成单次分析的最大秒数。范围 60-3600（默认 1200，即 20 分钟）。复杂 Case 出现「Copilot 未在时限内完成」错误时可调大。"
+    },
     hostVersion: { en: "Host Version", zh: "Host 版本" },
     
     menuEditor: { en: "Menu Editor", zh: "菜单编辑器" },

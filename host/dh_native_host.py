@@ -437,6 +437,12 @@ class NativeHost:
         self.current_request_id = None  # Track current request for progress updates
         self.root_path = None  # Store root path from config
         self.last_update_check = 0  # Track last update check time
+        # C2b-lite: timeout is user-configurable via Options
+        # (extension_preferences.analyze_timeout_seconds). Default 1200
+        # because cold-start of a complex case with MCP servers + multiple
+        # tool roundtrips routinely needs >600s. Clamped to [60, 3600] on
+        # every config read; see _load_config + handle_update_config.
+        self.analyze_timeout_seconds = 1200
         self.current_session_id = (
             None  # Track current Copilot session name (co-<case>) for --resume
         )
@@ -948,6 +954,15 @@ class NativeHost:
 
         # Apply log level from config (default: INFO for normal use)
         _apply_log_level(ext_prefs.get("log_level", "INFO"))
+
+        # Apply analyze timeout (C2b-lite). Clamp [60, 3600] to keep
+        # asyncio.wait_for / OS pipe buffer out of pathological ranges.
+        # int() coercion tolerates string values from older config files.
+        try:
+            _raw_timeout = int(ext_prefs.get("analyze_timeout_seconds", 1200))
+        except (TypeError, ValueError):
+            _raw_timeout = 1200
+        self.analyze_timeout_seconds = max(60, min(3600, _raw_timeout))
 
         # Extract root path
         current_root = final_data.get("root_path")
@@ -1562,6 +1577,15 @@ class NativeHost:
                 ext_prefs = current_data.get("extension_preferences", {})
                 _apply_log_level(ext_prefs.get("log_level", "INFO"))
 
+                # Apply analyze timeout immediately (C2b-lite). Mirror the
+                # clamp + coercion in _load_config so an Options edit takes
+                # effect on the very next analyze without host restart.
+                try:
+                    _raw_timeout = int(ext_prefs.get("analyze_timeout_seconds", 1200))
+                except (TypeError, ValueError):
+                    _raw_timeout = 1200
+                self.analyze_timeout_seconds = max(60, min(3600, _raw_timeout))
+
             # 3. Refresh Session
             success = await self._refresh_session()
 
@@ -1746,10 +1770,13 @@ class NativeHost:
 
             logger.info(f"Prompt length: {len(safe_prompt)}")
 
-            # Timeout Strategy:
-            # Frontend (FAB.tsx) has a safety timeout of 310 seconds.
-            # We set the backend timeout to 600 seconds (10 minutes) to be safe.
-            timeout_seconds = 600.0
+            # Timeout Strategy (C2b-lite):
+            # User-configurable via Options (extension_preferences
+            # .analyze_timeout_seconds, default 1200, clamped [60, 3600]).
+            # FAB.tsx applies the same value + 10s grace as its safety
+            # timeout so the popover error always comes from THIS branch
+            # (truthful message) rather than FAB's generic fallback.
+            timeout_seconds = float(self.analyze_timeout_seconds)
 
             logger.debug(
                 f"Calling send_and_wait with prompt length={len(safe_prompt)} and timeout: {timeout_seconds}"
@@ -1759,8 +1786,9 @@ class NativeHost:
                 for attempt in range(2):
                     try:
                         if attempt == 0:
+                            _mins = max(1, int(timeout_seconds // 60))
                             self.send_progress(
-                                "Copilot is analyzing (this may take up to 2 mins)..."
+                                f"Copilot is analyzing (max {_mins} min)..."
                             )
                         else:
                             self.send_progress("Session expired. Reconnecting...")
@@ -1839,10 +1867,24 @@ class NativeHost:
                 self.client = None
                 self.current_session_id = None
                 self.current_case_id = None
-                # Return a specific error guiding the user to check authentication/skills
+                # Truthful error message (C2b-lite). The previous "waiting
+                # for authentication" line was a guess and misled users into
+                # re-auth loops; in practice timeouts almost always mean
+                # the case was complex enough that Copilot's tool roundtrips
+                # exceeded the configured budget. The remediation is to
+                # raise the timeout, not to fix auth.
+                _mins = max(1, int(timeout_seconds // 60))
                 return {
                     "status": "error",
-                    "error": "Copilot request timed out. This often happens if Copilot is waiting for authentication or approval. Please run 'copilot' in your terminal to verify your login and skill permissions.",
+                    "error": (
+                        f"Copilot did not finish within the configured "
+                        f"{int(timeout_seconds)}s ({_mins} min) timeout. "
+                        f"This usually means the case is unusually complex "
+                        f"(many tool calls, large prompts). You can raise "
+                        f"the limit in Options → Analyze Timeout (max 60 "
+                        f"min). If timeouts persist at the max, run "
+                        f"'copilot' in a terminal to confirm authentication."
+                    ),
                 }
 
             logger.info("Received full response from Copilot.")

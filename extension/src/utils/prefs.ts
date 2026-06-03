@@ -28,6 +28,17 @@ export interface Preferences {
     teamCatalogEnabled?: boolean;
     teamManifestUrl?: string;
     teamLabel?: string;
+    /**
+     * Maximum seconds the host will wait for Copilot to finish a single
+     * analyze before timing out. User-configurable in Options (C2b-lite).
+     * Clamped server-side to [60, 3600]; Options UI enforces the same
+     * range. Default 1200 (was hardcoded 600 pre-v2.0.72).
+     *
+     * FAB derives its safety timeout from this value + 10s grace so the
+     * popover error always comes from the host's truthful "Copilot did
+     * not finish" branch, never FAB's generic fallback.
+     */
+    analyzeTimeoutSeconds?: number;
 }
 
 // Default values applied when dh_prefs is absent or partially populated.
@@ -50,7 +61,8 @@ export const DEFAULT_PREFS: Preferences = {
     logLevel: 'INFO',
     language: 'auto',
     teamCatalogEnabled: false,
-    teamManifestUrl: ''
+    teamManifestUrl: '',
+    analyzeTimeoutSeconds: 1200
 };
 
 // Read-only React hook over chrome.storage.local.dh_prefs.

@@ -803,6 +803,10 @@ const OptionsInner: React.FC = () => {
                             }
                             if (extPrefs.team !== undefined && !touched.has('team')) { newPrefs.team = extPrefs.team; changed = true; }
                             if (extPrefs.team_label !== undefined && !touched.has('teamLabel')) { newPrefs.teamLabel = extPrefs.team_label; changed = true; }
+                            if (extPrefs.analyze_timeout_seconds !== undefined && !touched.has('analyzeTimeoutSeconds')) {
+                                newPrefs.analyzeTimeoutSeconds = extPrefs.analyze_timeout_seconds;
+                                changed = true;
+                            }
                         }
 
                         // Mirror the host-derived prefs back to chrome.storage.local
@@ -1000,9 +1004,10 @@ const OptionsInner: React.FC = () => {
         // host's stale value would otherwise clobber what the user is
         // currently editing.
         userTouchedFieldsRef.current.add(name as keyof Preferences);
+        const isNumeric = name.startsWith('offset') || name === 'analyzeTimeoutSeconds';
         setPrefs(prev => ({
             ...prev,
-            [name]: name.startsWith('offset') ? Number(value) : value
+            [name]: isNumeric ? Number(value) : value
         }));
     };
 
@@ -1058,6 +1063,7 @@ const OptionsInner: React.FC = () => {
                     team_manifest_url: nextPrefs.teamManifestUrl,
                     team: nextPrefs.team,
                     team_label: nextPrefs.teamLabel,
+                    analyze_timeout_seconds: nextPrefs.analyzeTimeoutSeconds,
                 }
             }
         }
@@ -1897,7 +1903,42 @@ const OptionsInner: React.FC = () => {
                                                 <option value="ERROR">ERROR</option>
                                             </select>
                                         </div>
-                                        
+
+                                        {/* Analyze Timeout (C2b-lite) */}
+                                        <div className="mt-4">
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('analyzeTimeout')}</label>
+                                            <p className="text-[10px] text-slate-500 mb-2">
+                                                {t('analyzeTimeoutDesc')}
+                                            </p>
+                                            <input
+                                                type="number"
+                                                name="analyzeTimeoutSeconds"
+                                                min={60}
+                                                max={3600}
+                                                step={60}
+                                                value={prefs.analyzeTimeoutSeconds ?? 1200}
+                                                onChange={handlePrefChange}
+                                                onBlur={() => {
+                                                    // Client-side clamp [60, 3600] so the value the
+                                                    // user sees matches what the host will store. Host
+                                                    // re-clamps defensively but only surfaces the
+                                                    // clamped value on next get_config (e.g. restart),
+                                                    // which would otherwise be a surprising silent
+                                                    // change for the user.
+                                                    setPrefs(prev => {
+                                                        const raw = Number(prev.analyzeTimeoutSeconds ?? 1200);
+                                                        const clamped = Number.isFinite(raw)
+                                                            ? Math.max(60, Math.min(3600, Math.round(raw)))
+                                                            : 1200;
+                                                        const next = { ...prev, analyzeTimeoutSeconds: clamped };
+                                                        persistPrefs(next);
+                                                        return next;
+                                                    });
+                                                }}
+                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm"
+                                            />
+                                        </div>
+
                                         {/* Team Catalog */}
                                         <div className="mt-6 pt-6 border-t border-slate-200">
                                             <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
