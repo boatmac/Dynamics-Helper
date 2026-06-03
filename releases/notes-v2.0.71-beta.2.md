@@ -37,6 +37,18 @@ The timeout value now lives in three places that must stay aligned: `NativeHost.
 
 Test totals: host 72/72 (was 65 at beta.1), extension 42/42 (unchanged).
 
+## 🐛 Bug fixes (caught during pre-publish smoke)
+
+### Status bubble no longer hijacked by SAP/clipboard notifications
+
+The status bubble is a single-slot UI element — whoever wrote last won. The SAP textarea watcher polls every 3 s and fires a `DH_NOTIFICATION` + `DH_TOAST` when "Azure/Mooncake Support Escalation" appears, both routed through the same bubble slot the analyze flow uses. Result: an analyze on a case page that also has the SAP keyword would see its "analyzing" bubble wiped after a few seconds, and the subsequent "Analysis Complete (Xs)" confirmation could also be overwritten if a SAP poll happened to land within 0–5 s of completion. User-reported in test 9 of the beta.2 smoke pass.
+
+Fixed with an `isAnalyzingRef` mirror + an `analyzeFlowEndedAtRef` timestamp. SAP/clipboard bubbles are silenced while `isAnalyzing` is true or within 6 s after completion (covers the 5 s cross-case `Analysis Complete — Case {n}` bubble plus a 1 s race margin). The visual signal SAP cares about — red textarea outline, pulse, scrollIntoView via `legacyFeatures.ts::highlight()` — is unaffected. Only the redundant bubble notification is suppressed; the original SAP `console.log` lines remain for debug.
+
+### Analyze Timeout field repositioned
+
+Smoke feedback flagged that "Analyze Timeout" sat awkwardly below Log Level. Moved it to sit between Auto Analyze and Log Level — same section, more sensible visual flow (analysis-related options grouped, diagnostic options at the end).
+
 ## Installation
 
 1. Download `DynamicsHelper_v2.0.71-beta.2.zip` below
