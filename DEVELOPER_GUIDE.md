@@ -169,6 +169,42 @@ Background scans (MutationObserver, `useEffect` on `isOpen`) continuously scrape
 * **Rule:** All user-facing strings in FAB.tsx and Options.tsx must use `t('key')` lookups. Do not hardcode English strings in UI code.
 * **Status messages:** Timeout comparisons that use `setStatus(prev => prev === "..." ? "..." : prev)` must capture the translated string into a local variable before the `setTimeout` closure (see the `checkingMsg` / `timedOutMsg` pattern in Options.tsx).
 
+### Analysis Result Persistence (C2a+)
+
+Analyze runs are long (often 60-300 s). The user can navigate away from the case page or close the popover and miss the result. C2a+ (v2.0.71+) makes the result survive a page reload via `chrome.storage.local`, with one-shot semantics so a dismissed result does not re-appear.
+
+**Storage schema** (`extension/src/utils/analysisStore.ts`):
+
+* `dh_pending_analysis` — `{caseNumber, requestId, startTime}` written by SW before forwarding the host RPC, cleared on success/error/timeout/edge-6.3.
+* `dh_last_analysis` — `{status: 'success'|'error', caseNumber, title, content, path?, durationSec?, completedAt, seen}` written by SW on host response, marked `seen=true` when the user dismisses the popover.
+
+**Two ages, do not confuse them:**
+
+* `MAX_PENDING_AGE_MS = 2h` — GC threshold; pending markers older than this are treated as orphans (likely SW crash mid-flight).
+* `MAX_PENDING_DISPLAY_AGE_MS = 15min` — UI threshold for `useAnalysisHydration`; older pending markers are not surfaced as "Analyzing…" because the user has likely abandoned the run.
+* `MAX_RESULT_AGE_MS = 1h` — re-hydration window for `dh_last_analysis`; older results are not popped open on mount.
+
+**Wire protocol — `_persist` field on outgoing NATIVE_MSG:**
+
+FAB attaches a `_persist: {caseNumber, successTitle, errorTitle}` to the analyze payload. The SW reads this, calls `recordAnalyzeStart` before forwarding, calls `recordAnalyzeSuccess`/`recordAnalyzeError` on response, and **strips `_persist` before sending to the host** (the host has never seen this field and will reject unknown keys). Titles are pre-translated by FAB because the SW has no `t()` access.
+
+**Pure-helper boundary:**
+
+* `extension/src/background/analyzeBridge.ts` exposes `handleAnalyzeForward(payload, ctx, deps)` with DI'd `send`. The 6 tests in `analyzeBridge.test.ts` cover P-I1..P-I4 + edge 6.3 without spinning up a real Chrome port.
+* `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, isAnalyzing, dismissPopover}`. The 10 tests in `useAnalysisHydration.test.ts` cover R-I1..R-I5 + variants by mocking `chrome.storage.local` only.
+* FAB calls `useAnalysisHydration(scrapedData?.caseNumber || '')` once at the top of the component, then mirrors `popover`/`isAnalyzing` into local state in two `useEffect` hooks. The mirror is one-way (storage → local); user dismissal goes through `hydration.dismissPopover()` which writes `seen=true`.
+
+**popoverIsAnalyze ref discriminator:**
+
+`ResultPopover` is shared between analyze flow and bookmark markdown previews. `popoverIsAnalyze.current` is set `true` whenever an analyze success/error opens the popover, and the close handler only calls `hydration.dismissPopover()` when this flag is set — otherwise dismissing a bookmark popover would spuriously mark a stale analysis result as seen.
+
+**Edge cases handled:**
+
+* **Race in handleAnalyzeForward (edge 6.3):** if `recordAnalyzeStart` resolves *after* the host response, the post-response success/error write is a no-op for the marker because `clearPendingIfMatches(requestId)` only deletes if the requestId matches what is on disk. The pending row is written, then immediately cleared on the next event loop tick, so the user sees a brief "Analyzing…" flicker instead of a stuck pending marker.
+* **Stale pending on mount:** `useAnalysisHydration` checks `Date.now() - startTime > MAX_PENDING_DISPLAY_AGE_MS` and ignores pending markers older than 15 min. The marker stays on disk until GC; this is intentional (the user might still want to know if the run eventually completes).
+* **Case mismatch on pending:** if the on-disk pending marker is for case A but the FAB is mounted on case B, the hook ignores the pending row entirely (no false "Analyzing…").
+* **Options Reset:** the Reset button now also removes `dh_last_analysis` and `dh_pending_analysis` so a user-initiated reset wipes persisted analysis state. See `Options.tsx:1159`.
+
 ---
 
 ## Extension Testing

@@ -254,6 +254,15 @@ This file defines the operational rules, development workflows, and coding stand
 * **DO NOT** log plaintext URLs in `_decrypt_secrets_in_memory` / `_encrypt_secrets_before_write` or anywhere else.
 * **DO NOT** add new sensitive fields without applying the same pattern. If you persist a credential to `config.json`, encrypt it.
 
+### 9. Analysis Result Persistence (C2a+)
+
+* **Pattern:** Analyze results survive page reload via `chrome.storage.local` (`dh_pending_analysis` + `dh_last_analysis`). The Service Worker owns ALL writes; FAB only reads via the `useAnalysisHydration` hook and calls `dismissPopover()` on user dismissal.
+* **Wire contract:** FAB attaches `_persist: {caseNumber, successTitle, errorTitle}` to outgoing `analyze_error` NATIVE_MSG payloads. The SW strips this field before forwarding to the host. **DO NOT** forward `_persist` to the host — it will be treated as an unknown key.
+* **Title translation:** Titles are pre-translated in FAB and passed through `_persist`. The SW has no `useTranslation()` and MUST NOT attempt to translate; if you need a new analyze-flow title, add it to FAB and pass through `_persist`.
+* **One-shot semantics:** Once the user dismisses an analyze-flow popover, `seen=true` is written to `dh_last_analysis`. Re-hydration on next mount checks this flag and does NOT re-open seen results. **DO NOT** bypass `popoverIsAnalyze.current` discrimination in the `ResultPopover` `onClose` handler — bookmark popovers share the same component and dismissing a bookmark must NOT mark an analysis result as seen.
+* **Two ages:** `MAX_PENDING_DISPLAY_AGE_MS = 15min` (UI re-hydration cutoff) vs `MAX_PENDING_AGE_MS = 2h` (GC cutoff). Do not collapse these — they encode different user-intent assumptions.
+* **Pure-helper boundary:** New analyze-persistence behaviour goes into `analyzeBridge.ts` (SW side) or `useAnalysisHydration.ts` (FAB side), NOT directly into `serviceWorker.ts`/`FAB.tsx`. The boundary is what makes the 16 spec invariants testable without a real Chrome port. See `docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md` for invariant numbering (P-I1..P-I4, R-I1..R-I5).
+
 ## 5. Debugging Workflow
 
 Since you cannot see the browser or console:
