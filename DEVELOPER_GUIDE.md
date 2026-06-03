@@ -29,7 +29,7 @@ The project consists of three main components:
 
 * **`dh_native_host.py`**: The core backend script.
   * **Loop:** Reads messages from `stdin` (from Chrome) and writes to `stdout`.
-  * **Timeout:** Has a hard timeout (currently 600s) for Copilot requests.
+  * **Timeout:** User-configurable timeout for Copilot requests via Options → Analyze Timeout (range 60–3600s, default 1200s). Stored as `extension_preferences.analyze_timeout_seconds` in `config.json`. Live-updated on `update_config`. See `AGENTS.md` § 4.2 for the three-site sync contract.
   * **Logging:** Uses `_SafeRotatingFileHandler` (5 MB max, 3 backups) writing to `%LOCALAPPDATA%\DynamicsHelper\native_host.log`. Log level is configurable via the Options UI (DEBUG/INFO/WARNING/ERROR) and is applied at startup from `config.json`, then live-updated on `update_config`.
   * **Config Loading:** Prioritizes `%LOCALAPPDATA%` config over the local directory.
   * **Session Persistence:** Uses deterministic UUID v5 session IDs (derived from case IDs via `_case_to_session_id()`) for Copilot `/resume` support.
@@ -72,7 +72,7 @@ Understanding how a user request becomes an AI response.
     * On session creation, `resume_session(name)` is tried first (restores conversation history, tool state). Falls back to `create_session(session_id=name)`.
     * The session name is injected into the `system_message` content as a `## Session Info` section (labelled `Session Name: co-<case>`), making it available to the AI during the conversation (e.g., for writing `context.md` frontmatter `session_name:` field).
 5. **SDK Execution (`send_and_wait`):**
-    * The backend sends the prompt as a plain string (SDK 0.2.0+, still applies in 0.3.0) with a **600s timeout**.
+    * The backend sends the prompt as a plain string (SDK 0.2.0+, still applies in 0.3.0) with a **user-configurable timeout** (default 1200s, range 60–3600s, set via Options → Analyze Timeout). The FAB safety timeout is derived as `(value + 10) * 1000` ms so the host's truthful "Copilot did not finish within Ns" error always fires first.
 
 ### 2. Session Persistence
 

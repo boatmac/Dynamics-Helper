@@ -101,6 +101,17 @@ You can control the verbosity of the host log from the extension's **Settings �
 
 Changes take effect immediately — no restart required.
 
+### Analyze Timeout
+
+Controls how long the host waits for Copilot to finish analyzing a case before giving up. Configure in **Settings → General → Analyze Timeout (seconds)**.
+
+* **Default**: 1200 seconds (20 minutes).
+* **Range**: 60–3600 seconds (1 minute to 1 hour). Values outside this range are clamped automatically.
+* **When to raise it**: If you see "Copilot did not finish within Ns timeout" errors on complex cases (lots of log files, deep MCP queries). The error message itself tells you the current configured value.
+* **When to lower it**: Rarely useful. The timeout only fires when the SDK is actively working past the budget; idle sessions don't burn the timer.
+
+Changes take effect immediately on the next analyze — no host restart required.
+
 ### Custom Instructions & Prompts
 
 In the **Settings → Copilot Configuration** section, you can customize two Markdown text fields:
@@ -229,12 +240,11 @@ Re-run the Quick Install command or download the latest release from the Release
 By default, Dynamics Helper only receives **stable** releases. To opt in to pre-release (Beta) versions ahead of stable:
 
 1. Open the extension **Options** page → **General** tab.
-2. Tick **"Receive beta updates"**.
-3. Click **Save Changes** at the top of the Options page so the setting is persisted to the host.
+2. Tick **"Receive beta updates"**. The change is saved automatically — there is no Save button (instant persistence since v2.0.70).
 
-Beta versions include new features and fixes before they ship to stable, but may also be less tested. Once saved, the setting takes effect on the next update check.
+Beta versions include new features and fixes before they ship to stable, but may also be less tested. The setting takes effect on the next update check.
 
-Toggling this option **off** (and saving) does not roll you back from a Beta you are already on — you will simply return to the stable channel for future updates. The next stable release that is newer than your current Beta will pick you up automatically.
+Toggling this option **off** does not roll you back from a Beta you are already on — you will simply return to the stable channel for future updates. The next stable release that is newer than your current Beta will pick you up automatically.
 
 ---
 

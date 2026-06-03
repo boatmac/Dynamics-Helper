@@ -207,13 +207,13 @@ This file defines the operational rules, development workflows, and coding stand
 ### 2. Timeouts
 
 * **Sync:** Frontend safety timeout MUST be derived from the same `analyzeTimeoutSeconds` preference that the host reads, with a small grace buffer. The host must always be the one that times out first; the FAB safety timeout is only a fallback in case the host crashes/disconnects.
-* **User-configurable (v2.0.72+):** `extension_preferences.analyze_timeout_seconds` in `config.json` (mirrored as `prefs.analyzeTimeoutSeconds` in extension). Range **[60, 3600] seconds**, **default 1200** (was hardcoded 600 pre-v2.0.72). Clamped by the host on every config load and on every `update_config` RPC. Clamped client-side in Options on field blur so the displayed value matches what is actually stored.
+* **User-configurable (v2.0.71+):** `extension_preferences.analyze_timeout_seconds` in `config.json` (mirrored as `prefs.analyzeTimeoutSeconds` in extension). Range **[60, 3600] seconds**, **default 1200** (was hardcoded 600 pre-v2.0.72). Clamped by the host on every config load and on every `update_config` RPC. Clamped client-side in Options on field blur so the displayed value matches what is actually stored.
 * **FAB safety timeout:** Computed at analyze-time as `(prefs.analyzeTimeoutSeconds + 10) * 1000` ms — the 10s grace ensures the host's truthful "Copilot did not finish within Ns" error branch always fires before FAB's generic fallback popover.
 * **Three sites that must stay in sync** if you ever refactor:
   1. `host/dh_native_host.py::NativeHost.__init__` — initial value (1200)
   2. `host/dh_native_host.py::_get_session_config` + `handle_update_config` — config read + clamp
   3. `extension/src/components/FAB.tsx::handleAnalyze` — safety timeout derivation
-* **Error message contract:** The host's timeout error message MUST mention the configured budget value and direct users to Options → Analyze Timeout, NOT to re-authenticate. Pre-v2.0.72 the error said "waiting for authentication or approval" which was a guess and caused users to chase non-existent auth issues. Do not regress to that wording.
+* **Error message contract:** The host's timeout error message MUST mention the configured budget value and direct users to Options → Analyze Timeout, NOT to re-authenticate. Pre-v2.0.71 the error said "waiting for authentication or approval" which was a guess and caused users to chase non-existent auth issues. Do not regress to that wording.
 
 ### 3. PII Redaction
 
