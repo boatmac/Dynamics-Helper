@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { PageReader, ScrapedData } from '../utils/pageReader';
@@ -7,6 +7,7 @@ import { useTranslation } from '../utils/i18n';
 import { usePrefs, mergeRootPathOverride } from '../utils/prefs';
 import { trackEvent, trackException, hashCaseId } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
+import { useAnalysisHydration } from '../hooks/useAnalysisHydration';
 import { 
     X, 
     Settings, 
@@ -234,8 +235,17 @@ const FAB: React.FC = () => {
         path?: string;
         duration?: string;
     }>({ isOpen: false, title: '', content: '' });
-    const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    // NOTE: legacy `errorMsg` state was removed in v2.0.71 (C2a+). It had
+    // 9 setters and 0 readers — confirmed dead in
+    // docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md
+    // § 1. All error surfacing now flows through `setResultPopover` so the
+    // user sees a persistent popover instead of a 4-second bubble flash.
     const [updateAvailable, setUpdateAvailable] = useState<{version: string, url: string} | null>(null);
+
+    // Track whether the currently-displayed ResultPopover originated from an
+    // analyze flow (vs a bookmark markdown). Only analyze popovers should
+    // call markSeen() on close — bookmark popovers have no persisted state.
+    const popoverIsAnalyze = React.useRef(false);
     
     // Status Bubble State
     const [statusBubble, setStatusBubble] = useState<{ 
@@ -255,6 +265,40 @@ const FAB: React.FC = () => {
     // Track which case IDs have already fired "Case Analyzed" this session
     // to deduplicate: 3 analyses of the same case = 1 "Case Analyzed" event.
     const reportedCases = React.useRef<Set<string>>(new Set());
+
+    // C2a+: re-hydrate persisted analysis result on mount and on case change.
+    // See docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md
+    // The hook reads dh_last_analysis / dh_pending_analysis from
+    // chrome.storage.local and tells us whether to auto-open the popover
+    // (matching unseen result inside STALE_WINDOW_MS) or show the spinner
+    // (matching pending marker inside MAX_PENDING_DISPLAY_AGE_MS).
+    const hydration = useAnalysisHydration(scrapedData?.caseNumber || '');
+
+    // When the hook surfaces a persisted result and no popover is open, mirror
+    // it into the local resultPopover state. Then immediately mark it seen so
+    // a future remount doesn't re-open the same result (one-shot semantics).
+    useEffect(() => {
+        if (!hydration.popover) return;
+        if (resultPopover.isOpen) return;
+        setResultPopover({
+            isOpen: true,
+            title: hydration.popover.title,
+            content: hydration.popover.content,
+            path: hydration.popover.savedTo,
+        });
+        popoverIsAnalyze.current = true;
+        // Fire-and-forget; dismissPopover only marks storage seen=true and
+        // closes the hook's internal popover state — both safe to ignore.
+        void hydration.dismissPopover();
+    }, [hydration.popover, resultPopover.isOpen, hydration]);
+
+    // Mirror hook's isAnalyzing into local state so the FAB shows the
+    // spinner when a pending marker exists from a previous session.
+    useEffect(() => {
+        if (hydration.isAnalyzing) {
+            setIsAnalyzing(true);
+        }
+    }, [hydration.isAnalyzing]);
 
     // Initial Health Check to wake up Host and check for updates
     useEffect(() => {
@@ -357,6 +401,21 @@ const FAB: React.FC = () => {
             }, autoHideDuration);
         }
     };
+
+    // C2a+: surface an analyze failure as a persistent ResultPopover (the
+    // prior pattern of an inline error string + 4-second bubble was invisible
+    // during long analysis runs — user walks away, bubble auto-hides, no
+    // record). The bubble is kept as a brief visual flash; the popover
+    // carries the full message and stays until dismissed.
+    const showAnalysisError = (msg: string) => {
+        setResultPopover({
+            isOpen: true,
+            title: `❌ ${t('analysisFailed')}`,
+            content: msg,
+        });
+        popoverIsAnalyze.current = true;
+        showStatusBubble(t('analysisFailed'), 'error', 4000);
+    };
     
     const { prefs } = usePrefs();
     const [rootPathOverride, setRootPathOverride] = useState<string | null>(null);
@@ -428,7 +487,6 @@ const FAB: React.FC = () => {
                          isUserEdited.current = false; // New case context — reset edit flag
                          setScrapedData(freshData);
                          setHasAutoAnalyzed(false); // Reset to allow auto-analysis for the new context
-                         setErrorMsg(null);
                      }
                  }
              }
@@ -659,7 +717,6 @@ const FAB: React.FC = () => {
             isUserEdited.current = false;
             setScrapedData(data);
             setHasAutoAnalyzed(false); // Reset so auto-analyze can run again if enabled
-            setErrorMsg(null);
         }
     };
 
@@ -702,15 +759,13 @@ const FAB: React.FC = () => {
         });
 
         setIsAnalyzing(true);
-        setErrorMsg(null);
         const startTime = Date.now();
         
         // Safety timeout to prevent infinite "Analyzing..." state
         const timeoutId = setTimeout(() => {
             setIsAnalyzing(prev => {
                 if (prev) {
-                    setErrorMsg(t('analysisFailed'));
-                    showStatusBubble(t('analysisFailed'), 'error', 5000);
+                    showAnalysisError(t('analysisFailed'));
                     trackEvent('Analyze Timeout');
                     return false;
                 }
@@ -749,7 +804,16 @@ const FAB: React.FC = () => {
                         product: targetData.productCategory,
                         caseNumber: targetData.caseNumber
                     },
-                    requestId: requestId 
+                    requestId: requestId,
+                    // C2a+: tell the SW to persist pending/result for re-hydration
+                    // after the user navigates away from the case page. SW strips
+                    // this before forwarding to the host. Titles are pre-translated
+                    // here because the SW has no `t()` (spec §3 ctx contract).
+                    _persist: {
+                        caseNumber: targetData.caseNumber || '',
+                        successTitle: `🤖 Copilot ${t('analyze')}`,
+                        errorTitle: `❌ ${t('analysisFailed')}`,
+                    }
                 }
             });
             
@@ -775,7 +839,6 @@ const FAB: React.FC = () => {
                     
                     // Check Analysis function result
                     if (analysisData && !analysisData.error) {
-                        setErrorMsg(null); // Clear any potential timeout errors if we recovered
                         const duration = (Date.now() - startTime) / 1000;
                         const caseNum = targetData.caseNumber || '';
                         const caseHash = await hashCaseId(caseNum);
@@ -810,26 +873,23 @@ const FAB: React.FC = () => {
                             path: analysisData.saved_to,
                             duration: `${duration.toFixed(1)}s`
                         });
+                        popoverIsAnalyze.current = true;
                         setIsOpen(false); // Close menu to show result
                     } else {
                         const errMsg = analysisData?.error || "Unknown analysis error";
-                        setErrorMsg(`${t('analysisFailed')}: ${errMsg}`);
-                        showStatusBubble(t('analysisFailed'), 'error', 4000);
+                        showAnalysisError(`${t('analysisFailed')}: ${errMsg}`);
                         trackEvent('Analyze Failed', { error: errMsg });
                     }
                 } else {
                     const hostError = nativeResp?.message || nativeResp?.error || "Unknown native host error";
-                    setErrorMsg(`Host Error: ${hostError}`);
-                    showStatusBubble(t('analysisFailed'), 'error', 4000);
+                    showAnalysisError(`Host Error: ${hostError}`);
                     trackEvent('Analyze Host Error', { error: hostError });
                 }
             } else {
-                setErrorMsg(`Error: ${response.error || response.message || 'Unknown error'}`);
-                showStatusBubble(t('analysisFailed'), 'error', 4000);
+                showAnalysisError(`Error: ${response.error || response.message || 'Unknown error'}`);
             }
         } catch (e: any) {
-            setErrorMsg(`Error: ${e.message}`);
-            showStatusBubble(t('analysisFailed'), 'error', 4000);
+            showAnalysisError(`Error: ${e.message}`);
             trackEvent('Analyze Exception', { error: e.message });
         } finally {
             setIsAnalyzing(false);
@@ -916,7 +976,17 @@ const FAB: React.FC = () => {
             position:fixed stacking context issues with the bottom-right anchored container */}
         <ResultPopover 
             isOpen={resultPopover.isOpen} 
-            onClose={() => setResultPopover(prev => ({ ...prev, isOpen: false }))} 
+            onClose={() => {
+                // C2a+: if the popover came from an analyze flow (success or
+                // error), mark the persisted result as seen so it does not
+                // re-hydrate on the next page load. Bookmark popovers leave
+                // the flag untouched.
+                if (popoverIsAnalyze.current) {
+                    popoverIsAnalyze.current = false;
+                    hydration.dismissPopover();
+                }
+                setResultPopover(prev => ({ ...prev, isOpen: false }));
+            }} 
             title={resultPopover.title}
             content={resultPopover.content}
             filePath={resultPopover.path}

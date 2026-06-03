@@ -1156,7 +1156,7 @@ const OptionsInner: React.FC = () => {
                 k => userTouchedFieldsRef.current.add(k)
             );
             setPrefs(DEFAULT_PREFS);
-            chrome.storage.local.remove(["dh_prefs", "dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels"], () => {
+            chrome.storage.local.remove(["dh_prefs", "dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels", "dh_last_analysis", "dh_pending_analysis"], () => {
                 // Wrap loaded items in collapseFolders so Reset produces the
                 // same folded-by-default tree the mount path produces. Without
                 // this, items.json defaults render fully expanded after Reset
