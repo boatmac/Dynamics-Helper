@@ -9,6 +9,8 @@ import { setupContextMenu } from './contextMenu';
 // ServiceWorkerGlobalScope per the HTML spec
 // (https://github.com/w3c/ServiceWorker/issues/1356).
 import { syncTeamBookmarks, clearTeamSelection, fetchManifest } from '../utils/teamCatalog';
+import { handleAnalyzeForward } from './analyzeBridge';
+import type { AnalyzePersistContext } from '../utils/analysisStore';
 
 const NATIVE_HOST_NAME = "com.dynamics.helper.native";
 
@@ -250,7 +252,29 @@ function sendNativeMessage(message: any): Promise<any> {
 // Listen for messages from Content Script or Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "NATIVE_MSG") {
-        sendNativeMessage(message.payload)
+        // Extract optional persistence context from the payload. FAB sets
+        // _persist when initiating an analyze_error request so the SW can
+        // mirror the result into chrome.storage.local (see
+        // docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md).
+        // Other actions pass through with ctx=null — no storage writes.
+        const inner = message.payload ?? {};
+        const persistMeta = inner._persist;
+        const isAnalyze = inner.action === 'analyze_error';
+        let ctx: AnalyzePersistContext | null = null;
+        if (isAnalyze && persistMeta && typeof persistMeta === 'object') {
+            ctx = {
+                caseNumber: String(persistMeta.caseNumber || ''),
+                requestId: String(inner.requestId || persistMeta.requestId || ''),
+                successTitle: String(persistMeta.successTitle || 'Analysis Result'),
+                errorTitle: String(persistMeta.errorTitle || 'Analysis Failed'),
+            };
+        }
+        // Strip _persist before forwarding so the native host never sees
+        // extension-internal metadata.
+        const forwarded = { ...inner };
+        delete forwarded._persist;
+
+        handleAnalyzeForward(forwarded, ctx, { send: sendNativeMessage })
             .then(response => sendResponse(response))
             .catch(error => sendResponse({ status: "error", error: error.message }));
         return true; // Keep channel open for async response
