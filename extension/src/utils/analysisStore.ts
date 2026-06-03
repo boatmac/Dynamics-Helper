@@ -112,6 +112,97 @@ export async function clearPendingAnalysis(): Promise<void> {
     await chrome.storage.local.remove(KEY_PENDING);
 }
 
+// ---------------------------------------------------------------------------
+// Service-Worker-facing helpers
+//
+// These wrap the storage primitives above with the field assembly that the
+// SW write hooks need (title strings passed in from FAB at request time,
+// timestamp stamping, success/error field shaping). FAB never calls these
+// directly — it only reads via getLastAnalysis / markSeen / getPendingAnalysis.
+//
+// The helpers are split out into named functions (vs inlined in the SW
+// handler) so each invariant in
+// docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md § 5
+// can be tested without spinning up the full Service Worker module (which
+// has top-level side effects: native port connect, App Insights init, etc).
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-analyze context the SW carries from request to response. The FAB
+ * builds this when it sends a NATIVE_MSG with action='analyze_error' and
+ * the SW bridge plumbs it through to the success/error recording helpers.
+ *
+ * `successTitle` and `errorTitle` are pre-translated by the caller (FAB
+ * has access to `t()`; the SW does not). Storing them in the request-scoped
+ * context — not in the pending marker — means a SW crash mid-flight loses
+ * the titles, but recovery is straightforward: the user retries and the
+ * new ctx carries fresh strings. Schema stays minimal.
+ */
+export interface AnalyzePersistContext {
+    caseNumber: string;
+    requestId: string;
+    successTitle: string;
+    errorTitle: string;
+}
+
+/** Write the pending marker. Called by the SW before forwarding to the host. */
+export async function recordAnalyzeStart(
+    ctx: AnalyzePersistContext,
+): Promise<void> {
+    await setPendingAnalysis({
+        caseNumber: ctx.caseNumber,
+        requestId: ctx.requestId,
+        startTime: Date.now(),
+    });
+}
+
+/**
+ * Host returned a success response. Persist the result and clear the
+ * pending marker only if it still matches our requestId (edge 6.3 — a
+ * newer analysis on a different case must not have its pending wiped
+ * by our late response).
+ *
+ * `hostData` is the inner success payload from `handle_analyze_error`:
+ *   { markdown: string, saved_to: string, session_name?: string }
+ * v1 does NOT persist durationSec (host doesn't return it; FAB computes
+ * client-side). Re-hydrated popovers will show no duration. Acceptable.
+ */
+export async function recordAnalyzeSuccess(
+    ctx: AnalyzePersistContext,
+    hostData: { markdown?: string; saved_to?: string },
+): Promise<void> {
+    await setLastAnalysis({
+        caseNumber: ctx.caseNumber,
+        status: 'success',
+        title: ctx.successTitle,
+        content: hostData?.markdown ?? '',
+        timestamp: Date.now(),
+        seen: false,
+        savedTo: hostData?.saved_to,
+    });
+    await clearPendingIfMatches(ctx.requestId);
+}
+
+/**
+ * Host returned an error response OR the SW-level send() rejected.
+ * Either way, surface the error to the user via the same persisted
+ * popover path as success.
+ */
+export async function recordAnalyzeError(
+    ctx: AnalyzePersistContext,
+    errorMessage: string,
+): Promise<void> {
+    await setLastAnalysis({
+        caseNumber: ctx.caseNumber,
+        status: 'error',
+        title: ctx.errorTitle,
+        content: errorMessage,
+        timestamp: Date.now(),
+        seen: false,
+    });
+    await clearPendingIfMatches(ctx.requestId);
+}
+
 /**
  * Clear dh_pending_analysis only if its requestId matches the given one.
  *
