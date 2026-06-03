@@ -263,6 +263,21 @@ const FAB: React.FC = () => {
         type: 'default' | 'success' | 'error';
     }>({ visible: false, text: '', type: 'default' });
     const statusTimeoutRef = React.useRef<any>(null);
+
+    // Analyze-flow bubble protection (fixes SAP/clipboard notifications
+    // clobbering the "analyzing" or "Analysis Complete" bubble). The status
+    // bubble is a single-slot last-write-wins state; without a guard, the
+    // SAP textarea watcher's 3-second poll can fire DH_NOTIFICATION at any
+    // moment and wipe critical analyze-flow feedback. We mirror
+    // `isAnalyzing` into a ref (closure-stable for the listener useEffect)
+    // and remember when the analyze last completed; SAP/clipboard bubbles
+    // are silenced during the analyze and for a short tail window after.
+    // The visual signal SAP cares about (red textarea outline + pulse +
+    // scrollIntoView in legacyFeatures.ts::highlight) is unaffected — only
+    // the redundant bubble notification is suppressed.
+    const isAnalyzingRef = React.useRef(false);
+    const analyzeFlowEndedAtRef = React.useRef(0);
+    const ANALYZE_BUBBLE_PROTECTION_MS = 6000;
     
     // Concurrency Control
     const latestRequestId = React.useRef<string | null>(null);
@@ -313,6 +328,7 @@ const FAB: React.FC = () => {
     useEffect(() => {
         if (hydration.isAnalyzing) {
             setIsAnalyzing(true);
+        isAnalyzingRef.current = true;
         }
     }, [hydration.isAnalyzing]);
 
@@ -383,11 +399,23 @@ const FAB: React.FC = () => {
 
         const handleNotification = (e: any) => {
             const { text, type } = e.detail;
+            // Don't override analyze-flow bubble (see isAnalyzingRef comment).
+            const now = Date.now();
+            if (isAnalyzingRef.current || (now - analyzeFlowEndedAtRef.current) < ANALYZE_BUBBLE_PROTECTION_MS) {
+                console.log('[DH] Suppressed legacy notification during analyze flow:', text);
+                return;
+            }
             showStatusBubble(text, type || 'default', 5000);
         };
         
         const handleToast = (e: any) => {
-             showStatusBubble(e.detail.text, 'default', 3000);
+            // Same suppression rationale as handleNotification.
+            const now = Date.now();
+            if (isAnalyzingRef.current || (now - analyzeFlowEndedAtRef.current) < ANALYZE_BUBBLE_PROTECTION_MS) {
+                console.log('[DH] Suppressed legacy toast during analyze flow:', e.detail.text);
+                return;
+            }
+            showStatusBubble(e.detail.text, 'default', 3000);
         };
 
         window.addEventListener('dh-native-progress', handleProgress);
@@ -707,6 +735,7 @@ const FAB: React.FC = () => {
                     setHasAutoAnalyzed(true); // Mark as handled immediately to prevent double-fire
                     // Immediate feedback: Set analyzing state so UI reflects it instantly
                     setIsAnalyzing(true);
+        isAnalyzingRef.current = true;
                     showStatusBubble(t('analyzing'), 'default', 0); // Show analyzing status persistently until done
                     setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
             }
@@ -724,6 +753,7 @@ const FAB: React.FC = () => {
                 setHasAutoAnalyzed(true);
                 // Immediate feedback: Set analyzing state so UI reflects it instantly
                 setIsAnalyzing(true);
+        isAnalyzingRef.current = true;
                 showStatusBubble(t('analyzing'), 'default', 0);
                 setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
             }
@@ -737,6 +767,7 @@ const FAB: React.FC = () => {
              if (isInitialPending && hasValidIdentifier && rawContent.length > 20) {
                  setHasAutoAnalyzed(true);
                  setIsAnalyzing(true);
+        isAnalyzingRef.current = true;
                  showStatusBubble(t('analyzing'), 'default', 0);
                  setTimeout(() => handleAnalyze(scrapedData), 100);
              }
@@ -794,6 +825,7 @@ const FAB: React.FC = () => {
         });
 
         setIsAnalyzing(true);
+        isAnalyzingRef.current = true;
         const startTime = Date.now();
         // Snapshot the case this run was launched on. Used to detect mid-flight
         // D365 tab switches: if the user moves to a different case, popovers
@@ -958,6 +990,8 @@ const FAB: React.FC = () => {
             trackEvent('Analyze Exception', { error: e.message });
         } finally {
             setIsAnalyzing(false);
+            isAnalyzingRef.current = false;
+            analyzeFlowEndedAtRef.current = Date.now();
             // Don't clear bubble here immediately if success/error, let the timeout handle it. 
             // If manual cancel or something else, we might need to check.
         }

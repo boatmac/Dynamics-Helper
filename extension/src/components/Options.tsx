@@ -1885,25 +1885,6 @@ const OptionsInner: React.FC = () => {
                                             {t('betaChannelHint')}
                                         </p>
 
-                                        {/* Log Level */}
-                                        <div className="mt-4">
-                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('logLevel')}</label>
-                                            <p className="text-[10px] text-slate-500 mb-2">
-                                                {t('logLevelDesc')}
-                                            </p>
-                                            <select
-                                                name="logLevel"
-                                                value={prefs.logLevel || 'INFO'}
-                                                onChange={(e) => updatePref({ logLevel: e.target.value as Preferences['logLevel'] })}
-                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
-                                            >
-                                                <option value="DEBUG">DEBUG</option>
-                                                <option value="INFO">INFO</option>
-                                                <option value="WARNING">WARNING</option>
-                                                <option value="ERROR">ERROR</option>
-                                            </select>
-                                        </div>
-
                                         {/* Analyze Timeout (C2b-lite) */}
                                         <div className="mt-4">
                                             <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('analyzeTimeout')}</label>
@@ -1937,6 +1918,25 @@ const OptionsInner: React.FC = () => {
                                                 }}
                                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm"
                                             />
+                                        </div>
+
+                                        {/* Log Level */}
+                                        <div className="mt-4">
+                                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">{t('logLevel')}</label>
+                                            <p className="text-[10px] text-slate-500 mb-2">
+                                                {t('logLevelDesc')}
+                                            </p>
+                                            <select
+                                                name="logLevel"
+                                                value={prefs.logLevel || 'INFO'}
+                                                onChange={(e) => updatePref({ logLevel: e.target.value as Preferences['logLevel'] })}
+                                                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
+                                            >
+                                                <option value="DEBUG">DEBUG</option>
+                                                <option value="INFO">INFO</option>
+                                                <option value="WARNING">WARNING</option>
+                                                <option value="ERROR">ERROR</option>
+                                            </select>
                                         </div>
 
                                         {/* Team Catalog */}
