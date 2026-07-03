@@ -444,7 +444,7 @@ class NativeHost:
         # every config read; see _load_config + handle_update_config.
         self.analyze_timeout_seconds = 1200
         self.current_session_id = (
-            None  # Track current Copilot session name (co-<case>) for --resume
+            None  # Track current Copilot session name (dhco-<case>) for --resume
         )
         self.current_case_id = None  # Track which case the current session belongs to
 
@@ -1257,24 +1257,43 @@ class NativeHost:
         """Returns the session-name string used for both Copilot SDK
         create_session(session_id=...) and shell-CLI `copilot --resume <name>`.
 
-        Format: `co-<case-num>`. Matches the MyCasesKit B81 RFC § D1
-        cross-CLI session-naming convention so that a DH-launched session
-        (this method's value passed to SDK) and a shell-CLI-launched session
-        (`copilot -n co-<case>`) are the same logical session, resumable by
-        the same `copilot --resume co-<case>` command.
+        Format: `dhco-<case-num>` (**21 chars** for a 16-digit case ID).
+
+        Why the length matters: MCP servers that authenticate via Microsoft
+        Entra AAD pass this string as the `client_session` OAuth parameter.
+        AAD validates `client_session` as **20-50 chars**, alphanumeric plus
+        `-_.~`. The prior `co-<case>` form (19 chars) failed AAD validation
+        with `AADSTS901001: Invalid request` and blocked MCP auth for every
+        analyze that touched an AAD-protected MCP tool. `dhco-<case>` at
+        21 chars sits comfortably inside the 20-50 window.
+
+        Prefix compatibility with MyCasesKit B81 RFC § D1: the RFC's
+        contract is `^(cc|co)-<case-num>$` for shell-CLI-launched sessions.
+        `dhco-` is a **DH-side extension** of that namespace — the prefix
+        marks the session as "created by Dynamics Helper" so a MyCasesKit
+        shell-CLI resume (`copilot --resume co-<case>`) and a DH-launched
+        session (`copilot --resume dhco-<case>`) are two distinct sessions
+        rather than colliding.
+
+        Cross-repo state (2026-07-03): MyCasesKit will be updated to
+        recognise the `dhco-` prefix as a peer namespace (matcher
+        `^(cc|co|dhco)-<case-num>$`). Until then, sessions do NOT round-trip
+        between DH and MyCasesKit — this is an accepted temporary
+        regression to unblock AAD auth.
 
         History: prior versions used `str(uuid.uuid5(NAMESPACE, f"dh-{case_id}"))`
         because the Copilot CLI then validated session_id as a UUID and
         `copilot --resume <custom-name>` corrupted state. Both constraints
-        were verified lifted on 2026-05-11:
-          - CLI side: MyCasesKit B81.0c (W11 dry-run, custom name resumes clean)
-          - SDK side: B82.0 probe (.scratch/b82-0-sdk-probe.py — SDK->SDK
-            and SDK->CLI handoff both round-trip; CANARY token preserved
-            across the SDK/CLI process boundary)
-        See sibling repo MyCasesKit docs/b81-session-naming-rfc.md § D1 and
-        docs/postmortem-followup.md B82 row.
+        were verified lifted on 2026-05-11 (see MyCasesKit
+        docs/b81-session-naming-rfc.md § D1). Ported to `co-<case>` in B82.
+        Ported to `dhco-<case>` on 2026-07-03 to satisfy AAD 20-char
+        minimum — see host/test_case_id.py::TestCaseToSessionId for the
+        regression guard.
+
+        A future UI option to let users customise the prefix
+        (e.g. team-specific `sap-` or per-user) is under consideration.
         """
-        return f"co-{case_id}"
+        return f"dhco-{case_id}"
 
     async def _refresh_session(
         self, session_id: str | None = None, case_id: str | None = None
@@ -1282,7 +1301,7 @@ class NativeHost:
         """Re-creates or resumes a Copilot session.
 
         Args:
-            session_id: If provided (the session-name string `co-<case>` from
+            session_id: If provided (the session-name string `dhco-<case>` from
                         _case_to_session_id), try to resume first. If resume
                         fails, create a new session with this name for future
                         shell-CLI `copilot --resume <name>` support.
@@ -1315,7 +1334,8 @@ class NativeHost:
 
         # Inject session name into system message so the AI can reference it
         # (e.g. when creating context.md frontmatter — MyCasesKit B81 RFC § D1
-        # field is `session_name:`, value form `co-<case-num>`).
+        # field is `session_name:`, value form `dhco-<case-num>` per DH's
+        # 21-char AAD-compatible extension of the RFC's prefix namespace).
         if session_id and "system_message" in full_config:
             sys_msg = full_config["system_message"]
             if isinstance(sys_msg, dict):
@@ -1372,7 +1392,7 @@ class NativeHost:
                 logger.debug(f"Resume traceback: {traceback.format_exc()}")
 
         try:
-            # Inject the session-name (co-<case>) so the server uses it as
+            # Inject the session-name (dhco-<case>) so the server uses it as
             # the session_id; this is what `copilot --resume <name>` later
             # looks up (B82 — see _case_to_session_id docstring).
             if session_id:
@@ -1679,8 +1699,9 @@ class NativeHost:
             len(text) if isinstance(text, str) else -1,
         )
 
-        # Derive the case-specific session name (`co-<case>`) for cross-CLI
-        # --resume (B82 / MyCasesKit B81 RFC § D1)
+        # Derive the case-specific session name (`dhco-<case>`) for cross-CLI
+        # --resume (B82 / MyCasesKit B81 RFC § D1 with DH's `dhco-` extension
+        # for AAD 20-char client_session minimum)
         valid_case_id = self._extract_case_id(case_number)
         session_id = self._case_to_session_id(valid_case_id) if valid_case_id else None
 

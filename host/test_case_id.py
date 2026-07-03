@@ -69,25 +69,69 @@ class TestExtractCaseId(unittest.TestCase):
 
 
 class TestCaseToSessionId(unittest.TestCase):
-    """Tests for NativeHost._case_to_session_id() — B82 contract.
+    """Tests for NativeHost._case_to_session_id() — DH `dhco-` extension of
+    the MyCasesKit B81 RFC § D1 contract.
 
     The session-name string returned here is the cross-CLI handle: the same
     value is passed to Copilot SDK `create_session(session_id=...)` and
     `client.resume_session(...)`, and is also the shell-side handle for
-    `copilot --resume <name>`. Matches MyCasesKit B81 RFC § D1 form
-    `^(cc|co)-<case-num>$`. See _case_to_session_id docstring for the
-    history (UUID v5 -> co-<case-num>) and the cross-repo decision trail.
+    `copilot --resume <name>`.
+
+    Contract history:
+      - B82 (2026-05-11): `co-<case-num>` (19 chars for a 16-digit case).
+      - 2026-07-03: extended to `dhco-<case-num>` (21 chars) to satisfy
+        Microsoft Entra AAD `client_session` OAuth parameter minimum of
+        20 chars. The 19-char `co-` form was silently blocking every MCP
+        auth flow with `AADSTS901001: Invalid request`.
+
+    MyCasesKit B81 RFC § D1's shell-CLI matcher is being updated in the
+    sibling repo from `^(cc|co)-<case-num>$` to `^(cc|co|dhco)-<case-num>$`
+    so shell-CLI sessions can still recognise DH-created sessions. Until
+    the MyCasesKit PR merges, DH-created and MyCasesKit-created sessions
+    for the same case have distinct names and do NOT round-trip through
+    `copilot --resume`.
+
+    See _case_to_session_id docstring for the full history.
     """
 
     UUID_REGEX = re.compile(
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     )
 
-    def test_returns_co_prefix_form(self):
-        """Per B82 / B81 RFC § D1, the value must be `co-<case-num>`."""
+    def test_returns_dhco_prefix_form(self):
+        """The value must be `dhco-<case-num>` per the 2026-07-03 AAD-fix
+        update. Bare `co-<case>` (19 chars) is REJECTED by AAD as too
+        short for `client_session`."""
         self.assertEqual(
             NativeHost._case_to_session_id("2601190030003106"),
-            "co-2601190030003106",
+            "dhco-2601190030003106",
+        )
+
+    def test_length_satisfies_aad_minimum(self):
+        """AAD requires `client_session` to be 20-50 chars. This test is
+        the regression guard: if a future maintainer shortens the prefix
+        back to `co-` or removes it, the AAD-side breakage returns and
+        every AAD-protected MCP tool fails to auth.
+        """
+        result = NativeHost._case_to_session_id("2601190030003106")
+        self.assertGreaterEqual(
+            len(result),
+            20,
+            f"Session name {result!r} is only {len(result)} chars; AAD "
+            "`client_session` OAuth parameter requires 20-50 chars. "
+            "See _case_to_session_id docstring re: AADSTS901001.",
+        )
+        self.assertLessEqual(len(result), 50)
+
+    def test_uses_only_aad_legal_chars(self):
+        """AAD `client_session` allows alphanumeric + `-_.~` only."""
+        import re as _re
+        result = NativeHost._case_to_session_id("2601190030003106")
+        self.assertRegex(
+            result,
+            _re.compile(r"^[A-Za-z0-9\-_.~]+$"),
+            f"Session name {result!r} contains chars outside AAD's "
+            "`client_session` allowed set (alphanumeric + `-_.~`).",
         )
 
     def test_is_deterministic(self):
@@ -106,22 +150,22 @@ class TestCaseToSessionId(unittest.TestCase):
 
     def test_never_returns_uuid_form(self):
         """Regression guard: B82 explicitly moved away from UUID v5(dh-<case>)
-        to the `co-<case-num>` form so DH-launched sessions and shell-CLI-
-        launched sessions converge under one --resume handle. If a future
-        change accidentally reverts to UUID output, this test fails loudly
-        and forces the maintainer to read the _case_to_session_id docstring
-        + MyCasesKit b81-session-naming-rfc.md before proceeding."""
+        so DH-launched sessions and shell-CLI-launched sessions converge
+        under one --resume handle. If a future change accidentally reverts
+        to UUID output, this test fails loudly and forces the maintainer
+        to read the _case_to_session_id docstring + MyCasesKit
+        b81-session-naming-rfc.md before proceeding."""
         result = NativeHost._case_to_session_id("2601190030003106")
         self.assertNotRegex(
             result,
             self.UUID_REGEX,
             f"_case_to_session_id returned UUID-shaped value {result!r}; "
-            "B82 requires `co-<case-num>` (see docstring).",
+            "contract requires `dhco-<case-num>` (see docstring).",
         )
         self.assertTrue(
-            result.startswith("co-"),
-            f"_case_to_session_id must start with 'co-' (got {result!r}); "
-            "B82 / MyCasesKit B81 RFC § D1 contract.",
+            result.startswith("dhco-"),
+            f"_case_to_session_id must start with 'dhco-' (got {result!r}); "
+            "AAD-compatible extension of MyCasesKit B81 RFC § D1 (see 2026-07-03 update).",
         )
 
 
