@@ -316,7 +316,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         return;
                     }
                     const result = await fetchManifest(manifestUrl, prefsData.dh_team_manifest_etag);
-                    if (result && result.changed && result.manifest) {
+
+                    // Propagate classified fetch failure so Options can display
+                    // actionable UX (auth-expired / not-found / network etc).
+                    // Prior to this branch, `!result || !result.ok` was silently
+                    // coerced to status:success, hiding SAS-token expiries and
+                    // similar HTTP failures from the user entirely.
+                    if (!result) {
+                        sendResponse({ status: "error", error: "Manifest URL not configured" });
+                        return;
+                    }
+                    if (!result.ok) {
+                        sendResponse({
+                            status: "error",
+                            error: result.failure.message,
+                            errorKind: result.failure.kind,
+                            httpStatus: result.failure.httpStatus,
+                        });
+                        return;
+                    }
+                    if (result.changed) {
                         await new Promise<void>((resolve) => {
                             chrome.storage.local.set({
                                 dh_team_manifest: result.manifest,
@@ -324,10 +343,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             }, resolve);
                         });
                     }
-                    // result === null means 304 Not Modified (cached manifest still valid)
-                    // or the URL did not return a manifest. Either way report success
-                    // so the Options page can render the existing dropdown options.
-                    sendResponse({ status: "success", data: { manifestOnly: true, changed: !!(result && result.changed) } });
+                    // result.changed === false means 304 (cached manifest still valid).
+                    // The Options page can render the existing dropdown from the
+                    // storage-side cache.
+                    sendResponse({ status: "success", data: { manifestOnly: true, changed: result.changed } });
                 } else if (!teamId) {
                     await clearTeamSelection();
                     sendResponse({ status: "success", data: { items: [] } });
@@ -380,7 +399,9 @@ async function syncTeamCatalogOnStartup() {
                 chrome.storage.local.get(['dh_team_manifest_etag'], resolve);
             });
             const result = await fetchManifest(manifestUrl, cached.dh_team_manifest_etag);
-            if (result && result.changed && result.manifest) {
+            // Startup-hook manifest refresh — degrade silently on failure since
+            // there is no UI to notify. Errors already logged in fetchManifest.
+            if (result && result.ok && result.changed) {
                 await new Promise<void>((resolve) => {
                     chrome.storage.local.set({
                         dh_team_manifest: result.manifest,

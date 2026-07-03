@@ -606,7 +606,10 @@ const OptionsInner: React.FC = () => {
     const [teamSynced, setTeamSynced] = useState<string>("");
     const [isSyncingTeam, setIsSyncingTeam] = useState(false);
     const [teamItems, setTeamItems] = useState<MenuItem[]>([]);
-    const [teamFetchError, setTeamFetchError] = useState<boolean>(false);
+    const [teamFetchError, setTeamFetchError] = useState<null | {
+        kind: 'auth' | 'notFound' | 'http' | 'network' | 'parse' | 'unknown';
+        httpStatus?: number;
+    }>(null);
     // Plan A onBlur validation feedback for the manifest URL field. True
     // when the user typed something that doesn't parse as a URL — we
     // refuse to persist garbage but want to tell them why nothing
@@ -1124,10 +1127,28 @@ const OptionsInner: React.FC = () => {
                         (response) => {
                             if (chrome.runtime.lastError) {
                                 showError(`Manifest fetch failed: ${chrome.runtime.lastError.message}`, 5000);
+                                setTeamFetchError({ kind: 'network' });
                                 return;
                             }
                             if (!response || response.status !== "success") {
-                                showError(`Manifest fetch failed: ${response?.error || 'Unknown error'}`, 5000);
+                                // Classified failure from SW: response.errorKind /
+                                // response.httpStatus were added 2026-07-03 so the
+                                // UI can show auth-vs-notFound-vs-generic copy
+                                // instead of a single opaque "manifest fetch failed".
+                                const kind = (response?.errorKind as any) || 'unknown';
+                                const httpStatus = response?.httpStatus as number | undefined;
+                                setTeamFetchError({ kind, httpStatus });
+                                // Only surface a toast for auth failures — the
+                                // inline red text under the URL field is enough
+                                // for other cases and prevents duplicate noise.
+                                if (kind === 'auth') {
+                                    showError(t('manifestFetchAuthToast'), 6000);
+                                }
+                            } else {
+                                // Fetch succeeded — clear any stale error banner
+                                // from a prior try (e.g. user pasted a working URL
+                                // after fixing a bad one).
+                                setTeamFetchError(null);
                             }
                         }
                     );
@@ -1232,7 +1253,7 @@ const OptionsInner: React.FC = () => {
     const handleTeamRefresh = async () => {
         if (!prefs.teamManifestUrl || !prefs.team) return;
         setIsSyncingTeam(true);
-        setTeamFetchError(false);
+        setTeamFetchError(null);
         try {
             const { syncTeamBookmarks } = await import('../utils/teamCatalog');
             const items = await syncTeamBookmarks(prefs.teamManifestUrl, prefs.team);
@@ -1249,7 +1270,10 @@ const OptionsInner: React.FC = () => {
             }
         } catch (e) {
             console.warn('[Options] Team refresh failed:', e);
-            setTeamFetchError(true);
+            // syncTeamBookmarks itself catches HTTP errors and falls back to
+            // cache silently — an exception here means something more severe
+            // (module load, storage access). Report generic.
+            setTeamFetchError({ kind: 'unknown' });
         } finally {
             setIsSyncingTeam(false);
         }
@@ -2013,7 +2037,7 @@ const OptionsInner: React.FC = () => {
                                                                     setTeamItems([]);
                                                                     setTeamCollapsedLabels(new Set());
                                                                     setTeamSynced('');
-                                                                    setTeamFetchError(false);
+                                                                    setTeamFetchError(null);
                                                                     lastFetchedManifestUrlRef.current = '';
                                                                     updatePref({ teamManifestUrl: '', team: '', teamLabel: '' });
                                                                 })();
@@ -2042,7 +2066,24 @@ const OptionsInner: React.FC = () => {
                                                         <p className="text-[11px] text-red-600 mt-1">{t('manifestUrlInvalid')}</p>
                                                     )}
                                                     {teamFetchError && !manifestUrlInvalid && (
-                                                        <p className="text-[11px] text-red-600 mt-1">{t('manifestFetchFailed')}</p>
+                                                        <p className="text-[11px] text-red-600 mt-1">
+                                                            {(() => {
+                                                                switch (teamFetchError.kind) {
+                                                                    case 'auth':
+                                                                        return `${t('manifestFetchAuth')}${teamFetchError.httpStatus ? ` (HTTP ${teamFetchError.httpStatus})` : ''}`;
+                                                                    case 'notFound':
+                                                                        return `${t('manifestFetchNotFound')}${teamFetchError.httpStatus ? ` (HTTP ${teamFetchError.httpStatus})` : ''}`;
+                                                                    case 'network':
+                                                                        return t('manifestFetchNetwork');
+                                                                    case 'parse':
+                                                                        return t('manifestFetchParse');
+                                                                    case 'http':
+                                                                        return `${t('manifestFetchHttp')}${teamFetchError.httpStatus ? ` (HTTP ${teamFetchError.httpStatus})` : ''}`;
+                                                                    default:
+                                                                        return t('manifestFetchFailed');
+                                                                }
+                                                            })()}
+                                                        </p>
                                                     )}
                                                 </div>
                                             )}

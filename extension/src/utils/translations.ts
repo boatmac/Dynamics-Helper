@@ -38,6 +38,30 @@ export const translations: TranslationDictionary = {
         en: "Could not fetch manifest. Check the URL and try Refresh.",
         zh: "无法获取 manifest。请检查 URL 并尝试刷新。",
     },
+    manifestFetchAuth: {
+        en: "Manifest URL rejected authentication — the SAS token may have expired or been revoked. Regenerate the URL and paste it here.",
+        zh: "Manifest URL 认证失败——SAS 令牌可能已过期或被吊销。请重新生成 URL 并粘贴到此处。",
+    },
+    manifestFetchAuthToast: {
+        en: "Manifest auth failed — check SAS token expiry",
+        zh: "Manifest 认证失败——请检查 SAS 令牌是否过期",
+    },
+    manifestFetchNotFound: {
+        en: "Manifest URL not found. Double-check the URL — the blob may have been deleted or renamed.",
+        zh: "Manifest URL 未找到。请核对 URL——blob 可能已被删除或改名。",
+    },
+    manifestFetchNetwork: {
+        en: "Network error fetching manifest. Check connectivity, DNS, or CORS/TLS configuration.",
+        zh: "获取 manifest 时出现网络错误。请检查网络连接、DNS 或 CORS/TLS 配置。",
+    },
+    manifestFetchParse: {
+        en: "Manifest response was not valid JSON. Verify the URL returns a manifest file.",
+        zh: "Manifest 响应不是合法 JSON。请确认 URL 指向的是 manifest 文件。",
+    },
+    manifestFetchHttp: {
+        en: "Manifest server returned an error. Try again later or contact the manifest owner.",
+        zh: "Manifest 服务器返回错误。请稍后重试或联系 manifest 所有者。",
+    },
     manifestUrlInvalid: {
         en: "Invalid URL format — not saved.",
         zh: "URL 格式不正确，未保存。",
