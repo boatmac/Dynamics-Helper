@@ -1256,23 +1256,42 @@ const OptionsInner: React.FC = () => {
         setTeamFetchError(null);
         try {
             const { syncTeamBookmarks } = await import('../utils/teamCatalog');
-            const items = await syncTeamBookmarks(prefs.teamManifestUrl, prefs.team);
-            setTeamItems(items);
-            setTeamSynced(new Date().toISOString());
-            // Refresh the dropdown if the manifest changed during this sync
-            const cached = await new Promise<any>((resolve) => {
-                chrome.storage.local.get(['dh_team_manifest'], resolve);
-            });
-            if (cached.dh_team_manifest && Array.isArray(cached.dh_team_manifest.teams)) {
-                setTeamList(
-                    cached.dh_team_manifest.teams.map((t: any) => ({ id: t.id, label: t.label })),
-                );
+            const result = await syncTeamBookmarks(prefs.teamManifestUrl, prefs.team);
+
+            // Always render whatever items came back (cache-on-failure) so
+            // the user isn't left with an empty list.
+            setTeamItems(result.items);
+
+            if (result.failure) {
+                // Refresh actually failed. Show the classified error and
+                // — crucially — do NOT bump the synced-at timestamp. The
+                // pre-fix behaviour of setTeamSynced(now) on a silently-
+                // failed refresh was exactly what the SAS-expiry bug
+                // report was about.
+                setTeamFetchError({
+                    kind: result.failure.kind,
+                    httpStatus: result.failure.httpStatus,
+                });
+                if (result.failure.kind === 'auth') {
+                    showError(t('manifestFetchAuthToast'), 6000);
+                }
+            } else {
+                setTeamSynced(new Date().toISOString());
+                // Refresh the dropdown if the manifest changed during this sync
+                const cached = await new Promise<any>((resolve) => {
+                    chrome.storage.local.get(['dh_team_manifest'], resolve);
+                });
+                if (cached.dh_team_manifest && Array.isArray(cached.dh_team_manifest.teams)) {
+                    setTeamList(
+                        cached.dh_team_manifest.teams.map((t: any) => ({ id: t.id, label: t.label })),
+                    );
+                }
             }
         } catch (e) {
             console.warn('[Options] Team refresh failed:', e);
-            // syncTeamBookmarks itself catches HTTP errors and falls back to
-            // cache silently — an exception here means something more severe
-            // (module load, storage access). Report generic.
+            // Exception here (not caught inside syncTeamBookmarks) means
+            // module load / storage access broke — more severe than a
+            // fetch failure. Report generic.
             setTeamFetchError({ kind: 'unknown' });
         } finally {
             setIsSyncingTeam(false);

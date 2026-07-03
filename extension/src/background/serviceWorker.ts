@@ -358,8 +358,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     if (!manifestUrl) {
                         sendResponse({ status: "error", error: "Manifest URL not configured" });
                     } else {
-                        const items = await syncTeamBookmarks(manifestUrl, teamId);
-                        sendResponse({ status: "success", data: { items, teamId } });
+                        const result = await syncTeamBookmarks(manifestUrl, teamId);
+                        // Forward classified failure so a caller (currently
+                        // hypothetical — no non-Options code uses this
+                        // response payload) can distinguish silent degradation
+                        // from a real sync. Items always carry the cache
+                        // fallback so UI never sees an empty list on failure.
+                        if (result.failure) {
+                            sendResponse({
+                                status: "error",
+                                error: result.failure.message,
+                                errorKind: result.failure.kind,
+                                httpStatus: result.failure.httpStatus,
+                                failureStage: result.failureStage,
+                                data: { items: result.items, teamId },
+                            });
+                        } else {
+                            sendResponse({ status: "success", data: { items: result.items, teamId } });
+                        }
                     }
                 }
             } catch (e: any) {
@@ -412,8 +428,14 @@ async function syncTeamCatalogOnStartup() {
             return;
         }
 
-        const items = await syncTeamBookmarks(manifestUrl, teamId);
-        console.log(`[DH-SW] Team catalog synced: ${items.length} items for team '${teamId}'`);
+        const result = await syncTeamBookmarks(manifestUrl, teamId);
+        // Startup hook has no UI to notify — log the outcome including any
+        // classified failure. Cached items still get returned so the popup
+        // has something to render.
+        if (result.failure) {
+            console.warn(`[DH-SW] Startup team sync failed (${result.failureStage}: ${result.failure.kind}): ${result.failure.message}`);
+        }
+        console.log(`[DH-SW] Team catalog synced: ${result.items.length} items for team '${teamId}'`);
     } catch (e) {
         console.warn('[DH-SW] Team catalog sync failed:', e);
     }
