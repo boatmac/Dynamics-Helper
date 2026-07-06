@@ -181,7 +181,7 @@ This file defines the operational rules, development workflows, and coding stand
   * All I/O bound operations (SDK calls) must be `async`.
 * **Type Hinting:**
   * Use Python type hints extensively (e.g., `def func(a: int) -> str:`).
-  * Import types from `copilot` (top-level: `CopilotClient`, `SubprocessConfig`) and `copilot.session` (`PermissionRequestResult`, `PreToolUseHookOutput`). `copilot.types` was removed in SDK 0.3.0; `CopilotClientOptions`, `MessageOptions`, and `SessionConfig` were removed in 0.2.0. WARNING: `copilot.generated.rpc.PermissionRequestResult` is a different internal RPC type (`success: bool`) — always import the session version. Full migration notes: `docs/sdk-upgrade-2026-05-0.3.0.md`.
+  * Import types from `copilot` (top-level: `CopilotClient`, `RuntimeConnection`) and `copilot.session` (`PermissionRequestResult`, `PreToolUseHookOutput`, `PermissionDecisionApproveOnce`). **SDK 1.0.5 (2026-07-03):** `SubprocessConfig` was removed — the stdio connection is now `RuntimeConnection.for_stdio(path=...)` passed as `CopilotClient(connection=...)`. `PermissionRequestResult` became a Union (annotation-only, NOT constructible) — the headless auto-approve handler returns the concrete `PermissionDecisionApproveOnce()` variant. `copilot.types` was removed back in 0.3.0. WARNING: `copilot.generated.rpc.PermissionRequestResult` is a different internal RPC type (`success: bool`) — always import the session version. Full migration notes: `docs/sdk-upgrade-2026-07-1.0.5.md` (latest), `docs/sdk-upgrade-2026-05-0.3.0.md` (prior).
 * **Logging:**
   * **CRITICAL:** Do NOT print to `stdout` (used for Native Messaging).
   * Use `logging.info()`, `logging.error()`, etc.
@@ -401,19 +401,20 @@ The SDK has **no version pin on the CLI** in its package metadata. The only runt
 
 **Why this matters for DH.** DH's `requirements.txt` pins the SDK version, but Copilot CLI is whatever the user has installed (and `copilot.cmd` auto-updates itself by re-extracting newer versions into `%LOCALAPPDATA%\copilot\pkg\<version>\` on each invocation). So DH ships with `SDK pinned + CLI wildcard`. Any field-level wire change in the CLI between DH's released SDK version and the user's current CLI will surface as a crash inside `CopilotClient.start()` or `create_session()`.
 
-**Known incident (2026-05-20):** CLI 1.0.46+ changed `PingResponse.timestamp` from `int` (epoch ms) to ISO 8601 string. SDK 0.3.0 does `int(timestamp)` in `client.py:204` and crashes with `ValueError: invalid literal for int() with base 10: '2026-05-20T...Z'`. Fix: monkey-patch `copilot.client.PingResponse.from_dict` at SDK-import time (see `host/dh_native_host.py:244-287`, commit `b4bb6ab`). Delete the shim once SDK ships a release with native ISO support.
+**Known incident (2026-05-20, RESOLVED by 1.0.5 upgrade):** CLI 1.0.46+ changed `PingResponse.timestamp` from `int` (epoch ms) to ISO 8601 string. SDK 0.3.0 did `int(timestamp)` and crashed with `ValueError: invalid literal for int() with base 10: '2026-05-20T...Z'`. The original fix was a monkey-patch of `copilot.client.PingResponse.from_dict` at SDK-import time (commit `b4bb6ab`). **That shim was DELETED on 2026-07-03 during the SDK 0.3.0 → 1.0.5 upgrade** — 1.0.5's `from_dict` handles ISO timestamps natively (`isinstance(int,float) ? epoch : from_datetime()`), verified by a live `client.start()` on clean 1.0.5 + CLI 1.0.69. This incident is the canonical example of the shim pattern below, kept for reference even though the specific shim is gone.
 
 **Response playbook when this recurs:**
 
-1. Reproduce in dev mode with a 5-line probe:
+1. Reproduce in dev mode with a 5-line probe (**SDK 1.0.5+ API** — note `RuntimeConnection`, NOT the removed `SubprocessConfig`):
    ```python
    import asyncio
-   from copilot import CopilotClient, SubprocessConfig
-   asyncio.run(CopilotClient(SubprocessConfig(cli_path=r"C:\Users\<u>\AppData\Roaming\npm\copilot.cmd")).start())
+   from copilot import CopilotClient, RuntimeConnection
+   conn = RuntimeConnection.for_stdio(path=r"C:\Users\<u>\AppData\Roaming\npm\copilot.cmd")
+   asyncio.run(CopilotClient(connection=conn).start())
    ```
 2. Grep the traceback for the SDK file and line: `from_dict`, `int(...)`, `str(...)` casts on RPC dict fields are the usual suspects.
-3. Add a startup-time monkey-patch in `dh_native_host.py` mirroring the PingResponse shim pattern (read raw obj, normalise, fall through to original).
+3. Add a startup-time monkey-patch in `dh_native_host.py` mirroring the (now-deleted) PingResponse shim pattern (read raw obj, normalise, fall through to original). The deleted shim's git history (`b4bb6ab` .. the 1.0.5-upgrade commit) is the reference implementation.
 4. Verify with `& "host/venv/Scripts/python.exe" -c "..."` before rebuilding.
-5. Record the patch in `docs/superpowers/plans/<latest>.md` follow-ups so the shim gets deleted when the SDK release catches up.
+5. Record the patch in `docs/sdk-upgrade-*.md` follow-ups so the shim gets deleted when the SDK release catches up (as was done for the PingResponse one).
 
 **Do NOT pin the user's CLI version.** Bundling a CLI binary inside DH (~100 MB), pinning npm install version (CLI auto-updates anyway by extracting into `%LOCALAPPDATA%\copilot\pkg\`), or wrapping `copilot.cmd` are all worse than per-incident shims. The Copilot CLI is a moving target by design.

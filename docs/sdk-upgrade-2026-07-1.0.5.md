@@ -291,15 +291,26 @@ atomically. Live ping used the maintainer's global CLI
 **Net Phase 1 verdict:** upgrade is low-risk. Both breakings are mechanical,
 the shim deletes cleanly, and the real SDK↔CLI handshake works today.
 
-### Phase 2 — Code changes [PENDING, LOCKED SCOPE]
-1. B1: import + 5 construction sites → `RuntimeConnection`.
-2. B2: import + handler return → `PermissionDecisionApproveOnce`.
-3. § 4.1: delete PingResponse shim (gated on Phase 1 step 2).
-4. § 4.2: add `infinite_sessions` observability logging (workspace_path +
-   compaction events). **Do not** add `enabled: False`.
-5. Update `test_sdk_compat.py` per § 5 + 2 new guards + break-and-fail.
-6. requirements.txt bump + regenerate pins.
-7. Run `python -m unittest discover host` — expect green.
+### Phase 2 — Code changes ✅ DONE (2026-07-03, commit `061da3f`)
+1. ✅ B1: import + 3 construction sites → `RuntimeConnection.for_stdio`.
+2. ✅ B2: import consolidated into `copilot.session` + handler return
+   `PermissionDecisionApproveOnce()`.
+3. ✅ PingResponse shim deleted (gated on Phase 1 live-ping — passed).
+   Kept in the *same* commit as the migration (not separate): the deletion
+   is only valid because of the upgrade, so a full `git revert` restores
+   both together — the realistic rollback path.
+4. ✅ `infinite_sessions` observability: `_log_session_observability()`
+   logs `workspace_path` at all 3 session-established points. **No**
+   `enabled: False` added — new default is ridden deliberately.
+5. ✅ `test_sdk_compat.py` rewritten for the 1.0.5 contract + new guards.
+   Host suite **77/77** green (was 74). Break-and-fail verified:
+   re-adding `SubprocessConfig` to the import crashes module load → 15
+   errors; reverted → 77 green.
+6. ✅ requirements.txt → `>=1.0.5,<1.1` + regenerated httpx-stack pins;
+   dropped the unused 0.3.0-era requests stack.
+7. ✅ `host/venv` upgraded to 1.0.5 atomically with source. Full module
+   load verified (exit 0). AGENTS.md § 3 + § 9.5 updated for the new
+   import map and the shim deletion.
 
 ### Phase 3 — PyInstaller + Defender + beta [PENDING]
 Per § 6.2. Then dev-mode smoke (real analyze end-to-end, watch for the
