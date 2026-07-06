@@ -248,67 +248,31 @@ logger.info(f"Python Executable: {sys.executable}")
 # Import the SDK from the correct package name we discovered: 'copilot'
 try:
     log_emergency("Attempting to import copilot SDK...")
-    # SDK 0.3.0 reorganized type exports: `copilot.types` was removed.
-    # SubprocessConfig moved to top-level `copilot`; PermissionRequestResult
-    # and PreToolUseHookOutput moved to `copilot.session`.
+    # SDK 1.0.5 import map (upgraded from 0.3.0 on 2026-07-03, see
+    # docs/sdk-upgrade-2026-07-1.0.5.md):
+    #   - SubprocessConfig was REMOVED; the stdio connection is now expressed
+    #     via `RuntimeConnection.for_stdio(path=...)`.
+    #   - PermissionRequestResult is now a Union type (annotation-only, not a
+    #     constructor). The headless auto-approve handler returns the concrete
+    #     `PermissionDecisionApproveOnce()` variant instead.
+    #   - PreToolUseHookOutput stays a TypedDict accepting permissionDecision.
     # WARNING: `copilot.generated.rpc.PermissionRequestResult` is a different
     # internal RPC type (success: bool); always import from `copilot.session`.
-    # See docs/sdk-upgrade-2026-05-0.3.0.md § 7.1 for the full import map.
-    from copilot import CopilotClient, SubprocessConfig
+    from copilot import CopilotClient, RuntimeConnection
     from copilot.session import (
         PermissionRequestResult,
         PreToolUseHookOutput,
+        PermissionDecisionApproveOnce,
     )
 
-    # --- SDK / CLI wire compat shim (2026-05-20) ---
-    # Copilot CLI >= 1.0.46 returns the `timestamp` field in `PingResponse`
-    # as an ISO 8601 string (e.g. "2026-05-20T06:00:50.595Z"). SDK 0.3.0's
-    # PingResponse.from_dict at client.py:204 does `int(timestamp)` directly,
-    # which raises ValueError, killing client.start() before any RPC works.
-    #
-    # Patch from_dict to detect ISO strings and convert to epoch-ms first.
-    # protocolVersion remains int(); only timestamp needs the workaround.
-    # Remove this shim once SDK ships a release that handles ISO timestamps.
-    # Last verified still needed: SDK 0.3.0 on 2026-05-25 — source still
-    # does `int(timestamp)` with no string handling (confirmed via
-    # `inspect.getsource(PingResponse.from_dict)`; latest on PyPI is still
-    # 0.3.0, no newer release). See follow-up #1 in
-    # docs/superpowers/plans/2026-05-11-beta-channel-toggle.md.
-    try:
-        import copilot.client as _copilot_client
-        from datetime import datetime as _datetime
-
-        _orig_ping_from_dict = _copilot_client.PingResponse.from_dict
-
-        def _patched_ping_from_dict(obj):
-            if isinstance(obj, dict):
-                ts = obj.get("timestamp")
-                if isinstance(ts, str):
-                    # Try ISO 8601 with trailing Z; fall back to passing through.
-                    try:
-                        # fromisoformat handles "...+00:00"; not "...Z" until 3.11+
-                        normalized = ts.replace("Z", "+00:00") if ts.endswith("Z") else ts
-                        dt = _datetime.fromisoformat(normalized)
-                        # convert to epoch ms (SDK's contract)
-                        obj = {**obj, "timestamp": int(dt.timestamp() * 1000)}
-                    except Exception as _conv_err:
-                        logger.warning(
-                            f"PingResponse timestamp ISO parse failed for {ts!r}: "
-                            f"{_conv_err}; letting original cast surface."
-                        )
-            return _orig_ping_from_dict(obj)
-
-        _copilot_client.PingResponse.from_dict = staticmethod(_patched_ping_from_dict)
-        logger.info(
-            "Applied SDK shim: PingResponse.from_dict tolerates ISO timestamps "
-            "(CLI 1.0.46+ wire format)."
-        )
-    except Exception as _shim_err:
-        logger.warning(
-            f"Could not apply SDK ping-timestamp shim: {_shim_err}. "
-            "DH will likely fail at client.start() if CLI >= 1.0.46."
-        )
-    # --- end shim ---
+    # NOTE (2026-07-03): the PingResponse ISO-timestamp monkey-patch shim
+    # that lived here (added 2026-05-20 for SDK 0.3.0 + CLI 1.0.46+) was
+    # DELETED during the 1.0.5 upgrade. SDK 1.0.5's PingResponse.from_dict
+    # handles ISO timestamps natively (isinstance(int,float) ? epoch :
+    # from_datetime()). Verified 2026-07-03 by a live client.start() on
+    # clean 1.0.5 + CLI 1.0.69 with no shim — handshake succeeded, no
+    # ValueError. Do not reintroduce the shim unless a future SDK/CLI pair
+    # regresses; see docs/sdk-upgrade-2026-07-1.0.5.md § 4.1.
 
     logger.info("Successfully imported copilot SDK.")
     log_emergency("Successfully imported copilot SDK.")
@@ -737,11 +701,13 @@ class NativeHost:
             logger.info("Initializing Copilot Client...")
 
             cli_path = self.find_copilot_cli()
-            config = (
-                SubprocessConfig(cli_path=cli_path) if cli_path else SubprocessConfig()
+            connection = (
+                RuntimeConnection.for_stdio(path=cli_path)
+                if cli_path
+                else RuntimeConnection.for_stdio()
             )
 
-            self.client = CopilotClient(config)
+            self.client = CopilotClient(connection=connection)
 
             # Explicitly start the client to ensure connection before session creation
             logger.info("Starting Copilot Client...")
@@ -1222,9 +1188,11 @@ class NativeHost:
         """
         logger.info(f"Permission requested (fallback handler): {request}")
         logger.info("Auto-approving permission request to prevent headless hang.")
-        # SDK 0.3.0 renamed the approval vocabulary: "approved" -> "approve-once".
-        # See docs/sdk-upgrade-2026-05-0.3.0.md § 7 (B-1) and host/test_sdk_compat.py.
-        return PermissionRequestResult(kind="approve-once")
+        # SDK 1.0.5: PermissionRequestResult is a Union (annotation-only);
+        # the concrete approval variant is PermissionDecisionApproveOnce().
+        # (0.3.0 used PermissionRequestResult(kind="approve-once"), removed
+        # in 1.0.5 — see docs/sdk-upgrade-2026-07-1.0.5.md § 3 B2.)
+        return PermissionDecisionApproveOnce()
 
     @staticmethod
     def _pre_tool_use_hook(hook_input, context) -> PreToolUseHookOutput:
@@ -1236,6 +1204,36 @@ class NativeHost:
         tool_name = hook_input.get("toolName", "unknown")
         logger.info(f"Pre-tool-use hook: auto-allowing '{tool_name}'")
         return PreToolUseHookOutput(permissionDecision="allow")
+
+    @staticmethod
+    def _log_session_observability(session, origin: str) -> None:
+        """Observability for SDK 1.0.5 infinite-sessions (on by default).
+
+        DH deliberately rides the new infinite-sessions default rather than
+        disabling it: automatic background compaction lets a long, complex
+        analysis keep going past the context ceiling instead of failing —
+        directly relevant to the C2b-lite long-analysis-timeout work
+        (docs/sdk-upgrade-2026-07-1.0.5.md § 4.2). This log makes the
+        adoption observable rather than blind: it surfaces the session-state
+        workspace path (where compaction checkpoints + persisted state live)
+        so beta testing can confirm behaviour and spot runaway disk use.
+
+        Best-effort: never raises. `workspace_path` may be absent on some
+        SDK builds; we log its absence rather than crash session creation.
+        """
+        try:
+            workspace_path = getattr(session, "workspace_path", None)
+            if workspace_path:
+                logger.info(
+                    f"[infinite-sessions] {origin} session workspace: {workspace_path}"
+                )
+            else:
+                logger.info(
+                    f"[infinite-sessions] {origin} session has no workspace_path "
+                    "attribute (infinite sessions may be disabled or unsupported)."
+                )
+        except Exception as e:
+            logger.debug(f"[infinite-sessions] observability log failed: {e}")
 
     @staticmethod
     def _extract_case_id(case_number: str) -> str | None:
@@ -1312,12 +1310,12 @@ class NativeHost:
             logger.warning("Client not initialized. Attempting re-initialization...")
             try:
                 cli_path = self.find_copilot_cli()
-                config = (
-                    SubprocessConfig(cli_path=cli_path)
+                connection = (
+                    RuntimeConnection.for_stdio(path=cli_path)
                     if cli_path
-                    else SubprocessConfig()
+                    else RuntimeConnection.for_stdio()
                 )
-                self.client = CopilotClient(config)
+                self.client = CopilotClient(connection=connection)
                 await self.client.start()
                 logger.info("Client re-initialized successfully.")
             except Exception as e:
@@ -1380,6 +1378,7 @@ class NativeHost:
                 logger.info(
                     f"Resumed existing session: {session_id} (Server ID: {self.current_session_id})"
                 )
+                self._log_session_observability(self.session, "resumed")
                 return True
             except AttributeError:
                 logger.info(
@@ -1422,6 +1421,7 @@ class NativeHost:
                 f"Copilot Session created successfully. "
                     f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
             )
+            self._log_session_observability(self.session, "created")
             return True
         except OSError as e:
             # OSError (e.g., [Errno 22] Invalid argument) typically means the CLI
@@ -1433,12 +1433,12 @@ class NativeHost:
             )
             try:
                 cli_path = self.find_copilot_cli()
-                reinit_config = (
-                    SubprocessConfig(cli_path=cli_path)
+                reinit_connection = (
+                    RuntimeConnection.for_stdio(path=cli_path)
                     if cli_path
-                    else SubprocessConfig()
+                    else RuntimeConnection.for_stdio()
                 )
-                self.client = CopilotClient(reinit_config)
+                self.client = CopilotClient(connection=reinit_connection)
                 await self.client.start()
                 logger.info("Client re-initialized after OSError.")
 
@@ -1451,6 +1451,7 @@ class NativeHost:
                     f"Copilot Session created successfully (after retry). "
                 f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
                 )
+                self._log_session_observability(self.session, "created-after-retry")
                 return True
             except Exception as retry_err:
                 logger.error(f"Retry after re-init also failed: {retry_err}")
