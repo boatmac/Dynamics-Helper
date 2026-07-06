@@ -1299,6 +1299,22 @@ const OptionsInner: React.FC = () => {
     };
 
     // Listen for updates
+    //
+    // `t` is captured in a ref because the runtime-message handler is
+    // registered once at mount (deps []) — putting `t` in the dep array
+    // would remove+re-add the listener on every language change and can
+    // drop messages that arrive during the swap. Same pattern as
+    // isAnalyzingRef in FAB.tsx (see AGENTS.md § notes on ref-vs-deps
+    // trade-offs). Without this ref, `t()` inside handleRuntimeMsg
+    // returns the language that was active AT MOUNT TIME — for a user
+    // who set language=zh but whose prefs hydrate from the host after
+    // the effect runs, the 'You are up to date!' string stays in English
+    // even after the UI otherwise switches to Chinese.
+    const tRef = useRef(t);
+    useEffect(() => {
+        tRef.current = t;
+    }, [t]);
+
     useEffect(() => {
         const handleRuntimeMsg = (message: any) => {
             if (message.type === "NATIVE_UPDATE_AVAILABLE") {
@@ -1310,15 +1326,15 @@ const OptionsInner: React.FC = () => {
                 }
                 console.log("[Options] Received update available:", message.payload);
                 setUpdateAvailable(message.payload);
-                showSuccess(`v${message.payload.version} ${t('availableForUpdate')}`, 5000);
+                showSuccess(`v${message.payload.version} ${tRef.current('availableForUpdate')}`, 5000);
             }
             
             if (message.type === "NATIVE_UPDATE_NOT_AVAILABLE") {
-                showSuccess(t('upToDate'), 3000);
+                showSuccess(tRef.current('upToDate'), 3000);
             }
 
             if (message.type === "NATIVE_UPDATE_ERROR") {
-                showError(`${t('checkFailed')}: ${message.payload.error}`, 5000);
+                showError(`${tRef.current('checkFailed')}: ${message.payload.error}`, 5000);
             }
         };
 
