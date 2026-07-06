@@ -91,9 +91,16 @@ In 1.0.5 `PermissionRequestResult` is a `UnionType` of concrete decision
 classes and is **not callable**. The headless auto-approve handler
 (AGENTS.md § 4.1 golden rule) must return a concrete variant.
 
-**Import addition:**
+**Import addition** (consolidate into the existing `copilot.session` block
+at L258–262 — Phase 1 confirmed `PermissionDecisionApproveOnce` is exported
+from `copilot.session` as well as `copilot.rpc`):
 ```python
-from copilot.rpc import PermissionDecisionApproveOnce
+from copilot.session import (
+    PermissionRequestResult,      # now annotation-only (Union)
+    PreToolUseHookOutput,
+    PermissionHandler,
+    PermissionDecisionApproveOnce,  # NEW — the concrete approve variant
+)
 ```
 
 **Handler return (dh_native_host.py:1227):**
@@ -197,10 +204,10 @@ which is the file doing its job. Update them to lock the 1.0.5 contract:
 | Test | Current assertion | 1.0.5 update |
 |---|---|---|
 | `test_top_level_imports` | `from copilot import CopilotClient, SubprocessConfig` | `..., RuntimeConnection`; assert `SubprocessConfig` is gone (mirror the `test_legacy_types_module_is_gone` pattern) |
-| `test_session_imports` | imports `PermissionRequestResultKind` | verify it still exists in 1.0.5 (probe did not check — **confirm during impl**); keep if present, drop if removed |
-| `test_internal_rpc_permissionresult_is_different_type` | asserts session PRR has `kind` annotation | session PRR is now a UnionType — rewrite to assert it's a Union and that `PermissionDecisionApproveOnce` is one of its members |
-| `test_approve_once_is_valid` | `PermissionRequestResult(kind="approve-once").kind` | replace with: `PermissionDecisionApproveOnce()` constructs and is a member of the `PermissionRequestResult` union |
-| `test_kind_literal_values_exact` | `PermissionRequestResultKind` literal set | re-derive from 1.0.5; if the Kind literal is gone, replace with a union-membership test over the concrete decision classes |
+| `test_session_imports` | imports `PermissionRequestResultKind` | **`PermissionRequestResultKind` is GONE** (Phase 1 confirmed) — drop it; import `PermissionDecisionApproveOnce` from `copilot.session` instead |
+| `test_internal_rpc_permissionresult_is_different_type` | asserts session PRR has `kind` annotation | session PRR is now a 16-member UnionType — rewrite to assert it's a Union and that `PermissionDecisionApproveOnce` is a member |
+| `test_approve_once_is_valid` | `PermissionRequestResult(kind="approve-once").kind` | replace with: `PermissionDecisionApproveOnce()` constructs and `is` in `typing.get_args(PermissionRequestResult)` |
+| `test_kind_literal_values_exact` | `PermissionRequestResultKind` literal set | **delete** — the Kind literal no longer exists; superseded by the union-membership test above |
 | `test_permission_decision_literal_values_exact` | `PreToolUseHookOutput` `{allow,deny,ask}` | likely unchanged — verify the literal set didn't grow |
 | `test_allow_literal_still_valid` | `PreToolUseHookOutput(permissionDecision="allow")` | unchanged (confirmed by probe) |
 | `TestMcpTypeMigration` | `local→stdio`, `remote→http` map | unchanged (DH-owned logic) |
@@ -254,13 +261,35 @@ Follow the prior upgrade's Phase 3 (`sdk-upgrade-2026-05-0.3.0.md` § 5, § 8):
 Measured all import/type/signature surfaces. Results in § 2. Two breakings
 (B1, B2) identified; shim + infinite_sessions decisions made.
 
-### Phase 1 — Upgrade venv + live verification [PENDING]
-1. `pip install "github-copilot-sdk>=1.0.5,<1.1"` into `host/venv`.
-2. Live-ping verification for § 4.1 (shim deletion gate): real
-   `client.start()`, confirm no ISO-timestamp crash **without** the shim.
-3. Confirm `RuntimeConnection.for_stdio` param name (`path=`).
-4. Confirm `PermissionRequestResultKind` existence for the test update.
-5. Confirm CLI discovery path for the frozen build (§ 6.2 wrinkle).
+### Phase 1 — Live verification ✅ DONE (2026-07-03)
+
+Done in an **isolated probe venv** (not `host/venv`) so the working 0.3.0
+dev environment stays intact until Phase 2 upgrades venv + source
+atomically. Live ping used the maintainer's global CLI
+(`%APPDATA%\npm\copilot.cmd`, **CLI version 1.0.69-1**).
+
+1. ✅ **Shim deletion gate PASSED.** `RuntimeConnection.for_stdio(path=<copilot.cmd>)`
+   + `await client.start()` on clean 1.0.5 (no shim) **succeeded** — ping
+   handshake clean, no `ValueError` on the ISO timestamp. **The shim is
+   confirmed dead code on 1.0.5.** Real stack tested: SDK 1.0.5 ↔ CLI 1.0.69.
+2. ✅ `RuntimeConnection.for_stdio(*, path=None, args=())` — `path=` is
+   keyword-only. Spec's B1 migration is correct.
+3. ✅ **`PermissionRequestResultKind` is GONE** in 1.0.5 (ImportError). The
+   `test_sdk_compat` kind-literal tests MUST be rewritten to union-membership
+   (§ 5 already anticipated this).
+4. ✅ `PermissionRequestResult` is a Union of **16 members**;
+   `PermissionDecisionApproveOnce` is the first. Importable from **all three**
+   of `copilot.rpc`, `copilot.generated.rpc`, `copilot.session` — so we can
+   **add it to the existing `copilot.session` import block** (L258–262)
+   rather than introducing a new `copilot.rpc` import line. (Spec § 3 B2
+   suggested `copilot.rpc`; consolidating into `copilot.session` is cleaner.)
+5. ✅ CLI discovery: `for_stdio(path=None)` → SDK auto-discovers/downloads;
+   DH keeps passing its explicit `copilot.cmd` path (proven working in the
+   live ping). `SDK_PROTOCOL_VERSION = 3`, same as 0.3.0 → protocol compatible.
+   Frozen-build CLI path assumption (AGENTS.md § 9.5) unchanged.
+
+**Net Phase 1 verdict:** upgrade is low-risk. Both breakings are mechanical,
+the shim deletes cleanly, and the real SDK↔CLI handshake works today.
 
 ### Phase 2 — Code changes [PENDING, LOCKED SCOPE]
 1. B1: import + 5 construction sites → `RuntimeConnection`.
