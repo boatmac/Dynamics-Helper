@@ -72,7 +72,7 @@ Understanding how a user request becomes an AI response.
     * On session creation, `resume_session(name)` is tried first (restores conversation history, tool state). Falls back to `create_session(session_id=name)`.
     * The session name is injected into the `system_message` content as a `## Session Info` section (labelled `Session Name: dhco-<case>`), making it available to the AI during the conversation (e.g., for writing `context.md` frontmatter `session_name:` field).
 5. **SDK Execution (`send_and_wait`):**
-    * The backend sends the prompt as a plain string (SDK 0.2.0+, still applies in 0.3.0) with a **user-configurable timeout** (default 1200s, range 60–3600s, set via Options → Analyze Timeout). The FAB safety timeout is derived as `(value + 10) * 1000` ms so the host's truthful "Copilot did not finish within Ns" error always fires first.
+    * The backend sends the prompt as a plain string (SDK 0.2.0+, still applies in 1.0.5) with a **user-configurable timeout** (default 1200s, range 60–3600s, set via Options → Analyze Timeout). The FAB safety timeout is derived as `(value + 10) * 1000` ms so the host's truthful "Copilot did not finish within Ns" error always fires first.
 
 ### 2. Session Persistence
 
