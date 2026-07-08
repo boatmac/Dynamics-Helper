@@ -112,6 +112,18 @@ Controls how long the host waits for Copilot to finish analyzing a case before g
 
 Changes take effect immediately on the next analyze — no host restart required.
 
+### Model & Performance
+
+Under **Settings → Copilot Configuration → Model & Performance**, you can choose the model, reasoning effort, and context tier DH uses for analyze sessions — independent of the model your Copilot CLI uses interactively.
+
+* **Why it exists**: DH used to inherit your Copilot CLI's global settings (`~/.copilot/settings.json`). If you set the CLI to a large model (e.g. Claude Opus at max reasoning effort) for interactive use, DH's analyses inherited it and were slow. Now DH has its own selection.
+* **Model**: a dropdown of the models your GitHub account offers (fetched live from Copilot; click **Refresh** to re-fetch). Pick a lighter model (e.g. Claude Sonnet) to speed analyses up. Leave it on **Use CLI default** to keep inheriting your CLI setting.
+* **Reasoning effort**: only shown for models that support it. Some models (e.g. Claude Sonnet 4.5) have no reasoning-effort setting — the dropdown will say so and only offer *Use CLI default*.
+* **Context tier**: `default` or `long_context`, or *Use CLI default*.
+* Any field left on **Use CLI default** is not sent to Copilot, so it inherits whatever your CLI is configured to use.
+
+If the model list can't be fetched (e.g. your GitHub login expired), DH shows an error under the dropdown and keeps the last-known model list — it never silently shows an empty list. For an expired login, run `copilot` in a terminal to re-authenticate, then click Refresh.
+
 ### Custom Instructions & Prompts
 
 In the **Settings → Copilot Configuration** section, you can customize two Markdown text fields:
