@@ -147,7 +147,7 @@ export const translations: TranslationDictionary = {
         zh: "无法获取模型列表。显示缓存列表；点刷新重试。"
     },
     
-    menuEditor: { en: "Menu Editor", zh: "菜单编辑器" },
+    menuEditor: { en: "Bookmark Manager", zh: "书签管理器" },
     addRootItem: { en: "Add Root Item", zh: "添加根项目" },
     addTo: { en: "Add to", zh: "添加到" },
     teamFolderReadOnly: { en: "Team folder (read-only)", zh: "团队文件夹（只读）" },

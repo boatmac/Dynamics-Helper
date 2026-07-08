@@ -22,7 +22,8 @@ import {
     Building2,
     Lock,
     Eye,
-    Pencil
+    Pencil,
+    Sparkles
 } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -633,6 +634,12 @@ const OptionsInner: React.FC = () => {
     const [modelFetchError, setModelFetchError] = useState<null | {
         kind: 'auth' | 'unavailable' | 'unknown';
     }>(null);
+    // Sidebar-nav layout (spec 2026-07-03-options-sidebar-nav-layout). The
+    // Options page is a left nav + wide content pane; only the active section
+    // renders. This is a pure shell change — every field's JSX/state/persist
+    // wiring is unchanged, just re-parented under a section gate.
+    type SectionId = 'general' | 'appearance' | 'copilot' | 'model' | 'team' | 'bookmarks';
+    const [activeSection, setActiveSection] = useState<SectionId>('general');
     // Ephemeral per-Options-session collapse state for team folders. Personal
     // folder collapse persists via item.collapsed field on dh_items. Team
     // folder collapse cannot be written to dh_team_items because the next SW
@@ -1872,10 +1879,38 @@ const OptionsInner: React.FC = () => {
                         </div>
                     )}
 
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
-                        
-                        {/* Sidebar: Visual Settings */}
-                        <div className="lg:col-span-5 p-8 border-r border-slate-100 bg-slate-50/30">
+                    <div className="flex min-h-[600px]">
+                        {/* Left sidebar navigation (spec 2026-07-03-options-sidebar-nav) */}
+                        <nav className="w-52 shrink-0 p-4 border-r border-slate-100 bg-slate-50/50">
+                            {([
+                                ['general', <Maximize2 size={16} />, t('behavior')],
+                                ['appearance', <Settings size={16} />, t('appearance')],
+                                ['copilot', <FileText size={16} />, t('copilotConfig')],
+                                ['model', <Sparkles size={16} />, t('modelPerformance')],
+                                ['__sep__', null, ''],
+                                ['team', <Building2 size={16} />, t('teamCatalog')],
+                                ['bookmarks', <Folder size={16} />, t('menuEditor')],
+                            ] as [string, React.ReactNode, string][]).map(([id, icon, label]) => id === '__sep__'
+                                ? <div key="sep" className="h-px bg-slate-200 my-2 mx-1" />
+                                : (
+                                    <button
+                                        key={id}
+                                        type="button"
+                                        data-section={id}
+                                        onClick={() => setActiveSection(id as SectionId)}
+                                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-semibold text-left transition-all mb-0.5 ${activeSection === id ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+                                    >
+                                        {icon}{label}
+                                    </button>
+                                )
+                            )}
+                        </nav>
+
+                        {/* Content pane */}
+                        <div className="flex-1 min-w-0 p-8">
+
+                        {activeSection === 'appearance' && (
+                        <div>
                             <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
                                 <Settings size={14} /> {t('appearance')}
                             </h2>
@@ -1971,11 +2006,16 @@ const OptionsInner: React.FC = () => {
                                             />
                                         </div>
                                     </div>
-                                    
-                                    <div className="pt-6 border-t border-slate-200">
-                                         <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                            <Maximize2 size={14} /> {t('behavior')}
-                                        </h2>
+                                </div>
+                            </div>
+                        </div>
+                        )}
+
+                        {activeSection === 'general' && (
+                        <div>
+                            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                <Maximize2 size={14} /> {t('behavior')}
+                            </h2>
                                         
                                         {/* 1. Automatic Analyze with Status Bubble */}
                                         <div>
@@ -2084,12 +2124,14 @@ const OptionsInner: React.FC = () => {
                                                 <option value="ERROR">ERROR</option>
                                             </select>
                                         </div>
+                        </div>
+                        )}
 
-                                        {/* Team Catalog */}
-                                        <div className="mt-6 pt-6 border-t border-slate-200">
-                                            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                                <Building2 size={14} /> {t('teamCatalog')}
-                                            </h2>
+                        {activeSection === 'team' && (
+                        <div>
+                            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                <Building2 size={14} /> {t('teamCatalog')}
+                            </h2>
 
                                             {/* Toggle: Enable Team Catalog */}
                                             <div className="mt-2 flex items-center gap-2">
@@ -2249,11 +2291,13 @@ const OptionsInner: React.FC = () => {
                                                 </div>
                                             )}
                                         </div>
+                        )}
 
-                                        <div className="mt-6 pt-6 border-t border-slate-200">
-                                            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                                <FileText size={14} /> {t('copilotConfig')}
-                                            </h2>
+                        {activeSection === 'copilot' && (
+                        <div>
+                            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                <FileText size={14} /> {t('copilotConfig')}
+                            </h2>
 
                                             {/* 2. Workbench Directory */}
                                             <div>
@@ -2342,7 +2386,7 @@ const OptionsInner: React.FC = () => {
                                                 {previewInstructions ? (
                                                     <MarkdownPreview
                                                         content={prefs.userInstructions || ""}
-                                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm h-52 overflow-y-auto bg-white"
+                                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm h-52 overflow-y-auto resize-y bg-white"
                                                     />
                                                 ) : (
                                                     <textarea
@@ -2381,7 +2425,7 @@ const OptionsInner: React.FC = () => {
                                                 {previewPrompt ? (
                                                     <MarkdownPreview
                                                         content={prefs.userPrompt || ""}
-                                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm h-52 overflow-y-auto bg-white"
+                                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm h-52 overflow-y-auto resize-y bg-white"
                                                     />
                                                 ) : (
                                                     <textarea
@@ -2392,11 +2436,16 @@ const OptionsInner: React.FC = () => {
                                                     />
                                                 )}
                                             </div>
+                        </div>
+                        )}
 
-                                            {/* Model & Performance (spec 2026-07-03). Empty = inherit CLI default. */}
-                                            <div className="mt-6 pt-5 border-t border-slate-200">
+                        {activeSection === 'model' && (
+                        <div>
+                                            <div className="mt-0">
                                                 <div className="flex items-center justify-between mb-1.5">
-                                                    <label className="block text-xs font-semibold text-slate-700">{t('modelPerformance')}</label>
+                                                    <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                                                        <Sparkles size={14} /> {t('modelPerformance')}
+                                                    </h2>
                                                     <button
                                                         type="button"
                                                         onClick={() => fetchModels(true)}
@@ -2492,15 +2541,11 @@ const OptionsInner: React.FC = () => {
                                                     <option value="long_context">long_context</option>
                                                 </select>
                                             </div>
-                                        </div>
-                                    </div>
-
-                                </div>
-                            </div>
                         </div>
+                        )}
 
-                        {/* Main Content: Bookmarks Editor */}
-                        <div className="lg:col-span-7 p-8">
+                        {activeSection === 'bookmarks' && (
+                        <div className="min-w-0">
                             <div className="flex justify-between items-center mb-6">
                                 <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
                                     <Folder size={14} /> {t('menuEditor')}
@@ -2519,7 +2564,7 @@ const OptionsInner: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[1200px]">
+                            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden resize-y flex flex-col h-[900px]">
                                 {/* Toolbar */}
                                 <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex gap-2 items-center">
                                      <button 
@@ -2600,8 +2645,11 @@ const OptionsInner: React.FC = () => {
                                 </div>
                             </div>
                         </div>
+                        )}
 
-                    </div>
+                        </div>{/* content pane */}
+
+                    </div>{/* flex */}
                 </div>
             </div>
         </DndProvider>

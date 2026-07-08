@@ -66,6 +66,17 @@ import Options from './Options'
 // ---------- shared helpers ----------
 
 const findLanguageSelect = async (): Promise<HTMLSelectElement> => {
+  // Sidebar-nav layout (v2.0.74): the language select lives in the
+  // Appearance section, which is not the default active tab (General).
+  // Switch to Appearance first so the select renders, then return it.
+  // The hydration invariants under test are section-agnostic — navigating
+  // tabs doesn't touch persistPrefs / userTouchedFieldsRef / the merge.
+  const navBtn = await waitFor(() => {
+    const el = document.querySelector('[data-section="appearance"]') as HTMLButtonElement | null
+    if (!el) throw new Error('appearance nav not yet rendered')
+    return el
+  })
+  fireEvent.click(navBtn)
   return await waitFor(() => {
     const el = document.querySelector('select[name="language"]') as HTMLSelectElement | null
     if (!el) throw new Error('language select not yet rendered')
