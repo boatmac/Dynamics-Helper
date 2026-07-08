@@ -2745,7 +2745,7 @@ const OptionsInner: React.FC = () => {
                             <p className="text-[10px] text-slate-500 flex items-start gap-1.5">
                                 <Shield size={12} className="text-slate-400 mt-px shrink-0" />
                                 <span>{t('privacyNote')}{' '}
-                                    <a href="https://github.com/boatmac/Dynamics-Helper/blob/master/USER_GUIDE.md#security--privacy" target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline">Security &amp; Privacy</a>
+                                    <a href="https://github.com/boatmac/Dynamics-Helper/blob/master/USER_GUIDE.md#security--privacy" target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline">{t('securityPrivacy')}</a>
                                 </span>
                             </p>
                         </div>

@@ -163,6 +163,7 @@ export const translations: TranslationDictionary = {
     copyPath: { en: "Copy path", zh: "复制路径" },
     copied: { en: "Copied!", zh: "已复制!" },
     privacyNote: { en: "Your data is PII-scrubbed locally before it is analyzed.", zh: "你的数据在本地经 PII 脱敏后才会被分析。" },
+    securityPrivacy: { en: "Security & Privacy", zh: "安全与隐私" },
     addRootItem: { en: "Add Root Item", zh: "添加根项目" },
     addTo: { en: "Add to", zh: "添加到" },
     teamFolderReadOnly: { en: "Team folder (read-only)", zh: "团队文件夹（只读）" },
