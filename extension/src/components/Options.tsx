@@ -23,7 +23,13 @@ import {
     Lock,
     Eye,
     Pencil,
-    Sparkles
+    Sparkles,
+    Info,
+    BookOpen,
+    Github,
+    Bug,
+    Copy,
+    Shield
 } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -638,7 +644,7 @@ const OptionsInner: React.FC = () => {
     // Options page is a left nav + wide content pane; only the active section
     // renders. This is a pure shell change — every field's JSX/state/persist
     // wiring is unchanged, just re-parented under a section gate.
-    type SectionId = 'general' | 'appearance' | 'copilot' | 'model' | 'team' | 'bookmarks';
+    type SectionId = 'general' | 'appearance' | 'copilot' | 'model' | 'team' | 'bookmarks' | 'about';
     const [activeSection, setActiveSection] = useState<SectionId>('general');
     // Ephemeral per-Options-session collapse state for team folders. Personal
     // folder collapse persists via item.collapsed field on dh_items. Team
@@ -1890,6 +1896,8 @@ const OptionsInner: React.FC = () => {
                                 ['__sep__', null, ''],
                                 ['team', <Building2 size={16} />, t('teamCatalog')],
                                 ['bookmarks', <Folder size={16} />, t('menuEditor')],
+                                ['__sep__', null, ''],
+                                ['about', <Info size={16} />, t('aboutHelp')],
                             ] as [string, React.ReactNode, string][]).map(([id, icon, label]) => id === '__sep__'
                                 ? <div key="sep" className="h-px bg-slate-200 my-2 mx-1" />
                                 : (
@@ -2645,6 +2653,10 @@ const OptionsInner: React.FC = () => {
                                 </div>
                             </div>
                         </div>
+                        )}
+
+                        {activeSection === 'about' && (
+                        <div>{/* About & Help — content added in Task 3 */}</div>
                         )}
 
                         </div>{/* content pane */}
