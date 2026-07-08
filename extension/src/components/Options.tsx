@@ -1413,7 +1413,7 @@ const OptionsInner: React.FC = () => {
                 }
                 console.log("[Options] Received update available:", message.payload);
                 setUpdateAvailable(message.payload);
-                showSuccess(`v${message.payload.version} ${tRef.current('availableForUpdate')}`, 5000);
+                showSuccess(`${message.payload.version.replace(/^v?/, 'v')} ${tRef.current('availableForUpdate')}`, 5000);
             }
             
             if (message.type === "NATIVE_UPDATE_NOT_AVAILABLE") {

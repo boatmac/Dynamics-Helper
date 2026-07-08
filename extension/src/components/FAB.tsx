@@ -1005,7 +1005,7 @@ const FAB: React.FC = () => {
     const handleFabUpdate = () => {
         if (!updateAvailable) return;
         setIsOpen(false);
-        showStatusBubble(`${t('downloadingVersion')} v${updateAvailable.version}...`, 'default', 0);
+        showStatusBubble(`${t('downloadingVersion')} ${updateAvailable.version.replace(/^v?/, 'v')}...`, 'default', 0);
         trackEvent('FAB Update Started', { version: updateAvailable.version });
 
         chrome.runtime.sendMessage({
