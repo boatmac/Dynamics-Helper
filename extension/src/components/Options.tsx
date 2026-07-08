@@ -1898,8 +1898,8 @@ const OptionsInner: React.FC = () => {
                                 ['bookmarks', <Folder size={16} />, t('menuEditor')],
                                 ['__sep__', null, ''],
                                 ['about', <Info size={16} />, t('aboutHelp')],
-                            ] as [string, React.ReactNode, string][]).map(([id, icon, label]) => id === '__sep__'
-                                ? <div key="sep" className="h-px bg-slate-200 my-2 mx-1" />
+                            ] as [string, React.ReactNode, string][]).map(([id, icon, label], idx) => id === '__sep__'
+                                ? <div key={`sep-${idx}`} className="h-px bg-slate-200 my-2 mx-1" />
                                 : (
                                     <button
                                         key={id}
