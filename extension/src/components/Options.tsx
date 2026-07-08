@@ -1499,6 +1499,13 @@ const OptionsInner: React.FC = () => {
         });
     };
 
+    // About & Help: copy the log folder path (Explorer expands %LOCALAPPDATA%).
+    const handleCopyLogPath = () => {
+        navigator.clipboard?.writeText('%LOCALAPPDATA%\\DynamicsHelper')
+            .then(() => showSuccess(t('copied')))
+            .catch(() => {/* clipboard blocked; no-op */});
+    };
+
     const handleCheckUpdates = () => {
         showSuccess(t('checkingForUpdates'));
         chrome.runtime.sendMessage({ 
@@ -2656,7 +2663,92 @@ const OptionsInner: React.FC = () => {
                         )}
 
                         {activeSection === 'about' && (
-                        <div>{/* About & Help — content added in Task 3 */}</div>
+                        <div>
+                            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                                <Info size={14} /> {t('aboutHelp')}
+                            </h2>
+
+                            {/* About / version */}
+                            <div className="mb-6">
+                                <div className="flex items-center gap-3 mb-3">
+                                    <div className="w-10 h-10 bg-teal-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-sm">
+                                        {prefs.buttonText.slice(0, 2)}
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-bold text-slate-800">{t('appName')}</p>
+                                        <p className="text-xs text-slate-500">{t('aboutTagline')}</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-slate-500">
+                                    <span>Extension v{getExtensionVersion()}</span>
+                                    {hostVersion && <span>• {t('hostVersion')} v{hostVersion}</span>}
+                                </div>
+                                <div className="flex items-center gap-2 mt-3">
+                                    <button
+                                        onClick={handleCheckUpdates}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 text-xs font-medium rounded-lg border border-slate-200 transition-colors shadow-sm"
+                                    >
+                                        <RefreshCw size={12} /> {t('checkForUpdates')}
+                                    </button>
+                                    {updateAvailable && (
+                                        <button
+                                            onClick={handleUpdate}
+                                            disabled={isUpdating}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-medium transition-colors"
+                                        >
+                                            {isUpdating ? <RotateCcw size={12} className="animate-spin" /> : <Download size={12} />}
+                                            {isUpdating ? t('updating') : t('updateNow')}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Links */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-6">
+                                <a href="https://github.com/boatmac/Dynamics-Helper/blob/master/USER_GUIDE.md" target="_blank" rel="noopener noreferrer"
+                                   className="flex items-center gap-2 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg border border-slate-200 transition-colors shadow-sm">
+                                    <BookOpen size={14} className="text-teal-600" /> {t('openUserGuide')}
+                                </a>
+                                <a href="https://github.com/boatmac/Dynamics-Helper/releases" target="_blank" rel="noopener noreferrer"
+                                   className="flex items-center gap-2 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg border border-slate-200 transition-colors shadow-sm">
+                                    <Github size={14} className="text-teal-600" /> {t('viewOnGitHub')}
+                                </a>
+                                <a href="https://github.com/boatmac/Dynamics-Helper/issues/new" target="_blank" rel="noopener noreferrer"
+                                   className="flex items-center gap-2 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg border border-slate-200 transition-colors shadow-sm">
+                                    <Bug size={14} className="text-teal-600" /> {t('reportABug')}
+                                </a>
+                            </div>
+
+                            {/* Help & Troubleshooting */}
+                            <div className="mb-6">
+                                <h3 className="text-xs font-bold text-slate-700 mb-2">{t('helpTroubleshooting')}</h3>
+                                <ul className="text-xs text-slate-600 space-y-1.5 list-disc pl-4 mb-3">
+                                    <li>{t('issueTimeout')}</li>
+                                    <li>{t('issueDisconnected')}</li>
+                                </ul>
+                                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                                    <p className="text-xs font-semibold text-slate-700 mb-1">{t('collectLogs')}</p>
+                                    <p className="text-[10px] text-slate-500 mb-2">{t('collectLogsDesc')}</p>
+                                    <div className="flex items-center gap-2">
+                                        <code className="flex-1 text-xs font-mono bg-white border border-slate-200 rounded px-2 py-1 text-slate-700 truncate">%LOCALAPPDATA%\DynamicsHelper</code>
+                                        <button
+                                            onClick={handleCopyLogPath}
+                                            className="flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 text-slate-600 text-xs font-medium rounded-lg border border-slate-200 transition-colors shrink-0"
+                                        >
+                                            <Copy size={12} /> {t('copyPath')}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Privacy */}
+                            <p className="text-[10px] text-slate-500 flex items-start gap-1.5">
+                                <Shield size={12} className="text-slate-400 mt-px shrink-0" />
+                                <span>{t('privacyNote')}{' '}
+                                    <a href="https://github.com/boatmac/Dynamics-Helper/blob/master/USER_GUIDE.md#security--privacy" target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline">Security &amp; Privacy</a>
+                                </span>
+                            </p>
+                        </div>
                         )}
 
                         </div>{/* content pane */}

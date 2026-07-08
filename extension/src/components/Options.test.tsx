@@ -343,3 +343,39 @@ describe('Options hydration window — Inv6: Reset during window survives merge'
     })
   })
 })
+
+// ---------- About & Help tab (spec 2026-07-08) ----------
+
+describe('Options About & Help tab', () => {
+  beforeEach(() => {
+    resetChromeMock()
+    installChromeMock()
+  })
+
+  it('shows the extension version and a User Guide link when the About tab is active', async () => {
+    // Hydration is irrelevant to this tab — defer get_config and never resolve.
+    deferNextResponse('get_config')
+    render(<Options />)
+
+    const aboutNav = await waitFor(() => {
+      const el = document.querySelector('[data-section="about"]') as HTMLButtonElement | null
+      if (!el) throw new Error('about nav not yet rendered')
+      return el
+    })
+    fireEvent.click(aboutNav)
+
+    // getExtensionVersion is mocked to '2.0.70-beta.5-test' (top of file).
+    await waitFor(() => {
+      if (!document.body.textContent?.includes('2.0.70-beta.5-test')) {
+        throw new Error('extension version not shown in About tab')
+      }
+    })
+
+    const guideLink = document.querySelector(
+      'a[href="https://github.com/boatmac/Dynamics-Helper/blob/master/USER_GUIDE.md"]',
+    ) as HTMLAnchorElement | null
+    expect(guideLink).not.toBeNull()
+    expect(guideLink!.target).toBe('_blank')
+    expect(guideLink!.rel).toContain('noopener')
+  })
+})
