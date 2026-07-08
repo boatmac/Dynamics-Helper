@@ -33,7 +33,7 @@ To install the latest **Beta** instead of stable, run:
 & ([scriptblock]::Create((irm https://aka.ms/mcdyhelper))) -Beta
 ```
 
-This also enables the Beta channel in your host config, so future automatic update checks continue to consider Beta releases. You can disable Beta updates at any time from **Options → General → Receive beta updates** (remember to click Save Changes).
+This also enables the Beta channel in your host config, so future automatic update checks continue to consider Beta releases. You can disable Beta updates at any time from **Options → General → Receive beta updates** (saves automatically).
 
 ### Manual Install
 
@@ -90,6 +90,19 @@ The extension uses configuration files stored in your User directory. This ensur
 * **`copilot-instructions.md`**: The "Persona" of the AI. You can edit this file to change how the AI responds (e.g., change the tone, add new rules).
 * **`native_host.log`**: The log file for troubleshooting. Log files rotate automatically at 5 MB (up to 3 backups: `.log.1`, `.log.2`, `.log.3`), keeping total disk usage under ~20 MB.
 
+### The Options Page
+
+Open the Options page from the extension icon or the FAB menu. Settings are organized into a left-hand navigation rail with the following tabs:
+
+* **General** — language, auto-analyze mode, status bubble, analyze timeout, log level, and beta channel.
+* **Appearance** — floating-button text, colour, and screen-edge offsets.
+* **Copilot Configuration** — workbench root path, skills, MCP config, custom instructions, and user prompt.
+* **Model & Performance** — model, reasoning effort, and context tier for analyze sessions.
+* **Team Catalog** — shared team bookmark subscription.
+* **Bookmark Manager** — your personal bookmark menu editor.
+
+All changes save automatically — there is no Save button. The only manual actions are the **Reset** button (restores defaults) and the **Refresh** buttons for the model list and team catalog.
+
 ### Log Level
 
 You can control the verbosity of the host log from the extension's **Settings → General** section:
@@ -114,7 +127,7 @@ Changes take effect immediately on the next analyze — no host restart required
 
 ### Model & Performance
 
-Under **Settings → Copilot Configuration → Model & Performance**, you can choose the model, reasoning effort, and context tier DH uses for analyze sessions — independent of the model your Copilot CLI uses interactively.
+Under **Settings → Model & Performance**, you can choose the model, reasoning effort, and context tier DH uses for analyze sessions — independent of the model your Copilot CLI uses interactively.
 
 * **Why it exists**: DH used to inherit your Copilot CLI's global settings (`~/.copilot/settings.json`). If you set the CLI to a large model (e.g. Claude Opus at max reasoning effort) for interactive use, DH's analyses inherited it and were slow. Now DH has its own selection.
 * **Model**: a dropdown of the models your GitHub account offers (fetched live from Copilot; click **Refresh** to re-fetch). Pick a lighter model (e.g. Claude Sonnet) to speed analyses up. Leave it on **Use CLI default** to keep inheriting your CLI setting.
@@ -131,7 +144,7 @@ In the **Settings → Copilot Configuration** section, you can customize two Mar
 * **User Instructions**: Appended to the core system prompt. Use this for personal rules (e.g., "Always respond in bullet points", "Focus on technical details"). These instructions shape the AI's behavior across all analyses.
 * **User Prompt**: Appended to the case context description when scanning a page. Use this for standard questions or instructions that should accompany every analysis (e.g., "Please provide a root cause analysis and mitigation steps").
 
-Both fields support Markdown formatting. Click the **Preview** toggle above each textarea to see the rendered output; click **Edit** to return to the raw text editor.
+Both fields support Markdown formatting. Click the **Preview** toggle above each textarea to see the rendered output; click **Edit** to return to the raw text editor. Both the Edit and Preview panes can be resized by dragging their bottom-right corner.
 
 ### Workspace Configuration (Advanced)
 
@@ -193,12 +206,11 @@ The extension can subscribe to a shared list of bookmarks ("team catalog") publi
 
 To enable:
 
-1. Open the extension **Options** page.
+1. Open the extension **Options** page → **Team Catalog** tab.
 2. Tick **"Enable Team Catalog"**.
-3. Paste your team's **Manifest URL** into the input. This URL is provided by your team admin and points to a JSON file (e.g. on GitHub raw, Azure Blob, SharePoint).
-4. Click **Save Changes**.
-5. Click **Refresh** to fetch the manifest and populate the dropdown.
-6. Pick your team from the dropdown.
+3. Paste your team's **Manifest URL** into the input. This URL is provided by your team admin and points to a JSON file (e.g. on GitHub raw, Azure Blob, SharePoint). The URL saves automatically when you click out of the field.
+4. Click **Refresh** to fetch the manifest and populate the dropdown.
+5. Pick your team from the dropdown.
 
 The manifest format your admin needs to publish:
 
@@ -227,7 +239,7 @@ Each team's bookmark file at its `url`:
 
 **Disabling** the toggle hides team data and stops all team-related network requests, but does not delete the local cache — turning it back on restores your previous selection.
 
-**Personal bookmarks** (drag-and-drop in Options) work independently of the team catalog and are not affected by the toggle.
+**Personal bookmarks** (drag-and-drop in the **Bookmark Manager** tab) work independently of the team catalog and are not affected by the toggle.
 
 ---
 
@@ -302,7 +314,7 @@ If the tool isn't working, follow these steps to collect information for the dev
 
 ### Common Issues
 
-* **"Analysis Timed Out"**: The Agent is taking too long. This usually means it's doing a lot of work (good!) but hit the 10-minute safety limit. Try narrowing down your request or checking the logs.
+* **"Analysis Timed Out"**: The Agent is taking too long. This usually means it's doing a lot of work (good!) but hit the analyze-timeout budget (default 20 minutes; configurable under **Options → General → Analyze Timeout**). Raise the timeout or narrow your request, and check the logs.
 * **"Host error" / "Native host disconnected"**: The browser cannot find the Python script.
   * Verify you ran `install.bat` as Administrator.
   * Verify your Extension ID is correct in the host manifest.
