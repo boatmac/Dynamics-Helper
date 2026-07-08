@@ -2416,7 +2416,20 @@ const OptionsInner: React.FC = () => {
                                                 <select
                                                     name="model"
                                                     value={prefs.model || ''}
-                                                    onChange={(e) => updatePref({ model: e.target.value })}
+                                                    onChange={(e) => {
+                                                        // Reset reasoning effort if the newly-picked model
+                                                        // doesn't support the currently-selected effort —
+                                                        // otherwise create_session fails with "Model X does
+                                                        // not support reasoning effort configuration".
+                                                        const newModel = e.target.value;
+                                                        const sel = modelList.find(m => m.id === newModel);
+                                                        const supported = sel?.supported_reasoning_efforts || [];
+                                                        const patch: { model: string; reasoningEffort?: '' } = { model: newModel };
+                                                        if (prefs.reasoningEffort && !supported.includes(prefs.reasoningEffort)) {
+                                                            patch.reasoningEffort = '';
+                                                        }
+                                                        updatePref(patch);
+                                                    }}
                                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white mb-1"
                                                 >
                                                     <option value="">{t('useCliDefault')}</option>
@@ -2446,13 +2459,25 @@ const OptionsInner: React.FC = () => {
                                                 >
                                                     <option value="">{t('useCliDefault')}</option>
                                                     {(() => {
+                                                        // Only offer efforts the SELECTED model supports.
+                                                        // A model with an empty supported list (e.g. Claude
+                                                        // Sonnet 4.5) supports no reasoning effort → only
+                                                        // "Use CLI default" is offered, preventing the
+                                                        // create_session "does not support reasoning effort"
+                                                        // failure. When no model is picked (inherit CLI
+                                                        // default) we also can't know support → no efforts.
                                                         const sel = modelList.find(m => m.id === prefs.model);
-                                                        const efforts = (sel && sel.supported_reasoning_efforts && sel.supported_reasoning_efforts.length)
-                                                            ? sel.supported_reasoning_efforts
-                                                            : ['low', 'medium', 'high', 'xhigh'];
+                                                        const efforts = sel?.supported_reasoning_efforts || [];
                                                         return efforts.map(ef => <option key={ef} value={ef}>{ef}</option>);
                                                     })()}
                                                 </select>
+                                                {prefs.model && (() => {
+                                                    const sel = modelList.find(m => m.id === prefs.model);
+                                                    const supported = sel?.supported_reasoning_efforts || [];
+                                                    return supported.length === 0 ? (
+                                                        <p className="text-[10px] text-slate-400 mt-1">{t('effortUnsupported')}</p>
+                                                    ) : null;
+                                                })()}
 
                                                 {/* Context tier */}
                                                 <label className="block text-[11px] font-medium text-slate-600 mb-1 mt-2">{t('contextTierLabel')}</label>

@@ -1350,6 +1350,11 @@ class NativeHost:
                         If None, create a generic session (no resume capability).
             case_id:    The 16-digit case ID this session belongs to (for tracking).
         """
+        # Cleared on every attempt; set in the except blocks so the analyze
+        # handler can surface the REAL reason a session failed to create
+        # (e.g. an unsupported model/reasoning-effort combo) instead of the
+        # generic "session/client not initialized".
+        self.last_session_error = None
         if not self.client:
             logger.warning("Client not initialized. Attempting re-initialization...")
             try:
@@ -1511,6 +1516,7 @@ class NativeHost:
             except Exception as retry_err:
                 logger.error(f"Retry after re-init also failed: {retry_err}")
                 logger.error(f"Full traceback: {traceback.format_exc()}")
+                self.last_session_error = str(retry_err)
                 self.session = None
                 self.current_session_id = None
                 self.current_case_id = None
@@ -1518,6 +1524,7 @@ class NativeHost:
         except Exception as e:
             logger.error(f"Failed to create/refresh session: {e}")
             logger.error(f"Full traceback: {traceback.format_exc()}")
+            self.last_session_error = str(e)
             self.session = None
             self.current_session_id = None
             self.current_case_id = None
@@ -1852,9 +1859,20 @@ class NativeHost:
             return {"status": "error", "error": "No text provided for analysis."}
 
         if not self.session or not self.client:
+            detail = getattr(self, "last_session_error", None) or ""
+            hint = ""
+            low = detail.lower()
+            if "does not support reasoning effort" in low:
+                hint = (
+                    " The selected model does not support a reasoning effort. "
+                    "Set Reasoning effort back to 'Use CLI default' in Options → "
+                    "Model & Performance, or choose a model that supports it."
+                )
+            elif "does not support" in low:
+                hint = " Check your Model / Reasoning effort / Context tier in Options → Model & Performance."
             return {
                 "status": "error",
-                "error": "Copilot session/client not initialized.",
+                "error": (f"Copilot session/client not initialized. {detail}{hint}").strip(),
             }
 
         self.send_progress("Checking authentication...")

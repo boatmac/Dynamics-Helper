@@ -132,6 +132,10 @@ export const translations: TranslationDictionary = {
     },
     modelLabel: { en: "Model", zh: "模型" },
     reasoningEffortLabel: { en: "Reasoning effort", zh: "推理强度" },
+    effortUnsupported: {
+        en: "This model has no reasoning-effort setting.",
+        zh: "此模型不支持推理强度设置。"
+    },
     contextTierLabel: { en: "Context tier", zh: "上下文层级" },
     useCliDefault: { en: "Use CLI default", zh: "使用 CLI 默认" },
     modelFetchAuth: {
