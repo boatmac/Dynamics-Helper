@@ -164,6 +164,10 @@ export const translations: TranslationDictionary = {
     copied: { en: "Copied!", zh: "已复制！" },
     privacyNote: { en: "Your data is PII-scrubbed locally before it is analyzed.", zh: "你的数据在本地经 PII 脱敏后才会被分析。" },
     securityPrivacy: { en: "Security & Privacy", zh: "安全与隐私" },
+    // Native confirm()/alert() dialog strings (must go through t() per i18n rule)
+    updateConfirm: { en: "Update to version {version}? This will restart the extension.", zh: "更新到版本 {version}？这将重启扩展。" },
+    deleteItemConfirm: { en: "Delete this item?", zh: "删除此项？" },
+    parseJsonFailed: { en: "Failed to parse JSON", zh: "JSON 解析失败" },
     addRootItem: { en: "Add Root Item", zh: "添加根项目" },
     addTo: { en: "Add to", zh: "添加到" },
     teamFolderReadOnly: { en: "Team folder (read-only)", zh: "团队文件夹（只读）" },

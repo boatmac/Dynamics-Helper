@@ -226,6 +226,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     currentTeamId,
 }) => {
     const ref = useRef<HTMLDivElement>(null);
+    const { t } = useTranslation();
     const currentPath = [...path, index];
     const isEditing = editingItemPath && editingItemPath.join('.') === currentPath.join('.');
     const isSelected = selectedPath && selectedPath.join('.') === currentPath.join('.');
@@ -441,7 +442,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                 <button 
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        if (confirm("Delete this item?")) {
+                                        if (confirm(t('deleteItemConfirm'))) {
                                             setItems(prev => deleteItemAt(currentPath, prev));
                                         }
                                     }}
@@ -1468,7 +1469,7 @@ const OptionsInner: React.FC = () => {
 
     const handleUpdate = () => {
         if (!updateAvailable) return;
-        if (!confirm(`Update to version ${updateAvailable.version}? This will restart the extension.`)) return;
+        if (!confirm(t('updateConfirm').replace('{version}', updateAvailable.version))) return;
 
         setIsUpdating(true);
         showSuccess(t('downloadingUpdate'));
@@ -1784,7 +1785,7 @@ const OptionsInner: React.FC = () => {
                 setItems(newItems);
                 showSuccess(t('importSuccess'), 2000);
             } catch (err) {
-                alert("Failed to parse JSON");
+                alert(t('parseJsonFailed'));
             }
         };
         reader.readAsText(file);
