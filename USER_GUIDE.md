@@ -100,6 +100,7 @@ Open the Options page from the extension icon or the FAB menu. Settings are orga
 * **Model & Performance** — model, reasoning effort, and context tier for analyze sessions.
 * **Team Catalog** — shared team bookmark subscription.
 * **Bookmark Manager** — your personal bookmark menu editor.
+* **About & Help** — version info, links (User Guide, GitHub, report a bug), a log-collection helper, and troubleshooting tips.
 
 All changes save automatically — there is no Save button. The only manual actions are the **Reset** button (restores defaults) and the **Refresh** buttons for the model list and team catalog.
 
