@@ -125,6 +125,24 @@ export const translations: TranslationDictionary = {
         zh: "Host 等待 Copilot 完成单次分析的最大秒数。范围 60-3600（默认 1200，即 20 分钟）。复杂 Case 出现「Copilot 未在时限内完成」错误时可调大。"
     },
     hostVersion: { en: "Host Version", zh: "Host 版本" },
+    modelPerformance: { en: "Model & Performance", zh: "模型与性能" },
+    modelPerformanceDesc: {
+        en: "Model / reasoning effort / context tier for DH analyze sessions. Leave any field on 'Use CLI default' to inherit your Copilot CLI settings; pick a lighter model to speed up analysis.",
+        zh: "DH 分析会话使用的模型 / 推理强度 / 上下文层级。任一项保持「使用 CLI 默认」即沿用你的 Copilot CLI 设置；选更轻的模型可加快分析。"
+    },
+    refreshModels: { en: "Refresh", zh: "刷新" },
+    modelLabel: { en: "Model", zh: "模型" },
+    reasoningEffortLabel: { en: "Reasoning effort", zh: "推理强度" },
+    contextTierLabel: { en: "Context tier", zh: "上下文层级" },
+    useCliDefault: { en: "Use CLI default", zh: "使用 CLI 默认" },
+    modelFetchAuth: {
+        en: "Could not fetch models — GitHub login may have expired. Run `copilot` in a terminal to re-auth, then click Refresh.",
+        zh: "无法获取模型列表——GitHub 登录可能已过期。请在终端运行 `copilot` 重新登录后点刷新。"
+    },
+    modelFetchFailed: {
+        en: "Could not fetch models. Showing cached list; click Refresh to retry.",
+        zh: "无法获取模型列表。显示缓存列表；点刷新重试。"
+    },
     
     menuEditor: { en: "Menu Editor", zh: "菜单编辑器" },
     addRootItem: { en: "Add Root Item", zh: "添加根项目" },

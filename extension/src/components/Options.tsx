@@ -616,6 +616,23 @@ const OptionsInner: React.FC = () => {
     // happened. Cleared on next onChange (any keystroke = user is fixing
     // it) and on successful blur paths (empty / valid).
     const [manifestUrlInvalid, setManifestUrlInvalid] = useState<boolean>(false);
+    // Model & Performance (spec 2026-07-03-configurable-model-performance).
+    // Dynamically fetched model list from the host's list_models RPC, cached
+    // in chrome.storage.local. modelList holds the last-known-good models;
+    // modelFetchError surfaces a classified fetch failure (never silent) while
+    // keeping modelList intact for graceful degradation. modelFetching drives
+    // the Refresh button spinner.
+    interface ModelInfo {
+        id: string;
+        name: string;
+        supported_reasoning_efforts?: string[];
+        default_reasoning_effort?: string | null;
+    }
+    const [modelList, setModelList] = useState<ModelInfo[]>([]);
+    const [modelFetching, setModelFetching] = useState<boolean>(false);
+    const [modelFetchError, setModelFetchError] = useState<null | {
+        kind: 'auth' | 'unavailable' | 'unknown';
+    }>(null);
     // Ephemeral per-Options-session collapse state for team folders. Personal
     // folder collapse persists via item.collapsed field on dh_items. Team
     // folder collapse cannot be written to dh_team_items because the next SW
@@ -808,6 +825,18 @@ const OptionsInner: React.FC = () => {
                             if (extPrefs.team_label !== undefined && !touched.has('teamLabel')) { newPrefs.teamLabel = extPrefs.team_label; changed = true; }
                             if (extPrefs.analyze_timeout_seconds !== undefined && !touched.has('analyzeTimeoutSeconds')) {
                                 newPrefs.analyzeTimeoutSeconds = extPrefs.analyze_timeout_seconds;
+                                changed = true;
+                            }
+                            if (extPrefs.model !== undefined && !touched.has('model')) {
+                                newPrefs.model = extPrefs.model;
+                                changed = true;
+                            }
+                            if (extPrefs.reasoning_effort !== undefined && !touched.has('reasoningEffort')) {
+                                newPrefs.reasoningEffort = extPrefs.reasoning_effort;
+                                changed = true;
+                            }
+                            if (extPrefs.context_tier !== undefined && !touched.has('contextTier')) {
+                                newPrefs.contextTier = extPrefs.context_tier;
                                 changed = true;
                             }
                         }
@@ -1067,6 +1096,9 @@ const OptionsInner: React.FC = () => {
                     team: nextPrefs.team,
                     team_label: nextPrefs.teamLabel,
                     analyze_timeout_seconds: nextPrefs.analyzeTimeoutSeconds,
+                    model: nextPrefs.model,
+                    reasoning_effort: nextPrefs.reasoningEffort,
+                    context_tier: nextPrefs.contextTier,
                 }
             }
         }
@@ -1249,6 +1281,61 @@ const OptionsInner: React.FC = () => {
             }
         });
     };
+
+    // Model & Performance: fetch the available Copilot models from the host
+    // (list_models RPC), cache in chrome.storage.local for 24h, and surface
+    // classified fetch failures (never a silent empty list — spec § 5).
+    const MODEL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+    const fetchModels = (force: boolean = false) => {
+        chrome.storage.local.get(['dh_model_list', 'dh_model_list_fetched_at'], (cache) => {
+            const cached: ModelInfo[] | null = Array.isArray(cache.dh_model_list) ? cache.dh_model_list : null;
+            const fetchedAt = typeof cache.dh_model_list_fetched_at === 'number' ? cache.dh_model_list_fetched_at : 0;
+            const stale = Date.now() - fetchedAt > MODEL_CACHE_MAX_AGE_MS;
+
+            // Populate from cache immediately so the dropdown works offline /
+            // before the network call returns (graceful degradation).
+            if (cached && cached.length) {
+                setModelList(cached);
+            }
+
+            // Skip the host RPC unless forced, or the cache is empty / stale.
+            if (!force && cached && cached.length && !stale) {
+                return;
+            }
+
+            setModelFetching(true);
+            chrome.runtime.sendMessage(
+                { type: "NATIVE_MSG", payload: { action: "list_models" } },
+                (response) => {
+                    setModelFetching(false);
+                    if (chrome.runtime.lastError) {
+                        // Host unreachable — keep cached list, surface as unavailable.
+                        setModelFetchError({ kind: 'unavailable' });
+                        return;
+                    }
+                    if (!response || response.status !== "success") {
+                        const kind = (response?.errorKind as 'auth' | 'unavailable' | 'unknown') || 'unknown';
+                        setModelFetchError({ kind }); // keep cached list intact
+                        return;
+                    }
+                    const models = (response.data?.models || []) as ModelInfo[];
+                    setModelList(models);
+                    setModelFetchError(null);
+                    chrome.storage.local.set({
+                        dh_model_list: models,
+                        dh_model_list_fetched_at: Date.now(),
+                    });
+                }
+            );
+        });
+    };
+
+    // Fetch the model list once on mount (cache-aware; only hits the host
+    // when the cache is empty or > 24h old).
+    useEffect(() => {
+        fetchModels(false);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const handleTeamRefresh = async () => {
         if (!prefs.teamManifestUrl || !prefs.team) return;
@@ -2304,6 +2391,80 @@ const OptionsInner: React.FC = () => {
                                                         placeholder={t('userPromptPlaceholder')}
                                                     />
                                                 )}
+                                            </div>
+
+                                            {/* Model & Performance (spec 2026-07-03). Empty = inherit CLI default. */}
+                                            <div className="mt-6 pt-5 border-t border-slate-200">
+                                                <div className="flex items-center justify-between mb-1.5">
+                                                    <label className="block text-xs font-semibold text-slate-700">{t('modelPerformance')}</label>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => fetchModels(true)}
+                                                        disabled={modelFetching}
+                                                        className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-slate-500 hover:text-teal-700 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50"
+                                                    >
+                                                        <RefreshCw size={10} className={modelFetching ? 'animate-spin' : ''} /> {t('refreshModels')}
+                                                    </button>
+                                                </div>
+                                                <p className="text-[10px] text-slate-500 mb-2">
+                                                    {t('modelPerformanceDesc')}
+                                                </p>
+
+                                                {/* Model */}
+                                                <label className="block text-[11px] font-medium text-slate-600 mb-1">{t('modelLabel')}</label>
+                                                <select
+                                                    name="model"
+                                                    value={prefs.model || ''}
+                                                    onChange={(e) => updatePref({ model: e.target.value })}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white mb-1"
+                                                >
+                                                    <option value="">{t('useCliDefault')}</option>
+                                                    {modelList.map(m => (
+                                                        <option key={m.id} value={m.id}>{m.name || m.id}</option>
+                                                    ))}
+                                                    {/* Preserve a persisted model no longer in the list so it stays selected. */}
+                                                    {prefs.model && !modelList.some(m => m.id === prefs.model) && (
+                                                        <option value={prefs.model}>{prefs.model}</option>
+                                                    )}
+                                                </select>
+                                                {modelFetchError && (
+                                                    <p className="text-[11px] text-red-600 mb-2">
+                                                        {modelFetchError.kind === 'auth'
+                                                            ? t('modelFetchAuth')
+                                                            : t('modelFetchFailed')}
+                                                    </p>
+                                                )}
+
+                                                {/* Reasoning effort */}
+                                                <label className="block text-[11px] font-medium text-slate-600 mb-1 mt-2">{t('reasoningEffortLabel')}</label>
+                                                <select
+                                                    name="reasoningEffort"
+                                                    value={prefs.reasoningEffort || ''}
+                                                    onChange={(e) => updatePref({ reasoningEffort: e.target.value as any })}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
+                                                >
+                                                    <option value="">{t('useCliDefault')}</option>
+                                                    {(() => {
+                                                        const sel = modelList.find(m => m.id === prefs.model);
+                                                        const efforts = (sel && sel.supported_reasoning_efforts && sel.supported_reasoning_efforts.length)
+                                                            ? sel.supported_reasoning_efforts
+                                                            : ['low', 'medium', 'high', 'xhigh'];
+                                                        return efforts.map(ef => <option key={ef} value={ef}>{ef}</option>);
+                                                    })()}
+                                                </select>
+
+                                                {/* Context tier */}
+                                                <label className="block text-[11px] font-medium text-slate-600 mb-1 mt-2">{t('contextTierLabel')}</label>
+                                                <select
+                                                    name="contextTier"
+                                                    value={prefs.contextTier || ''}
+                                                    onChange={(e) => updatePref({ contextTier: e.target.value as any })}
+                                                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm bg-white"
+                                                >
+                                                    <option value="">{t('useCliDefault')}</option>
+                                                    <option value="default">default</option>
+                                                    <option value="long_context">long_context</option>
+                                                </select>
                                             </div>
                                         </div>
                                     </div>

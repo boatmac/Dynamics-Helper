@@ -1026,6 +1026,37 @@ class NativeHost:
 
         session_config.update(final_data)  # type: ignore
 
+        # Model / performance selection (spec 2026-07-03-configurable-model-
+        # performance). Surface as TOP-LEVEL session_config keys (like
+        # working_directory) so _refresh_session can add them to sdk_kwargs.
+        # Empty / absent / invalid → key left empty → session inherits the
+        # Copilot CLI's own default (~/.copilot/settings.json). Validate the
+        # enums defensively against a hand-edited config.json.
+        _VALID_EFFORTS = {"low", "medium", "high", "xhigh"}
+        _VALID_TIERS = {"default", "long_context"}
+        _model = ext_prefs.get("model")
+        session_config["model"] = _model if isinstance(_model, str) and _model.strip() else ""
+        _effort = ext_prefs.get("reasoning_effort")
+        if isinstance(_effort, str) and _effort in _VALID_EFFORTS:
+            session_config["reasoning_effort"] = _effort
+        else:
+            if _effort:
+                logger.warning(
+                    f"Ignoring invalid reasoning_effort {_effort!r}; "
+                    f"must be one of {sorted(_VALID_EFFORTS)}."
+                )
+            session_config["reasoning_effort"] = ""
+        _tier = ext_prefs.get("context_tier")
+        if isinstance(_tier, str) and _tier in _VALID_TIERS:
+            session_config["context_tier"] = _tier
+        else:
+            if _tier:
+                logger.warning(
+                    f"Ignoring invalid context_tier {_tier!r}; "
+                    f"must be one of {sorted(_VALID_TIERS)}."
+                )
+            session_config["context_tier"] = ""
+
         # B. Load Workspace MCP Config (.github/mcp-config.json)
         # This overrides Global tools with the same name
         if self.root_path and os.path.exists(self.root_path):
@@ -1376,6 +1407,17 @@ class NativeHost:
         if "skill_directories" in full_config:
             sdk_kwargs["skill_directories"] = full_config["skill_directories"]
 
+        # Model / performance (spec 2026-07-03-configurable-model-performance).
+        # Only pass when set to a non-empty value — empty means "inherit the
+        # Copilot CLI's own default from ~/.copilot/settings.json" (the prior
+        # behaviour). _get_session_config has already validated the values.
+        if full_config.get("model"):
+            sdk_kwargs["model"] = full_config["model"]
+        if full_config.get("reasoning_effort"):
+            sdk_kwargs["reasoning_effort"] = full_config["reasoning_effort"]
+        if full_config.get("context_tier"):
+            sdk_kwargs["context_tier"] = full_config["context_tier"]
+
         # If a session_id is provided, try to resume an existing session first
         if session_id:
             try:
@@ -1692,6 +1734,68 @@ class NativeHost:
                 "data": message,
             }
             self.send_message(progress_msg)
+
+    @staticmethod
+    def _classify_list_models_error(e) -> str:
+        """Classify a list_models failure for the Options UI (spec § 5).
+        'auth'        → GitHub login expired / invalid (user must re-auth)
+        'unavailable' → client/CLI not reachable (transient)
+        'unknown'     → anything else
+        """
+        msg = str(e).lower()
+        auth_markers = (
+            "auth", "401", "403", "unauthorized", "forbidden", "login",
+            "token", "credential", "sign in", "sign-in", "not logged in",
+        )
+        conn_markers = (
+            "not started", "not initialized", "connection", "broken pipe",
+            "closed", "timeout", "econnrefused", "unavailable", "refused",
+        )
+        if any(m in msg for m in auth_markers):
+            return "auth"
+        if any(m in msg for m in conn_markers):
+            return "unavailable"
+        return "unknown"
+
+    async def handle_list_models(self):
+        """Fetch available Copilot models via the SDK for the Options model
+        dropdown. Returns a CLASSIFIED error on failure — never a silent
+        empty list — so the extension can surface auth/connectivity problems
+        (spec 2026-07-03-configurable-model-performance-design.md § 5).
+
+        Returns one of:
+          {"status": "success", "data": {"models": [{id, name,
+              supported_reasoning_efforts, default_reasoning_effort}, ...]}}
+          {"status": "error", "error": <msg>, "errorKind": auth|unavailable|unknown}
+        """
+        if not self.client:
+            return {
+                "status": "error",
+                "error": "Copilot client not initialized",
+                "errorKind": "unavailable",
+            }
+        try:
+            models = await self.client.list_models()
+            out = []
+            for m in models:
+                mid = getattr(m, "id", None)
+                if not mid:
+                    continue
+                efforts = getattr(m, "supported_reasoning_efforts", None) or []
+                out.append({
+                    "id": mid,
+                    "name": getattr(m, "name", None) or mid,
+                    "supported_reasoning_efforts": list(efforts),
+                    "default_reasoning_effort": getattr(
+                        m, "default_reasoning_effort", None
+                    ),
+                })
+            logger.info(f"list_models returned {len(out)} model(s).")
+            return {"status": "success", "data": {"models": out}}
+        except Exception as e:
+            kind = self._classify_list_models_error(e)
+            logger.warning(f"list_models failed ({kind}): {e}")
+            return {"status": "error", "error": str(e), "errorKind": kind}
 
     async def handle_analyze_error(self, payload):
         """Uses the Copilot SDK to analyze the error."""
@@ -2116,6 +2220,17 @@ class NativeHost:
                 data = dict(session_config)
                 data["host_version"] = VERSION
                 response["data"] = data
+
+            elif action == "list_models":
+                # Fetch available Copilot models for the Options model dropdown.
+                # Classified failure is propagated (never a silent empty list).
+                result = await self.handle_list_models()
+                if result.get("status") == "error":
+                    response["status"] = "error"
+                    response["error"] = result.get("error")
+                    response["errorKind"] = result.get("errorKind")
+                else:
+                    response["data"] = result.get("data")
 
             else:
                 response["status"] = "error"

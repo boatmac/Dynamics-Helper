@@ -39,6 +39,20 @@ export interface Preferences {
      * not finish" branch, never FAB's generic fallback.
      */
     analyzeTimeoutSeconds?: number;
+    /**
+     * Model / performance selection for DH analyze sessions
+     * (spec 2026-07-03-configurable-model-performance). All three are empty
+     * by default, meaning "inherit the Copilot CLI's own default from
+     * ~/.copilot/settings.json" — DH only passes them to create_session when
+     * non-empty. Decouples DH's model from the user's interactive-CLI config.
+     *
+     * - model: a Copilot model id from list_models() (e.g. "claude-sonnet-4.5").
+     * - reasoningEffort: 'low' | 'medium' | 'high' | 'xhigh' (SDK ReasoningEffort).
+     * - contextTier: 'default' | 'long_context' (SDK ContextTier).
+     */
+    model?: string;
+    reasoningEffort?: '' | 'low' | 'medium' | 'high' | 'xhigh';
+    contextTier?: '' | 'default' | 'long_context';
 }
 
 // Default values applied when dh_prefs is absent or partially populated.
@@ -62,7 +76,10 @@ export const DEFAULT_PREFS: Preferences = {
     language: 'auto',
     teamCatalogEnabled: false,
     teamManifestUrl: '',
-    analyzeTimeoutSeconds: 1200
+    analyzeTimeoutSeconds: 1200,
+    model: '',
+    reasoningEffort: '',
+    contextTier: ''
 };
 
 // Read-only React hook over chrome.storage.local.dh_prefs.
