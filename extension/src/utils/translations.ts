@@ -130,7 +130,6 @@ export const translations: TranslationDictionary = {
         en: "Model / reasoning effort / context tier for DH analyze sessions. Leave any field on 'Use CLI default' to inherit your Copilot CLI settings; pick a lighter model to speed up analysis.",
         zh: "DH 分析会话使用的模型 / 推理强度 / 上下文层级。任一项保持「使用 CLI 默认」即沿用你的 Copilot CLI 设置；选更轻的模型可加快分析。"
     },
-    refreshModels: { en: "Refresh", zh: "刷新" },
     modelLabel: { en: "Model", zh: "模型" },
     reasoningEffortLabel: { en: "Reasoning effort", zh: "推理强度" },
     contextTierLabel: { en: "Context tier", zh: "上下文层级" },

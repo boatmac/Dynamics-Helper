@@ -2401,9 +2401,10 @@ const OptionsInner: React.FC = () => {
                                                         type="button"
                                                         onClick={() => fetchModels(true)}
                                                         disabled={modelFetching}
-                                                        className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium text-slate-500 hover:text-teal-700 bg-slate-100 hover:bg-slate-200 transition-all disabled:opacity-50"
+                                                        className="flex items-center gap-1 px-2 py-1 text-xs text-teal-600 hover:bg-teal-50 rounded-md transition-colors"
                                                     >
-                                                        <RefreshCw size={10} className={modelFetching ? 'animate-spin' : ''} /> {t('refreshModels')}
+                                                        <RefreshCw size={12} className={modelFetching ? 'animate-spin' : ''} />
+                                                        {modelFetching ? t('syncing') : t('refresh')}
                                                     </button>
                                                 </div>
                                                 <p className="text-[10px] text-slate-500 mb-2">
