@@ -1502,7 +1502,7 @@ const OptionsInner: React.FC = () => {
     // About & Help: copy the log folder path (Explorer expands %LOCALAPPDATA%).
     const handleCopyLogPath = () => {
         navigator.clipboard?.writeText('%LOCALAPPDATA%\\DynamicsHelper')
-            .then(() => showSuccess(t('copied')))
+            .then(() => showSuccess(t('copied'), 2000))
             .catch(() => {/* clipboard blocked; no-op */});
     };
 
