@@ -38,43 +38,62 @@ instance.
 
 ## 2. Decision
 
-Revert `_case_to_session_id()` to the **exact pre-B82 derivation**:
+> **Superseded derivation note (2026-07-03):** an earlier draft of this spec
+> recovered a DH-only namespace (`a1b2c3d4-…` + `dh-`-salted input) from DH's
+> pre-B82 git history (`30028cc`). That was **wrong for the cross-repo
+> purpose** — MyCasesKit never knew that namespace. The authoritative
+> derivation is defined by MyCasesKit's handoff spec
+> (`MyCasesKit/docs/dh-uuid5-change-spec.md`) and is what DH implements:
+
+Set `_case_to_session_id()` to the **MyCasesKit-shared derivation**:
 
 ```python
-_SESSION_UUID_NAMESPACE = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+# module-level constant (greppable coordination anchor)
+_NAMESPACE_MYCASE = uuid.UUID("816bee4e-8eee-4c0b-ae69-70879d032f4d")
 
 @classmethod
 def _case_to_session_id(cls, case_id: str) -> str:
-    return str(uuid.uuid5(cls._SESSION_UUID_NAMESPACE, f"dh-{case_id}"))
+    return str(uuid.uuid5(_NAMESPACE_MYCASE, case_id))
 ```
 
-Recovered verbatim from commit `30028cc` ("fix(host): use deterministic
-UUID v5 for session IDs"). A true revert, not a new invention — it returns
-to a design already proven in production.
+- Input is the **bare** case number — no `dh-`/`co-`/`mycase-` prefix, no
+  salt. The namespace already isolates the hash space; any text salt would
+  make DH's value differ from MyCasesKit's.
+- `_NAMESPACE_MYCASE` and the bare-case input MUST stay byte-identical to
+  MyCasesKit forever — that is the entire cross-repo agreement.
 
-**Why UUID v5 (not v4):** v5 is deterministic — `uuid5(NS, "dh-"+case)`
-yields the same UUID for the same case every time. This preserves the
-resume guarantee. A random v4 would break resume. The namespace +
-`dh-`-prefixed input are reproduced exactly so the mapping is identical to
-the historical one (any dormant pre-B82 sessions remain addressable, though
-in practice the session pool has long since rolled over).
+**Why UUID v5 (not v4):** v5 is deterministic — `uuid5(NS, case)` yields the
+same UUID for the same case every time, so DH re-derives it on any device
+and `resume_session` finds the existing session with no stored map. A random
+v4 would break resume. MyCasesKit computes the identical v5 independently.
 
 **AAD safety of the output:** a UUID string
-(e.g. `db4ccff6-8867-4e7f-9afb-565c6ddc48e6`) is 36 chars of
-`[0-9a-f-]` — inside AAD's 20–50 length window and a strict subset of its
-allowed charset (`[A-Za-z0-9\-_.~]`). Verified by the retained
-`test_length_satisfies_aad_minimum` / `test_uses_only_aad_legal_chars`
-guards.
+(e.g. `ce0ec286-26e6-5095-8b30-46143e9f437f`) is 36 chars of `[0-9a-f-]` —
+inside AAD's 20–50 length window and a strict subset of its allowed charset
+(`[A-Za-z0-9\-_.~]`). Verified by the retained `test_length_is_36_aad_legal`
+/ `test_uses_only_aad_legal_chars` guards.
+
+**Golden values (shared cross-repo anchor, byte-verified vs MyCasesKit):**
+
+| bare case number | uuid5 |
+|---|---|
+| `2601190030003106` | `ce0ec286-26e6-5095-8b30-46143e9f437f` |
+| `2099020099009998` | `0ff23d45-654e-55aa-8be9-dfc55a842b2e` |
+| `2606100030001545` | `6eb4d81e-d635-59e4-8a98-3d3a733cc733` |
+
+If DH's computed value differs from a golden value, the namespace or input
+is wrong — **fix the code, never the golden value.**
 
 ## 3. What changes vs. what stays
 
 ### Changes
 | Item | From | To |
 |---|---|---|
-| `_case_to_session_id` return | `f"dhco-{case_id}"` | `str(uuid.uuid5(NS, f"dh-{case_id}"))` |
-| `_SESSION_UUID_NAMESPACE` const | (removed in B82) | re-added: `a1b2c3d4-e5f6-7890-abcd-ef1234567890` |
+| `_case_to_session_id` return | `f"dhco-{case_id}"` | `str(uuid.uuid5(_NAMESPACE_MYCASE, case_id))` |
+| `_NAMESPACE_MYCASE` const | (none) | added: `816bee4e-8eee-4c0b-ae69-70879d032f4d` (module-level, shared w/ MyCasesKit) |
+| `import uuid` | (absent at module level) | added to the stdlib import block |
 | ~5 inline comments referencing `dhco-<case>` | `dhco-<case>` prose | UUID prose |
-| `test_case_id.py::TestCaseToSessionId` | asserts `dhco-` prefix | asserts valid deterministic UUID v5 |
+| `test_case_id.py::TestCaseToSessionId` | asserts `dhco-` prefix | known-answer golden values + asserts UUIDv5 |
 | AGENTS.md § 4.6 (Session Persistence) | `dhco-` contract | UUID contract |
 
 ### Stays (no change needed)
@@ -89,7 +108,7 @@ guards.
 - **`case_number` in context.md frontmatter** — already present (confirmed
   by maintainer). Human-readable case tracking is preserved *independently*
   of `session_name`, so the UUID `session_name` costs no readability.
-- **AAD-safety test guards** — `test_length_satisfies_aad_minimum` +
+- **AAD-safety test guards** — `test_length_is_36_aad_legal` +
   `test_uses_only_aad_legal_chars` stay valid and now protect the UUID form
   (and any future scheme) generically.
 
@@ -98,28 +117,33 @@ guards.
   form → `resume_session` misses → a fresh session is created. Identical to
   the `co-`→`dhco-` transition in v2.0.72. No data loss (analysis reports
   persist independently); the session pool naturally rolls forward as cases
-  are re-analyzed.
+  are re-analyzed. MyCasesKit's `context.md` migration forward-upgrades
+  legacy `dhco-<case>` values to their uuid5, so the two repos can land
+  independently — no lockstep deploy.
 
 ## 4. Test plan (`host/test_case_id.py::TestCaseToSessionId`)
 
 Rewrite the identity-of-form assertions; keep the property + AAD guards:
 
-- **`test_returns_deterministic_uuid`** (replaces `test_returns_dhco_prefix_form`):
-  assert the output matches the UUID regex and equals
-  `str(uuid.uuid5(NS, "dh-"+case))` recomputed — locks the exact derivation.
-- **`test_returns_uuid_form`** (inverts the old `test_never_returns_uuid_form`):
-  assert the output IS a UUID (the old test asserted it was NOT — the
-  contract flipped).
-- **`test_is_deterministic`** / **`test_different_cases_produce_different_names`**:
-  unchanged — still hold for uuid5.
-- **`test_length_satisfies_aad_minimum`** / **`test_uses_only_aad_legal_chars`**:
-  unchanged — still pass (36-char hex UUID), now guarding the UUID scheme.
-- **Break-and-fail:** after green, temporarily return `f"dhco-{case_id}"`
-  and confirm `test_returns_uuid_form` + `test_returns_deterministic_uuid`
-  fail; revert.
+- **`test_known_answer`** (replaces `test_returns_dhco_prefix_form`):
+  known-answer test against the 3 SHARED golden values (§2). Locks the exact
+  namespace + bare-case derivation and pins DH byte-for-byte to MyCasesKit.
+  Do NOT recompute — use the literals.
+- **`test_returns_uuid_v5_form`** (inverts `test_never_returns_uuid_form`):
+  assert the output IS an RFC-4122 UUID (`UUID_REGEX`), `uuid.UUID(r).version
+  == 5`, and does NOT start with `cc-`/`co-`/`dhco-`. The old test asserted
+  it was NOT a UUID — the contract flipped.
+- **`test_length_is_36_aad_legal`** (was `test_length_satisfies_aad_minimum`):
+  now asserts `== 36` (and within 20-50). AAD regression guard.
+- **`test_uses_only_aad_legal_chars`** / **`test_is_deterministic`** /
+  **`test_different_cases_produce_different_names`**: unchanged — still hold
+  for uuid5.
+- **Break-and-fail:** after green, temporarily return `f"dhco-{case_id}"` and
+  confirm `test_known_answer` + `test_length_is_36_aad_legal` +
+  `test_returns_uuid_v5_form` fail; revert. (Done 2026-07-03: 3 failures,
+  golden-answer caught the desync; restored → 77 green.)
 
-Host suite expected to stay green (77 tests, with the 2 rewritten
-assertions).
+Host suite stays green (77 tests, class rewritten 1:1 in count).
 
 ## 5. Cross-repo coordination (maintainer-owned)
 

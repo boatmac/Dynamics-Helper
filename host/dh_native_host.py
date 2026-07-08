@@ -121,10 +121,21 @@ import datetime
 import shutil
 import time
 import re
+import uuid
 import traceback
 import urllib.request
 
 VERSION = "2.0.73-beta.1"
+
+# --- Cross-repo session-id coordination anchor (2026-07-03) ---
+# DH derives each Copilot session id as a deterministic UUIDv5 from the bare
+# case number. MyCasesKit computes the SAME value independently using this
+# EXACT namespace + the bare case number (no prefix / no salt), so the two
+# repos agree without any handshake. This constant is the shared contract —
+# it must stay byte-identical to MyCasesKit's NAMESPACE_MYCASE forever. Do
+# NOT change it, and do NOT prepend a salt to the input; either desyncs the
+# repos. Authoritative spec: MyCasesKit docs/dh-uuid5-change-spec.md.
+_NAMESPACE_MYCASE = uuid.UUID("816bee4e-8eee-4c0b-ae69-70879d032f4d")
 
 # Setup User Data Directory (Cross-platform)
 
@@ -408,7 +419,7 @@ class NativeHost:
         # every config read; see _load_config + handle_update_config.
         self.analyze_timeout_seconds = 1200
         self.current_session_id = (
-            None  # Track current Copilot session name (dhco-<case>) for --resume
+            None  # Track current Copilot session name (uuid5 of case) for --resume
         )
         self.current_case_id = None  # Track which case the current session belongs to
 
@@ -1255,43 +1266,45 @@ class NativeHost:
         """Returns the session-name string used for both Copilot SDK
         create_session(session_id=...) and shell-CLI `copilot --resume <name>`.
 
-        Format: `dhco-<case-num>` (**21 chars** for a 16-digit case ID).
+        Format: a **deterministic UUIDv5** derived from the bare case number:
+        `str(uuid.uuid5(_NAMESPACE_MYCASE, case_id))` — e.g. case
+        `2601190030003106` → `ce0ec286-26e6-5095-8b30-46143e9f437f`.
 
-        Why the length matters: MCP servers that authenticate via Microsoft
-        Entra AAD pass this string as the `client_session` OAuth parameter.
-        AAD validates `client_session` as **20-50 chars**, alphanumeric plus
-        `-_.~`. The prior `co-<case>` form (19 chars) failed AAD validation
-        with `AADSTS901001: Invalid request` and blocked MCP auth for every
-        analyze that touched an AAD-protected MCP tool. `dhco-<case>` at
-        21 chars sits comfortably inside the 20-50 window.
+        Why UUIDv5 (reverted from `dhco-<case>` on 2026-07-03):
+          - **Future-proof against external validation.** The session id is
+            passed through to layers DH does not control — notably Microsoft
+            Entra AAD, which consumes it as the OAuth `client_session`
+            parameter (20-50 chars, `[A-Za-z0-9\\-_.~]`). The AAD incident
+            (`AADSTS901001`) proved custom-format names are exposed to such
+            constraints; the CLI is "a moving target by design" (AGENTS.md
+            § 9.5). A UUID is the format every one of those layers is built
+            and tested against, so it eliminates the whole class of custom-
+            name validation risk. A 36-char hex UUID is always AAD-legal
+            regardless of case-number length (unlike `co-`/`dhco-`, whose
+            length was coupled to the case number).
+          - **Deterministic → resume with no stored map.** uuid5 hashes
+            (namespace, name) → the same case always yields the same id, so
+            DH re-derives it on any device and `resume_session` finds the
+            existing session. This is exactly why DH used uuid5 pre-B82.
 
-        Prefix compatibility with MyCasesKit B81 RFC § D1: the RFC's
-        contract is `^(cc|co)-<case-num>$` for shell-CLI-launched sessions.
-        `dhco-` is a **DH-side extension** of that namespace — the prefix
-        marks the session as "created by Dynamics Helper" so a MyCasesKit
-        shell-CLI resume (`copilot --resume co-<case>`) and a DH-launched
-        session (`copilot --resume dhco-<case>`) are two distinct sessions
-        rather than colliding.
+        Cross-repo contract (MyCasesKit B81 RFC): MyCasesKit computes the
+        IDENTICAL value independently via the same `_NAMESPACE_MYCASE`
+        constant + the **bare** case number (no `dh-`/`co-` prefix, no salt).
+        The namespace and input format must stay byte-for-byte identical
+        across both repos or the values diverge. MyCasesKit now treats
+        `context.md` `session_name:` as an opaque UUID; case identity lives
+        in the separate `case_number` field. Authoritative handoff:
+        MyCasesKit docs/dh-uuid5-change-spec.md. Golden values are locked in
+        host/test_case_id.py::TestCaseToSessionId.test_known_answer.
 
-        Cross-repo state (2026-07-03): MyCasesKit will be updated to
-        recognise the `dhco-` prefix as a peer namespace (matcher
-        `^(cc|co|dhco)-<case-num>$`). Until then, sessions do NOT round-trip
-        between DH and MyCasesKit — this is an accepted temporary
-        regression to unblock AAD auth.
-
-        History: prior versions used `str(uuid.uuid5(NAMESPACE, f"dh-{case_id}"))`
-        because the Copilot CLI then validated session_id as a UUID and
-        `copilot --resume <custom-name>` corrupted state. Both constraints
-        were verified lifted on 2026-05-11 (see MyCasesKit
-        docs/b81-session-naming-rfc.md § D1). Ported to `co-<case>` in B82.
-        Ported to `dhco-<case>` on 2026-07-03 to satisfy AAD 20-char
-        minimum — see host/test_case_id.py::TestCaseToSessionId for the
-        regression guard.
-
-        A future UI option to let users customise the prefix
-        (e.g. team-specific `sap-` or per-user) is under consideration.
+        History: pre-B82 used uuid5 with a DH-only namespace + `dh-` salt.
+        B82 (2026-05-11) switched to `co-<case>` for memorable resume once
+        the CLI relaxed its UUID requirement; v2.0.72 patched that to
+        `dhco-<case>` for the AAD 20-char floor. This revert drops the custom
+        prefix entirely and adopts MyCasesKit's shared namespace so DH and
+        MyCasesKit derive one identical uuid5 per case.
         """
-        return f"dhco-{case_id}"
+        return str(uuid.uuid5(_NAMESPACE_MYCASE, case_id))
 
     async def _refresh_session(
         self, session_id: str | None = None, case_id: str | None = None
@@ -1299,7 +1312,7 @@ class NativeHost:
         """Re-creates or resumes a Copilot session.
 
         Args:
-            session_id: If provided (the session-name string `dhco-<case>` from
+            session_id: If provided (the uuid5 session-name string from
                         _case_to_session_id), try to resume first. If resume
                         fails, create a new session with this name for future
                         shell-CLI `copilot --resume <name>` support.
@@ -1331,9 +1344,9 @@ class NativeHost:
             return False
 
         # Inject session name into system message so the AI can reference it
-        # (e.g. when creating context.md frontmatter — MyCasesKit B81 RFC § D1
-        # field is `session_name:`, value form `dhco-<case-num>` per DH's
-        # 21-char AAD-compatible extension of the RFC's prefix namespace).
+        # (e.g. when creating context.md frontmatter — MyCasesKit
+        # `session_name:` field, now an opaque uuid5 shared byte-for-byte
+        # with MyCasesKit; case identity lives in the `case_number` field).
         if session_id and "system_message" in full_config:
             sys_msg = full_config["system_message"]
             if isinstance(sys_msg, dict):
@@ -1391,7 +1404,7 @@ class NativeHost:
                 logger.debug(f"Resume traceback: {traceback.format_exc()}")
 
         try:
-            # Inject the session-name (dhco-<case>) so the server uses it as
+            # Inject the session-name (uuid5 of case) so the server uses it as
             # the session_id; this is what `copilot --resume <name>` later
             # looks up (B82 — see _case_to_session_id docstring).
             if session_id:
@@ -1700,9 +1713,9 @@ class NativeHost:
             len(text) if isinstance(text, str) else -1,
         )
 
-        # Derive the case-specific session name (`dhco-<case>`) for cross-CLI
-        # --resume (B82 / MyCasesKit B81 RFC § D1 with DH's `dhco-` extension
-        # for AAD 20-char client_session minimum)
+        # Derive the case-specific session name (uuid5 of case) for cross-CLI
+        # --resume — shared byte-for-byte with MyCasesKit via _NAMESPACE_MYCASE
+        # (see _case_to_session_id + MyCasesKit docs/dh-uuid5-change-spec.md)
         valid_case_id = self._extract_case_id(case_number)
         session_id = self._case_to_session_id(valid_case_id) if valid_case_id else None
 

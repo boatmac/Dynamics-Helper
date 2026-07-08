@@ -1,5 +1,6 @@
 import re
 import unittest
+import uuid
 from host.dh_native_host import NativeHost
 
 
@@ -69,62 +70,70 @@ class TestExtractCaseId(unittest.TestCase):
 
 
 class TestCaseToSessionId(unittest.TestCase):
-    """Tests for NativeHost._case_to_session_id() — DH `dhco-` extension of
-    the MyCasesKit B81 RFC § D1 contract.
+    """Tests for NativeHost._case_to_session_id() — deterministic UUIDv5
+    session-id contract, shared byte-for-byte with MyCasesKit.
 
-    The session-name string returned here is the cross-CLI handle: the same
-    value is passed to Copilot SDK `create_session(session_id=...)` and
-    `client.resume_session(...)`, and is also the shell-side handle for
-    `copilot --resume <name>`.
+    The returned string is the cross-CLI handle: passed to Copilot SDK
+    `create_session(session_id=...)` / `resume_session(...)` and used as the
+    shell-side `copilot --resume <name>` handle.
 
-    Contract history:
-      - B82 (2026-05-11): `co-<case-num>` (19 chars for a 16-digit case).
-      - 2026-07-03: extended to `dhco-<case-num>` (21 chars) to satisfy
-        Microsoft Entra AAD `client_session` OAuth parameter minimum of
-        20 chars. The 19-char `co-` form was silently blocking every MCP
-        auth flow with `AADSTS901001: Invalid request`.
+    Contract (2026-07-03 revert): `str(uuid.uuid5(_NAMESPACE_MYCASE, case))`
+    where the input is the **bare** case number (no prefix/salt) and
+    `_NAMESPACE_MYCASE = 816bee4e-8eee-4c0b-ae69-70879d032f4d`. MyCasesKit
+    computes the IDENTICAL value from the same namespace + bare case number,
+    so the two repos agree with no handshake — the golden values below are
+    the cross-repo anchor (verified byte-identical to MyCasesKit's PowerShell
+    SHA-1 implementation). Authoritative handoff: MyCasesKit
+    docs/dh-uuid5-change-spec.md.
 
-    MyCasesKit B81 RFC § D1's shell-CLI matcher is being updated in the
-    sibling repo from `^(cc|co)-<case-num>$` to `^(cc|co|dhco)-<case-num>$`
-    so shell-CLI sessions can still recognise DH-created sessions. Until
-    the MyCasesKit PR merges, DH-created and MyCasesKit-created sessions
-    for the same case have distinct names and do NOT round-trip through
-    `copilot --resume`.
-
-    See _case_to_session_id docstring for the full history.
+    Why UUIDv5 (superseding the `co-`/`dhco-` prefix era): the session id is
+    consumed by external validators DH does not control — notably AAD's
+    `client_session` (20-50 chars). The `AADSTS901001` incident proved custom
+    formats are exposed to such constraints; a 36-char UUID is always legal
+    regardless of case-number length AND stays deterministic (uuid5), so
+    resume works with no stored map. The earlier B82 "moved away from uuid5"
+    rationale is superseded: the AAD floor is met by the UUID's fixed 36-char
+    length, and deterministic resume is preserved by uuid5, not by a
+    predictable prefix.
     """
 
     UUID_REGEX = re.compile(
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     )
 
-    def test_returns_dhco_prefix_form(self):
-        """The value must be `dhco-<case-num>` per the 2026-07-03 AAD-fix
-        update. Bare `co-<case>` (19 chars) is REJECTED by AAD as too
-        short for `client_session`."""
-        self.assertEqual(
-            NativeHost._case_to_session_id("2601190030003106"),
-            "dhco-2601190030003106",
-        )
+    def test_known_answer(self):
+        """Known-answer test against the SHARED golden values. These are the
+        cross-repo anchor: DH and MyCasesKit MUST produce these exact
+        strings. If output differs, the namespace constant or the input
+        (must be the bare case number, UTF-8, no prefix) is wrong — fix the
+        code, do NOT change these literals."""
+        golden = {
+            "2601190030003106": "ce0ec286-26e6-5095-8b30-46143e9f437f",
+            "2099020099009998": "0ff23d45-654e-55aa-8be9-dfc55a842b2e",
+            "2606100030001545": "6eb4d81e-d635-59e4-8a98-3d3a733cc733",
+        }
+        for case, expected in golden.items():
+            self.assertEqual(
+                NativeHost._case_to_session_id(case),
+                expected,
+                f"uuid5 mismatch for case {case}: cross-repo sync with "
+                "MyCasesKit is broken. Check _NAMESPACE_MYCASE + bare-case "
+                "input; do not edit the golden value.",
+            )
 
-    def test_length_satisfies_aad_minimum(self):
-        """AAD requires `client_session` to be 20-50 chars. This test is
-        the regression guard: if a future maintainer shortens the prefix
-        back to `co-` or removes it, the AAD-side breakage returns and
-        every AAD-protected MCP tool fails to auth.
-        """
+    def test_length_is_36_aad_legal(self):
+        """A UUID string is 36 chars — always inside AAD's `client_session`
+        20-50 window, regardless of case-number length. This is the AAD
+        regression guard: the whole reason we're on UUID is that the prior
+        `co-` (19 chars) failed AAD with `AADSTS901001`."""
         result = NativeHost._case_to_session_id("2601190030003106")
-        self.assertGreaterEqual(
-            len(result),
-            20,
-            f"Session name {result!r} is only {len(result)} chars; AAD "
-            "`client_session` OAuth parameter requires 20-50 chars. "
-            "See _case_to_session_id docstring re: AADSTS901001.",
-        )
+        self.assertEqual(len(result), 36)
+        self.assertGreaterEqual(len(result), 20)
         self.assertLessEqual(len(result), 50)
 
     def test_uses_only_aad_legal_chars(self):
-        """AAD `client_session` allows alphanumeric + `-_.~` only."""
+        """AAD `client_session` allows alphanumeric + `-_.~` only; UUID hex
+        digits + hyphens are a strict subset."""
         import re as _re
         result = NativeHost._case_to_session_id("2601190030003106")
         self.assertRegex(
@@ -135,9 +144,10 @@ class TestCaseToSessionId(unittest.TestCase):
         )
 
     def test_is_deterministic(self):
-        """Same case ID must always produce the same session name; this is
-        the precondition for SDK `resume_session(name)` and shell-CLI
-        `copilot --resume <name>` finding the same session across runs."""
+        """Same case ID must always produce the same session name — the
+        load-bearing property: it is what lets SDK `resume_session(name)` and
+        shell-CLI `copilot --resume <name>` find the same session across runs
+        and across devices with no stored case→id map."""
         a = NativeHost._case_to_session_id("2601190030003106")
         b = NativeHost._case_to_session_id("2601190030003106")
         self.assertEqual(a, b)
@@ -148,25 +158,33 @@ class TestCaseToSessionId(unittest.TestCase):
         b = NativeHost._case_to_session_id("2099020099009998")
         self.assertNotEqual(a, b)
 
-    def test_never_returns_uuid_form(self):
-        """Regression guard: B82 explicitly moved away from UUID v5(dh-<case>)
-        so DH-launched sessions and shell-CLI-launched sessions converge
-        under one --resume handle. If a future change accidentally reverts
-        to UUID output, this test fails loudly and forces the maintainer
-        to read the _case_to_session_id docstring + MyCasesKit
-        b81-session-naming-rfc.md before proceeding."""
+    def test_returns_uuid_v5_form(self):
+        """Contract-inversion guard (was `test_never_returns_uuid_form`).
+        The B82-era contract FORBADE UUID output and required a `dhco-`/`co-`
+        prefix; the 2026-07-03 revert flips that. The result MUST now be a
+        valid RFC-4122 UUID of **version 5** (deterministic namespace hash),
+        and must NOT carry a legacy `cc-`/`co-`/`dhco-` prefix. If a future
+        change reintroduces a prefix or a random (v4) UUID, this fails and
+        forces a read of the _case_to_session_id docstring + the MyCasesKit
+        handoff before proceeding."""
         result = NativeHost._case_to_session_id("2601190030003106")
-        self.assertNotRegex(
+        self.assertRegex(
             result,
             self.UUID_REGEX,
-            f"_case_to_session_id returned UUID-shaped value {result!r}; "
-            "contract requires `dhco-<case-num>` (see docstring).",
+            f"_case_to_session_id must now return a UUID (got {result!r}).",
         )
-        self.assertTrue(
-            result.startswith("dhco-"),
-            f"_case_to_session_id must start with 'dhco-' (got {result!r}); "
-            "AAD-compatible extension of MyCasesKit B81 RFC § D1 (see 2026-07-03 update).",
+        self.assertEqual(
+            uuid.UUID(result).version,
+            5,
+            f"session id {result!r} must be a deterministic UUIDv5, not a "
+            "random v4 — determinism is required for resume.",
         )
+        for legacy in ("cc-", "co-", "dhco-"):
+            self.assertFalse(
+                result.startswith(legacy),
+                f"session id {result!r} must not carry the legacy {legacy!r} "
+                "prefix — the custom-prefix era is over (see docstring).",
+            )
 
 
 if __name__ == "__main__":
