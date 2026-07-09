@@ -175,7 +175,7 @@ export const translations: TranslationDictionary = {
     userInstructionsPlaceholder: { en: "Enter your custom instructions here...", zh: "在此输入你的自定义指令…" },
     // FAB (i18n audit)
     settings: { en: "Settings", zh: "设置" },
-    refreshContext: { en: "Refresh Context (Re-scan page)", zh: "刷新上下文(重新扫描页面)" },
+    refreshContext: { en: "Refresh Context (Re-scan page)", zh: "刷新上下文（重新扫描页面）" },
     contextPlaceholder: { en: "Context will appear here...", zh: "上下文将显示在这里…" },
     // Preview + errors (i18n audit)
     noContentToPreview: { en: "No content to preview", zh: "暂无可预览的内容" },
