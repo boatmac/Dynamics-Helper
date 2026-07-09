@@ -1172,7 +1172,7 @@ const OptionsInner: React.FC = () => {
                         { type: "SYNC_TEAM_CATALOG", payload: { manifestOnly: true } },
                         (response) => {
                             if (chrome.runtime.lastError) {
-                                showError(`${t('manifestFetchFailed')}: ${chrome.runtime.lastError.message}`, 5000);
+                                showError(t('manifestFetchFailed'), 5000);
                                 setTeamFetchError({ kind: 'network' });
                                 return;
                             }
