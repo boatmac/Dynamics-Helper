@@ -805,7 +805,7 @@ const FAB: React.FC = () => {
             setResultPopover({
                 isOpen: true,
                 title: `❌ ${t('pingError')}`,
-                content: `Error: ${e.message}`
+                content: `${t('errorLabel')}: ${e.message}`
             });
         }
     };
@@ -973,20 +973,20 @@ const FAB: React.FC = () => {
                             );
                         }
                     } else {
-                        const errMsg = analysisData?.error || "Unknown analysis error";
+                        const errMsg = analysisData?.error || t('unknownAnalysisError');
                         showAnalysisError(`${t('analysisFailed')}: ${errMsg}`, caseNumberOfRun);
                         trackEvent('Analyze Failed', { error: errMsg });
                     }
                 } else {
-                    const hostError = nativeResp?.message || nativeResp?.error || "Unknown native host error";
-                    showAnalysisError(`Host Error: ${hostError}`, caseNumberOfRun);
+                    const hostError = nativeResp?.message || nativeResp?.error || t('unknownNativeHostError');
+                    showAnalysisError(`${t('hostErrorLabel')}: ${hostError}`, caseNumberOfRun);
                     trackEvent('Analyze Host Error', { error: hostError });
                 }
             } else {
-                showAnalysisError(`Error: ${response.error || response.message || 'Unknown error'}`, caseNumberOfRun);
+                showAnalysisError(`${t('errorLabel')}: ${response.error || response.message || t('unknownError')}`, caseNumberOfRun);
             }
         } catch (e: any) {
-            showAnalysisError(`Error: ${e.message}`, caseNumberOfRun);
+            showAnalysisError(`${t('errorLabel')}: ${e.message}`, caseNumberOfRun);
             trackEvent('Analyze Exception', { error: e.message });
         } finally {
             setIsAnalyzing(false);
@@ -1030,7 +1030,7 @@ const FAB: React.FC = () => {
                     chrome.runtime.reload();
                 }, 1500);
             } else {
-                const errMsg = response?.error || 'Unknown error';
+                const errMsg = response?.error || t('unknownError');
                 showStatusBubble(`${t('updateFailed')}: ` + errMsg, 'error');
                 trackEvent('FAB Update Failed', { version: updateAvailable.version, error: errMsg });
             }
@@ -1124,7 +1124,7 @@ const FAB: React.FC = () => {
                                 v{getExtensionVersion()}
                             </span>
                         </div>
-                        <button onClick={handleOpenOptions} title="Settings" className="dh-settings-btn">
+                        <button onClick={handleOpenOptions} title={t('settings')} className="dh-settings-btn">
                             <Settings size={16} />
                         </button>
                     </div>
@@ -1191,7 +1191,7 @@ const FAB: React.FC = () => {
                                 </div>
                                 <button 
                                     onClick={(e) => { e.stopPropagation(); handleRefreshContext(); }}
-                                    title="Refresh Context (Re-scan page)"
+                                    title={t('refreshContext')}
                                     style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px', color: '#64748B' }}
                                 >
                                     <RefreshCw size={12} />
@@ -1234,7 +1234,7 @@ const FAB: React.FC = () => {
                                                 };
                                             });
                                         }}
-                                        placeholder="Context will appear here..."
+                                        placeholder={t('contextPlaceholder')}
                                     />
                                 </div>
                             )}

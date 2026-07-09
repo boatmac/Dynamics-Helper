@@ -128,9 +128,9 @@ const ItemEditor: React.FC<{
                             value={draft.type} 
                             onChange={e => handleChange('type', e.target.value)}
                         >
-                            <option value="link">Link</option>
-                            <option value="folder">Folder</option>
-                            <option value="markdown">Markdown Note</option>
+                            <option value="link">{t('typeLink')}</option>
+                            <option value="folder">{t('typeFolder')}</option>
+                            <option value="markdown">{t('typeMarkdownNote')}</option>
                         </select>
                     </div>
                 </div>
@@ -157,7 +157,7 @@ const ItemEditor: React.FC<{
                             className="w-full border border-slate-300 p-2 text-sm rounded-md h-24 focus:ring-2 focus:ring-teal-500 outline-none font-mono text-slate-600"
                             value={draft.content || ''} 
                             onChange={e => handleChange('content', e.target.value)} 
-                            placeholder="# Markdown content here..."
+                            placeholder={t('markdownContentPlaceholder')}
                         />
                     </div>
                 )}
@@ -413,8 +413,8 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         {isTeamItem ? (
-                            <span className="flex items-center gap-1 px-2 py-1 text-xs text-slate-400" title="Team managed">
-                                <Lock size={12} /> Team
+                            <span className="flex items-center gap-1 px-2 py-1 text-xs text-slate-400" title={t('teamManagedTooltip')}>
+                                <Lock size={12} /> {t('teamManaged')}
                             </span>
                         ) : (
                             <>
@@ -422,10 +422,10 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                     <button 
                                         onClick={(e) => {
                                              e.stopPropagation();
-                                             const newItem: MenuItem = { type: 'link', label: 'New Link', url: 'https://' };
+                                             const newItem: MenuItem = { type: 'link', label: t('newLinkLabel'), url: 'https://' };
                                              setItems(prev => addItemAt(currentPath, newItem, prev));
                                         }}
-                                        className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors" title="Add Child"
+                                        className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors" title={t('addChild')}
                                     >
                                         <Plus size={14} />
                                     </button>
@@ -435,7 +435,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                         e.stopPropagation();
                                         setEditingItemPath(currentPath);
                                     }}
-                                    className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Edit"
+                                    className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title={t('edit')}
                                 >
                                     <Edit2 size={14} />
                                 </button>
@@ -446,7 +446,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                             setItems(prev => deleteItemAt(currentPath, prev));
                                         }
                                     }}
-                                    className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="Delete"
+                                    className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title={t('deleteTooltip')}
                                 >
                                     <Trash2 size={14} />
                                 </button>
@@ -1172,7 +1172,7 @@ const OptionsInner: React.FC = () => {
                         { type: "SYNC_TEAM_CATALOG", payload: { manifestOnly: true } },
                         (response) => {
                             if (chrome.runtime.lastError) {
-                                showError(`Manifest fetch failed: ${chrome.runtime.lastError.message}`, 5000);
+                                showError(`${t('manifestFetchFailed')}: ${chrome.runtime.lastError.message}`, 5000);
                                 setTeamFetchError({ kind: 'network' });
                                 return;
                             }
@@ -1284,14 +1284,14 @@ const OptionsInner: React.FC = () => {
         }, (response) => {
             setIsSyncingTeam(false);
             if (chrome.runtime.lastError) {
-                showError(`Team sync failed: ${chrome.runtime.lastError.message}`, 3000);
+                showError(`${t('teamSyncFailed')}: ${chrome.runtime.lastError.message}`, 3000);
                 return;
             }
             if (response?.status === "success") {
                 setTeamItems(response.data.items || []);
                 setTeamSynced(new Date().toISOString());
             } else {
-                showError(`Team sync failed: ${response?.error || 'Unknown error'}`, 3000);
+                showError(`${t('teamSyncFailed')}: ${response?.error || t('unknownError')}`, 3000);
             }
         });
     };
@@ -1495,7 +1495,7 @@ const OptionsInner: React.FC = () => {
                     chrome.runtime.reload();
                 }, 1000);
             } else {
-                showError(`${t('updateFailed')}: ` + (response?.error || "Unknown error"));
+                showError(`${t('updateFailed')}: ` + (response?.error || t('unknownError')));
             }
         });
     };
@@ -2409,7 +2409,7 @@ const OptionsInner: React.FC = () => {
                                                         value={prefs.userInstructions || ""}
                                                         onChange={(e) => { userTouchedFieldsRef.current.add('userInstructions'); setPrefs(prev => ({ ...prev, userInstructions: e.target.value })); }} onBlur={handlePrefBlur}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
-                                                        placeholder="Enter your custom instructions here..."
+                                                        placeholder={t('userInstructionsPlaceholder')}
                                                     />
                                                 )}
                                             </div>
@@ -2592,7 +2592,7 @@ const OptionsInner: React.FC = () => {
                                             // `items`; writing to a team path silently no-ops
                                             // because indices won't match.
                                             if (isSelectedPathTeam()) return;
-                                            const newItem: MenuItem = { type: 'link', label: 'New Item', url: 'https://' };
+                                            const newItem: MenuItem = { type: 'link', label: t('newItemLabel'), url: 'https://' };
                                             if (selectedPath) {
                                                 setItems(prev => addItemAt(selectedPath, newItem, prev));
                                             } else {
@@ -2618,7 +2618,7 @@ const OptionsInner: React.FC = () => {
                                         <button 
                                             onClick={() => setSelectedPath(null)}
                                             className="text-xs text-slate-500 hover:text-slate-700 px-2"
-                                            title="Clear Selection"
+                                            title={t('clearSelection')}
                                         >
                                             {t('clearSelection')}
                                         </button>

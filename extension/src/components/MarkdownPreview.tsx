@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useTranslation } from '../utils/i18n';
 
 interface MarkdownPreviewProps {
     content: string;
@@ -60,10 +61,11 @@ const mdComponents = {
 };
 
 export default function MarkdownPreview({ content, className }: MarkdownPreviewProps) {
+    const { t } = useTranslation();
     if (!content?.trim()) {
         return (
             <div className={className} style={{ color: '#94A3B8', fontStyle: 'italic', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                No content to preview
+                {t('noContentToPreview')}
             </div>
         );
     }
