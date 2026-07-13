@@ -67,10 +67,10 @@ Understanding how a user request becomes an AI response.
     * **Note:** GUID redaction is currently disabled to preserve technical identifiers needed for troubleshooting (e.g., Subscription IDs, Resource IDs).
 4. **Session Management:**
     * The backend validates the case number via `_extract_case_id()` (accepts 16 or 19 digits).
-    * A stable session-name `dhco-<case>` is derived via `_case_to_session_id()` (DH's AAD-compatible extension of MyCasesKit B81 RFC § D1) — the same string is the SDK `session_id` argument AND the shell-CLI `copilot --resume <name>` handle. History: prior UUID v5 derivation was retired 2026-05-11; 19-char `co-<case>` form was replaced with 21-char `dhco-<case>` on 2026-07-03 to satisfy Microsoft Entra AAD's 20-char `client_session` minimum (prior form was blocked by `AADSTS901001`).
-    * Smart refresh: the session is only recreated when `current_case_id` or workspace root path changes.
-    * On session creation, `resume_session(name)` is tried first (restores conversation history, tool state). Falls back to `create_session(session_id=name)`.
-    * The session name is injected into the `system_message` content as a `## Session Info` section (labelled `Session Name: dhco-<case>`), making it available to the AI during the conversation (e.g., for writing `context.md` frontmatter `session_name:` field).
+    * A stable deterministic UUIDv5 is derived via `_case_to_session_id()` from the bare case number and the shared MyCasesKit namespace. The same UUID is the SDK `session_id` argument and the shell-CLI resume handle.
+    * Smart refresh compares `current_case_id` plus `current_session_root_path` (the root actually applied to the active session), not just the desired `self.root_path` config value.
+    * On session creation, `resume_session(uuid, working_directory=root)` is tried first (restores conversation history/tool state and self-heals old cwd metadata). It falls back to `create_session(session_id=uuid, working_directory=root)`.
+    * The session UUID is injected into the `system_message` content as `## Session Info` / `Session Name: <uuid>`, making it available for `context.md` frontmatter `session_name:`.
 5. **SDK Execution (`send_and_wait`):**
     * The backend sends the prompt as a plain string (SDK 0.2.0+, still applies in 1.0.5) with a **user-configurable timeout** (default 1200s, range 60–3600s, set via Options → Analyze Timeout). The FAB safety timeout is derived as `(value + 10) * 1000` ms so the host's truthful "Copilot did not finish within Ns" error always fires first.
 
@@ -81,11 +81,12 @@ The host maintains persistent sessions so users can continue analysis in the Cop
 * **Session ID:** A deterministic UUID v5 derived from the case ID via `_case_to_session_id()`. The same case always produces the same UUID, enabling resume across restarts. The Copilot CLI requires session IDs to be valid UUIDs (not arbitrary strings like `dh-{caseId}`).
 * **Server Verification:** After `create_session()`, the session ID is read from `session.session_id` and stored in `self.current_session_id`.
 * **Case Tracking:** `self.current_case_id` tracks which case the current session belongs to, used for smart-refresh comparison (not the session ID itself).
-* **SDK Mechanism:** `client.resume_session(session_id)` restores state from `~/.copilot/session-state/{session_id}/`.
+* **SDK Mechanism:** `client.resume_session(session_id, working_directory=root)` restores state from `~/.copilot/session-state/{session_id}/` and explicitly applies the configured root. `CopilotClient` also receives the same root so its CLI subprocess never falls back to the Native Host install cwd.
 * **Graceful Fallback:** If the SDK version doesn't support `resume_session()`, an `AttributeError` is caught and a new session is created instead.
-* **Report Integration:** `dh_case_report.md` includes the session name (`dhco-<case>`) and a `copilot --resume <name>` command.
+* **Report Integration:** `dh_case_report.md` includes the UUID and `copilot -C '<root>' --resume=<uuid>`. `-C` runs before CLI workspace discovery, ensuring root-level skills/MCP/instructions load even if an old session persisted the wrong cwd.
 * **Response Payload:** The session name is returned to the extension as `session_name` in the analysis response for frontend visibility (renamed from `session_id` in B82 to match the B81 cross-CLI naming RFC).
-* **System Message Injection:** The session name is appended to the `system_message` content as a `## Session Info` section (labelled `Session Name: dhco-<case>`) before session creation. This ensures the AI can reference it (e.g., for `context.md` frontmatter `session_name:` field) without relying on a fallback value.
+* **System Message Injection:** The UUID is appended to the `system_message` content as a `## Session Info` section (labelled `Session Name: <uuid>`) before session creation. This ensures the AI can reference it (e.g., for `context.md` frontmatter `session_name:` field) without relying on a fallback value.
+* **Lifecycle:** Startup initializes only the SDK client; session creation is lazy until Analyze supplies a case. Config updates preserve an active deterministic case session and never replace it with a generic UUIDv4 session. Root changes restart the client and refresh the session. `update_config` is authoritative for clearing root; a missing/empty Analyze `rootPath` reloads host config so a pre-hydration extension default cannot overwrite the canonical disk value.
 
 ### 3. Instruction Hierarchy (The Context)
 

@@ -197,9 +197,9 @@ In the extension settings, you can enable automatic analysis:
 
 Each analysis creates a persistent Copilot session tied to your case number. After the analysis completes:
 
-* The report includes a **Session ID** (a UUID that uniquely identifies the analysis session).
-* You can continue the investigation in the Copilot CLI by running: `copilot /resume {session_id}` (copy the session ID from the report).
-* This restores the full conversation history, tool state, and planning context from the browser-based analysis.
+* The report includes a **Session Name** (a deterministic UUID that identifies the case session).
+* Copy the complete resume command from the report. With Root Path configured it has the form `copilot -C '<root>' --resume=<uuid>`; `-C` applies the workspace before Copilot discovers skills, MCP, and instructions.
+* This restores the conversation history, tool state, planning context, and the configured workspace root. Prefer the report command over entering `/resume` inside a CLI started elsewhere, especially for sessions created by older DH versions whose saved cwd may be stale.
 
 ### Team Bookmark Catalog
 

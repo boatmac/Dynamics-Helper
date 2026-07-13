@@ -136,6 +136,7 @@ VERSION = "2.0.74-beta.3"
 # NOT change it, and do NOT prepend a salt to the input; either desyncs the
 # repos. Authoritative spec: MyCasesKit docs/dh-uuid5-change-spec.md.
 _NAMESPACE_MYCASE = uuid.UUID("816bee4e-8eee-4c0b-ae69-70879d032f4d")
+_WORKING_DIRECTORY_UNSET = object()
 
 # Setup User Data Directory (Cross-platform)
 
@@ -422,6 +423,8 @@ class NativeHost:
             None  # Track current Copilot session name (uuid5 of case) for --resume
         )
         self.current_case_id = None  # Track which case the current session belongs to
+        self.client_working_directory = None
+        self.current_session_root_path = None
 
         # Log startup location
         logger.info(
@@ -539,6 +542,16 @@ class NativeHost:
 
         except Exception as e:
             logger.error(f"Extension migration/repair failed: {e}")
+
+    @staticmethod
+    def _normalize_root_path(root_path: str | None) -> str | None:
+        """Normalize Options.rootPath; an empty value explicitly clears it."""
+        if not isinstance(root_path, str) or not root_path.strip():
+            return None
+        expanded = os.path.expanduser(root_path.strip())
+        if not os.path.isabs(expanded):
+            raise ValueError("Root path must be an absolute path.")
+        return os.path.normpath(expanded)
 
     def _read_beta_channel_pref(self) -> bool:
         """Best-effort read of the beta-channel preference from config.json.
@@ -706,10 +719,41 @@ class NativeHost:
 
         return None
 
+    async def _discard_client_if_workspace_changed(
+        self, desired_working_directory: str | None
+    ) -> None:
+        """Stop a CLI client whose process cwd no longer matches config."""
+        if not self.client:
+            return
+        current = getattr(self, "client_working_directory", None)
+        if current == desired_working_directory:
+            return
+
+        logger.info(
+            "Client working directory changed: %r -> %r. Restarting client.",
+            current,
+            desired_working_directory,
+        )
+        try:
+            await self.client.stop()
+        except Exception as e:
+            logger.warning(f"Failed to stop old Copilot client cleanly: {e}")
+        self.client = None
+        self.client_working_directory = None
+        self.session = None
+        self.current_session_id = None
+        self.current_session_root_path = None
+
     async def initialize_sdk(self):
-        """Initializes the Copilot Client and Session."""
+        """Initializes the Copilot Client without creating a generic session."""
         try:
             logger.info("Initializing Copilot Client...")
+
+            # Load root_path before starting the CLI process. Session-level
+            # working_directory remains authoritative, but binding the client
+            # process too prevents any fallback session from persisting the
+            # Native Host installation directory as its workspace cwd.
+            full_config = self._get_session_config()
 
             cli_path = self.find_copilot_cli()
             connection = (
@@ -718,19 +762,23 @@ class NativeHost:
                 else RuntimeConnection.for_stdio()
             )
 
-            self.client = CopilotClient(connection=connection)
+            client_kwargs = {"connection": connection}
+            if full_config.get("working_directory"):
+                client_kwargs["working_directory"] = full_config["working_directory"]
+            self.client = CopilotClient(**client_kwargs)
+            self.client_working_directory = full_config.get("working_directory")
 
             # Explicitly start the client to ensure connection before session creation
             logger.info("Starting Copilot Client...")
             await self.client.start()
             logger.info("Copilot Client started.")
 
-            await self._refresh_session()
-
         except Exception as e:
             logger.error(f"Failed to initialize SDK: {e}")
             self.client = None  # Ensure client is None so null checks catch it
+            self.client_working_directory = None
             self.session = None  # Ensure it's None on failure
+            self.current_session_root_path = None
 
     # ------------------------------------------------------------------
     # Secret field encryption boundary
@@ -840,7 +888,7 @@ class NativeHost:
         ext["team_manifest_url_encrypted"] = blob
         del ext["team_manifest_url"]
 
-    def _get_session_config(self) -> dict:
+    def _get_session_config(self, root_path_override=_WORKING_DIRECTORY_UNSET) -> dict:
         """Constructs the session configuration from disk."""
         session_config: dict = {}
 
@@ -890,7 +938,7 @@ class NativeHost:
                 return data
             except Exception as e:
                 logger.error(f"Failed to load config from {path}: {e}")
-                return {}
+                raise RuntimeError(f"Failed to load config from {path}: {e}") from e
 
         # --- Load and Merge Configurations ---
 
@@ -942,11 +990,12 @@ class NativeHost:
         self.analyze_timeout_seconds = max(60, min(3600, _raw_timeout))
 
         # Extract root path
-        current_root = final_data.get("root_path")
+        if root_path_override is _WORKING_DIRECTORY_UNSET:
+            current_root = self._normalize_root_path(final_data.get("root_path"))
+        else:
+            current_root = self._normalize_root_path(root_path_override)
         has_root_path = bool(current_root)
-
-        if has_root_path:
-            self.root_path = current_root
+        self.root_path = current_root
 
         # --- SKILL DIRECTORIES ---
         # Strategy:
@@ -1103,10 +1152,13 @@ class NativeHost:
             session_config["mcp_servers"] = mcp_servers
 
         # --- Working Directory ---
-        # Tells Copilot where to anchor file operations (e.g., filesystem MCP)
-        if self.root_path:
-            session_config["working_directory"] = self.root_path
-            logger.info(f"Set working_directory to: {self.root_path}")
+        # Always send an absolute cwd. SDK 1.0.5 omits falsey values from the
+        # wire; omission would let resume restore stale metadata (often the
+        # Native Host install directory). A configured root wins; otherwise
+        # use the process cwd as an explicit compatibility fallback.
+        working_directory = self.root_path or os.getcwd()
+        session_config["working_directory"] = working_directory
+        logger.info(f"Set working_directory to: {working_directory}")
 
         # --- System Instructions (Split Prompt Architecture) ---
 
@@ -1337,8 +1389,33 @@ class NativeHost:
         """
         return str(uuid.uuid5(_NAMESPACE_MYCASE, case_id))
 
+    @staticmethod
+    def _build_resume_command(session_id: str, root_path: str | None) -> str:
+        """Build a CLI resume command anchored to the configured workspace.
+
+        ``-C`` applies the root before CLI workspace discovery, so skills,
+        MCP, and instructions load from the configured root even if an older
+        session persisted the Native Host process directory as its cwd.
+        """
+        if root_path:
+            # PowerShell single-quoted strings keep $, &, backticks, and
+            # parentheses literal. Embedded apostrophes are doubled.
+            quoted_root = root_path.replace("'", "''")
+            return f"copilot -C '{quoted_root}' --resume={session_id}"
+        return f"copilot --resume={session_id}"
+
+    @staticmethod
+    def _markdown_code_span(value: str) -> str:
+        """Wrap text in a Markdown code span without backtick collisions."""
+        longest_run = max((len(run) for run in re.findall(r"`+", value)), default=0)
+        fence = "`" * (longest_run + 1)
+        return f"{fence}{value}{fence}"
+
     async def _refresh_session(
-        self, session_id: str | None = None, case_id: str | None = None
+        self,
+        session_id: str | None = None,
+        case_id: str | None = None,
+        working_directory_override=_WORKING_DIRECTORY_UNSET,
     ):
         """Re-creates or resumes a Copilot session.
 
@@ -1355,6 +1432,22 @@ class NativeHost:
         # (e.g. an unsupported model/reasoning-effort combo) instead of the
         # generic "session/client not initialized".
         self.last_session_error = None
+
+        # Build session config before any client (re)initialization so the CLI
+        # process and the session are anchored to the same workspace root.
+        try:
+            full_config = self._get_session_config(
+                root_path_override=working_directory_override
+            )
+        except Exception as e:
+            logger.error(f"Failed to build session config: {e}")
+            self.last_session_error = str(e)
+            return False
+
+        await self._discard_client_if_workspace_changed(
+            full_config.get("working_directory")
+        )
+
         if not self.client:
             logger.warning("Client not initialized. Attempting re-initialization...")
             try:
@@ -1364,20 +1457,21 @@ class NativeHost:
                     if cli_path
                     else RuntimeConnection.for_stdio()
                 )
-                self.client = CopilotClient(connection=connection)
+                client_kwargs = {"connection": connection}
+                if full_config.get("working_directory"):
+                    client_kwargs["working_directory"] = full_config[
+                        "working_directory"
+                    ]
+                self.client = CopilotClient(**client_kwargs)
+                self.client_working_directory = full_config.get(
+                    "working_directory"
+                )
                 await self.client.start()
                 logger.info("Client re-initialized successfully.")
             except Exception as e:
                 logger.error(f"Client re-initialization failed: {e}")
                 self.client = None
                 return False
-
-        # Build session config upfront (used for both resume and create)
-        try:
-            full_config = self._get_session_config()
-        except Exception as e:
-            logger.error(f"Failed to build session config: {e}")
-            return False
 
         # Inject session name into system message so the AI can reference it
         # (e.g. when creating context.md frontmatter — MyCasesKit
@@ -1435,6 +1529,9 @@ class NativeHost:
                 )
                 # Track which case this session belongs to
                 self.current_case_id = case_id
+                self.current_session_root_path = full_config.get(
+                    "working_directory"
+                )
                 logger.info(
                     f"Resumed existing session: {session_id} (Server ID: {self.current_session_id})"
                 )
@@ -1474,9 +1571,10 @@ class NativeHost:
                 )
 
             self.current_session_id = server_session_id
-            # Track which case this session belongs to (for smart-refresh comparison)
-            if case_id:
-                self.current_case_id = case_id
+            # Keep identity exact. A generic session must never retain a stale
+            # case ID from the deterministic session it replaced.
+            self.current_case_id = case_id
+            self.current_session_root_path = full_config.get("working_directory")
             logger.info(
                 f"Copilot Session created successfully. "
                     f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
@@ -1498,15 +1596,25 @@ class NativeHost:
                     if cli_path
                     else RuntimeConnection.for_stdio()
                 )
-                self.client = CopilotClient(connection=reinit_connection)
+                client_kwargs = {"connection": reinit_connection}
+                if full_config.get("working_directory"):
+                    client_kwargs["working_directory"] = full_config[
+                        "working_directory"
+                    ]
+                self.client = CopilotClient(**client_kwargs)
+                self.client_working_directory = full_config.get(
+                    "working_directory"
+                )
                 await self.client.start()
                 logger.info("Client re-initialized after OSError.")
 
                 self.session = await self.client.create_session(**sdk_kwargs)
                 server_session_id = getattr(self.session, "session_id", None)
                 self.current_session_id = server_session_id
-                if case_id:
-                    self.current_case_id = case_id
+                self.current_case_id = case_id
+                self.current_session_root_path = full_config.get(
+                    "working_directory"
+                )
                 logger.info(
                     f"Copilot Session created successfully (after retry). "
                 f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
@@ -1517,9 +1625,12 @@ class NativeHost:
                 logger.error(f"Retry after re-init also failed: {retry_err}")
                 logger.error(f"Full traceback: {traceback.format_exc()}")
                 self.last_session_error = str(retry_err)
+                self.client = None
+                self.client_working_directory = None
                 self.session = None
                 self.current_session_id = None
                 self.current_case_id = None
+                self.current_session_root_path = None
                 return False
         except Exception as e:
             logger.error(f"Failed to create/refresh session: {e}")
@@ -1528,6 +1639,7 @@ class NativeHost:
             self.session = None
             self.current_session_id = None
             self.current_case_id = None
+            self.current_session_root_path = None
             return False
 
     def _resolve_skills(self, directories, base_path):
@@ -1669,8 +1781,21 @@ class NativeHost:
                     _raw_timeout = 1200
                 self.analyze_timeout_seconds = max(60, min(3600, _raw_timeout))
 
-            # 3. Refresh Session
-            success = await self._refresh_session()
+            # 3. Refresh the current deterministic case session. Config edits
+            # must not replace it with a generic UUID while leaving a stale
+            # current_case_id behind. With no active case, defer session
+            # creation until the next Analyze request supplies an identity.
+            if self.current_case_id:
+                session_id = self._case_to_session_id(self.current_case_id)
+                success = await self._refresh_session(
+                    session_id=session_id,
+                    case_id=self.current_case_id,
+                )
+            else:
+                self.session = None
+                self.current_session_id = None
+                self.current_session_root_path = None
+                success = True
 
             if success:
                 return {
@@ -1810,7 +1935,15 @@ class NativeHost:
         context = payload.get("context", "Unknown")
         product = payload.get("product", "General")
         case_number = payload.get("caseNumber", "Unspecified")
-        payload_root_path = payload.get("rootPath")
+        payload_root_value = payload.get("rootPath")
+        if isinstance(payload_root_value, str) and payload_root_value.strip():
+            payload_root_path = self._normalize_root_path(payload_root_value)
+        else:
+            # Missing/empty analyze values can be the extension's
+            # pre-hydration default. Config updates are the authoritative way
+            # to clear root_path; analyze falls back to host config here.
+            self._get_session_config()
+            payload_root_path = self.root_path
 
         # Diagnostic: log the identifying payload fields so we can correlate
         # cross-tab issues (e.g. Tab B sending stale caseNumber from Tab A).
@@ -1833,17 +1966,22 @@ class NativeHost:
         # Determine if we need to refresh the session:
         # 1. Root path changed (workspace MCP/Skills config may differ)
         # 2. Session name changed (different case)
-        needs_refresh = False
+        needs_refresh = self.session is None or self.client is None
 
-        if payload_root_path:
-            if self.root_path != payload_root_path:
-                logger.info(
-                    f"Root path changed: {self.root_path} -> {payload_root_path}."
-                )
-                self.root_path = payload_root_path
-                needs_refresh = True
-            else:
-                self.root_path = payload_root_path
+        if self.root_path != payload_root_path:
+            logger.info(
+                f"Configured root path changed: {self.root_path} -> {payload_root_path}."
+            )
+            self.root_path = payload_root_path
+
+        desired_session_root = payload_root_path or os.getcwd()
+        if getattr(self, "current_session_root_path", None) != desired_session_root:
+            logger.info(
+                "Session root path changed: %r -> %r.",
+                getattr(self, "current_session_root_path", None),
+                desired_session_root,
+            )
+            needs_refresh = True
 
         if valid_case_id and valid_case_id != self.current_case_id:
             logger.info(f"Case changed: {self.current_case_id} -> {valid_case_id}.")
@@ -1853,7 +1991,21 @@ class NativeHost:
             logger.info(
                 f"Refreshing session for: {session_id or 'generic'} (case: {valid_case_id or 'none'})"
             )
-            await self._refresh_session(session_id=session_id, case_id=valid_case_id)
+            refreshed = await self._refresh_session(
+                session_id=session_id,
+                case_id=valid_case_id,
+                working_directory_override=payload_root_path,
+            )
+            if not refreshed:
+                detail = getattr(self, "last_session_error", None) or "unknown error"
+                self.session = None
+                self.current_session_id = None
+                self.current_case_id = None
+                self.current_session_root_path = None
+                return {
+                    "status": "error",
+                    "error": f"Copilot session refresh failed: {detail}",
+                }
 
         if not text:
             return {"status": "error", "error": "No text provided for analysis."}
@@ -1962,9 +2114,16 @@ class NativeHost:
                             logger.warning(
                                 f"Session error encountered: {e}. Refreshing session..."
                             )
-                            await self._refresh_session(
-                                session_id=session_id, case_id=valid_case_id
+                            refreshed = await self._refresh_session(
+                                session_id=session_id,
+                                case_id=valid_case_id,
+                                working_directory_override=payload_root_path,
                             )
+                            if not refreshed:
+                                detail = self.last_session_error or "unknown error"
+                                raise RuntimeError(
+                                    f"Copilot session reconnect failed: {detail}"
+                                )
                             continue
                         # Re-raise other errors (including TimeoutError) to be handled by outer blocks
                         raise e
@@ -2022,8 +2181,10 @@ class NativeHost:
                 logger.info("Invalidating session after timeout.")
                 self.session = None
                 self.client = None
+                self.client_working_directory = None
                 self.current_session_id = None
                 self.current_case_id = None
+                self.current_session_root_path = None
                 # Truthful error message (C2b-lite). The previous "waiting
                 # for authentication" line was a guess and misled users into
                 # re-auth loops; in practice timeouts almost always mean
@@ -2118,8 +2279,13 @@ class NativeHost:
                     f.write(f"**Session Name:** {self.current_session_id}\n")
                 f.write(f"\n")
                 if self.current_session_id:
+                    resume_command = self._build_resume_command(
+                        self.current_session_id,
+                        self.root_path,
+                    )
                     f.write(
-                        f"> Resume in Copilot CLI: `copilot --resume {self.current_session_id}`\n\n"
+                        "> Resume in Copilot CLI: "
+                        f"{self._markdown_code_span(resume_command)}\n\n"
                     )
                 f.write(f"## Original Error\n{scrubbed_text}\n\n")
                 if scrubbed_context:
@@ -2138,12 +2304,15 @@ class NativeHost:
         except Exception as e:
             logger.error(f"SDK Error: {e}")
             # Invalidate session on pipe/subprocess errors so next request reconnects
-            if "Invalid argument" in str(e) or "Broken pipe" in str(e):
+            error_text = str(e).lower()
+            if "invalid argument" in error_text or "broken pipe" in error_text:
                 logger.info("Invalidating session due to broken pipe/subprocess.")
                 self.session = None
                 self.client = None
+                self.client_working_directory = None
                 self.current_session_id = None
                 self.current_case_id = None
+                self.current_session_root_path = None
             return {"status": "error", "error": f"SDK Error: {str(e)}"}
 
     async def process_message(self, message):
@@ -2168,8 +2337,9 @@ class NativeHost:
                 if self.loop:
                     self.loop.create_task(self.check_for_updates())
 
-                # With the SDK, existence of self.client/session implies health
-                if self.client and self.session:
+                # The client is the host's initialized SDK boundary. Sessions
+                # are created lazily once Analyze provides a case identity.
+                if self.client:
                     response["data"] = {
                         "status": "healthy",
                         "message": "Copilot SDK Active",

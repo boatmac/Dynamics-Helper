@@ -92,15 +92,16 @@ The host maintains Copilot sessions so users can continue analysis in the Copilo
 * **Server Verification:** After `create_session()`, the real session ID is captured from `session.session_id`. This is stored in `self.current_session_id` and used in reports and `/resume` commands.
 * **Case Tracking:** `self.current_case_id` holds the 16-digit case ID for smart-refresh comparison. This is separate from the session ID.
 * **Validation:** `_extract_case_id()` accepts 16-digit (main case) or 19-digit (task ID, maps to parent 16 digits).
-* **Invalid case numbers** result in a generic session (no persistence, no resume).
-* **System Message Injection:** Before calling `create_session()` or `resume_session()`, the session name (`dhco-<case>`, DH's AAD-compatible 21-char extension of MyCasesKit B81 RFC § D1 — see AGENTS.md § 4.6) is appended to the `system_message` content as a `## Session Info` section (labelled `Session Name:`). This makes the name available to the AI for use in generated files (e.g., `context.md` frontmatter `session_name:` field, resumable from any shell via `copilot --resume dhco-<case>`).
+* **Invalid case numbers** may use a generic session only when an analysis is explicitly requested; startup never pre-creates one.
+* **System Message Injection:** Before calling `create_session()` or `resume_session()`, the deterministic UUIDv5 session name is appended to the `system_message` content as `## Session Info` / `Session Name:`. This makes it available for generated files such as `context.md` frontmatter `session_name:`.
 
 ### Session Lifecycle
 
 1. **First analysis for a case:** `resume_session(uuid)` is tried first. If no prior session exists, falls back to `create_session(session_id=uuid)`.
-2. **Subsequent analyses for same case:** Session is reused (no refresh needed). Smart-refresh compares `current_case_id`, not the session ID.
-3. **Case change or root path change:** Session is recreated with a new `resume_session()` attempt for the new case.
+2. **Subsequent analyses for same case:** Session is reused only when `current_case_id` and `current_session_root_path` still match and the client/session are available.
+3. **Case or root change:** The client is restarted when its process cwd differs from the configured root; the deterministic session is then resumed with explicit `working_directory=root` (or created under that root). Analyze payloads with missing/empty `rootPath` use host `config.json`; only `update_config` can clear the canonical root.
 4. **SDK compatibility:** `AttributeError` is caught gracefully if the SDK version doesn't support `resume_session()`.
+5. **Shell resume:** Reports print `copilot -C '<root>' --resume=<uuid>`, applying the root before CLI discovers workspace skills/MCP/instructions and overriding stale cwd metadata in sessions created by older DH versions.
 
 ### Storage
 
