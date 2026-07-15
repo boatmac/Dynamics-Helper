@@ -111,6 +111,7 @@ except Exception as e:
     NATIVE_STDOUT = sys.stdout.buffer
 
 import asyncio
+import copy
 import threading
 import struct
 import json
@@ -705,6 +706,58 @@ class NativeHost:
             ),
         )
 
+    def _get_prompt_source_config_fields(
+        self,
+        effective_root: str | None,
+        use_workspace_only: bool,
+    ) -> dict:
+        status: dict[str, str] = {"status": "ok"}
+        dh_raw: str | None = None
+        dh_error: PromptSourceError | None = None
+
+        try:
+            self._read_prompt_source(
+                os.path.join(self._get_install_dir(), "system_prompt.md"),
+                missing_error_code="dh_core_prompt_missing",
+                unreadable_error_code="dh_core_prompt_unreadable",
+            )
+        except PromptSourceError as error:
+            status = error.to_result()
+
+        try:
+            _, dh_raw = self._read_prompt_source(
+                os.path.join(USER_DATA_DIR, "copilot-instructions.md"),
+                missing_error_code=None,
+                unreadable_error_code="dh_specific_instructions_unreadable",
+            )
+        except PromptSourceError as error:
+            dh_error = error
+
+        selected_error: PromptSourceError | None = None
+        if effective_root and use_workspace_only:
+            try:
+                self._read_prompt_source(
+                    os.path.join(
+                        effective_root,
+                        ".github",
+                        "copilot-instructions.md",
+                    ),
+                    missing_error_code="repository_instructions_missing",
+                    unreadable_error_code="repository_instructions_unreadable",
+                )
+            except PromptSourceError as error:
+                selected_error = error
+
+        if status["status"] == "ok" and selected_error is not None:
+            status = selected_error.to_result()
+        if status["status"] == "ok" and dh_error is not None:
+            status = dh_error.to_result()
+
+        fields: dict = {"prompt_source_status": status}
+        if dh_raw is not None:
+            fields["_user_instructions_raw"] = dh_raw
+        return fields
+
     @staticmethod
     def _build_system_message(
         snapshot: PromptSnapshot,
@@ -1055,7 +1108,12 @@ class NativeHost:
         ext["team_manifest_url_encrypted"] = blob
         del ext["team_manifest_url"]
 
-    def _get_session_config(self, root_path_override=_WORKING_DIRECTORY_UNSET) -> dict:
+    def _get_session_config(
+        self,
+        root_path_override=_WORKING_DIRECTORY_UNSET,
+        *,
+        include_prompt_status: bool = False,
+    ) -> dict:
         """Constructs the session configuration from disk."""
         session_config: dict = {}
 
@@ -1340,11 +1398,14 @@ class NativeHost:
 
         if legacy_prompt and not os.path.exists(user_prompt_path):
             try:
-                logger.info(f"Migrating legacy user_prompt to {user_prompt_path}")
+                logger.info("Migrating legacy user_prompt to user_prompt.md")
                 with open(user_prompt_path, "w", encoding="utf-8") as f:
                     f.write(legacy_prompt)
             except Exception as e:
-                logger.error(f"Failed to migrate user_prompt: {e}")
+                logger.error(
+                    "Failed to migrate user_prompt: %s",
+                    type(e).__name__,
+                )
 
         # 3. Read from File (Source of Truth)
         current_prompt_content = ""
@@ -1353,7 +1414,10 @@ class NativeHost:
                 with open(user_prompt_path, "r", encoding="utf-8") as f:
                     current_prompt_content = f.read()
             except Exception as e:
-                logger.error(f"Failed to read user_prompt.md: {e}")
+                logger.error(
+                    "Failed to read user_prompt.md: %s",
+                    type(e).__name__,
+                )
 
         # 4. Inject into extension_preferences for Frontend Sync
         if "extension_preferences" not in session_config:
@@ -1362,6 +1426,14 @@ class NativeHost:
         # We force the file content into the config object sent to frontend
         # This overrides whatever might be lingering in config.json
         session_config["extension_preferences"]["user_prompt"] = current_prompt_content
+
+        if include_prompt_status:
+            session_config.update(
+                self._get_prompt_source_config_fields(
+                    current_root,
+                    bool(use_workspace_only),
+                )
+            )
 
         return session_config
 
@@ -1778,156 +1850,157 @@ class NativeHost:
                 resolved.append(os.path.normpath(expanded))
         return resolved
 
+    @staticmethod
+    def _write_utf8_text(path: str, value: str) -> None:
+        with open(path, "w", encoding="utf-8", newline="") as stream:
+            stream.write(value)
+
+    def _write_user_config(self, incoming_config: dict) -> dict:
+        user_config_path = os.path.join(USER_DATA_DIR, "config.json")
+        current_data: dict = {}
+        if os.path.exists(user_config_path):
+            try:
+                with open(user_config_path, "r", encoding="utf-8") as stream:
+                    current_data = json.load(stream)
+            except (OSError, json.JSONDecodeError):
+                current_data = {}
+
+        config_to_write = copy.deepcopy(incoming_config)
+        ext_prefs = config_to_write.get("extension_preferences")
+        if isinstance(ext_prefs, dict):
+            ext_prefs.pop("user_prompt", None)
+        current_ext = current_data.get("extension_preferences")
+        if isinstance(current_ext, dict):
+            current_ext.pop("user_prompt", None)
+
+        if "skill_directories" in config_to_write:
+            incoming_skills = config_to_write["skill_directories"]
+            workspace_skill = (
+                os.path.normpath(
+                    os.path.join(self.root_path, ".github", "skills")
+                )
+                if self.root_path
+                else None
+            )
+            config_to_write["skill_directories"] = [
+                skill
+                for skill in incoming_skills
+                if workspace_skill is None
+                or os.path.normpath(skill) != workspace_skill
+            ]
+
+        self._encrypt_secrets_before_write(config_to_write)
+        current_data.update(config_to_write)
+        with open(user_config_path, "w", encoding="utf-8") as stream:
+            json.dump(current_data, stream, indent=2)
+
+        saved_ext = current_data.get("extension_preferences", {})
+        _apply_log_level(saved_ext.get("log_level", "INFO"))
+        try:
+            raw_timeout = int(saved_ext.get("analyze_timeout_seconds", 1200))
+        except (TypeError, ValueError):
+            raw_timeout = 1200
+        self.analyze_timeout_seconds = max(60, min(3600, raw_timeout))
+        return current_data
+
     async def handle_update_config(self, payload):
         """Updates configuration files and refreshes the session."""
-        try:
-            # 1. Update User Instructions
-            # Support both 'user_instructions' (new) and 'system_instructions' (legacy/mapped)
-            new_instr = payload.get("user_instructions") or payload.get(
-                "system_instructions"
-            )
+        if "user_instructions" in payload:
+            new_instr = payload["user_instructions"]
+        elif "system_instructions" in payload:
+            new_instr = payload["system_instructions"]
+        else:
+            new_instr = None
 
-            if new_instr is not None:
-                # FIX: Write to 'copilot-instructions.md'
-                instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
-                with open(instr_path, "w", encoding="utf-8") as f:
-                    f.write(new_instr)
-                logger.info("Updated copilot-instructions.md")
+        new_prompt = payload.get("user_prompt")
+        if new_prompt is None:
+            incoming_config = payload.get("config", {})
+            if isinstance(incoming_config, dict):
+                ext = incoming_config.get("extension_preferences", {})
+                if isinstance(ext, dict) and "user_prompt" in ext:
+                    new_prompt = ext["user_prompt"]
 
-            # 1.5 Update User Prompt (New Architecture: user_prompt.md)
-            # Check top-level payload first, then try to fish it out of extension_preferences if missing
-            new_prompt = payload.get("user_prompt")
-
-            # If not in top-level, check if it's inside config (legacy/transition)
-            if (
-                new_prompt is None
-                and "config" in payload
-                and "extension_preferences" in payload["config"]
-            ):
-                new_prompt = payload["config"]["extension_preferences"].get(
-                    "user_prompt"
-                )
-
-            if new_prompt is not None:
-                prompt_path = os.path.join(USER_DATA_DIR, "user_prompt.md")
-                with open(prompt_path, "w", encoding="utf-8") as f:
-                    f.write(new_prompt)
-                logger.info("Updated user_prompt.md")
-
-            # 2. Update Config (Model, etc)
-            if "config" in payload:
-                user_config_path = os.path.join(USER_DATA_DIR, "config.json")
-                # Read existing or empty
-                current_data = {}
-                if os.path.exists(user_config_path):
-                    try:
-                        with open(user_config_path, "r") as f:
-                            current_data = json.load(f)
-                    except:
-                        pass  # Start fresh if corrupt
-
-                # --- SANITIZE USER PROMPT ---
-                # Remove user_prompt from config to avoid duplication in config.json
-                # It is now stored in user_prompt.md
-                if "extension_preferences" in payload["config"]:
-                    ext_prefs = payload["config"]["extension_preferences"]
-                    if "user_prompt" in ext_prefs:
-                        # Remove it from the dict we are about to save
-                        # But we must create a copy if we want to be safe, though here we are just processing incoming payload
-                        # Actually, we can just delete it from payload["config"] before merging
-                        del ext_prefs["user_prompt"]
-                        # Also remove from current_data if it exists there (cleanup legacy)
-                        if "extension_preferences" in current_data:
-                            if "user_prompt" in current_data["extension_preferences"]:
-                                del current_data["extension_preferences"]["user_prompt"]
-
-                # --- SANITIZE SKILLS ---
-                # The payload contains "effective" skills (User + Default + Workspace).
-                # We must NOT save Workspace skills into the User Config (config.json).
-                # Default skills ARE saved if the user has them, because User Settings > Default.
-                if "skill_directories" in payload["config"]:
-                    incoming_skills = payload["config"]["skill_directories"]
-                    system_skills = set()
-
-                    # Identify Workspace Skills to Remove
-                    # The workspace skills path is <root>/.github/skills
-                    if self.root_path:
-                        ws_skills_path = os.path.join(
-                            self.root_path, ".github", "skills"
-                        )
-                        # Normalize for comparison
-                        system_skills.add(os.path.normpath(ws_skills_path))
-
-                    # Filter Incoming
-                    filtered_skills = []
-                    for s in incoming_skills:
-                        if os.path.normpath(s) not in system_skills:
-                            filtered_skills.append(s)
-
-                    logger.info(
-                        f"Sanitized skills: {len(incoming_skills)} -> {len(filtered_skills)} (Removed {len(incoming_skills) - len(filtered_skills)} workspace skills)"
-                    )
-                    payload["config"]["skill_directories"] = filtered_skills
-
-                # Encrypt secret fields (team_manifest_url -> _encrypted)
-                # before merging. EncryptError aborts the entire write per
-                # spec § "EncryptError handling".
-                try:
-                    self._encrypt_secrets_before_write(payload["config"])
-                except secret_store.EncryptError as e:
-                    logger.error(
-                        "Failed to encrypt secret field; aborting config write. "
-                        "Error: %s", e
-                    )
-                    return {
-                        "error": "Failed to encrypt secret field; configuration not saved."
-                    }
-
-                # Merge new config
-                current_data.update(payload["config"])
-
-                with open(user_config_path, "w") as f:
-                    json.dump(current_data, f, indent=2)
-                logger.info("Updated config.json")
-
-                # Apply log level immediately (before session refresh)
-                ext_prefs = current_data.get("extension_preferences", {})
-                _apply_log_level(ext_prefs.get("log_level", "INFO"))
-
-                # Apply analyze timeout immediately (C2b-lite). Mirror the
-                # clamp + coercion in _load_config so an Options edit takes
-                # effect on the very next analyze without host restart.
-                try:
-                    _raw_timeout = int(ext_prefs.get("analyze_timeout_seconds", 1200))
-                except (TypeError, ValueError):
-                    _raw_timeout = 1200
-                self.analyze_timeout_seconds = max(60, min(3600, _raw_timeout))
-
-            # 3. Refresh the current deterministic case session. Config edits
-            # must not replace it with a generic UUID while leaving a stale
-            # current_case_id behind. With no active case, defer session
-            # creation until the next Analyze request supplies an identity.
-            if self.current_case_id:
-                session_id = self._case_to_session_id(self.current_case_id)
-                success = await self._refresh_session(
-                    session_id=session_id,
-                    case_id=self.current_case_id,
-                )
-            else:
-                self._invalidate_active_session()
-                success = True
-
-            if success:
+        for field_name, value in (
+            ("user_instructions", new_instr),
+            ("user_prompt", new_prompt),
+        ):
+            if value is not None and not isinstance(value, str):
                 return {
-                    "success": True,
-                    "message": "Configuration updated and session refreshed.",
+                    "success": False,
+                    "config_saved": False,
+                    "error": f"{field_name} must be a string.",
                 }
-            else:
-                return {"error": "Configuration saved but session refresh failed."}
 
-        except Exception as e:
-            logger.error(f"Error updating config: {e}")
-            return {"error": str(e)}
+        config_saved = False
+        try:
+            if "config" in payload:
+                incoming_config = payload["config"]
+                if not isinstance(incoming_config, dict):
+                    raise TypeError("config must be an object")
+                # Applies live log level and analyze_timeout_seconds settings.
+                self._write_user_config(incoming_config)
+            if new_instr is not None:
+                self._write_utf8_text(
+                    os.path.join(USER_DATA_DIR, "copilot-instructions.md"),
+                    new_instr,
+                )
+            if new_prompt is not None:
+                self._write_utf8_text(
+                    os.path.join(USER_DATA_DIR, "user_prompt.md"),
+                    new_prompt,
+                )
+            config_saved = True
+        except secret_store.EncryptError as error:
+            logger.error(
+                "Secret encryption failed; configuration was not saved: %s",
+                type(error).__name__,
+            )
+            return {
+                "success": False,
+                "config_saved": False,
+                "error": "Configuration was not saved.",
+            }
+        except Exception as error:
+            logger.error("Configuration write failed: %s", type(error).__name__)
+            return {
+                "success": False,
+                "config_saved": False,
+                "error": "Configuration was not saved.",
+            }
+
+        # Preserve the current deterministic case. With no active case, defer
+        # session creation until the next Analyze supplies an identity.
+        if self.current_case_id:
+            session_id = self._case_to_session_id(self.current_case_id)
+            success = await self._refresh_session(
+                session_id=session_id,
+                case_id=self.current_case_id,
+            )
+        else:
+            self._invalidate_active_session()
+            success = True
+
+        if success:
+            return {
+                "success": True,
+                "config_saved": config_saved,
+                "message": "Configuration updated and session refreshed.",
+            }
+
+        prompt_error = getattr(self, "last_prompt_source_error", None)
+        self._invalidate_active_session()
+        if prompt_error:
+            return {
+                "success": False,
+                "config_saved": config_saved,
+                "error_code": prompt_error.error_code,
+                "error": str(prompt_error),
+            }
+        return {
+            "success": False,
+            "config_saved": config_saved,
+            "error": "Configuration saved but session refresh failed.",
+        }
 
     def start_input_thread(self):
         """Starts a daemon thread to read stdin without blocking the async loop."""
@@ -1967,7 +2040,15 @@ class NativeHost:
     def send_message(self, message_content):
         """Writes a message to stdout in Native Messaging format."""
         try:
-            logger.debug(f"Sending message: {json.dumps(message_content)}")
+            logger.debug(
+                "Sending message: requestId=%r status=%r action=%r error=%r error_code=%r data_type=%s",
+                message_content.get("requestId"),
+                message_content.get("status"),
+                message_content.get("action"),
+                message_content.get("error"),
+                message_content.get("error_code"),
+                type(message_content.get("data")).__name__,
+            )
             encoded_content = json.dumps(message_content).encode("utf-8")
             encoded_length = struct.pack("@I", len(encoded_content))
 
@@ -2125,8 +2206,12 @@ class NativeHost:
         if self.current_prompt_fingerprint != snapshot.fingerprint:
             logger.info(
                 "Prompt fingerprint changed: %r -> %r.",
-                self.current_prompt_fingerprint,
-                snapshot.fingerprint,
+                (
+                    self.current_prompt_fingerprint[:11]
+                    if self.current_prompt_fingerprint
+                    else None
+                ),
+                snapshot.fingerprint[:11],
             )
             needs_refresh = True
 
@@ -2209,7 +2294,6 @@ class NativeHost:
                 else scrubbed_text
             )
 
-            logger.debug(f"Scrubbed Prompt content: {prompt}")
             logger.info(f"Sending prompt to Copilot (length: {len(prompt)})")
 
             self.send_progress("Waiting for Copilot agent...")
@@ -2556,7 +2640,9 @@ class NativeHost:
 
             elif action == "get_config":
                 # Return the effective configuration (merging defaults + user + workspace)
-                session_config = self._get_session_config()
+                session_config = self._get_session_config(
+                    include_prompt_status=True
+                )
                 # Cast to dict for JSON serialization
                 data = dict(session_config)
                 data["host_version"] = VERSION
