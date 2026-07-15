@@ -512,6 +512,53 @@ class TestPromptFingerprintLifecycle(
         self.active_session.send_and_wait.assert_not_awaited()
         self.replacement_session.send_and_wait.assert_awaited_once()
 
+    async def test_send_process_exit_clears_all_active_session_state(self):
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        self.active_session.send_and_wait.side_effect = ProcessExitedError(
+            "active CLI exited"
+        )
+        dead_client = self.host.client
+        dead_client.stop.side_effect = RuntimeError("process already exited")
+
+        result = await self.host.handle_analyze_error(self.payload)
+
+        self.assertEqual(
+            result,
+            {"status": "error", "error": "SDK Error: active CLI exited"},
+        )
+        dead_client.stop.assert_awaited_once()
+        self.assertIsNone(self.host.client)
+        self.assertIsNone(self.host.client_working_directory)
+        self.assertIsNone(self.host.session)
+        self.assertIsNone(self.host.current_session_id)
+        self.assertIsNone(self.host.current_case_id)
+        self.assertIsNone(self.host.current_session_root_path)
+        self.assertIsNone(self.host.current_prompt_fingerprint)
+
+    async def test_ordinary_send_error_retains_healthy_active_state(self):
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        self.active_session.send_and_wait.side_effect = RuntimeError(
+            "tool execution rejected"
+        )
+        healthy_client = self.host.client
+
+        result = await self.host.handle_analyze_error(self.payload)
+
+        self.assertEqual(
+            result,
+            {"status": "error", "error": "SDK Error: tool execution rejected"},
+        )
+        healthy_client.stop.assert_not_awaited()
+        self.assertIs(self.host.client, healthy_client)
+        self.assertIs(self.host.session, self.active_session)
+        self.assertEqual(self.host.current_session_id, self.session_id)
+        self.assertEqual(self.host.current_case_id, self.case_id)
+        self.assertEqual(self.host.current_session_root_path, self.root)
+        self.assertEqual(
+            self.host.current_prompt_fingerprint,
+            self.snapshot.fingerprint,
+        )
+
     async def test_configuration_failure_retains_healthy_client(self):
         self.host._refresh_session = NativeHost._refresh_session.__get__(
             self.host,

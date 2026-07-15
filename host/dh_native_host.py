@@ -2451,8 +2451,20 @@ class NativeHost:
             logger.error(f"SDK Error: {e}")
             # Invalidate session on pipe/subprocess errors so next request reconnects
             error_text = str(e).lower()
-            if "invalid argument" in error_text or "broken pipe" in error_text:
+            if (
+                isinstance(e, ProcessExitedError)
+                or "invalid argument" in error_text
+                or "broken pipe" in error_text
+            ):
                 logger.info("Invalidating session due to broken pipe/subprocess.")
+                dead_client = self.client
+                if dead_client:
+                    try:
+                        await dead_client.stop()
+                    except Exception as stop_error:
+                        logger.warning(
+                            f"Failed to stop dead Copilot client cleanly: {stop_error}"
+                        )
                 self._invalidate_active_session(clear_client=True)
             return {"status": "error", "error": f"SDK Error: {str(e)}"}
 
