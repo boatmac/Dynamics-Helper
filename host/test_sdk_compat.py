@@ -13,6 +13,17 @@ import typing
 import unittest
 
 
+class TestCustomInstructionIsolation(unittest.TestCase):
+    def test_session_methods_accept_skip_custom_instructions(self):
+        import inspect
+        from copilot import CopilotClient
+
+        for name in ("create_session", "resume_session"):
+            with self.subTest(name=name):
+                signature = inspect.signature(getattr(CopilotClient, name))
+                self.assertIn("skip_custom_instructions", signature.parameters)
+
+
 class TestSdkImportPaths(unittest.TestCase):
     """1.0.5 removed `SubprocessConfig` (→ RuntimeConnection) and demoted
     `PermissionRequestResult` to a Union. Make sure the paths DH imports

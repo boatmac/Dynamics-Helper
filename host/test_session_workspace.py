@@ -13,18 +13,47 @@ import os
 import tempfile
 
 import host.dh_native_host as dhm
-from host.dh_native_host import NativeHost
+from host.dh_native_host import NativeHost, PromptSnapshot
+
+
+def make_snapshot(root_path: str | None, fingerprint: str = "v1:workspace"):
+    return PromptSnapshot(
+        mode="dh-specific",
+        effective_root=root_path,
+        core_bytes=b"CORE",
+        core_text="CORE",
+        selected_bytes=b"DH",
+        selected_text="DH",
+        fingerprint=fingerprint,
+    )
+
+
+def make_session_config(root_path: str) -> dict:
+    return {
+        "_effective_root": None,
+        "_use_workspace_only": False,
+        "working_directory": root_path,
+    }
+
+
+def initialize_prompt_state(host: NativeHost) -> None:
+    host.current_prompt_fingerprint = None
+    host.last_prompt_source_error = None
 
 
 class TestClientWorkspaceInitialization(unittest.IsolatedAsyncioTestCase):
     def _host_shell(self, root_path: str, *, mock_refresh: bool = True):
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.client = None
         host.session = None
         host.root_path = None
         host.find_copilot_cli = MagicMock(return_value=None)
         host._get_session_config = MagicMock(
-            return_value={"working_directory": root_path}
+            return_value=make_session_config(root_path)
+        )
+        host._resolve_prompt_snapshot = MagicMock(
+            return_value=make_snapshot(root_path)
         )
         if mock_refresh:
             host._refresh_session = AsyncMock(return_value=True)
@@ -155,6 +184,7 @@ class TestClientWorkspaceInitialization(unittest.IsolatedAsyncioTestCase):
         host.current_session_id = "stale-session"
         host.current_case_id = "2601190030003106"
         host.current_session_root_path = root_path
+        host.current_prompt_fingerprint = "v1:stale"
         broken_client = MagicMock()
         broken_client.create_session = AsyncMock(side_effect=OSError("broken pipe"))
         host.client = broken_client
@@ -181,6 +211,7 @@ class TestClientWorkspaceInitialization(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(host.current_session_id)
         self.assertIsNone(host.current_case_id)
         self.assertIsNone(host.current_session_root_path)
+        self.assertIsNone(host.current_prompt_fingerprint)
 
 
 class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
@@ -189,6 +220,7 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         session_id = NativeHost._case_to_session_id(case_id)
         root_path = r"C:\MyWorkbench\MyCases"
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.client = MagicMock()
         host.client.resume_session = AsyncMock(
             return_value=SimpleNamespace(session_id=session_id)
@@ -201,7 +233,10 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         host.current_session_root_path = None
         host.last_session_error = None
         host._get_session_config = MagicMock(
-            return_value={"working_directory": root_path}
+            return_value=make_session_config(root_path)
+        )
+        host._resolve_prompt_snapshot = MagicMock(
+            return_value=make_snapshot(root_path)
         )
 
         success = await host._refresh_session(
@@ -220,6 +255,7 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         payload_root = r"C:\MyWorkbench\PayloadRoot"
         disk_root = r"C:\MyWorkbench\DiskRoot"
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.client = MagicMock()
         host.client.resume_session = AsyncMock(
             return_value=SimpleNamespace(session_id=session_id)
@@ -232,9 +268,12 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         host.current_session_root_path = None
         host.last_session_error = None
         host._get_session_config = MagicMock(
-            side_effect=lambda *, root_path_override: {
-                "working_directory": root_path_override or os.getcwd()
-            }
+            side_effect=lambda *, root_path_override: make_session_config(
+                root_path_override or os.getcwd()
+            )
+        )
+        host._resolve_prompt_snapshot = MagicMock(
+            return_value=make_snapshot(payload_root)
         )
 
         success = await host._refresh_session(
@@ -255,6 +294,7 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         case_id = "2601190030003106"
         session_id = NativeHost._case_to_session_id(case_id)
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.current_case_id = case_id
         host.current_session_id = session_id
         host.session = object()
@@ -272,8 +312,10 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         case_id = "2601190030003106"
         root_path = r"C:\MyWorkbench\MyCases"
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.current_case_id = "2601190030003105"
         host.current_session_id = "stale-session"
+        host.current_prompt_fingerprint = "v1:stale"
         host.root_path = root_path
         host.session = object()
         host.client = object()
@@ -283,6 +325,10 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         host.send_progress = MagicMock()
         host.scrubber = MagicMock()
         host.scrubber.scrub.side_effect = lambda value: value
+        config = make_session_config(root_path)
+        snapshot = make_snapshot(root_path)
+        host._get_session_config = MagicMock(return_value=config)
+        host._resolve_prompt_snapshot = MagicMock(return_value=snapshot)
 
         result = await host.handle_analyze_error(
             {
@@ -297,12 +343,14 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(host.session)
         self.assertIsNone(host.current_session_id)
         self.assertIsNone(host.current_case_id)
+        self.assertIsNone(host.current_prompt_fingerprint)
 
     async def test_missing_session_for_same_case_forces_refresh(self):
         case_id = "2601190030003106"
         session_id = NativeHost._case_to_session_id(case_id)
         root_path = r"C:\MyWorkbench\MyCases"
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.current_case_id = case_id
         host.current_session_id = session_id
         host.current_session_root_path = root_path
@@ -310,6 +358,10 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         host.session = None
         host.client = object()
         host._refresh_session = AsyncMock(return_value=True)
+        config = make_session_config(root_path)
+        snapshot = make_snapshot(root_path)
+        host._get_session_config = MagicMock(return_value=config)
+        host._resolve_prompt_snapshot = MagicMock(return_value=snapshot)
 
         result = await host.handle_analyze_error(
             {
@@ -323,7 +375,8 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         host._refresh_session.assert_awaited_once_with(
             session_id=session_id,
             case_id=case_id,
-            working_directory_override=root_path,
+            session_config=config,
+            prompt_snapshot=snapshot,
         )
 
     async def test_session_root_mismatch_for_same_case_forces_refresh(self):
@@ -331,6 +384,7 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         session_id = NativeHost._case_to_session_id(case_id)
         root_path = r"C:\MyWorkbench\MyCases"
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.current_case_id = case_id
         host.current_session_id = session_id
         host.current_session_root_path = r"C:\OldRoot"
@@ -338,6 +392,10 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         host.session = object()
         host.client = object()
         host._refresh_session = AsyncMock(return_value=True)
+        config = make_session_config(root_path)
+        snapshot = make_snapshot(root_path)
+        host._get_session_config = MagicMock(return_value=config)
+        host._resolve_prompt_snapshot = MagicMock(return_value=snapshot)
 
         result = await host.handle_analyze_error(
             {
@@ -351,7 +409,8 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         host._refresh_session.assert_awaited_once_with(
             session_id=session_id,
             case_id=case_id,
-            working_directory_override=root_path,
+            session_config=config,
+            prompt_snapshot=snapshot,
         )
 
     async def test_missing_root_payload_preserves_configured_root(self):
@@ -359,6 +418,7 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         session_id = NativeHost._case_to_session_id(case_id)
         root_path = r"C:\MyWorkbench\MyCases"
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.current_case_id = case_id
         host.current_session_id = session_id
         host.current_session_root_path = root_path
@@ -366,9 +426,17 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         host.session = object()
         host.client = object()
         host._refresh_session = AsyncMock(return_value=True)
+        snapshot = make_snapshot(root_path)
+        host.current_prompt_fingerprint = snapshot.fingerprint
+        config = {
+            **make_session_config(root_path),
+            "_effective_root": root_path,
+        }
         host._get_session_config = MagicMock(
-            return_value={"working_directory": root_path}
+            return_value=config
         )
+        host._resolve_prompt_snapshot = MagicMock(return_value=snapshot)
+        host._validate_effective_root = MagicMock()
 
         result = await host.handle_analyze_error(
             {
@@ -388,6 +456,7 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         session_id = NativeHost._case_to_session_id(case_id)
         configured_root = r"C:\MyWorkbench\MyCases"
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.current_case_id = case_id
         host.current_session_id = session_id
         host.current_session_root_path = configured_root
@@ -395,10 +464,17 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         host.session = object()
         host.client = object()
         host._refresh_session = AsyncMock(return_value=True)
+        snapshot = make_snapshot(configured_root)
+        host.current_prompt_fingerprint = snapshot.fingerprint
+        host._resolve_prompt_snapshot = MagicMock(return_value=snapshot)
+        host._validate_effective_root = MagicMock()
 
         def load_config():
             host.root_path = configured_root
-            return {"working_directory": configured_root}
+            return {
+                **make_session_config(configured_root),
+                "_effective_root": configured_root,
+            }
 
         host._get_session_config = MagicMock(side_effect=load_config)
 
@@ -426,6 +502,7 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as root_path:
             host = NativeHost.__new__(NativeHost)
+            initialize_prompt_state(host)
             host.current_case_id = case_id
             host.current_session_id = session_id
             host.current_session_root_path = root_path
@@ -439,6 +516,15 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
                 return_value=SimpleNamespace(isAuthenticated=True)
             )
             host._refresh_session = AsyncMock(return_value=True)
+            config = {
+                "_effective_root": root_path,
+                "_use_workspace_only": False,
+                "working_directory": root_path,
+            }
+            snapshot = make_snapshot(root_path)
+            host.current_prompt_fingerprint = snapshot.fingerprint
+            host._get_session_config = MagicMock(return_value=config)
+            host._resolve_prompt_snapshot = MagicMock(return_value=snapshot)
             host.current_request_id = None
             host.send_progress = MagicMock()
             host.scrubber = MagicMock()
@@ -459,7 +545,8 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         host._refresh_session.assert_awaited_once_with(
             session_id=session_id,
             case_id=case_id,
-            working_directory_override=os.path.normpath(root_path),
+            session_config=config,
+            prompt_snapshot=snapshot,
         )
 
 
@@ -478,6 +565,7 @@ class TestRootPathNormalization(unittest.TestCase):
 
     def test_config_empty_root_clears_previous_host_root(self):
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.root_path = r"C:\OldRoot"
         host.analyze_timeout_seconds = 1200
         host._decrypt_secrets_in_memory = MagicMock()
@@ -493,6 +581,7 @@ class TestRootPathNormalization(unittest.TestCase):
 
     def test_config_override_drives_workspace_discovery_not_disk_root(self):
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.root_path = None
         host.analyze_timeout_seconds = 1200
         host._decrypt_secrets_in_memory = MagicMock()
@@ -520,6 +609,7 @@ class TestRootPathNormalization(unittest.TestCase):
 
     def test_corrupt_user_config_does_not_fallback_to_host_cwd(self):
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.root_path = None
         host.analyze_timeout_seconds = 1200
         host._decrypt_secrets_in_memory = MagicMock()
@@ -573,6 +663,7 @@ class TestResumeCommand(unittest.TestCase):
 class TestHealthCheck(unittest.IsolatedAsyncioTestCase):
     async def test_started_client_without_case_session_is_healthy(self):
         host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
         host.client = object()
         host.session = None
         host.loop = None
