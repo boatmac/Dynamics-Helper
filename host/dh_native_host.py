@@ -1855,7 +1855,22 @@ class NativeHost:
         with open(path, "w", encoding="utf-8", newline="") as stream:
             stream.write(value)
 
+    @staticmethod
+    def _validate_user_config(incoming_config: dict) -> None:
+        if (
+            "extension_preferences" in incoming_config
+            and not isinstance(incoming_config["extension_preferences"], dict)
+        ):
+            raise TypeError("extension_preferences must be an object")
+        if "skill_directories" in incoming_config:
+            incoming_skills = incoming_config["skill_directories"]
+            if not isinstance(incoming_skills, list) or any(
+                not isinstance(skill, str) for skill in incoming_skills
+            ):
+                raise TypeError("skill_directories must be a list of strings")
+
     def _write_user_config(self, incoming_config: dict) -> dict:
+        self._validate_user_config(incoming_config)
         user_config_path = os.path.join(USER_DATA_DIR, "config.json")
         current_data: dict = {}
         if os.path.exists(user_config_path):
@@ -1868,16 +1883,10 @@ class NativeHost:
         config_to_write = copy.deepcopy(incoming_config)
         ext_prefs = config_to_write.get("extension_preferences")
         if "extension_preferences" in config_to_write:
-            if not isinstance(ext_prefs, dict):
-                raise TypeError("extension_preferences must be an object")
             ext_prefs.pop("user_prompt", None)
 
         if "skill_directories" in config_to_write:
             incoming_skills = config_to_write["skill_directories"]
-            if not isinstance(incoming_skills, list) or any(
-                not isinstance(skill, str) for skill in incoming_skills
-            ):
-                raise TypeError("skill_directories must be a list of strings")
 
         current_ext = current_data.get("extension_preferences")
         if isinstance(current_ext, dict):
@@ -1933,14 +1942,15 @@ class NativeHost:
                 }
 
         config_saved = False
-        durable_write_completed = False
+        durable_write_attempted = False
         try:
             if "config" in payload:
                 incoming_config = payload["config"]
                 if not isinstance(incoming_config, dict):
                     raise TypeError("config must be an object")
+                self._validate_user_config(incoming_config)
+                durable_write_attempted = True
                 saved_config = self._write_user_config(incoming_config)
-                durable_write_completed = True
                 saved_ext = saved_config.get("extension_preferences", {})
                 _apply_log_level(saved_ext.get("log_level", "INFO"))
                 try:
@@ -1954,24 +1964,24 @@ class NativeHost:
                     min(3600, raw_timeout),
                 )
             if new_instr is not None:
+                durable_write_attempted = True
                 self._write_utf8_text(
                     os.path.join(USER_DATA_DIR, "copilot-instructions.md"),
                     new_instr,
                 )
-                durable_write_completed = True
             if new_prompt is not None:
+                durable_write_attempted = True
                 self._write_utf8_text(
                     os.path.join(USER_DATA_DIR, "user_prompt.md"),
                     new_prompt,
                 )
-                durable_write_completed = True
             config_saved = True
         except secret_store.EncryptError as error:
             logger.error(
                 "Secret encryption failed; configuration was not saved: %s",
                 type(error).__name__,
             )
-            if durable_write_completed:
+            if durable_write_attempted:
                 self._invalidate_active_session()
             return {
                 "success": False,
@@ -1980,9 +1990,9 @@ class NativeHost:
             }
         except Exception as error:
             logger.error("Configuration write failed: %s", type(error).__name__)
-            # Completed writes are not rolled back, so stale active state must
-            # not remain reusable after the requested operation fails.
-            if durable_write_completed:
+            # Writer attempts may have truncated or partially changed a file.
+            # No rollback is attempted, so stale active state cannot be reused.
+            if durable_write_attempted:
                 self._invalidate_active_session()
             return {
                 "success": False,

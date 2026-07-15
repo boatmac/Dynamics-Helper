@@ -10,6 +10,29 @@ import host.dh_native_host as dhm
 from host.dh_native_host import NativeHost, PromptSourceError
 
 
+class _FailingTextWriter:
+    def __init__(self, stream, failure_mode: str):
+        self.stream = stream
+        self.failure_mode = failure_mode
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.stream.close()
+        if self.failure_mode == "exit" and exc_type is None:
+            raise OSError("test close failure")
+        return False
+
+    def write(self, value: str):
+        if self.failure_mode == "write":
+            prefix_length = max(1, len(value) // 2)
+            self.stream.write(value[:prefix_length])
+            self.stream.flush()
+            raise OSError("test partial write failure")
+        return self.stream.write(value)
+
+
 class PromptSourceFixture:
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -88,6 +111,20 @@ class PromptSourceFixture:
             if normalized == normalized_denied:
                 raise PermissionError("denied by test")
             return original_open(path, *args, **kwargs)
+
+        return patch("builtins.open", side_effect=guarded_open)
+
+    def _fail_text_writer(self, failed_path: str, failure_mode: str):
+        original_open = open
+        normalized_failed = os.path.normcase(os.path.normpath(failed_path))
+
+        def guarded_open(path, *args, **kwargs):
+            stream = original_open(path, *args, **kwargs)
+            mode = args[0] if args else kwargs.get("mode", "r")
+            normalized = os.path.normcase(os.path.normpath(os.fspath(path)))
+            if normalized == normalized_failed and "w" in mode:
+                return _FailingTextWriter(stream, failure_mode)
+            return stream
 
         return patch("builtins.open", side_effect=guarded_open)
 
@@ -434,6 +471,78 @@ class TestPromptConfigApi(
         self.assertEqual(self.host.client_working_directory, self.root)
         self.host._refresh_session.assert_not_awaited()
 
+    async def test_prompt_writer_failure_after_mutation_invalidates_attempt(self):
+        for failure_mode in ("write", "exit"):
+            with self.subTest(failure_mode=failure_mode):
+                healthy_client = object()
+                self._write(self.dh_path, b"old instructions")
+                self.host.client = healthy_client
+                self.host.client_working_directory = self.root
+                self.host.session = object()
+                self.host.current_case_id = "2601190030003106"
+                self.host.current_session_id = "stale-session"
+                self.host.current_session_root_path = self.root
+                self.host.current_prompt_fingerprint = "v1:stale"
+                self.host._refresh_session = AsyncMock(return_value=True)
+
+                with self._fail_text_writer(self.dh_path, failure_mode):
+                    result = await self.host.handle_update_config({
+                        "user_instructions": "new instructions",
+                    })
+
+                self.assertEqual(result, {
+                    "success": False,
+                    "config_saved": False,
+                    "error": "Configuration was not saved.",
+                })
+                with open(self.dh_path, "rb") as stream:
+                    changed = stream.read()
+                self.assertNotEqual(changed, b"old instructions")
+                self.assertTrue(changed.startswith(b"new"))
+                self.assertIsNone(self.host.session)
+                self.assertIsNone(self.host.current_session_id)
+                self.assertIsNone(self.host.current_case_id)
+                self.assertIsNone(self.host.current_session_root_path)
+                self.assertIsNone(self.host.current_prompt_fingerprint)
+                self.assertIs(self.host.client, healthy_client)
+                self.assertEqual(self.host.client_working_directory, self.root)
+                self.host._refresh_session.assert_not_awaited()
+
+    async def test_config_writer_close_failure_invalidates_attempt(self):
+        config_path = os.path.join(self.user_dir, "config.json")
+        original_config = b'{"preserved": true}\n'
+        self._write(config_path, original_config)
+        healthy_client = object()
+        self.host.client = healthy_client
+        self.host.client_working_directory = self.root
+        self.host.session = object()
+        self.host.current_case_id = "2601190030003106"
+        self.host.current_session_id = "stale-session"
+        self.host.current_session_root_path = self.root
+        self.host.current_prompt_fingerprint = "v1:stale"
+        self.host._refresh_session = AsyncMock(return_value=True)
+
+        with self._fail_text_writer(config_path, "exit"):
+            result = await self.host.handle_update_config({
+                "config": {"root_path": self.root},
+            })
+
+        self.assertEqual(result, {
+            "success": False,
+            "config_saved": False,
+            "error": "Configuration was not saved.",
+        })
+        with open(config_path, "r", encoding="utf-8") as stream:
+            self.assertEqual(json.load(stream)["root_path"], self.root)
+        self.assertIsNone(self.host.session)
+        self.assertIsNone(self.host.current_session_id)
+        self.assertIsNone(self.host.current_case_id)
+        self.assertIsNone(self.host.current_session_root_path)
+        self.assertIsNone(self.host.current_prompt_fingerprint)
+        self.assertIs(self.host.client, healthy_client)
+        self.assertEqual(self.host.client_working_directory, self.root)
+        self.host._refresh_session.assert_not_awaited()
+
     async def test_post_config_apply_failure_invalidates_after_durable_write(self):
         healthy_client = object()
         self.host.client = healthy_client
@@ -483,7 +592,15 @@ class TestPromptConfigApi(
         original_config = b'{"preserved": true}\n'
         self._write(config_path, original_config)
         self._write(prompt_path, b"old prompt")
+        healthy_client = object()
+        stale_session = object()
+        self.host.client = healthy_client
+        self.host.client_working_directory = self.root
+        self.host.session = stale_session
         self.host.current_case_id = "2601190030003106"
+        self.host.current_session_id = "stale-session"
+        self.host.current_session_root_path = self.root
+        self.host.current_prompt_fingerprint = "v1:stale"
         self.host._refresh_session = AsyncMock(return_value=True)
 
         result = await self.host.handle_update_config({
@@ -503,6 +620,13 @@ class TestPromptConfigApi(
             self.assertEqual(stream.read(), b"DH-SPECIFIC")
         with open(prompt_path, "rb") as stream:
             self.assertEqual(stream.read(), b"old prompt")
+        self.assertIs(self.host.session, stale_session)
+        self.assertEqual(self.host.current_session_id, "stale-session")
+        self.assertEqual(self.host.current_case_id, "2601190030003106")
+        self.assertEqual(self.host.current_session_root_path, self.root)
+        self.assertEqual(self.host.current_prompt_fingerprint, "v1:stale")
+        self.assertIs(self.host.client, healthy_client)
+        self.assertEqual(self.host.client_working_directory, self.root)
         self.host._encrypt_secrets_before_write.assert_not_called()
         self.host._refresh_session.assert_not_awaited()
 
