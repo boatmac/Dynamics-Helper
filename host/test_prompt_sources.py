@@ -1,3 +1,4 @@
+import copy
 import os
 import tempfile
 import json
@@ -393,6 +394,188 @@ class TestPromptConfigApi(
         with open(prompt_path, "rb") as stream:
             self.assertEqual(stream.read(), b"old prompt")
 
+    async def test_late_prompt_write_failure_invalidates_after_config_saved(self):
+        healthy_client = object()
+        stale_session = object()
+        self.host.client = healthy_client
+        self.host.client_working_directory = self.root
+        self.host.session = stale_session
+        self.host.current_case_id = "2601190030003106"
+        self.host.current_session_id = "stale-session"
+        self.host.current_session_root_path = self.root
+        self.host.current_prompt_fingerprint = "v1:stale"
+        self.host._refresh_session = AsyncMock(return_value=True)
+
+        with self._deny_open(self.dh_path):
+            result = await self.host.handle_update_config({
+                "config": {"root_path": self.root},
+                "user_instructions": "new instructions",
+            })
+
+        self.assertEqual(result, {
+            "success": False,
+            "config_saved": False,
+            "error": "Configuration was not saved.",
+        })
+        with open(
+            os.path.join(self.user_dir, "config.json"),
+            "r",
+            encoding="utf-8",
+        ) as stream:
+            self.assertEqual(json.load(stream)["root_path"], self.root)
+        with open(self.dh_path, "rb") as stream:
+            self.assertEqual(stream.read(), b"DH-SPECIFIC")
+        self.assertIsNone(self.host.session)
+        self.assertIsNone(self.host.current_session_id)
+        self.assertIsNone(self.host.current_case_id)
+        self.assertIsNone(self.host.current_session_root_path)
+        self.assertIsNone(self.host.current_prompt_fingerprint)
+        self.assertIs(self.host.client, healthy_client)
+        self.assertEqual(self.host.client_working_directory, self.root)
+        self.host._refresh_session.assert_not_awaited()
+
+    async def test_post_config_apply_failure_invalidates_after_durable_write(self):
+        healthy_client = object()
+        self.host.client = healthy_client
+        self.host.client_working_directory = self.root
+        self.host.session = object()
+        self.host.current_case_id = "2601190030003106"
+        self.host.current_session_id = "stale-session"
+        self.host.current_session_root_path = self.root
+        self.host.current_prompt_fingerprint = "v1:stale"
+        self.host._refresh_session = AsyncMock(return_value=True)
+
+        with patch.object(
+            dhm,
+            "_apply_log_level",
+            side_effect=RuntimeError("test apply failure"),
+        ):
+            result = await self.host.handle_update_config({
+                "config": {
+                    "root_path": self.root,
+                    "extension_preferences": {"log_level": "INFO"},
+                },
+            })
+
+        self.assertEqual(result, {
+            "success": False,
+            "config_saved": False,
+            "error": "Configuration was not saved.",
+        })
+        with open(
+            os.path.join(self.user_dir, "config.json"),
+            "r",
+            encoding="utf-8",
+        ) as stream:
+            self.assertEqual(json.load(stream)["root_path"], self.root)
+        self.assertIsNone(self.host.session)
+        self.assertIsNone(self.host.current_session_id)
+        self.assertIsNone(self.host.current_case_id)
+        self.assertIsNone(self.host.current_session_root_path)
+        self.assertIsNone(self.host.current_prompt_fingerprint)
+        self.assertIs(self.host.client, healthy_client)
+        self.assertEqual(self.host.client_working_directory, self.root)
+        self.host._refresh_session.assert_not_awaited()
+
+    async def test_invalid_extension_preferences_is_rejected_before_writes(self):
+        config_path = os.path.join(self.user_dir, "config.json")
+        prompt_path = os.path.join(self.user_dir, "user_prompt.md")
+        original_config = b'{"preserved": true}\n'
+        self._write(config_path, original_config)
+        self._write(prompt_path, b"old prompt")
+        self.host.current_case_id = "2601190030003106"
+        self.host._refresh_session = AsyncMock(return_value=True)
+
+        result = await self.host.handle_update_config({
+            "config": {"extension_preferences": None},
+            "user_instructions": "new instructions",
+            "user_prompt": "new prompt",
+        })
+
+        self.assertEqual(result, {
+            "success": False,
+            "config_saved": False,
+            "error": "Configuration was not saved.",
+        })
+        with open(config_path, "rb") as stream:
+            self.assertEqual(stream.read(), original_config)
+        with open(self.dh_path, "rb") as stream:
+            self.assertEqual(stream.read(), b"DH-SPECIFIC")
+        with open(prompt_path, "rb") as stream:
+            self.assertEqual(stream.read(), b"old prompt")
+        self.host._encrypt_secrets_before_write.assert_not_called()
+        self.host._refresh_session.assert_not_awaited()
+
+    async def test_invalid_skill_directories_is_rejected_before_writes(self):
+        config_path = os.path.join(self.user_dir, "config.json")
+        prompt_path = os.path.join(self.user_dir, "user_prompt.md")
+        original_config = b'{"preserved": true}\n'
+        for invalid_skills in ("not-a-list", [self.root, 42]):
+            with self.subTest(invalid_skills=invalid_skills):
+                self._write(config_path, original_config)
+                self._write(self.dh_path, b"DH-SPECIFIC")
+                self._write(prompt_path, b"old prompt")
+                self.host.current_case_id = "2601190030003106"
+                self.host._refresh_session = AsyncMock(return_value=True)
+
+                result = await self.host.handle_update_config({
+                    "config": {"skill_directories": invalid_skills},
+                    "user_instructions": "new instructions",
+                    "user_prompt": "new prompt",
+                })
+
+                self.assertEqual(result, {
+                    "success": False,
+                    "config_saved": False,
+                    "error": "Configuration was not saved.",
+                })
+                with open(config_path, "rb") as stream:
+                    self.assertEqual(stream.read(), original_config)
+                with open(self.dh_path, "rb") as stream:
+                    self.assertEqual(stream.read(), b"DH-SPECIFIC")
+                with open(prompt_path, "rb") as stream:
+                    self.assertEqual(stream.read(), b"old prompt")
+                self.host._encrypt_secrets_before_write.assert_not_called()
+                self.host._refresh_session.assert_not_awaited()
+                self.host._encrypt_secrets_before_write.reset_mock()
+
+    def test_write_user_config_encrypts_copy_without_mutating_input(self):
+        incoming = {
+            "extension_preferences": {
+                "team_manifest_url": "https://example.test/secret",
+                "log_level": "INFO",
+            },
+        }
+        original = copy.deepcopy(incoming)
+        self.host._encrypt_secrets_before_write = (
+            NativeHost._encrypt_secrets_before_write.__get__(
+                self.host,
+                NativeHost,
+            )
+        )
+
+        with patch.object(
+            dhm.secret_store,
+            "encrypt",
+            return_value="DETERMINISTIC-BLOB",
+        ) as encrypt:
+            self.host._write_user_config(incoming)
+
+        with open(
+            os.path.join(self.user_dir, "config.json"),
+            "r",
+            encoding="utf-8",
+        ) as stream:
+            on_disk = json.load(stream)
+        saved_ext = on_disk["extension_preferences"]
+        self.assertNotIn("team_manifest_url", saved_ext)
+        self.assertEqual(
+            saved_ext["team_manifest_url_encrypted"],
+            "DETERMINISTIC-BLOB",
+        )
+        self.assertEqual(incoming, original)
+        encrypt.assert_called_once_with("https://example.test/secret")
+
     async def test_invalid_instruction_is_rejected_before_any_write(self):
         config_path = os.path.join(self.user_dir, "config.json")
         self._write(config_path, b'{"preserved": true}')
@@ -515,8 +698,9 @@ class TestPromptConfigApi(
                 })
         self.assertNotIn(marker, "\n".join(captured.output))
 
-    async def test_analyze_log_omits_scrubbed_prompt_content(self):
-        marker = "DO-NOT-LOG-SCRUBBED-PROMPT"
+    async def test_analyze_log_omits_text_and_context_contents(self):
+        text_marker = "DO-NOT-LOG-SCRUBBED-PROMPT"
+        context_marker = "DO-NOT-LOG-RAW-CONTEXT"
         case_id = "2601190030003106"
         session_id = self.host._case_to_session_id(case_id)
         snapshot = self.host._resolve_prompt_snapshot(self.root, False)
@@ -548,14 +732,16 @@ class TestPromptConfigApi(
         )
         with self.assertLogs("dh", level="DEBUG") as captured:
             result = await self.host.handle_analyze_error({
-                "text": marker,
-                "context": "safe context",
+                "text": text_marker,
+                "context": context_marker,
                 "product": "General",
                 "caseNumber": case_id,
                 "rootPath": self.root,
             })
         self.assertEqual(result["status"], "success")
-        self.assertNotIn(marker, "\n".join(captured.output))
+        logs = "\n".join(captured.output)
+        self.assertNotIn(text_marker, logs)
+        self.assertNotIn(context_marker, logs)
 
     async def test_analyze_log_uses_short_prompt_fingerprint_prefixes(self):
         case_id = "2601190030003106"

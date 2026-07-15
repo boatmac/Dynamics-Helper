@@ -1867,14 +1867,23 @@ class NativeHost:
 
         config_to_write = copy.deepcopy(incoming_config)
         ext_prefs = config_to_write.get("extension_preferences")
-        if isinstance(ext_prefs, dict):
+        if "extension_preferences" in config_to_write:
+            if not isinstance(ext_prefs, dict):
+                raise TypeError("extension_preferences must be an object")
             ext_prefs.pop("user_prompt", None)
+
+        if "skill_directories" in config_to_write:
+            incoming_skills = config_to_write["skill_directories"]
+            if not isinstance(incoming_skills, list) or any(
+                not isinstance(skill, str) for skill in incoming_skills
+            ):
+                raise TypeError("skill_directories must be a list of strings")
+
         current_ext = current_data.get("extension_preferences")
         if isinstance(current_ext, dict):
             current_ext.pop("user_prompt", None)
 
         if "skill_directories" in config_to_write:
-            incoming_skills = config_to_write["skill_directories"]
             workspace_skill = (
                 os.path.normpath(
                     os.path.join(self.root_path, ".github", "skills")
@@ -1893,14 +1902,6 @@ class NativeHost:
         current_data.update(config_to_write)
         with open(user_config_path, "w", encoding="utf-8") as stream:
             json.dump(current_data, stream, indent=2)
-
-        saved_ext = current_data.get("extension_preferences", {})
-        _apply_log_level(saved_ext.get("log_level", "INFO"))
-        try:
-            raw_timeout = int(saved_ext.get("analyze_timeout_seconds", 1200))
-        except (TypeError, ValueError):
-            raw_timeout = 1200
-        self.analyze_timeout_seconds = max(60, min(3600, raw_timeout))
         return current_data
 
     async def handle_update_config(self, payload):
@@ -1932,29 +1933,46 @@ class NativeHost:
                 }
 
         config_saved = False
+        durable_write_completed = False
         try:
             if "config" in payload:
                 incoming_config = payload["config"]
                 if not isinstance(incoming_config, dict):
                     raise TypeError("config must be an object")
-                # Applies live log level and analyze_timeout_seconds settings.
-                self._write_user_config(incoming_config)
+                saved_config = self._write_user_config(incoming_config)
+                durable_write_completed = True
+                saved_ext = saved_config.get("extension_preferences", {})
+                _apply_log_level(saved_ext.get("log_level", "INFO"))
+                try:
+                    raw_timeout = int(
+                        saved_ext.get("analyze_timeout_seconds", 1200)
+                    )
+                except (TypeError, ValueError):
+                    raw_timeout = 1200
+                self.analyze_timeout_seconds = max(
+                    60,
+                    min(3600, raw_timeout),
+                )
             if new_instr is not None:
                 self._write_utf8_text(
                     os.path.join(USER_DATA_DIR, "copilot-instructions.md"),
                     new_instr,
                 )
+                durable_write_completed = True
             if new_prompt is not None:
                 self._write_utf8_text(
                     os.path.join(USER_DATA_DIR, "user_prompt.md"),
                     new_prompt,
                 )
+                durable_write_completed = True
             config_saved = True
         except secret_store.EncryptError as error:
             logger.error(
                 "Secret encryption failed; configuration was not saved: %s",
                 type(error).__name__,
             )
+            if durable_write_completed:
+                self._invalidate_active_session()
             return {
                 "success": False,
                 "config_saved": False,
@@ -1962,6 +1980,10 @@ class NativeHost:
             }
         except Exception as error:
             logger.error("Configuration write failed: %s", type(error).__name__)
+            # Completed writes are not rolled back, so stale active state must
+            # not remain reusable after the requested operation fails.
+            if durable_write_completed:
+                self._invalidate_active_session()
             return {
                 "success": False,
                 "config_saved": False,
@@ -2163,12 +2185,12 @@ class NativeHost:
 
         # Diagnostic: log the identifying payload fields so we can correlate
         # cross-tab issues (e.g. Tab B sending stale caseNumber from Tab A).
-        # text/error body is intentionally excluded to keep PII out of the log.
+        # Text and context bodies are intentionally excluded to keep PII out.
         logger.info(
-            "analyze payload: caseNumber=%r product=%r context=%r rootPath=%r textLen=%d",
+            "analyze payload: caseNumber=%r product=%r contextLen=%d rootPath=%r textLen=%d",
             case_number,
             product,
-            context,
+            len(context) if isinstance(context, str) else -1,
             payload_root_path,
             len(text) if isinstance(text, str) else -1,
         )
