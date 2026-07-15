@@ -124,6 +124,8 @@ import re
 import uuid
 import traceback
 import urllib.request
+from dataclasses import dataclass
+import hashlib
 
 VERSION = "2.0.74-beta.4"
 
@@ -137,6 +139,52 @@ VERSION = "2.0.74-beta.4"
 # repos. Authoritative spec: MyCasesKit docs/dh-uuid5-change-spec.md.
 _NAMESPACE_MYCASE = uuid.UUID("816bee4e-8eee-4c0b-ae69-70879d032f4d")
 _WORKING_DIRECTORY_UNSET = object()
+
+_PROMPT_ERROR_MESSAGES = {
+    "dh_core_prompt_missing": (
+        "DH Core System Prompt is missing. Repair or reinstall Dynamics Helper."
+    ),
+    "dh_core_prompt_unreadable": (
+        "DH Core System Prompt cannot be read as UTF-8. "
+        "Repair the installation or file permissions."
+    ),
+    "dh_specific_instructions_unreadable": (
+        "DH-specific Instructions cannot be read as UTF-8. "
+        "Repair or replace them in Options."
+    ),
+    "repository_instructions_missing": (
+        "Repository Instructions are missing. Add "
+        ".github/copilot-instructions.md under Root Path or disable Repository ONLY."
+    ),
+    "repository_instructions_unreadable": (
+        "Repository Instructions cannot be read as UTF-8. "
+        "Repair the file or disable Repository ONLY."
+    ),
+}
+
+
+@dataclass(frozen=True)
+class PromptSnapshot:
+    mode: str
+    effective_root: str | None
+    core_bytes: bytes
+    core_text: str
+    selected_bytes: bytes
+    selected_text: str
+    fingerprint: str
+
+
+class PromptSourceError(RuntimeError):
+    def __init__(self, error_code: str) -> None:
+        self.error_code = error_code
+        super().__init__(_PROMPT_ERROR_MESSAGES[error_code])
+
+    def to_result(self) -> dict[str, str]:
+        return {
+            "status": "error",
+            "error_code": self.error_code,
+            "error": str(self),
+        }
 
 # Setup User Data Directory (Cross-platform)
 
@@ -552,6 +600,118 @@ class NativeHost:
         if not os.path.isabs(expanded):
             raise ValueError("Root path must be an absolute path.")
         return os.path.normpath(expanded)
+
+    @staticmethod
+    def _get_install_dir() -> str:
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(sys.executable)
+        return os.path.dirname(os.path.abspath(__file__))
+
+    @staticmethod
+    def _prompt_source_mode(
+        effective_root: str | None,
+        use_workspace_only: bool,
+    ) -> str:
+        return (
+            "repository-only"
+            if effective_root and use_workspace_only
+            else "dh-specific"
+        )
+
+    @staticmethod
+    def _validate_effective_root(effective_root: str | None) -> None:
+        if effective_root and not os.path.isdir(effective_root):
+            raise ValueError(
+                "Configured Root Path does not exist or is not a directory."
+            )
+
+    @staticmethod
+    def _read_prompt_source(
+        path: str,
+        *,
+        missing_error_code: str | None,
+        unreadable_error_code: str,
+    ) -> tuple[bytes, str]:
+        try:
+            with open(path, "rb") as stream:
+                raw = stream.read()
+        except FileNotFoundError as error:
+            if missing_error_code is None:
+                return b"", ""
+            raise PromptSourceError(missing_error_code) from error
+        except OSError as error:
+            raise PromptSourceError(unreadable_error_code) from error
+        try:
+            return raw, raw.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise PromptSourceError(unreadable_error_code) from error
+
+    @staticmethod
+    def _compute_prompt_fingerprint(
+        mode: str,
+        core_bytes: bytes,
+        selected_bytes: bytes,
+    ) -> str:
+        digest = hashlib.sha256()
+        for part in (
+            b"dh-prompt-fingerprint-v1",
+            mode.encode("utf-8"),
+            core_bytes,
+            selected_bytes,
+        ):
+            digest.update(len(part).to_bytes(8, "big"))
+            digest.update(part)
+        return f"v1:{digest.hexdigest()}"
+
+    def _resolve_prompt_snapshot(
+        self,
+        effective_root: str | None,
+        use_workspace_only: bool,
+    ) -> PromptSnapshot:
+        mode = self._prompt_source_mode(effective_root, use_workspace_only)
+        core_bytes, core_text = self._read_prompt_source(
+            os.path.join(self._get_install_dir(), "system_prompt.md"),
+            missing_error_code="dh_core_prompt_missing",
+            unreadable_error_code="dh_core_prompt_unreadable",
+        )
+        if mode == "repository-only":
+            selected_path = os.path.join(
+                effective_root or "", ".github", "copilot-instructions.md"
+            )
+            missing_code = "repository_instructions_missing"
+            unreadable_code = "repository_instructions_unreadable"
+        else:
+            selected_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
+            missing_code = None
+            unreadable_code = "dh_specific_instructions_unreadable"
+        selected_bytes, selected_text = self._read_prompt_source(
+            selected_path,
+            missing_error_code=missing_code,
+            unreadable_error_code=unreadable_code,
+        )
+        return PromptSnapshot(
+            mode=mode,
+            effective_root=effective_root,
+            core_bytes=core_bytes,
+            core_text=core_text,
+            selected_bytes=selected_bytes,
+            selected_text=selected_text,
+            fingerprint=self._compute_prompt_fingerprint(
+                mode, core_bytes, selected_bytes
+            ),
+        )
+
+    @staticmethod
+    def _build_system_message(
+        snapshot: PromptSnapshot,
+        session_id: str | None,
+    ) -> dict[str, str]:
+        sections = [snapshot.core_text]
+        if snapshot.selected_text.strip():
+            sections.append(snapshot.selected_text)
+        if session_id:
+            sections.append(f"## Session Info\n\nSession Name: {session_id}")
+        return {"mode": "append", "content": "\n\n".join(sections)}
 
     def _read_beta_channel_pref(self) -> bool:
         """Best-effort read of the beta-channel preference from config.json.
@@ -1074,6 +1234,8 @@ class NativeHost:
         # --- Apply to Instance and Session ---
 
         session_config.update(final_data)  # type: ignore
+        session_config["_effective_root"] = current_root
+        session_config["_use_workspace_only"] = bool(use_workspace_only)
 
         # Model / performance selection (spec 2026-07-03-configurable-model-
         # performance). Surface as TOP-LEVEL session_config keys (like
@@ -1159,85 +1321,6 @@ class NativeHost:
         working_directory = self.root_path or os.getcwd()
         session_config["working_directory"] = working_directory
         logger.info(f"Set working_directory to: {working_directory}")
-
-        # --- System Instructions (Split Prompt Architecture) ---
-
-        system_instr_path = os.path.join(install_dir, "system_prompt.md")
-        user_instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
-
-        # 2. Load System Instructions (Managed by Installer)
-        sys_content = ""
-        if os.path.exists(system_instr_path):
-            try:
-                with open(system_instr_path, "r", encoding="utf-8") as f:
-                    sys_content = f.read()
-            except Exception as e:
-                logger.error(f"Failed to read system instructions: {e}")
-
-        # 3. Load User Instructions (Managed by User)
-        user_content = ""
-        if os.path.exists(user_instr_path):
-            try:
-                with open(user_instr_path, "r", encoding="utf-8") as f:
-                    user_content = f.read()
-            except Exception as e:
-                logger.error(f"Failed to read user instructions: {e}")
-        else:
-            logger.info(f"User instructions file not found at: {user_instr_path}")
-
-        # 4. Combine
-        final_content = sys_content
-        if user_content.strip():
-            final_content += "\n\n" + user_content
-
-        # Apply
-        if final_content.strip():
-            session_config["system_message"] = {
-                "mode": "append",
-                "content": final_content,
-            }
-            logger.info("Loaded system instructions (System + User).")
-
-        # Store raw user content in config for the UI to retrieve
-        session_config["_user_instructions_raw"] = user_content
-
-        # 5. Append Workspace Instructions (.github/copilot-instructions.md)
-        if self.root_path and os.path.exists(self.root_path):
-            ws_instr_path = os.path.join(
-                self.root_path, ".github", "copilot-instructions.md"
-            )
-            if os.path.exists(ws_instr_path):
-                try:
-                    with open(ws_instr_path, "r", encoding="utf-8") as f:
-                        ws_instr_content = f.read()
-
-                    if ws_instr_content.strip():
-                        # If system_message already exists, append to it
-                        current_msg = session_config.get("system_message", {})
-
-                        previous_content = ""
-                        if isinstance(current_msg, dict):
-                            previous_content = current_msg.get("content", "")
-                        elif isinstance(current_msg, str):
-                            previous_content = current_msg
-
-                        new_content = (
-                            previous_content + "\n\n" + ws_instr_content
-                            if previous_content
-                            else ws_instr_content
-                        )
-
-                        session_config["system_message"] = {
-                            "mode": "append",
-                            "content": new_content,
-                        }
-                        logger.info(
-                            f"Loaded workspace instructions from {ws_instr_path}"
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to load workspace instructions from {ws_instr_path}: {e}"
-                    )
 
         # --- User Prompt (New Architecture: user_prompt.md) ---
         # 1. Path
