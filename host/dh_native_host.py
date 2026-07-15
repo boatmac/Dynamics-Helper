@@ -319,6 +319,7 @@ try:
     # WARNING: `copilot.generated.rpc.PermissionRequestResult` is a different
     # internal RPC type (success: bool); always import from `copilot.session`.
     from copilot import CopilotClient, RuntimeConnection
+    from copilot._jsonrpc import ProcessExitedError
     from copilot.session import (
         PermissionRequestResult,
         PreToolUseHookOutput,
@@ -1605,6 +1606,8 @@ class NativeHost:
         if full_config.get("context_tier"):
             sdk_kwargs["context_tier"] = full_config["context_tier"]
 
+        transport_error = None
+
         # If a session_id is provided, try to resume an existing session first
         if session_id:
             try:
@@ -1630,6 +1633,12 @@ class NativeHost:
                 logger.info(
                     "SDK does not support resume_session. Will create new session."
                 )
+            except (OSError, ProcessExitedError) as e:
+                transport_error = e
+                logger.warning(
+                    f"Session transport failed while resuming {session_id}: {e}. "
+                    "Re-initializing client."
+                )
             except Exception as e:
                 logger.info(
                     f"No existing session to resume ({session_id}): {e}. Creating new session."
@@ -1637,12 +1646,14 @@ class NativeHost:
                 logger.debug(f"Resume traceback: {traceback.format_exc()}")
 
         try:
+            if session_id:
+                sdk_kwargs["session_id"] = session_id
+            if transport_error is not None:
+                raise transport_error
+
             # Inject the session-name (uuid5 of case) so the server uses it as
             # the session_id; this is what `copilot --resume <name>` later
             # looks up (B82 — see _case_to_session_id docstring).
-            if session_id:
-                sdk_kwargs["session_id"] = session_id
-
             # Debug: Log the config keys being sent to create_session
             safe_keys = {k: type(v).__name__ for k, v in sdk_kwargs.items()}
             logger.info(f"create_session config keys: {safe_keys}")
@@ -1671,14 +1682,20 @@ class NativeHost:
             )
             self._log_session_observability(self.session, "created")
             return True
-        except OSError as e:
-            # OSError (e.g., [Errno 22] Invalid argument) typically means the CLI
-            # subprocess pipe is broken/closed (process exited during idle period).
-            # Re-initialize the client and retry once.
+        except (OSError, ProcessExitedError) as e:
             logger.warning(
-                f"create_session failed with OSError: {e}. "
-                f"CLI process likely exited. Re-initializing client and retrying..."
+                f"Session transport failed: {e}. "
+                "Re-initializing client and retrying..."
             )
+            broken_client = self.client
+            if broken_client:
+                try:
+                    await broken_client.stop()
+                except Exception as stop_error:
+                    logger.warning(
+                        f"Failed to stop broken Copilot client cleanly: {stop_error}"
+                    )
+            self._invalidate_active_session(clear_client=True)
             try:
                 cli_path = self.find_copilot_cli()
                 reinit_connection = (
@@ -1696,8 +1713,15 @@ class NativeHost:
                     "working_directory"
                 )
                 await self.client.start()
-                logger.info("Client re-initialized after OSError.")
+                logger.info("Client re-initialized after transport failure.")
+            except Exception as retry_err:
+                logger.error(f"Client re-initialization failed: {retry_err}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                self.last_session_error = str(retry_err)
+                self._invalidate_active_session(clear_client=True)
+                return False
 
+            try:
                 self.session = await self.client.create_session(**sdk_kwargs)
                 server_session_id = getattr(self.session, "session_id", None)
                 self.current_session_id = server_session_id
@@ -1712,11 +1736,26 @@ class NativeHost:
                 )
                 self._log_session_observability(self.session, "created-after-retry")
                 return True
+            except (OSError, ProcessExitedError) as retry_err:
+                logger.error(f"Retry transport failed: {retry_err}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                self.last_session_error = str(retry_err)
+                retry_client = self.client
+                if retry_client:
+                    try:
+                        await retry_client.stop()
+                    except Exception as stop_error:
+                        logger.warning(
+                            "Failed to stop retry Copilot client cleanly: "
+                            f"{stop_error}"
+                        )
+                self._invalidate_active_session(clear_client=True)
+                return False
             except Exception as retry_err:
                 logger.error(f"Retry after re-init also failed: {retry_err}")
                 logger.error(f"Full traceback: {traceback.format_exc()}")
                 self.last_session_error = str(retry_err)
-                self._invalidate_active_session(clear_client=True)
+                self._invalidate_active_session()
                 return False
         except Exception as e:
             logger.error(f"Failed to create/refresh session: {e}")
@@ -2079,7 +2118,7 @@ class NativeHost:
             )
             needs_refresh = True
 
-        if valid_case_id and valid_case_id != self.current_case_id:
+        if valid_case_id != self.current_case_id:
             logger.info(f"Case changed: {self.current_case_id} -> {valid_case_id}.")
             needs_refresh = True
 

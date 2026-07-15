@@ -12,6 +12,8 @@ import json
 import os
 import tempfile
 
+from copilot._jsonrpc import ProcessExitedError
+
 import host.dh_native_host as dhm
 from host.dh_native_host import NativeHost, PromptSnapshot
 
@@ -191,8 +193,9 @@ class TestClientWorkspaceInitialization(unittest.IsolatedAsyncioTestCase):
         host.client_working_directory = root_path
         replacement_client = MagicMock()
         replacement_client.start = AsyncMock()
+        replacement_client.stop = AsyncMock()
         replacement_client.create_session = AsyncMock(
-            side_effect=RuntimeError("retry failed")
+            side_effect=ProcessExitedError("retry process exited")
         )
 
         with (
@@ -205,6 +208,7 @@ class TestClientWorkspaceInitialization(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertFalse(success)
+        replacement_client.stop.assert_awaited_once()
         self.assertIsNone(host.client)
         self.assertIsNone(host.client_working_directory)
         self.assertIsNone(host.session)
@@ -508,14 +512,23 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
             host.current_session_root_path = root_path
             host.root_path = root_path
             host.session = MagicMock()
-            host.session.send_and_wait = AsyncMock(
-                side_effect=[Exception("Session not found"), response_event]
+            original_session = host.session
+            original_session.send_and_wait = AsyncMock(
+                side_effect=Exception("Session not found")
+            )
+            replacement_session = MagicMock()
+            replacement_session.send_and_wait = AsyncMock(
+                return_value=response_event
             )
             host.client = MagicMock()
             host.client.get_auth_status = AsyncMock(
                 return_value=SimpleNamespace(isAuthenticated=True)
             )
-            host._refresh_session = AsyncMock(return_value=True)
+            async def refresh(**_kwargs):
+                host.session = replacement_session
+                return True
+
+            host._refresh_session = AsyncMock(side_effect=refresh)
             config = {
                 "_effective_root": root_path,
                 "_use_workspace_only": False,
@@ -548,6 +561,8 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
             session_config=config,
             prompt_snapshot=snapshot,
         )
+        original_session.send_and_wait.assert_awaited_once()
+        replacement_session.send_and_wait.assert_awaited_once()
 
 
 class TestRootPathNormalization(unittest.TestCase):

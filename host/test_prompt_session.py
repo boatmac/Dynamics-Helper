@@ -4,6 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from copilot._jsonrpc import ProcessExitedError
+
 from host.dh_native_host import NativeHost, PromptSnapshot, PromptSourceError
 
 
@@ -115,6 +117,7 @@ class TestPromptSessionKwargs(
         broken_client = self.host.client
         broken_client.resume_session.side_effect = AttributeError("no resume")
         broken_client.create_session.side_effect = OSError("broken pipe")
+        broken_client.stop.side_effect = RuntimeError("already stopped")
         replacement = MagicMock()
         replacement.start = AsyncMock()
         replacement.create_session = AsyncMock(
@@ -136,6 +139,7 @@ class TestPromptSessionKwargs(
                 prompt_snapshot=self.snapshot,
             )
         self.assertTrue(success)
+        broken_client.stop.assert_awaited_once()
         retry_kwargs = replacement.create_session.await_args.kwargs
         self.assertIs(retry_kwargs["skip_custom_instructions"], True)
         self.assertEqual(
@@ -159,20 +163,94 @@ class TestPromptSessionKwargs(
             {"on_pre_tool_use": self.host._pre_tool_use_hook},
         )
 
+    async def test_process_exit_retry_keeps_equal_prompt_kwargs(self):
+        broken_client = self.host.client
+        broken_client.resume_session.side_effect = ProcessExitedError("CLI exited")
+        replacement = MagicMock()
+        replacement.start = AsyncMock()
+        replacement.create_session = AsyncMock(
+            return_value=SimpleNamespace(session_id=self.session_id)
+        )
+        with (
+            patch("host.dh_native_host.RuntimeConnection.for_stdio"),
+            patch("host.dh_native_host.CopilotClient", return_value=replacement),
+        ):
+            success = await self.host._refresh_session(
+                session_id=self.session_id,
+                case_id=self.case_id,
+                session_config=self.config,
+                prompt_snapshot=self.snapshot,
+            )
+
+        self.assertTrue(success)
+        broken_client.stop.assert_awaited_once()
+        resume_kwargs = broken_client.resume_session.await_args.kwargs
+        create_kwargs = dict(replacement.create_session.await_args.kwargs)
+        self.assertEqual(create_kwargs.pop("session_id"), self.session_id)
+        self.assertEqual(create_kwargs, resume_kwargs)
+
+    async def test_retry_configuration_failure_retains_replacement_client(self):
+        broken_client = self.host.client
+        broken_client.resume_session.side_effect = AttributeError("no resume")
+        broken_client.create_session.side_effect = OSError("broken pipe")
+        replacement = MagicMock()
+        replacement.start = AsyncMock()
+        replacement.create_session = AsyncMock(
+            side_effect=RuntimeError(
+                "Model does not support reasoning effort configuration"
+            )
+        )
+        with (
+            patch("host.dh_native_host.RuntimeConnection.for_stdio"),
+            patch("host.dh_native_host.CopilotClient", return_value=replacement),
+        ):
+            success = await self.host._refresh_session(
+                session_id=self.session_id,
+                case_id=self.case_id,
+                session_config=self.config,
+                prompt_snapshot=self.snapshot,
+            )
+
+        self.assertFalse(success)
+        broken_client.stop.assert_awaited_once()
+        self.assertIs(self.host.client, replacement)
+        self.assertIsNone(self.host.session)
+        self.assertIsNone(self.host.current_prompt_fingerprint)
+
 
 class TestPromptFingerprintLifecycle(
     PromptSessionFixture,
     unittest.IsolatedAsyncioTestCase,
 ):
+    async def _install_replacement_session(self, **kwargs):
+        self.host.session = self.replacement_session
+        self.host.current_session_id = kwargs["session_id"]
+        self.host.current_case_id = kwargs["case_id"]
+        self.host.current_session_root_path = kwargs["session_config"][
+            "working_directory"
+        ]
+        self.host.current_prompt_fingerprint = kwargs[
+            "prompt_snapshot"
+        ].fingerprint
+        return True
+
     def setUp(self):
         super().setUp()
-        self.host.session = MagicMock()
-        self.host.session.send_and_wait = AsyncMock(
+        self.active_session = MagicMock()
+        self.active_session.send_and_wait = AsyncMock(
             return_value=SimpleNamespace(
                 type="assistant.message",
                 data=SimpleNamespace(content="analysis complete"),
             )
         )
+        self.replacement_session = MagicMock()
+        self.replacement_session.send_and_wait = AsyncMock(
+            return_value=SimpleNamespace(
+                type="assistant.message",
+                data=SimpleNamespace(content="analysis complete"),
+            )
+        )
+        self.host.session = self.active_session
         self.host.client.get_auth_status = AsyncMock(
             return_value=SimpleNamespace(isAuthenticated=True)
         )
@@ -187,7 +265,9 @@ class TestPromptFingerprintLifecycle(
         self.host.analyze_timeout_seconds = 60
         self.host._get_session_config = MagicMock(return_value=self.config)
         self.host._resolve_prompt_snapshot = MagicMock(return_value=self.snapshot)
-        self.host._refresh_session = AsyncMock(return_value=True)
+        self.host._refresh_session = AsyncMock(
+            side_effect=self._install_replacement_session
+        )
         self.payload = {
             "text": "CUSTOM-USER-PROMPT",
             "context": "context",
@@ -207,9 +287,9 @@ class TestPromptFingerprintLifecycle(
         self.host.current_prompt_fingerprint = "v1:old"
         order: list[str] = []
 
-        async def refresh(**_kwargs):
+        async def refresh(**kwargs):
             order.append("refresh")
-            return True
+            return await self._install_replacement_session(**kwargs)
 
         async def send(*_args, **_kwargs):
             order.append("send")
@@ -219,7 +299,7 @@ class TestPromptFingerprintLifecycle(
             )
 
         self.host._refresh_session.side_effect = refresh
-        self.host.session.send_and_wait.side_effect = send
+        self.replacement_session.send_and_wait.side_effect = send
         result = await self.host.handle_analyze_error(self.payload)
         self.assertEqual(result["status"], "success")
         self.host._refresh_session.assert_awaited_once_with(
@@ -229,6 +309,26 @@ class TestPromptFingerprintLifecycle(
             prompt_snapshot=self.snapshot,
         )
         self.assertEqual(order, ["refresh", "send"])
+        self.active_session.send_and_wait.assert_not_awaited()
+        self.replacement_session.send_and_wait.assert_awaited_once()
+
+    async def test_case_to_generic_refreshes_and_uses_replacement_session(self):
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        self.payload["caseNumber"] = "invalid-case-id"
+
+        result = await self.host.handle_analyze_error(self.payload)
+
+        self.assertEqual(result["status"], "success")
+        self.host._refresh_session.assert_awaited_once_with(
+            session_id=None,
+            case_id=None,
+            session_config=self.config,
+            prompt_snapshot=self.snapshot,
+        )
+        self.active_session.send_and_wait.assert_not_awaited()
+        self.replacement_session.send_and_wait.assert_awaited_once()
+        sent_prompt = self.replacement_session.send_and_wait.await_args.args[0]
+        self.assertIn("CUSTOM-USER-PROMPT", sent_prompt)
 
     async def test_PF_I5_resolution_failure_sends_no_turn(self):
         original_session = self.host.session
@@ -306,6 +406,8 @@ class TestPromptFingerprintLifecycle(
         self.host._resolve_prompt_snapshot.return_value = repository_snapshot
         await self.host.handle_analyze_error(self.payload)
         self.host._refresh_session.assert_awaited_once()
+        self.active_session.send_and_wait.assert_not_awaited()
+        self.replacement_session.send_and_wait.assert_awaited_once()
 
     async def test_PF_I4_create_fallback_commits_candidate_fingerprint(self):
         self.host._refresh_session = NativeHost._refresh_session.__get__(
@@ -344,6 +446,8 @@ class TestPromptFingerprintLifecycle(
         self.host._resolve_prompt_snapshot.return_value = changed
         await self.host.handle_analyze_error(self.payload)
         self.host._refresh_session.assert_awaited_once()
+        self.active_session.send_and_wait.assert_not_awaited()
+        self.replacement_session.send_and_wait.assert_awaited_once()
 
     async def test_session_not_found_retry_reuses_same_snapshot_object(self):
         response = SimpleNamespace(
@@ -351,15 +455,85 @@ class TestPromptFingerprintLifecycle(
             data=SimpleNamespace(content="analysis complete"),
         )
         self.host.current_prompt_fingerprint = self.snapshot.fingerprint
-        self.host.session.send_and_wait.side_effect = [
-            Exception("Session not found"),
-            response,
-        ]
+        self.active_session.send_and_wait.side_effect = Exception("Session not found")
+        self.replacement_session.send_and_wait.return_value = response
         await self.host.handle_analyze_error(self.payload)
         call = self.host._refresh_session.await_args
         self.assertIs(call.kwargs["prompt_snapshot"], self.snapshot)
         self.assertIs(call.kwargs["session_config"], self.config)
         self.host._resolve_prompt_snapshot.assert_called_once_with(self.root, False)
+        self.active_session.send_and_wait.assert_awaited_once()
+        self.replacement_session.send_and_wait.assert_awaited_once()
+
+    async def test_process_exit_clears_client_and_next_analyze_reinitializes(self):
+        self.host._refresh_session = NativeHost._refresh_session.__get__(
+            self.host,
+            NativeHost,
+        )
+        self.host.current_prompt_fingerprint = "v1:old"
+        dead_client = self.host.client
+        dead_client.resume_session.side_effect = RuntimeError("not found")
+        dead_client.create_session.side_effect = ProcessExitedError("CLI exited")
+        dead_client.stop.side_effect = RuntimeError("process already exited")
+
+        failed_restart = MagicMock()
+        failed_restart.start = AsyncMock(
+            side_effect=ProcessExitedError("restart exited")
+        )
+        healthy_client = MagicMock()
+        healthy_client.start = AsyncMock()
+        healthy_client.resume_session = AsyncMock(
+            return_value=self.replacement_session
+        )
+        healthy_client.get_auth_status = AsyncMock(
+            return_value=SimpleNamespace(isAuthenticated=True)
+        )
+
+        with (
+            patch("host.dh_native_host.RuntimeConnection.for_stdio"),
+            patch(
+                "host.dh_native_host.CopilotClient",
+                side_effect=[failed_restart, healthy_client],
+            ) as client_class,
+        ):
+            first_result = await self.host.handle_analyze_error(self.payload)
+            self.assertEqual(first_result["status"], "error")
+            dead_client.stop.assert_awaited_once()
+            self.assertIsNone(self.host.client)
+            self.assertIsNone(self.host.session)
+            self.assertIsNone(self.host.current_prompt_fingerprint)
+
+            second_result = await self.host.handle_analyze_error(self.payload)
+
+        self.assertEqual(second_result["status"], "success")
+        self.assertEqual(client_class.call_count, 2)
+        healthy_client.start.assert_awaited_once()
+        healthy_client.resume_session.assert_awaited_once()
+        self.active_session.send_and_wait.assert_not_awaited()
+        self.replacement_session.send_and_wait.assert_awaited_once()
+
+    async def test_configuration_failure_retains_healthy_client(self):
+        self.host._refresh_session = NativeHost._refresh_session.__get__(
+            self.host,
+            NativeHost,
+        )
+        healthy_client = self.host.client
+        healthy_client.resume_session.side_effect = RuntimeError("not found")
+        healthy_client.create_session.side_effect = RuntimeError(
+            "Model does not support reasoning effort configuration"
+        )
+
+        success = await self.host._refresh_session(
+            session_id=self.session_id,
+            case_id=self.case_id,
+            session_config=self.config,
+            prompt_snapshot=self.snapshot,
+        )
+
+        self.assertFalse(success)
+        self.assertIs(self.host.client, healthy_client)
+        self.assertIsNone(self.host.session)
+        self.assertIsNone(self.host.current_prompt_fingerprint)
 
     async def test_PS_I9_custom_user_prompt_is_only_user_content(self):
         self.host.current_prompt_fingerprint = self.snapshot.fingerprint
