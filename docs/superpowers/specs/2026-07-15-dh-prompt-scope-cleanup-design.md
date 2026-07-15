@@ -1,6 +1,6 @@
 # Dynamics Helper Prompt Scope Cleanup Design
 
-**Status:** Draft - design approved; written spec awaiting review
+**Status:** Accepted
 **Date:** 2026-07-15
 **Baseline:** `v2.0.74-beta.4` / handoff commit `0040b1d`
 
