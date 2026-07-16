@@ -549,6 +549,7 @@ const OptionsInner: React.FC = () => {
     // unchanged) does not spuriously count as a URL change.
     const lastFetchedManifestUrlRef = useRef<string>('__unset__');
     const pendingManifestFetchUrlRef = useRef<string | null>(null);
+    const teamRefreshGenerationRef = useRef(0);
 
     // Hydration guard: prefs state is fully populated only AFTER the host
     // get_config response merges its fields into state (see mount useEffect
@@ -1438,8 +1439,14 @@ const OptionsInner: React.FC = () => {
         persistPrefs(next, opts);
     };
 
+    const invalidateTeamRefresh = () => {
+        teamRefreshGenerationRef.current += 1;
+        setIsSyncingTeam(false);
+    };
+
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
+            invalidateTeamRefresh();
             userInstructionsEditTokenRef.current = {
                 revision: userInstructionsEditTokenRef.current.revision + 1,
                 value: DEFAULT_PREFS.userInstructions ?? '',
@@ -1452,7 +1459,7 @@ const OptionsInner: React.FC = () => {
             markUserTouched(Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>);
             setCurrentPrefs(DEFAULT_PREFS);
             persistPrefs(DEFAULT_PREFS);
-            chrome.storage.local.remove(["dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels", "dh_last_analysis", "dh_pending_analysis"], () => {
+            chrome.storage.local.remove(["dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels", "dh_last_analysis", "dh_pending_analysis", "dh_seen_analysis"], () => {
                 // Wrap loaded items in collapseFolders so Reset produces the
                 // same folded-by-default tree the mount path produces. Without
                 // this, items.json defaults render fully expanded after Reset
@@ -1470,6 +1477,7 @@ const OptionsInner: React.FC = () => {
 
     // --- Team Catalog Handlers ---
     const handleTeamChange = (teamId: string) => {
+        invalidateTeamRefresh();
         const selectedTeam = teamList.find(t => t.id === teamId);
         // Plan A: team selection is "instant persist". Symptom 3 fix —
         // previously this only called setPrefs (React state), so refreshing
@@ -1505,6 +1513,12 @@ const OptionsInner: React.FC = () => {
                 return;
             }
             if (response?.status === "success") {
+                if (
+                    response.data?.stale === true
+                    || prefsRef.current.team !== teamId
+                ) {
+                    return;
+                }
                 setTeamItems(response.data.items || []);
                 setTeamSynced(new Date().toISOString());
             } else {
@@ -1569,18 +1583,27 @@ const OptionsInner: React.FC = () => {
     }, []);
 
     const handleTeamRefresh = async () => {
-        if (!prefs.teamManifestUrl || !prefs.team) return;
+        const manifestUrl = prefs.teamManifestUrl;
+        const teamId = prefs.team;
+        if (!manifestUrl || !teamId) return;
+        const generation = ++teamRefreshGenerationRef.current;
+        const refreshIsCurrent = () =>
+            generation === teamRefreshGenerationRef.current
+            && prefsRef.current.teamCatalogEnabled === true
+            && prefsRef.current.teamManifestUrl === manifestUrl
+            && prefsRef.current.team === teamId;
         setIsSyncingTeam(true);
         setTeamFetchError(null);
         try {
             const { syncTeamBookmarks } = await import('../utils/teamCatalog');
-            const result = await syncTeamBookmarks(prefs.teamManifestUrl, prefs.team);
-
-            // Always render whatever items came back (cache-on-failure) so
-            // the user isn't left with an empty list.
-            setTeamItems(result.items);
+            const result = await syncTeamBookmarks(manifestUrl, teamId);
+            if (result.status === 'stale' || !refreshIsCurrent()) {
+                return;
+            }
 
             if (result.failure) {
+                // Render the selected team's cache on an ordinary failure.
+                setTeamItems(result.items);
                 // Refresh actually failed. Show the classified error and
                 // — crucially — do NOT bump the synced-at timestamp. The
                 // pre-fix behaviour of setTeamSynced(now) on a silently-
@@ -1594,25 +1617,30 @@ const OptionsInner: React.FC = () => {
                     showError(t('manifestFetchAuthToast'), 6000);
                 }
             } else {
-                setTeamSynced(new Date().toISOString());
                 // Refresh the dropdown if the manifest changed during this sync
                 const cached = await new Promise<any>((resolve) => {
                     chrome.storage.local.get(['dh_team_manifest'], resolve);
                 });
+                if (!refreshIsCurrent()) return;
+                setTeamItems(result.items);
+                setTeamSynced(new Date().toISOString());
                 if (cached.dh_team_manifest && Array.isArray(cached.dh_team_manifest.teams)) {
                     setTeamList(
                         cached.dh_team_manifest.teams.map((t: any) => ({ id: t.id, label: t.label })),
                     );
                 }
             }
-        } catch (e) {
-            console.warn('[Options] Team refresh failed:', e);
+        } catch {
+            if (!refreshIsCurrent()) return;
+            console.warn('[Options] Team refresh failed unexpectedly.');
             // Exception here (not caught inside syncTeamBookmarks) means
             // module load / storage access broke — more severe than a
             // fetch failure. Report generic.
             setTeamFetchError({ kind: 'unknown' });
         } finally {
-            setIsSyncingTeam(false);
+            if (refreshIsCurrent()) {
+                setIsSyncingTeam(false);
+            }
         }
     };
 
@@ -2395,6 +2423,7 @@ const OptionsInner: React.FC = () => {
                                                     checked={prefs.teamCatalogEnabled === true}
                                                     onChange={(e) => {
                                                         const enabled = e.target.checked;
+                                                        invalidateTeamRefresh();
                                                         updatePref({ teamCatalogEnabled: enabled });
                                                         try {
                                                             trackEvent('Team Catalog Toggled', { enabled });
@@ -2424,6 +2453,7 @@ const OptionsInner: React.FC = () => {
                                                             // staring at it after they've already started
                                                             // fixing the typo.
                                                             if (manifestUrlInvalid) setManifestUrlInvalid(false);
+                                                            invalidateTeamRefresh();
                                                             markUserTouched(['teamManifestUrl']);
                                                             updateCurrentPrefs({ teamManifestUrl: e.target.value });
                                                         }}

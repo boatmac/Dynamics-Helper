@@ -23,6 +23,31 @@ describe('applyCurrentUserPrompt', () => {
     expect(applyCurrentUserPrompt(stale, '   ')).toBe(BASE)
   })
 
+  it('replaces from the first authoritative marker when duplicate sections exist', () => {
+    const duplicated = [
+      BASE,
+      '## User Prompt',
+      '',
+      'FIRST STALE PROMPT',
+      '',
+      '## User Prompt',
+      '',
+      'SECOND STALE PROMPT',
+    ].join('\n\n')
+
+    const result = applyCurrentUserPrompt(duplicated, 'CURRENT PROMPT')
+
+    expect(result).toBe(`${BASE}\n\n## User Prompt\n\nCURRENT PROMPT`)
+    expect(result).not.toContain('FIRST STALE PROMPT')
+    expect(result).not.toContain('SECOND STALE PROMPT')
+  })
+
+  it('removes every stale duplicate section when the current prompt is empty', () => {
+    const duplicated = `${BASE}\n\n## User Prompt\n\nFIRST STALE\n\n## User Prompt\n\nSECOND STALE`
+
+    expect(applyCurrentUserPrompt(duplicated, '')).toBe(BASE)
+  })
+
   it('preserves context bytes when there is no prompt section or current prompt', () => {
     const context = `${BASE}  \n`
     expect(applyCurrentUserPrompt(context, '')).toBe(context)

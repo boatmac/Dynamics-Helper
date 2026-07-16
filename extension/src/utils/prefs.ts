@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { LanguageCode } from './translations';
 
 // Single source of truth for the dh_prefs storage shape.
@@ -94,23 +94,31 @@ export const DEFAULT_PREFS: Preferences = {
 // read-only avoids accidentally firing those side effects from FAB.
 export function usePrefs(): { prefs: Preferences } {
     const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
+    const storageGenerationRef = useRef(0);
 
     useEffect(() => {
-        chrome.storage.local.get('dh_prefs', (result) => {
-            if (result.dh_prefs && typeof result.dh_prefs === 'object') {
-                setPrefs(prev => ({ ...prev, ...(result.dh_prefs as Partial<Preferences>) }));
-            }
-        });
-
         const handleChange = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
             if (area === 'local' && changes.dh_prefs) {
+                storageGenerationRef.current += 1;
                 const next = changes.dh_prefs.newValue;
                 if (next && typeof next === 'object') {
-                    setPrefs(prev => ({ ...prev, ...(next as Partial<Preferences>) }));
+                    setPrefs({ ...DEFAULT_PREFS, ...(next as Partial<Preferences>) });
+                } else {
+                    setPrefs(DEFAULT_PREFS);
                 }
             }
         };
         chrome.storage.onChanged.addListener(handleChange);
+
+        const initialGeneration = storageGenerationRef.current;
+        chrome.storage.local.get('dh_prefs', (result) => {
+            if (storageGenerationRef.current !== initialGeneration) return;
+            const stored = result.dh_prefs;
+            if (stored && typeof stored === 'object') {
+                setPrefs({ ...DEFAULT_PREFS, ...(stored as Partial<Preferences>) });
+            }
+        });
+
         return () => chrome.storage.onChanged.removeListener(handleChange);
     }, []);
 

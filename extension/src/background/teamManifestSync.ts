@@ -1,5 +1,6 @@
 import type {
     ManifestFetchResult,
+    SyncResult,
     TeamManifest,
 } from '../utils/teamCatalog'
 
@@ -67,4 +68,27 @@ export async function syncManifestOnly(deps: ManifestOnlyDeps): Promise<any> {
         status: 'success',
         data: { manifestOnly: true, changed: result.changed },
     }
+}
+
+export function toSelectedTeamSyncResponse(
+    result: SyncResult,
+    teamId: string,
+): any {
+    if (result.status === 'stale') {
+        return {
+            status: 'success',
+            data: { skipped: true, stale: true, teamId },
+        }
+    }
+    if (result.failure) {
+        return {
+            status: 'error',
+            error: result.failure.message,
+            errorKind: result.failure.kind,
+            httpStatus: result.failure.httpStatus,
+            failureStage: result.failureStage,
+            data: { items: result.items, teamId },
+        }
+    }
+    return { status: 'success', data: { items: result.items, teamId } }
 }

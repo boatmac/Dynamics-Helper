@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { syncManifestOnly } from './teamManifestSync'
+import { toSelectedTeamSyncResponse } from './teamManifestSync'
 
 const URL = 'https://catalog.example/manifest.json?sig=secret'
 const MANIFEST = { version: 1, teams: [] }
@@ -79,5 +80,28 @@ describe('syncManifestOnly preference commit gate', () => {
       data: { manifestOnly: true, changed: true },
     })
     expect(writeManifest).toHaveBeenCalledWith(MANIFEST, 'new-etag')
+  })
+})
+
+describe('selected-team sync response boundary', () => {
+  it('does not expose stale items to Service Worker callers', () => {
+    expect(toSelectedTeamSyncResponse(
+      { status: 'stale', items: [{ label: 'STALE ITEM' }] },
+      'team-a',
+    )).toEqual({
+      status: 'success',
+      data: { skipped: true, stale: true, teamId: 'team-a' },
+    })
+  })
+
+  it('preserves valid committed items', () => {
+    const items = [{ label: 'Current item' }]
+    expect(toSelectedTeamSyncResponse(
+      { status: 'committed', items },
+      'team-a',
+    )).toEqual({
+      status: 'success',
+      data: { items, teamId: 'team-a' },
+    })
   })
 })

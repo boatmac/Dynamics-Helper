@@ -130,13 +130,13 @@ Strict Analyze/session resolution fails closed:
 
 After the latest `update_config` intent is durably acknowledged, Options sends one additional health-only `get_config`. This callback changes only `promptHealthIssue`; it never re-enters the full hydration merge. Both config and health generations must still match before applying a response, so an older health result cannot replace newer state. Transport/non-success responses leave the existing health issue unchanged.
 
-Prompt-source errors carry a stable `error_code` and safe English fallback. Options/FAB preserve unknown non-empty codes, localize the five known codes only at render time, and never tell users to re-authenticate for a source/configuration error. Logs may include safe source mode, classified code, or a short fingerprint prefix, but never instruction contents, Custom User Prompt contents, or prompt-source paths.
+Prompt-source errors carry a stable `error_code` and safe English fallback. Options/FAB preserve unknown non-empty codes, localize the five known codes only at render time, and never tell users to re-authenticate for a source/configuration error. Logs may include safe source mode, classified code, or a short fingerprint prefix, but never instruction contents, Custom User Prompt contents, or prompt-source paths. SDK response-event diagnostics are likewise metadata-only: event type, data type, content presence, and content length. No-content fallback reports use that safe summary and never serialize the event, its data, or model content.
 
-FAB applies Custom User Prompt immediately before every send. It removes an existing trailing `## User Prompt` section from either preformatted or freshly assembled context, then appends the current non-empty value once; an empty current value leaves the stale section removed. The resulting complete text still enters the Host's existing PII scrub path unchanged.
+FAB applies Custom User Prompt immediately before every send. It truncates from the first authoritative line-level `## User Prompt` marker in either preformatted or freshly assembled context, then appends the current non-empty value once; an empty current value leaves all stale/duplicate sections removed. The resulting complete text still enters the Host's existing PII scrub path unchanged.
 
 Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe parse/network messages and logs only failure kind plus numeric HTTP status. It must not log URL/status-text/exception values. Manifest-only Service Worker commits also re-read `dh_prefs` after fetch to prevent Reset or a URL change from being overwritten by a stale response.
 
-Analysis result dismissal is identity-qualified. New `LastAnalysis` records carry their Analyze `requestId`; legacy records are identified by exact `caseNumber + timestamp`. Hydration passes that identity to FAB, and `markSeen` re-reads storage before writing. If a newer Service Worker record replaced the displayed one, dismissal is a no-op so the new record stays unseen with its complete error metadata.
+Analysis result dismissal uses a separate identity acknowledgment. New `LastAnalysis` records carry their Analyze `requestId`; legacy records are identified by exact `caseNumber + timestamp`. Hydration reads `dh_last_analysis`, `dh_pending_analysis`, and `dh_seen_analysis` together and suppresses a result when its legacy `seen` flag is true or its identity matches the acknowledgment. `markSeen` writes only `dh_seen_analysis`, so acknowledgment A can never rewrite newer result B or remove B's error metadata, regardless of storage completion order.
 
 The standalone `host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` files are historical pre-1.0.5 probes. They retain `skip_custom_instructions=True` on session creation, but other imports, constructor arguments, and message shapes are obsolete; they are explicitly outside supported diagnostics until separately migrated. Use `host/venv` tests or the SDK 1.0.5 wire-drift probe documented in `AGENTS.md` instead.
 
@@ -211,7 +211,8 @@ Analyze runs are long (often 60-300 s). The user can navigate away from the case
 **Storage schema** (`extension/src/utils/analysisStore.ts`):
 
 * `dh_pending_analysis` — `{caseNumber, requestId, startTime}` written by SW before forwarding the host RPC, cleared on success/error/timeout/edge-6.3.
-* `dh_last_analysis` — `{status: 'success'|'error', caseNumber, requestId?, title, content, timestamp, seen, durationSec?, savedTo?, errorCode?}` written by SW on Host response. New records use `requestId` as result identity; legacy records use exact `caseNumber + timestamp`. Dismissal/consumption marks it seen only when that displayed identity still matches storage. `errorCode` is an optional raw machine-readable Host code; legacy records omit both optional fields.
+* `dh_last_analysis` — `{status: 'success'|'error', caseNumber, requestId?, title, content, timestamp, seen, durationSec?, savedTo?, errorCode?}` written by SW on Host response. New records use `requestId` as result identity; legacy records use exact `caseNumber + timestamp`. The legacy `seen` field remains readable for compatibility but is no longer rewritten for acknowledgment. `errorCode` is an optional raw machine-readable Host code; legacy records may omit optional fields.
+* `dh_seen_analysis` — `{caseNumber, requestId?, timestamp?}` written by FAB on immediate/hydrated consumption. New identities match `requestId` plus case; legacy identities match exact `caseNumber + timestamp`. It contains no result body and never requires clearing when a new result arrives because the new identity differs.
 
 **Two ages, do not confuse them:**
 
@@ -228,8 +229,8 @@ For errors, persistence stores the raw safe Host fallback in `content` and prese
 **Pure-helper boundary:**
 
 * `extension/src/background/analyzeBridge.ts` exposes `handleAnalyzeForward(payload, ctx, deps)` with DI'd `send`. Its focused suite covers P-I1..P-I4, error-code transport, and edge 6.3 without spinning up a real Chrome port; the test count is not a contract.
-* `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, isAnalyzing, dismissPopover(identity)}`. Its focused suite covers result/pending hydration, identity-safe one-shot dismissal, and optional `errorCode` using only a mocked `chrome.storage.local`; the test count is not a contract.
-* FAB calls `useAnalysisHydration(scrapedData?.caseNumber || '')` once at the top of the component, then mirrors `popover`/`isAnalyzing` into local state in two `useEffect` hooks. The mirror is one-way (storage → local); user dismissal passes the displayed identity through `hydration.dismissPopover(identity)`, which re-reads storage before writing `seen=true`.
+* `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, isAnalyzing, dismissPopover(identity)}`. Its focused suite covers result/pending/seen hydration, identity-safe one-shot dismissal, write-order races, and optional `errorCode` using only a mocked `chrome.storage.local`; the test count is not a contract.
+* FAB calls `useAnalysisHydration(scrapedData?.caseNumber || '')` once at the top of the component, then mirrors `popover`/`isAnalyzing` into local state in two `useEffect` hooks. The mirror is one-way (storage → local); user dismissal passes the displayed identity through `hydration.dismissPopover(identity)`, which writes only `dh_seen_analysis`.
 
 **popoverIsAnalyze ref discriminator:**
 
@@ -241,7 +242,7 @@ For errors, persistence stores the raw safe Host fallback in `content` and prese
 * **Late response versus newer pending (edge 6.3):** Analysis A can remain in flight while analysis B starts and replaces the single-slot pending marker with B's request ID. When A's response arrives, A's result is persisted, but `clearPendingIfMatches(A.requestId)` rereads the pending marker and leaves B's marker intact because the request IDs differ. A late response therefore cannot clear a newer analysis's pending state.
 * **Stale pending on mount:** `useAnalysisHydration` checks `Date.now() - startTime > MAX_PENDING_DISPLAY_AGE_MS` and ignores pending markers older than 15 min. The marker stays on disk until GC; this is intentional (the user might still want to know if the run eventually completes).
 * **Case mismatch on pending:** if the on-disk pending marker is for case A but the FAB is mounted on case B, the hook ignores the pending row entirely (no false "Analyzing…").
-* **Options Reset:** the Reset button also removes `dh_last_analysis` and `dh_pending_analysis` so a user-initiated reset wipes persisted analysis state.
+* **Options Reset:** the Reset button removes `dh_last_analysis`, `dh_pending_analysis`, and `dh_seen_analysis` so a user-initiated reset wipes persisted analysis state and acknowledgment state.
 
 ---
 
@@ -271,11 +272,12 @@ Provides a complete mock of the chrome.runtime + chrome.storage surfaces used by
 * `resetChromeMock()` — clears storage, pending responses, message log, **and spy call counts**.
 * `seedStorage({ ... })` — pre-populate `chrome.storage.local` before render.
 * `deferNextResponse(action)` — pause the next outgoing message with the given `action`. Returns a controller with `.resolve(response)` / `.reject(error)`. Used to hold `get_config` open while the test simulates user edits inside the hydration window.
-* `chromeMockSpies` — `{ sendMessage, storageGet, storageSet, storageRemove }`, each a `vi.fn()`. Used for call-count assertions and inspecting outgoing payloads.
+* `emitStorageChanges(changes, areaName?)` — explicitly updates mock storage and invokes registered `chrome.storage.onChanged` listeners. Normal mock `set`/`remove` calls remain non-emitting for backward-compatible deterministic tests.
+* `chromeMockSpies` — runtime/storage operation spies plus storage-listener registration spies, each a `vi.fn()`. Used for ordering, call-count, and payload assertions.
 
 The mock supports **both callback-style** (`chrome.runtime.sendMessage(msg, cb)`) and **Promise-style** (`await chrome.runtime.sendMessage(msg)`) APIs. Pick the matching style for the code under test — the production code uses callback style for `sendMessage` and Promise style for `chrome.storage.local`.
 
-**Spy reset is mandatory.** `resetChromeMock()` calls `.mockClear()` on all four spies. Without this, spy counts accumulate across tests in the same file because the spy objects themselves are module-level singletons. The 6-invariant `Options.test.tsx` suite depends on per-test call counting and will silently report false positives if spies leak.
+**Mock reset is mandatory.** `resetChromeMock()` clears registered listeners and calls `.mockClear()` on all spies. Without this, listeners/state/counts accumulate across tests because the mock objects are module-level singletons. Ordering and Options invariant suites can silently report false positives if mock state leaks.
 
 ### The 6-Invariant Pattern for `Options.test.tsx`
 

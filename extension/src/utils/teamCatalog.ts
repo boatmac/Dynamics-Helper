@@ -219,9 +219,9 @@ export async function fetchTeamBookmarks(
 }
 
 /**
- * Result of a `syncTeamBookmarks` pass. `items` is always populated (from
- * cache when a fetch failed) so callers rendering the bookmark list have
- * something to show. `failure` is present when either the manifest fetch
+ * Result of a `syncTeamBookmarks` pass. `items` uses the selected team's
+ * cache on ordinary failures. A stale pass returns an empty current-safe list
+ * that consumers must ignore. `failure` is present when either manifest fetch
  * OR the bookmark fetch failed — callers that care about the distinction
  * (Options refresh button showing an error banner) should check
  * `failure` before treating the pass as a successful sync.
@@ -231,7 +231,10 @@ export async function fetchTeamBookmarks(
  * user's URL is wrong; a `notFound` on the bookmarks means the manifest
  * entry's URL is wrong — different user actions).
  */
+export type SyncStatus = 'committed' | 'unchanged' | 'failed' | 'skipped' | 'stale';
+
 export interface SyncResult {
+    status: SyncStatus;
     items: any[];
     failure?: FetchFailure;
     failureStage?: 'manifest' | 'bookmarks';
@@ -245,7 +248,7 @@ export interface SyncResult {
  *   4. Fetch that team's bookmark JSON (with ETag)
  *   5. Persist whatever changed
  *
- * Returns `{ items, failure?, failureStage? }`. On failure `items` is the
+ * Returns a status-discriminated result. On failure `items` is the
  * cached array (possibly empty) so the UI keeps rendering; callers should
  * check `failure` to decide whether to show a banner and/or refresh the
  * synced-at timestamp. Prior to 2026-07-03 this function returned a bare
@@ -257,7 +260,7 @@ export async function syncTeamBookmarks(
     manifestUrl: string,
     teamId: string,
 ): Promise<SyncResult> {
-    if (!manifestUrl) return { items: [] };
+    if (!manifestUrl) return { status: 'skipped', items: [] };
 
     const cache = await new Promise<any>((resolve) => {
         chrome.storage.local.get(
@@ -270,6 +273,18 @@ export async function syncTeamBookmarks(
         cache.dh_team === teamId && Array.isArray(cache.dh_team_items)
             ? cache.dh_team_items
             : [];
+    const staleResult = (): SyncResult => ({ status: 'stale', items: [] });
+    const preferencesStillMatch = async (): Promise<boolean> => {
+        const current = await chrome.storage.local.get('dh_prefs');
+        const prefs = current.dh_prefs as {
+            teamCatalogEnabled?: boolean;
+            teamManifestUrl?: string;
+            team?: string;
+        } | undefined;
+        return prefs?.teamCatalogEnabled === true
+            && prefs.teamManifestUrl === manifestUrl
+            && prefs.team === teamId;
+    };
 
     // Step 1: refresh the manifest
     const manifestResult = await fetchManifest(manifestUrl, cache.dh_team_manifest_etag);
@@ -277,11 +292,13 @@ export async function syncTeamBookmarks(
 
     if (manifestResult === null) {
         // Empty URL (defensive; guarded above). Return quietly.
-        return { items: cachedItemsForTeam() };
+        return { status: 'skipped', items: cachedItemsForTeam() };
     }
+    if (!await preferencesStillMatch()) return staleResult();
     if (!manifestResult.ok) {
         warnFetchFailure('manifest', manifestResult.failure);
         return {
+            status: 'failed',
             items: cachedItemsForTeam(),
             failure: manifestResult.failure,
             failureStage: 'manifest',
@@ -290,17 +307,6 @@ export async function syncTeamBookmarks(
 
     if (manifestResult.changed) {
         manifest = manifestResult.manifest;
-        const current = await chrome.storage.local.get('dh_prefs');
-        const currentPrefs = current.dh_prefs as {
-            teamCatalogEnabled?: boolean;
-            teamManifestUrl?: string;
-        } | undefined;
-        if (
-            currentPrefs?.teamCatalogEnabled !== true
-            || currentPrefs.teamManifestUrl !== manifestUrl
-        ) {
-            return { items: cachedItemsForTeam() };
-        }
         // Persist the new manifest + its ETag
         await new Promise<void>((resolve) => {
             chrome.storage.local.set({
@@ -315,30 +321,33 @@ export async function syncTeamBookmarks(
         });
         manifest = cached.dh_team_manifest || null;
     }
+    if (!await preferencesStillMatch()) return staleResult();
 
     if (!manifest) {
-        return { items: cachedItemsForTeam() };
+        return { status: 'skipped', items: cachedItemsForTeam() };
     }
 
     // Step 2: find the entry for the currently-selected team
-    if (!teamId) return { items: [] };
+    if (!teamId) return { status: 'skipped', items: [] };
     const entry = manifest.teams.find(t => t.id === teamId);
     if (!entry) {
         console.warn('[DH] Selected team not found in manifest; using cached items if any.');
-        return { items: cachedItemsForTeam() };
+        return { status: 'skipped', items: cachedItemsForTeam() };
     }
 
     // Step 3: fetch the team's bookmark JSON
     // If we switched team since last sync, ignore old ETag
     const currentEtag = cache.dh_team === teamId ? cache.dh_team_etag : undefined;
     const bookmarksResult = await fetchTeamBookmarks(entry.url, currentEtag);
+    if (!await preferencesStillMatch()) return staleResult();
 
     if (bookmarksResult === null) {
-        return { items: cachedItemsForTeam() };
+        return { status: 'skipped', items: cachedItemsForTeam() };
     }
     if (!bookmarksResult.ok) {
         warnFetchFailure('bookmarks', bookmarksResult.failure);
         return {
+            status: 'failed',
             items: cachedItemsForTeam(),
             failure: bookmarksResult.failure,
             failureStage: 'bookmarks',
@@ -350,7 +359,10 @@ export async function syncTeamBookmarks(
         await new Promise<void>((resolve) => {
             chrome.storage.local.set({ dh_team_synced: new Date().toISOString() }, resolve);
         });
-        return { items: Array.isArray(cache.dh_team_items) ? cache.dh_team_items : [] };
+        return {
+            status: 'unchanged',
+            items: Array.isArray(cache.dh_team_items) ? cache.dh_team_items : [],
+        };
     }
 
     // New bookmarks — persist
@@ -363,7 +375,7 @@ export async function syncTeamBookmarks(
         }, resolve);
     });
 
-    return { items: bookmarksResult.items };
+    return { status: 'committed', items: bookmarksResult.items };
 }
 
 /**

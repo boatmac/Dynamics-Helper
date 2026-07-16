@@ -10,9 +10,9 @@
 // - Constants (STALE_WINDOW_MS, MAX_PENDING_AGE_MS) live next to the code
 //   that uses them — easy to find and change.
 //
-// Owner of writes: Service Worker only. FAB never writes dh_last_analysis
-// or dh_pending_analysis except to flip `seen: true` via identity-qualified
-// markSeen() when the user dismisses the popover.
+// Owner of result writes: Service Worker only. FAB acknowledges a displayed
+// identity through the separate dh_seen_analysis key, never by rewriting the
+// latest result.
 
 /** Persisted analysis result. Overwritten on every new analysis. */
 export interface LastAnalysis {
@@ -62,6 +62,7 @@ export const MAX_PENDING_DISPLAY_AGE_MS = 15 * 60 * 1000;
 
 const KEY_LAST = 'dh_last_analysis';
 const KEY_PENDING = 'dh_pending_analysis';
+const KEY_SEEN = 'dh_seen_analysis';
 
 /** Read the current dh_last_analysis, or null if absent. */
 export async function getLastAnalysis(): Promise<LastAnalysis | null> {
@@ -89,11 +90,9 @@ export async function setLastAnalysis(value: LastAnalysis): Promise<void> {
 }
 
 /**
- * Set `seen: true` only when the currently stored result still matches the
- * displayed identity. Called by FAB when it consumes/closes the popover.
- *
- * Race-safe: re-reads storage immediately before write so it doesn't
- * stomp on a concurrent SW write of a newer result.
+ * Persist only the identity that FAB consumed. This deliberately never reads
+ * or rewrites dh_last_analysis, so an acknowledgement for A cannot overwrite
+ * a newer result B regardless of storage callback ordering.
  */
 export function getLastAnalysisIdentity(
     value: LastAnalysis,
@@ -105,10 +104,11 @@ export function getLastAnalysisIdentity(
     };
 }
 
-function matchesLastAnalysisIdentity(
-    value: LastAnalysis,
-    expected: LastAnalysisIdentity,
+export function matchesLastAnalysisIdentity(
+    value: LastAnalysisIdentity,
+    expected: LastAnalysisIdentity | null,
 ): boolean {
+    if (!expected) return false;
     if (value.caseNumber !== expected.caseNumber) return false;
     if (value.requestId || expected.requestId) {
         return value.requestId === expected.requestId;
@@ -119,13 +119,13 @@ function matchesLastAnalysisIdentity(
 export async function markSeen(
     expected: LastAnalysisIdentity,
 ): Promise<void> {
-    const current = await getLastAnalysis();
-    if (!current) return;
-    if (!matchesLastAnalysisIdentity(current, expected)) return;
-    if (current.seen) return;
-    await chrome.storage.local.set({
-        [KEY_LAST]: { ...current, seen: true },
-    });
+    await chrome.storage.local.set({ [KEY_SEEN]: { ...expected } });
+}
+
+/** Read the last identity acknowledged by FAB, or null if absent. */
+export async function getSeenAnalysis(): Promise<LastAnalysisIdentity | null> {
+    const result = await chrome.storage.local.get(KEY_SEEN);
+    return (result[KEY_SEEN] as LastAnalysisIdentity | undefined) ?? null;
 }
 
 /** Read the current dh_pending_analysis, or null if absent. */

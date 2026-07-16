@@ -2394,7 +2394,26 @@ class NativeHost:
                             continue
                         # Re-raise other errors (including TimeoutError) to be handled by outer blocks
                         raise e
-                logger.debug(f"Returned from send_and_wait. Event: {response_event}")
+                raw_event_type = (
+                    getattr(response_event, "type", "none")
+                    if response_event is not None
+                    else "none"
+                )
+                event_type = (
+                    raw_event_type
+                    if isinstance(raw_event_type, str)
+                    else type(raw_event_type).__name__
+                )
+                event_data = getattr(response_event, "data", None)
+                data_type = type(event_data).__name__ if event_data is not None else "none"
+                event_content = getattr(event_data, "content", None)
+                has_content = isinstance(event_content, str) and bool(event_content)
+                content_length = len(event_content) if isinstance(event_content, str) else 0
+                event_summary = (
+                    f"event_type={event_type}, data_type={data_type}, "
+                    f"content_present={has_content}, content_length={content_length}"
+                )
+                logger.debug(f"Returned from send_and_wait: {event_summary}")
 
                 self.send_progress("Processing response...")
 
@@ -2417,26 +2436,15 @@ class NativeHost:
 
                 if response_event and response_event.data:
                     # Check for content, but also handle cases where it might be in a different field or the event type is weird
-                    if (
-                        hasattr(response_event.data, "content")
-                        and response_event.data.content
-                    ):
-                        full_response = response_event.data.content
+                    if has_content:
+                        full_response = event_content
                     else:
-                        # DEBUG: Dump the full event to understand why content is missing
-                        # This will help diagnose if it's a refusal, a filter, or a different event type
-                        import pprint
-
-                        debug_dump = pprint.pformat(response_event, indent=2)
                         full_response = (
                             f"### Debug: No content received\n\n"
                             f"The Copilot SDK returned an event without standard content. "
-                            f"Here is the raw event data for debugging:\n\n"
-                            f"```text\n{debug_dump}\n```"
+                            f"Safe diagnostic summary: `{event_summary}`."
                         )
-                        logger.warning(
-                            f"Response event data missing content: {response_event}"
-                        )
+                        logger.warning(f"Response event data missing content: {event_summary}")
                 else:
                     full_response = "No response event received (None)."
 

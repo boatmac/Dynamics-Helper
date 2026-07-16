@@ -593,6 +593,58 @@ class TestPromptFingerprintLifecycle(
         self.assertIn("CUSTOM-USER-PROMPT", sent_prompt)
         self.assertNotIn("CUSTOM-USER-PROMPT", system_message)
 
+    async def test_response_diagnostics_never_log_or_report_raw_event_content(self):
+        secret = "SDK-RESPONSE-SECRET-MARKER"
+
+        class SecretData:
+            content = None
+
+            def __repr__(self):
+                return f"SecretData({secret})"
+
+        class SecretEvent:
+            type = "assistant.message"
+            data = SecretData()
+
+            def __repr__(self):
+                return f"SecretEvent({secret}, data={self.data!r})"
+
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        self.active_session.send_and_wait.return_value = SecretEvent()
+
+        with (
+            patch("host.dh_native_host.logger.debug") as debug,
+            patch("host.dh_native_host.logger.warning") as warning,
+        ):
+            result = await self.host.handle_analyze_error(self.payload)
+
+        self.assertEqual(result["status"], "success")
+        self.assertIn("No content received", result["data"]["markdown"])
+        self.assertIn("event_type=assistant.message", result["data"]["markdown"])
+        observable = "\n".join(
+            [str(result), str(debug.call_args_list), str(warning.call_args_list)]
+        )
+        with open(result["data"]["saved_to"], encoding="utf-8") as report:
+            observable += report.read()
+        self.assertNotIn(secret, observable)
+
+    async def test_response_metadata_logging_preserves_ordinary_model_output(self):
+        output = "ordinary model output"
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        self.active_session.send_and_wait.return_value = SimpleNamespace(
+            type="assistant.message",
+            data=SimpleNamespace(content=output),
+        )
+
+        with patch("host.dh_native_host.logger.debug") as debug:
+            result = await self.host.handle_analyze_error(self.payload)
+
+        self.assertEqual(result["data"]["markdown"], output)
+        logs = str(debug.call_args_list)
+        self.assertIn("event_type=assistant.message", logs)
+        self.assertIn(f"content_length={len(output)}", logs)
+        self.assertNotIn(output, logs)
+
     async def test_unusable_absolute_root_fails_before_instruction_resolution(self):
         missing_root = os.path.join(self.root, "missing")
         original_session = self.host.session

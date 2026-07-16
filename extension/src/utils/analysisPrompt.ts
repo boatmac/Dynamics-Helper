@@ -1,13 +1,10 @@
-const USER_PROMPT_HEADING = /^## User Prompt[\t ]*\r?$/gm
+const USER_PROMPT_HEADING = /^## User Prompt[\t ]*\r?$/m
 
 export function applyCurrentUserPrompt(
     context: string,
     currentPrompt: string | undefined,
 ): string {
-    let markerIndex = -1
-    for (const match of context.matchAll(USER_PROMPT_HEADING)) {
-        markerIndex = match.index
-    }
+    const markerIndex = context.search(USER_PROMPT_HEADING)
 
     if (markerIndex < 0 && !currentPrompt?.trim()) return context
 

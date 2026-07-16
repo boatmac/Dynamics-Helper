@@ -15,6 +15,15 @@ import {
 import { DEFAULT_PREFS } from '../utils/prefs'
 import { getTranslation } from '../utils/translations'
 
+const teamCatalogMock = vi.hoisted(() => ({
+  syncTeamBookmarks: vi.fn(),
+}))
+
+vi.mock('../utils/teamCatalog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../utils/teamCatalog')>()),
+  syncTeamBookmarks: teamCatalogMock.syncTeamBookmarks,
+}))
+
 // Mock telemetry BEFORE importing Options. telemetry.ts instantiates
 // ApplicationInsights + createBrowserHistory at module-load and would
 // blow up under jsdom (window.location.protocol checks, etc.).
@@ -552,6 +561,159 @@ describe('Options delayed initial chrome hydration', () => {
       status: 'success',
       data: { success: true, config_saved: true },
     }))
+  })
+})
+
+describe('Options selected-team refresh generation', () => {
+  beforeEach(() => {
+    resetChromeMock()
+    installChromeMock()
+    teamCatalogMock.syncTeamBookmarks.mockReset()
+  })
+
+  async function hydrateTeamOptions() {
+    seedStorage({
+      dh_team_items: [{ type: 'link', label: 'Cached' }],
+      dh_team_synced: '2026-01-01T00:00:00.000Z',
+      dh_team_manifest: {
+        version: 1,
+        teams: [
+          { id: 'team-a', label: 'Team A', url: 'https://example.com/a.json' },
+          { id: 'team-b', label: 'Team B', url: 'https://example.com/b.json' },
+        ],
+      },
+    })
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: {
+        team_catalog_enabled: true,
+        team_manifest_url: 'https://example.com/manifest.json',
+        team: 'team-a',
+        use_workspace_only: false,
+      },
+    })
+    fireEvent.click(document.querySelector('[data-section="team"]') as HTMLButtonElement)
+  }
+
+  it('ignores a stale refresh result after the selected team changes', async () => {
+    let resolveSync!: (value: unknown) => void
+    teamCatalogMock.syncTeamBookmarks.mockReturnValue(
+      new Promise(resolve => { resolveSync = resolve }),
+    )
+    await hydrateTeamOptions()
+
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
+    const teamSelect = screen.getByRole('combobox') as HTMLSelectElement
+    fireEvent.change(teamSelect, { target: { value: 'team-b' } })
+    seedStorage({
+      dh_team_manifest: {
+        version: 1,
+        teams: [{ id: 'stale', label: 'Stale Team', url: 'https://example.com/stale.json' }],
+      },
+    })
+    resolveSync({
+      status: 'stale',
+      items: [
+        { type: 'link', label: 'STALE ONE' },
+        { type: 'link', label: 'STALE TWO' },
+      ],
+    })
+
+    await waitFor(() => expect(teamCatalogMock.syncTeamBookmarks).toHaveBeenCalled())
+    expect(teamSelect.value).toBe('team-b')
+    expect(document.body.textContent).not.toContain('Stale Team')
+    expect(document.body.textContent).not.toContain('STALE ONE')
+    expect(document.body.textContent).toContain('1 items')
+    expect(document.body.textContent).toContain(
+      new Date('2026-01-01T00:00:00.000Z').toLocaleString(),
+    )
+  })
+
+  it('ignores a stale refresh result after Reset without restoring UI state', async () => {
+    let resolveSync!: (value: unknown) => void
+    teamCatalogMock.syncTeamBookmarks.mockReturnValue(
+      new Promise(resolve => { resolveSync = resolve }),
+    )
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await hydrateTeamOptions()
+      seedStorage({
+        dh_seen_analysis: {
+          caseNumber: '1234567890123456',
+          requestId: 'seen-before-reset',
+          timestamp: 1,
+        },
+      })
+      fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await waitFor(() => {
+        expect(screen.getByRole('status').textContent).toContain('Reset complete')
+      })
+      await act(async () => resolveSync({
+          status: 'stale',
+          items: [{ type: 'link', label: 'STALE AFTER RESET' }],
+          failure: { kind: 'auth', message: 'unsafe stale failure' },
+      }))
+
+      await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+      expect(document.body.textContent).not.toContain('STALE AFTER RESET')
+      expect(document.body.textContent).not.toContain('Manifest auth failed')
+      expect(getStorageSnapshot()).not.toHaveProperty('dh_seen_analysis')
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+
+  it('ignores a stale refresh result after the manifest URL changes', async () => {
+    let resolveSync!: (value: unknown) => void
+    teamCatalogMock.syncTeamBookmarks.mockReturnValue(
+      new Promise(resolve => { resolveSync = resolve }),
+    )
+    await hydrateTeamOptions()
+
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
+    await waitFor(() => expect(teamCatalogMock.syncTeamBookmarks).toHaveBeenCalled())
+    const manifest = screen.getByPlaceholderText(
+      'https://example.com/team-manifest.json',
+    ) as HTMLInputElement
+    fireEvent.change(manifest, {
+      target: { value: 'https://example.com/new-manifest.json' },
+    })
+    await act(async () => {
+      resolveSync({
+        status: 'stale',
+        items: [
+          { type: 'link', label: 'STALE ONE' },
+          { type: 'link', label: 'STALE TWO' },
+        ],
+        failure: { kind: 'auth', message: 'stale auth failure' },
+      })
+      await new Promise(resolve => setTimeout(resolve, 20))
+    })
+
+    expect(manifest.value).toBe('https://example.com/new-manifest.json')
+    expect(document.body.textContent).not.toContain('STALE ONE')
+    expect(document.body.textContent).not.toContain('Manifest auth failed')
+    expect(document.body.textContent).toContain('1 items')
+    expect(document.body.textContent).toContain(
+      new Date('2026-01-01T00:00:00.000Z').toLocaleString(),
+    )
+  })
+
+  it('applies an unchanged valid refresh result', async () => {
+    teamCatalogMock.syncTeamBookmarks.mockResolvedValue({
+      status: 'unchanged',
+      items: [{ type: 'link', label: 'Cached' }],
+    })
+    await hydrateTeamOptions()
+
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('Last synced')
+      expect(document.body.textContent).toContain('1 items')
+    })
   })
 })
 

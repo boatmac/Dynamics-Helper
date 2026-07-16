@@ -29,6 +29,10 @@ type DeferredStorageRemove = DeferredResponse & {
 type DeferredStorageGet = DeferredResponse & {
   matches: (keys: unknown) => boolean
 }
+type StorageChangeListener = (
+  changes: { [key: string]: chrome.storage.StorageChange },
+  areaName: string,
+) => void
 
 let pendingByAction: PendingMap = new Map()
 let pendingStorageGets: DeferredStorageGet[] = []
@@ -36,6 +40,7 @@ let pendingStorageSets: DeferredStorageSet[] = []
 let pendingStorageRemoves: DeferredStorageRemove[] = []
 let storageData: Record<string, unknown> = {}
 let messageLog: Array<{ action: string; payload: unknown }> = []
+let storageChangeListeners = new Set<StorageChangeListener>()
 
 function makeDeferred(): DeferredResponse {
   let resolve!: (v: unknown) => void
@@ -54,10 +59,13 @@ export function resetChromeMock(): void {
   pendingStorageRemoves = []
   storageData = {}
   messageLog = []
+  storageChangeListeners = new Set()
   sendMessage.mockClear()
   storageGet.mockClear()
   storageSet.mockClear()
   storageRemove.mockClear()
+  storageOnChangedAddListener.mockClear()
+  storageOnChangedRemoveListener.mockClear()
 }
 
 /**
@@ -253,6 +261,34 @@ export function getStorageSnapshot(): Readonly<Record<string, unknown>> {
   return structuredClone(storageData)
 }
 
+/**
+ * Emit an explicit chrome.storage.onChanged notification. Storage mocks keep
+ * their historical non-emitting set/remove behavior unless a test calls this
+ * helper, so existing tests remain deterministic.
+ */
+export function emitStorageChanges(
+  changes: { [key: string]: chrome.storage.StorageChange },
+  areaName = 'local',
+): void {
+  if (areaName === 'local') {
+    for (const [key, change] of Object.entries(changes)) {
+      if (change.newValue === undefined) delete storageData[key]
+      else storageData[key] = change.newValue
+    }
+  }
+  for (const listener of [...storageChangeListeners]) {
+    listener(changes, areaName)
+  }
+}
+
+const storageOnChangedAddListener = vi.fn((listener: StorageChangeListener) => {
+  storageChangeListeners.add(listener)
+})
+
+const storageOnChangedRemoveListener = vi.fn((listener: StorageChangeListener) => {
+  storageChangeListeners.delete(listener)
+})
+
 export function installChromeMock(): void {
   ;(globalThis as unknown as { chrome: unknown }).chrome = {
     runtime: {
@@ -272,8 +308,8 @@ export function installChromeMock(): void {
         remove: storageRemove,
       },
       onChanged: {
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
+        addListener: storageOnChangedAddListener,
+        removeListener: storageOnChangedRemoveListener,
       },
     },
   }
@@ -284,4 +320,6 @@ export const chromeMockSpies = {
   storageGet,
   storageSet,
   storageRemove,
+  storageOnChangedAddListener,
+  storageOnChangedRemoveListener,
 }

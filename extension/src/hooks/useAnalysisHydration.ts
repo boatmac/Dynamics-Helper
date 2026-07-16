@@ -15,7 +15,9 @@ import {
     getLastAnalysis,
     getLastAnalysisIdentity,
     getPendingAnalysis,
+    getSeenAnalysis,
     markSeen,
+    matchesLastAnalysisIdentity,
     STALE_WINDOW_MS,
     MAX_PENDING_DISPLAY_AGE_MS,
 } from '../utils/analysisStore'
@@ -45,11 +47,13 @@ export interface HydrationResult {
 
 function shouldOpen(
     last: LastAnalysis | null,
+    seen: LastAnalysisIdentity | null,
     caseNumber: string,
 ): boolean {
     if (!last || !caseNumber) return false
     if (last.caseNumber !== caseNumber) return false
     if (last.seen) return false
+    if (matchesLastAnalysisIdentity(last, seen)) return false
     if (Date.now() - last.timestamp > STALE_WINDOW_MS) return false
     return true
 }
@@ -84,13 +88,14 @@ export function useAnalysisHydration(caseNumber: string): HydrationResult {
                 return
             }
 
-            const [last, pending] = await Promise.all([
+            const [last, pending, seen] = await Promise.all([
                 getLastAnalysis(),
                 getPendingAnalysis(),
+                getSeenAnalysis(),
             ])
             if (cancelled) return
 
-            if (shouldOpen(last, caseNumber)) {
+            if (shouldOpen(last, seen, caseNumber)) {
                 // Non-null per shouldOpen.
                 const l = last!
                 setPopover({

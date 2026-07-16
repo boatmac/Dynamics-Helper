@@ -11,8 +11,18 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
-import { installChromeMock, resetChromeMock, seedStorage } from '../test/chromeMock'
-import { STALE_WINDOW_MS, MAX_PENDING_DISPLAY_AGE_MS } from '../utils/analysisStore'
+import {
+    deferNextStorageSet,
+    getStorageSnapshot,
+    installChromeMock,
+    resetChromeMock,
+    seedStorage,
+} from '../test/chromeMock'
+import {
+    markSeen,
+    STALE_WINDOW_MS,
+    MAX_PENDING_DISPLAY_AGE_MS,
+} from '../utils/analysisStore'
 import type { LastAnalysis, PendingAnalysis } from '../utils/analysisStore'
 import { useAnalysisHydration } from './useAnalysisHydration'
 
@@ -76,8 +86,9 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
         })
     })
 
-    // R-I2: dismiss → seen flips to true → re-mount does NOT auto-open.
-    it('R-I2: dismissPopover sets seen=true; remount does not auto-open', async () => {
+    // R-I2: dismiss writes a separate identity acknowledgement. The result
+    // remains immutable and a re-mount does not auto-open it.
+    it('R-I2: dismissPopover acknowledges A separately; remount does not auto-open', async () => {
         seedStorage({ dh_last_analysis: makeLast() })
 
         const first = renderHook(() => useAnalysisHydration(CASE_A))
@@ -89,9 +100,14 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
             )
         })
 
-        // Verify storage was updated with seen=true.
+        // The last result is not rewritten; the separate identity is stored.
         const stored = await chrome.storage.local.get('dh_last_analysis')
-        expect((stored.dh_last_analysis as LastAnalysis).seen).toBe(true)
+        expect((stored.dh_last_analysis as LastAnalysis).seen).toBe(false)
+        expect(getStorageSnapshot().dh_seen_analysis).toEqual({
+            requestId: 'req-A',
+            caseNumber: CASE_A,
+            timestamp: expect.any(Number),
+        })
         expect(first.result.current.popover).toBeNull()
 
         // Fresh mount on the same case must not re-open.
@@ -187,15 +203,19 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
         })
     })
 
-    it('does not mark a newer result seen when it replaces the displayed record', async () => {
+    it('an A acknowledgement ordered after newer B cannot rewrite B or its error code', async () => {
         const displayed = makeLast({
             requestId: 'req-A',
             errorCode: 'dh_core_prompt_missing',
         })
         seedStorage({ dh_last_analysis: displayed })
-        const hook = renderHook(() => useAnalysisHydration(CASE_A))
-        await waitFor(() => expect(hook.result.current.popover).not.toBeNull())
-        const identity = (hook.result.current.popover as any).identity
+        const delayedAck = deferNextStorageSet()
+        const marking = markSeen({
+            caseNumber: CASE_A,
+            requestId: 'req-A',
+            timestamp: displayed.timestamp,
+        })
+        await act(async () => undefined)
 
         seedStorage({
             dh_last_analysis: makeLast({
@@ -204,9 +224,8 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
                 errorCode: 'repository_instructions_missing',
             }),
         })
-        await act(async () => {
-            await (hook.result.current.dismissPopover as any)(identity)
-        })
+        await act(async () => delayedAck.resolve(undefined))
+        await marking
 
         const stored = await chrome.storage.local.get('dh_last_analysis')
         expect(stored.dh_last_analysis).toMatchObject({
@@ -214,53 +233,47 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
             seen: false,
             errorCode: 'repository_instructions_missing',
         })
-    })
-
-    it('marks a matching legacy record seen by case number and timestamp', async () => {
-        const legacy = makeLast({ requestId: undefined })
-        seedStorage({ dh_last_analysis: legacy })
-        const hook = renderHook(() => useAnalysisHydration(CASE_A))
-        await waitFor(() => expect(hook.result.current.popover).not.toBeNull())
-
-        await act(async () => {
-            await (hook.result.current.dismissPopover as any)(
-                (hook.result.current.popover as any).identity,
-            )
-        })
-
-        const stored = await chrome.storage.local.get('dh_last_analysis')
-        expect(stored.dh_last_analysis).toMatchObject({
-            requestId: undefined,
+        expect(getStorageSnapshot().dh_seen_analysis).toMatchObject({
+            requestId: 'req-A',
             caseNumber: CASE_A,
-            timestamp: legacy.timestamp,
-            seen: true,
         })
     })
 
-    it('does not wildcard-match a different legacy timestamp', async () => {
-        const displayed = makeLast({ requestId: undefined })
-        seedStorage({ dh_last_analysis: displayed })
+    it('suppresses a legacy record acknowledged by exact case number and timestamp', async () => {
+        const legacy = makeLast({ requestId: undefined })
+        seedStorage({
+            dh_last_analysis: legacy,
+            dh_seen_analysis: {
+                caseNumber: CASE_A,
+                timestamp: legacy.timestamp,
+            },
+        })
+        const hook = renderHook(() => useAnalysisHydration(CASE_A))
+        await new Promise(resolve => setTimeout(resolve, 20))
+        expect(hook.result.current.popover).toBeNull()
+    })
+
+    it('does not suppress a legacy record with a different timestamp', async () => {
+        const current = makeLast({ requestId: undefined })
+        seedStorage({
+            dh_last_analysis: current,
+            dh_seen_analysis: {
+                caseNumber: CASE_A,
+                timestamp: current.timestamp - 1,
+            },
+        })
         const hook = renderHook(() => useAnalysisHydration(CASE_A))
         await waitFor(() => expect(hook.result.current.popover).not.toBeNull())
-        const identity = (hook.result.current.popover as any).identity
+        expect(hook.result.current.popover?.identity.timestamp).toBe(current.timestamp)
+    })
 
-        seedStorage({
-            dh_last_analysis: makeLast({
-                requestId: undefined,
-                timestamp: displayed.timestamp + 1,
-                errorCode: 'newer-legacy-error',
-            }),
-        })
-        await act(async () => {
-            await (hook.result.current.dismissPopover as any)(identity)
-        })
+    it('preserves legacy last.seen suppression without a separate acknowledgement', async () => {
+        seedStorage({ dh_last_analysis: makeLast({ seen: true }) })
 
-        const stored = await chrome.storage.local.get('dh_last_analysis')
-        expect(stored.dh_last_analysis).toMatchObject({
-            timestamp: displayed.timestamp + 1,
-            seen: false,
-            errorCode: 'newer-legacy-error',
-        })
+        const hook = renderHook(() => useAnalysisHydration(CASE_A))
+        await new Promise(resolve => setTimeout(resolve, 20))
+
+        expect(hook.result.current.popover).toBeNull()
     })
 
     it('UI-I6: hydrates coded prompt errors', async () => {

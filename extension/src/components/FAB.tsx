@@ -1103,7 +1103,11 @@ const FAB: React.FC = () => {
         if (item.type === 'folder') {
             navigateTo(item);
         } else if (item.type === 'link' && item.url) {
-            trackEvent('Bookmark Link Clicked', { label: item.label, url: item.url });
+            trackEvent('Bookmark Link Clicked', {
+                label: item.label,
+                source: item.source || 'personal',
+                type: item.type,
+            });
             try {
                 // We must use chrome.runtime.sendMessage to ask background script to open tab
                 // because sometimes window.open is blocked or behaves poorly in content scripts
@@ -1115,8 +1119,8 @@ const FAB: React.FC = () => {
                 if (url) {
                     window.open(url, '_blank');
                 }
-            } catch (e) {
-                console.error("Failed to open link:", e);
+            } catch {
+                console.error("Failed to open bookmark link.");
             }
             setIsOpen(false);
         } else if (item.type === 'markdown') {
