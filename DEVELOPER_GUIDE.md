@@ -225,7 +225,8 @@ For errors, persistence stores the raw safe Host fallback in `content` and prese
 
 **Edge cases handled:**
 
-* **Race in handleAnalyzeForward (edge 6.3):** if `recordAnalyzeStart` resolves *after* the host response, the post-response success/error write is a no-op for the marker because `clearPendingIfMatches(requestId)` only deletes if the requestId matches what is on disk. The pending row is written, then immediately cleared on the next event loop tick, so the user sees a brief "Analyzing…" flicker instead of a stuck pending marker.
+* **Start-before-send ordering:** `handleAnalyzeForward` awaits `recordAnalyzeStart(ctx)` before calling `deps.send(payload)`. The Host request is not dispatched until the pending marker write completes.
+* **Late response versus newer pending (edge 6.3):** Analysis A can remain in flight while analysis B starts and replaces the single-slot pending marker with B's request ID. When A's response arrives, A's result is persisted, but `clearPendingIfMatches(A.requestId)` rereads the pending marker and leaves B's marker intact because the request IDs differ. A late response therefore cannot clear a newer analysis's pending state.
 * **Stale pending on mount:** `useAnalysisHydration` checks `Date.now() - startTime > MAX_PENDING_DISPLAY_AGE_MS` and ignores pending markers older than 15 min. The marker stays on disk until GC; this is intentional (the user might still want to know if the run eventually completes).
 * **Case mismatch on pending:** if the on-disk pending marker is for case A but the FAB is mounted on case B, the hook ignores the pending row entirely (no false "Analyzing…").
 * **Options Reset:** the Reset button also removes `dh_last_analysis` and `dh_pending_analysis` so a user-initiated reset wipes persisted analysis state.

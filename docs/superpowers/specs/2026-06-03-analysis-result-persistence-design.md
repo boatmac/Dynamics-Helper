@@ -98,7 +98,10 @@ identity changes:
 const STALE_WINDOW_MS = 60 * 60 * 1000;   // 1 hour
 ```
 
-If a result is older than `STALE_WINDOW_MS`, it is ignored on read (treated as expired). It is NOT deleted from storage on the read path — only overwritten by the next analysis or evicted by an explicit garbage-collection pass (4.6).
+If a result is older than `STALE_WINDOW_MS`, it is ignored on read but remains
+in `dh_last_analysis`. It is removed only when the next analysis result
+overwrites it or when Options Reset explicitly removes the storage key. The
+garbage-collection pass in 4.6 applies only to stale pending markers.
 
 ### 4.5 Error display in popover (replaces the 4-second-bubble-only UX)
 
@@ -122,7 +125,9 @@ On FAB unmount: no cleanup. The next mount handles expiry on read.
 On every successful write of `dh_last_analysis`, `setLastAnalysis()` also removes
 a `dh_pending_analysis` marker older than `MAX_PENDING_AGE_MS` (2 hours). This
 prevents an orphaned marker, such as one left by a Service Worker failure, from
-blocking later pending-state behavior indefinitely.
+blocking later pending-state behavior indefinitely. This GC does not inspect or
+delete `dh_last_analysis`; stale results remain until overwritten by a later
+analysis or removed by Options Reset.
 
 ## 5. Invariants
 
