@@ -11,7 +11,9 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Isolated worktree: `C:\Users\zhaobo\AppData\Local\Temp\opencode\Dynamics-Helper-prompt-scope-spec`
 - Product implementation Tasks 1-6: approved through `0f57f8e`
 - Implementation/documentation Tasks 1-7: approved through `90e6da3` (`docs(persistence): correct result lifecycle semantics`)
-- Task 8 evidence: `9127546` plus `73b8adf`; the final whole-branch review findings are fixed by the commits recorded in the review-fix addendum below
+- Task 8 evidence: `9127546` plus `73b8adf`; first-review fixes/evidence are `907acd0` and `6b9631f`
+- Second whole-branch Important-finding implementation: `cb760a4` plus comment-only follow-up `3e18244`
+- Controller broad whole-branch review: **pending rerun after the second fix wave**
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
@@ -53,10 +55,15 @@ ca65519 docs(prompt): document deterministic instruction scopes
 6fdd8f5 docs(prompt): correct Task 7 review findings
 90e6da3 docs(persistence): correct result lifecycle semantics
 9127546 docs(verification): record prompt scope test evidence
-HEAD docs(verification): isolate prompt scope host evidence
+73b8adf docs(verification): isolate prompt scope host evidence
+907acd0 fix(prompt): close review race and secret gaps
+6b9631f docs(verification): record final review fixes
+cb760a4 fix(review): close remaining race and logging gaps
+3e18244 docs(review): align stale-result comments
+HEAD docs(verification): record second review fixes
 ```
 
-These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. The approved pre-verification head was `90e6da3a03050ef53526d253ec0cf7989efa8e47`, at which point the branch was 20 commits ahead of and 0 behind `origin/master`. Current Task 8 evidence consists of `9127546` plus the correcting current `HEAD`; the branch is 22 commits ahead of and 0 behind `origin/master` at that correcting commit. The controller's final broad code review remains separate. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming an ahead/behind count from this document.
+These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Product commit `cb760a4` was 25 commits ahead of `origin/master`; comment follow-up `3e18244` plus this evidence commit make the branch 27 ahead and 0 behind if the remote baseline is unchanged. The controller must still rerun its broad whole-branch review. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming the embedded count remains current.
 
 ## Remote VM Bootstrap
 
@@ -253,6 +260,30 @@ Fresh gates run from committed product head `907acd0`:
 - Isolated Python `compileall -q host`: **passed** with no diagnostics.
 - `git diff --check` and review static scans: **passed**.
 
+## Second Review Important-Fix Addendum - 2026-07-17
+
+Starting head: `6b9631f0a42e7934913831c989214aea59a1ade0`. Product/test/documentation fix commit: `cb760a4` (`fix(review): close remaining race and logging gaps`), followed by comment-only `3e18244`. Full commands, RED/GREEN and mutation evidence, file mapping, and concerns are recorded in `.superpowers/sdd/second-final-review-fix-report.md`.
+
+The coordinated TDD wave closes the six remaining Important findings:
+
+- Full selected-team sync rechecks current enabled/URL/team preferences before manifest, 304 timestamp, and changed bookmark commits; stale results are discriminated and ignored by Options and Service Worker consumers.
+- Analysis consumption writes a separate identity-only `dh_seen_analysis` acknowledgment and never read-modify-writes `dh_last_analysis`; legacy `last.seen` and exact case/timestamp identities remain supported.
+- `usePrefs` registers `storage.onChanged` before its initial get and generation-gates a delayed stale snapshot, including reset-empty/default values.
+- Custom User Prompt truncation starts at the first authoritative line-level marker, so duplicate stale sections cannot survive.
+- Bookmark telemetry contains label/source/type but no URL, and related catch logs avoid thrown URL text.
+- Host SDK response logs and no-content reports use metadata only: event type, data type, content presence, and content length.
+
+Fresh gates run from product head `cb760a4` with every Host process using an isolated `LOCALAPPDATA`:
+
+- Focused Host with `PYTHONPATH=host`: **111/111** passed in 5.963s.
+- Full Host discovery: **181/181** passed in 5.146s.
+- Focused Extension review suite: **127/127** passed across 10 files in 18.80s.
+- Full Extension: **166/166** passed across 15 files in 18.95s.
+- Extension production build: **passed**, TypeScript and Vite exit 0, 2,217 modules transformed, 14 artifacts listed in 7.50s.
+- Isolated Python `compileall -q host` and `git diff --check 6b9631f..cb760a4`: **passed** with no diagnostics.
+
+The optional authenticated marker smoke remains skipped because safe isolation of authenticated user/session state was not guaranteed. The controller broad whole-branch review remains pending and must not be inferred from these focused/self-review results.
+
 ## Session Identity Contract
 
 - Case session ID is deterministic UUIDv5 derived from the bare 16-digit case number.
@@ -442,9 +473,9 @@ Blocked until the Contract Primitives spec freezes the adapter boundary:
 
 ## Current Decision State
 
-- Prompt-scope implementation/documentation Tasks 1-7 are approved on `docs/prompt-scope-cleanup-design` through `90e6da3`; Task 8 evidence is `9127546` plus the current correcting evidence commit, and its concise unversioned release draft exists.
+- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and two review-fix waves are recorded through `cb760a4`, `3e18244`, and the current evidence commit, and the concise unversioned release draft exists.
 - Accepted design and plan are `441d0db` and `21108d9`.
-- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; final broad code review remains controller-owned after the correcting Task 8 evidence commit.
+- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the second Important-fix wave.
 - No MyCases integration code, mode preference, workspace detector, coordinator adapter, persistence adapter, or MyCases canonical-file write has been implemented.
 - MyCasesKit response `675006a` accepts Form ③ and the Stage 1 deterministic persistence-gate model.
 - Five shared JSON fixtures and a README exist as examples, but six README items remain tentative; not every interface is frozen.
@@ -484,7 +515,7 @@ Use the following for continuation; update the exact HEAD and status from Git ra
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9，产品 Tasks 1-6 已批准到 0f57f8e，Task 7 文档已完成。Task 8 已由 9127546 和当前 correcting evidence HEAD 完成：隔离 LOCALAPPDATA 的 Host focused 108/108、full 178/178，Extension focused 88/88、full 118/118，build 通过；可选 marker smoke 因无法保证 model-backed VM 本地状态完全隔离而跳过；releases/notes-prompt-scope-cleanup-draft.md 已存在且未选择版本。下一步是 controller broad code review，不要重做 Task 8。
+历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9。第二轮 Important 修复是产品提交 cb760a4 加注释提交 3e18244：隔离 LOCALAPPDATA 的 Host focused 111/111、full 181/181，Extension focused 127/127、full 166/166，build 通过；可选 marker smoke 因无法保证 authenticated model-backed user/session state 完全隔离而跳过；releases/notes-prompt-scope-cleanup-draft.md 已更新且未选择版本。下一步仍是 controller 重新运行 broad whole-branch review；不要把本轮 focused/self-review 当作 broad review 已通过。
 
 已实现行为：所有 DH create/resume 都设置 skip_custom_instructions=True；CLI global、AGENTS、path instructions 等自动发现源全部排除。DH 显式注入 Core + 恰好一个可编辑源：Root 为空或 Repository ONLY 关闭时使用 DH-specific Instructions；Root 非空且 Repository ONLY 开启时只使用 <Root>/.github/copilot-instructions.md。Custom User Prompt 仍是每次 Analyze 的 PII-scrubbed user content。使用严格 UTF-8 immutable byte snapshot、framed fingerprint、same-UUID refresh 和 fail-closed errors。Options 区分 explicit empty（清空文件）与 omitted（不写），检查 update_config/config_saved，并保留可选 errorCode 到持久化和本地化显示。
 
