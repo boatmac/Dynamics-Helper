@@ -286,7 +286,16 @@ The optional authenticated marker smoke remains skipped because safe isolation o
 
 ## Third Review Fix Addendum - 2026-07-17
 
-Starting head: `b39b46a01de5c6a00176a89f084e61a50a7ce196`. The third coordinated TDD wave makes the Service Worker the serialized owner of Team Catalog cache/clear/reset state, preserves full selected-team sync status and identity, generation-gates every Options callback branch, and stamps/rejects mismatched cache identities. Analysis state now uses one mutation queue, one coherent hydration snapshot, and deterministic per-identity seen keys with legacy singleton compatibility. Host SDK/CLI exception paths log and return safe operation/type summaries only while preserving transport invalidation. Full commands, totals, mutations, commits, and concerns are recorded in `.superpowers/sdd/third-final-review-fix-report.md` after final verification.
+Starting head: `b39b46a01de5c6a00176a89f084e61a50a7ce196`. Product/test/documentation fix commit: `67fb4bb` (`fix(review): serialize shared storage ownership`). The third coordinated TDD wave makes the Service Worker the serialized owner of Team Catalog cache/clear/reset state, preserves full selected-team sync status and identity, generation-gates every Options callback branch, and stamps/rejects mismatched cache identities. Analysis state now uses one mutation queue, one coherent hydration snapshot, and deterministic per-identity seen keys with legacy singleton compatibility. Host SDK/CLI exception paths log and return safe operation/type summaries only while preserving transport invalidation. Full commands, mutations, files, and concerns are recorded in `.superpowers/sdd/third-final-review-fix-report.md`; the subsequent evidence commit is the branch `HEAD`.
+
+Fresh gates from committed product head `67fb4bb`, with every Host process using isolated `LOCALAPPDATA` and focused Host using `PYTHONPATH=host`:
+
+- Focused Host: **123/123 passed** across prompt/config/session/workspace/SDK/debug modules.
+- Full Host discovery: **187/187 passed**.
+- Focused Extension review suite: **143/143 passed across 6 files**.
+- Full Extension: **198/198 passed across 16 files**.
+- Extension production build: **passed**, TypeScript and Vite exit 0, **2,216 modules transformed**, **13 artifacts listed**.
+- Isolated Python `compileall -q host`, `git diff --check b39b46a..HEAD`, mutation proofs, and static ownership/secrecy scans: **passed**.
 
 The optional authenticated marker smoke remains skipped unless safe authenticated isolation can be guaranteed. The controller broad whole-branch review remains pending after this wave; no focused/self-review result substitutes for it.
 
@@ -479,9 +488,9 @@ Blocked until the Contract Primitives spec freezes the adapter boundary:
 
 ## Current Decision State
 
-- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and two review-fix waves are recorded through `cb760a4`, `3e18244`, and the current evidence commit, and the concise unversioned release draft exists.
+- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and three review-fix waves are recorded through product commit `67fb4bb` and the current evidence commit, and the concise unversioned release draft exists.
 - Accepted design and plan are `441d0db` and `21108d9`.
-- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the second Important-fix wave.
+- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the third fix wave.
 - No MyCases integration code, mode preference, workspace detector, coordinator adapter, persistence adapter, or MyCases canonical-file write has been implemented.
 - MyCasesKit response `675006a` accepts Form ③ and the Stage 1 deterministic persistence-gate model.
 - Five shared JSON fixtures and a README exist as examples, but six README items remain tentative; not every interface is frozen.
