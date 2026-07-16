@@ -213,6 +213,14 @@ export const translations: TranslationDictionary = {
         en: "Repository Instructions cannot be read. Repair the file or disable Repository ONLY.",
         zh: "无法读取仓库指令。请修复该文件，或禁用仅仓库模式。",
     },
+    configSavedRefreshFailed: {
+        en: "Settings were saved, but the active prompt could not be refreshed.",
+        zh: "设置已保存，但无法刷新当前提示源。",
+    },
+    configNotSaved: {
+        en: "Settings were not saved.",
+        zh: "设置未保存。",
+    },
     newItemLabel: { en: "New Item", zh: "新建项目" },
     newLinkLabel: { en: "New Link", zh: "新建链接" },
     // Native confirm()/alert() dialog strings (must go through t() per i18n rule)

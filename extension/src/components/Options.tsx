@@ -38,6 +38,18 @@ import { Preferences, DEFAULT_PREFS, usePrefs } from '../utils/prefs';
 import MarkdownPreview from './MarkdownPreview';
 import { trackEvent } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
+import { localizePromptSourceError } from '../utils/promptSourceErrors';
+import {
+    acknowledgeInstructionRevision,
+    classifyConfigUpdateResponse,
+    shouldIncludeUserInstructions,
+    type ConfigUpdateIssue,
+} from '../utils/configUpdateResult';
+
+type PromptSourceIssue = {
+    errorCode?: string;
+    fallback: string;
+};
 
 // Helper
 function cn(...inputs: (string | undefined | null | false)[]) {
@@ -553,6 +565,12 @@ const OptionsInner: React.FC = () => {
     // unhydrated state is the failure mode we are trying to prevent.
     const prefsHydratedRef = useRef(false);
 
+    const [promptHealthIssue, setPromptHealthIssue] = useState<PromptSourceIssue | null>(null);
+    const [configUpdateIssue, setConfigUpdateIssue] = useState<ConfigUpdateIssue | null>(null);
+    const userInstructionsEditRevisionRef = useRef(0);
+    const userInstructionsAckRevisionRef = useRef(0);
+    const configUpdateRequestRevisionRef = useRef(0);
+
     // Hydration-window edit protection. Tracks which dh_prefs keys the user
     // has edited during this Options session. Used by:
     //   1. The host get_config merge — fields in this set are NOT overwritten
@@ -675,6 +693,99 @@ const OptionsInner: React.FC = () => {
     const [previewInstructions, setPreviewInstructions] = useState(true);
     const [previewPrompt, setPreviewPrompt] = useState(true);
 
+    const buildHostConfigPayload = (
+        nextPrefs: Preferences,
+        options: { includeUserInstructions: boolean },
+    ) => {
+        const payload: Record<string, unknown> = {
+            user_prompt: nextPrefs.userPrompt,
+            config: {
+                root_path: nextPrefs.rootPath,
+                skill_directories: nextPrefs.skillDirectories
+                    ? nextPrefs.skillDirectories
+                        .split(',')
+                        .map(value => value.trim())
+                        .filter(Boolean)
+                    : [],
+                mcp_config_path: nextPrefs.mcpConfigPath,
+                extension_preferences: {
+                    auto_analyze_mode: nextPrefs.autoAnalyzeMode,
+                    user_prompt: nextPrefs.userPrompt,
+                    enable_status_bubble: nextPrefs.enableStatusBubble,
+                    beta_channel_enabled: nextPrefs.betaChannelEnabled,
+                    use_workspace_only: nextPrefs.useWorkspaceOnly,
+                    log_level: nextPrefs.logLevel,
+                    language: nextPrefs.language,
+                    primary_color: nextPrefs.primaryColor,
+                    button_text: nextPrefs.buttonText,
+                    offset_bottom: nextPrefs.offsetBottom,
+                    offset_right: nextPrefs.offsetRight,
+                    team_catalog_enabled: nextPrefs.teamCatalogEnabled,
+                    team_manifest_url: nextPrefs.teamManifestUrl,
+                    team: nextPrefs.team,
+                    team_label: nextPrefs.teamLabel,
+                    analyze_timeout_seconds: nextPrefs.analyzeTimeoutSeconds,
+                    model: nextPrefs.model,
+                    reasoning_effort: nextPrefs.reasoningEffort,
+                    context_tier: nextPrefs.contextTier,
+                },
+            },
+        };
+        if (options.includeUserInstructions) {
+            payload.user_instructions = nextPrefs.userInstructions ?? '';
+        }
+        return { action: 'update_config', payload };
+    };
+
+    const sendHostConfigUpdate = (
+        nextPrefs: Preferences,
+        options: {
+            suppressTransportWarning?: boolean;
+            instructionRevision?: number;
+        } = {},
+    ) => {
+        const instructionRevision = options.instructionRevision
+            ?? userInstructionsEditRevisionRef.current;
+        const includeUserInstructions = shouldIncludeUserInstructions(
+            instructionRevision,
+            userInstructionsAckRevisionRef.current,
+        );
+        const requestRevision = ++configUpdateRequestRevisionRef.current;
+
+        chrome.runtime.sendMessage({
+            type: 'NATIVE_MSG',
+            payload: buildHostConfigPayload(nextPrefs, {
+                includeUserInstructions,
+            }),
+        }, (response) => {
+            const transportError = chrome.runtime.lastError;
+            if (transportError) {
+                if (
+                    !options.suppressTransportWarning
+                    && requestRevision === configUpdateRequestRevisionRef.current
+                ) {
+                    setConfigUpdateIssue({
+                        fallback: transportError.message || '',
+                        configSaved: false,
+                    });
+                }
+                return;
+            }
+
+            const decision = classifyConfigUpdateResponse(response);
+            if (includeUserInstructions) {
+                userInstructionsAckRevisionRef.current = acknowledgeInstructionRevision(
+                    userInstructionsAckRevisionRef.current,
+                    instructionRevision,
+                    decision.acknowledged,
+                );
+            }
+            if (requestRevision === configUpdateRequestRevisionRef.current) {
+                setConfigUpdateIssue(decision.issue);
+            }
+        });
+    };
+
     // Initial Load
     useEffect(() => {
         // Load Prefs
@@ -737,13 +848,9 @@ const OptionsInner: React.FC = () => {
                      // host comes back within the same Options session.
                      if (userTouchedFieldsRef.current.size > 0) {
                          setPrefs(currentPrefs => {
-                             chrome.runtime.sendMessage({
-                                 type: "NATIVE_MSG",
-                                 payload: buildHostConfigPayload(currentPrefs)
-                             }, () => {
-                                 if (chrome.runtime.lastError) {
-                                     // Expected — host is down. Storage is correct.
-                                 }
+                             sendHostConfigUpdate(currentPrefs, {
+                                 suppressTransportWarning: true,
+                                 instructionRevision: userInstructionsEditRevisionRef.current,
                              });
                              return currentPrefs;
                          });
@@ -753,7 +860,27 @@ const OptionsInner: React.FC = () => {
                 
                 if (response && response.status === "success" && response.data) {
                     const hostConfig = response.data;
-                    console.log("[Options] Synced config from Host:", hostConfig);
+                    const promptSourceStatus = hostConfig.prompt_source_status;
+                    console.log("[Options] Synced config from Host:", {
+                        host_version: hostConfig.host_version,
+                        prompt_source_status: promptSourceStatus
+                            ? {
+                                status: promptSourceStatus.status,
+                                error_code: promptSourceStatus.error_code,
+                            }
+                            : undefined,
+                    });
+
+                    if (promptSourceStatus?.status === 'error') {
+                        setPromptHealthIssue({
+                            errorCode: typeof promptSourceStatus.error_code === 'string'
+                                ? promptSourceStatus.error_code
+                                : undefined,
+                            fallback: String(promptSourceStatus.error || ''),
+                        });
+                    } else if (promptSourceStatus?.status === 'ok') {
+                        setPromptHealthIssue(null);
+                    }
 
                     if (hostConfig.host_version) {
                         setHostVersion(hostConfig.host_version);
@@ -806,15 +933,20 @@ const OptionsInner: React.FC = () => {
                         }
 
                         // 4. User Instructions (Split Prompt)
-                        // Host now returns _user_instructions_raw for the editable part
-                        // Fallback to system_message if raw is missing (legacy host)
+                        // Modern Hosts omit raw content when the DH-specific file is
+                        // unreadable. In that case keep the Chrome mirror rather than
+                        // hydrating Core content through the legacy fallback.
                         if (!touched.has('userInstructions')) {
-                            if (hostConfig._user_instructions_raw !== undefined) {
+                            if ('_user_instructions_raw' in hostConfig) {
                                 if (hostConfig._user_instructions_raw !== prev.userInstructions) {
                                     newPrefs.userInstructions = hostConfig._user_instructions_raw;
                                     changed = true;
                                 }
-                            } else if (hostConfig.system_message && hostConfig.system_message.content) {
+                            } else if (
+                                !('prompt_source_status' in hostConfig)
+                                && hostConfig.system_message
+                                && hostConfig.system_message.content
+                            ) {
                                 // Legacy fallback
                                 if (hostConfig.system_message.content !== prev.userInstructions) {
                                     newPrefs.userInstructions = hostConfig.system_message.content;
@@ -915,13 +1047,9 @@ const OptionsInner: React.FC = () => {
                         const merged = changed ? newPrefs : prev;
                         if (userTouchedFieldsRef.current.size > 0) {
                             console.log('[DH] Hydration catch-up: pushing', userTouchedFieldsRef.current.size, 'user-touched field(s) to host');
-                            chrome.runtime.sendMessage({
-                                type: "NATIVE_MSG",
-                                payload: buildHostConfigPayload(merged)
-                            }, () => {
-                                if (chrome.runtime.lastError) {
-                                    console.warn('[DH] Catch-up RPC failed:', chrome.runtime.lastError.message, '— storage holds truth; next Options open will retry.');
-                                }
+                            sendHostConfigUpdate(merged, {
+                                suppressTransportWarning: true,
+                                instructionRevision: userInstructionsEditRevisionRef.current,
                             });
                         }
 
@@ -934,7 +1062,10 @@ const OptionsInner: React.FC = () => {
                     console.warn(
                         "[Options] Host get_config returned non-success; " +
                         "marking prefs hydrated to unblock user actions.",
-                        response,
+                        {
+                            status: response?.status,
+                            error_code: response?.error_code,
+                        },
                     );
                     prefsHydratedRef.current = true;
 
@@ -950,13 +1081,9 @@ const OptionsInner: React.FC = () => {
                         // and bailed). Re-enter setPrefs to capture current
                         // value as 'prev'.
                         setPrefs(currentPrefs => {
-                            chrome.runtime.sendMessage({
-                                type: "NATIVE_MSG",
-                                payload: buildHostConfigPayload(currentPrefs)
-                            }, () => {
-                                if (chrome.runtime.lastError) {
-                                    console.warn('[DH] Catch-up RPC failed (host non-success path):', chrome.runtime.lastError.message);
-                                }
+                            sendHostConfigUpdate(currentPrefs, {
+                                suppressTransportWarning: true,
+                                instructionRevision: userInstructionsEditRevisionRef.current,
                             });
                             return currentPrefs;
                         });
@@ -1089,8 +1216,7 @@ const OptionsInner: React.FC = () => {
     // persistPrefs(), which:
     //
     //   1. Writes dh_prefs to chrome.storage.local
-    //   2. Fires update_config to the host (fire-and-forget; host loads the
-    //      file on startup anyway so transient failure is recoverable)
+    //   2. Sends update_config to the host and inspects the structured result
     //   3. If teamManifestUrl differs from lastFetchedManifestUrlRef AND
     //      team catalog is enabled, asks the SW to fetch the manifest.
     //      Caller opts into this with { fetchManifest: true } so e.g. a
@@ -1100,40 +1226,6 @@ const OptionsInner: React.FC = () => {
     // setItems directly into chrome.storage via its own useEffect (see
     // dh_items persistence above). Mixing the two would create double-writes
     // on every editor click. Spec § 3.5 / AGENTS.md § 3 (after C7 update).
-    const buildHostConfigPayload = (nextPrefs: Preferences) => ({
-        action: "update_config",
-        payload: {
-            user_instructions: nextPrefs.userInstructions,
-            user_prompt: nextPrefs.userPrompt,
-            config: {
-                root_path: nextPrefs.rootPath,
-                skill_directories: nextPrefs.skillDirectories ? nextPrefs.skillDirectories.split(',').map(s => s.trim()).filter(Boolean) : [],
-                mcp_config_path: nextPrefs.mcpConfigPath,
-                extension_preferences: {
-                    auto_analyze_mode: nextPrefs.autoAnalyzeMode,
-                    user_prompt: nextPrefs.userPrompt,
-                    enable_status_bubble: nextPrefs.enableStatusBubble,
-                    beta_channel_enabled: nextPrefs.betaChannelEnabled,
-                    use_workspace_only: nextPrefs.useWorkspaceOnly,
-                    log_level: nextPrefs.logLevel,
-                    language: nextPrefs.language,
-                    primary_color: nextPrefs.primaryColor,
-                    button_text: nextPrefs.buttonText,
-                    offset_bottom: nextPrefs.offsetBottom,
-                    offset_right: nextPrefs.offsetRight,
-                    team_catalog_enabled: nextPrefs.teamCatalogEnabled,
-                    team_manifest_url: nextPrefs.teamManifestUrl,
-                    team: nextPrefs.team,
-                    team_label: nextPrefs.teamLabel,
-                    analyze_timeout_seconds: nextPrefs.analyzeTimeoutSeconds,
-                    model: nextPrefs.model,
-                    reasoning_effort: nextPrefs.reasoningEffort,
-                    context_tier: nextPrefs.contextTier,
-                }
-            }
-        }
-    });
-
     const persistPrefs = (nextPrefs: Preferences, opts?: { fetchManifest?: boolean }) => {
         // Three-segment persist (see spec § 4.1):
         //
@@ -1155,6 +1247,7 @@ const OptionsInner: React.FC = () => {
         // The pre-hydration warn that used to live here was removed because
         // hitting it during normal cold start is expected, not exceptional.
         // See docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md
+        const instructionRevision = userInstructionsEditRevisionRef.current;
         chrome.storage.local.set({ dh_prefs: nextPrefs }, () => {
             if (!prefsHydratedRef.current) {
                 // Window edit — touched ref will route it through the
@@ -1163,18 +1256,7 @@ const OptionsInner: React.FC = () => {
                 return;
             }
 
-            // Host update — fire-and-forget. Failures are logged but don't
-            // surface to the user because the host re-reads config.json on
-            // next startup. A red toast would be noisy for every keystroke
-            // in dev when the host isn't running.
-            chrome.runtime.sendMessage({
-                type: "NATIVE_MSG",
-                payload: buildHostConfigPayload(nextPrefs)
-            }, () => {
-                if (chrome.runtime.lastError) {
-                    console.warn("Could not update host immediately:", chrome.runtime.lastError.message);
-                }
-            });
+            sendHostConfigUpdate(nextPrefs, { instructionRevision });
 
             // Manifest fetch — only when caller opts in AND URL actually
             // changed since last fetch. Diff guard prevents a refetch when
@@ -1236,6 +1318,7 @@ const OptionsInner: React.FC = () => {
 
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
+            userInstructionsEditRevisionRef.current += 1;
             // Mark ALL prefs keys as user-touched so a late host hydration
             // response cannot un-reset us. DEFAULT_PREFS is the user's
             // explicit choice — protect it from being merged-over. Without
@@ -1851,6 +1934,20 @@ const OptionsInner: React.FC = () => {
         );
     };
 
+    const activeIssue = configUpdateIssue ?? promptHealthIssue;
+    const issueDetail = activeIssue
+        ? localizePromptSourceError(
+            activeIssue.errorCode,
+            activeIssue.fallback || t('configNotSaved'),
+            t,
+        )
+        : '';
+    const issuePrefix = configUpdateIssue
+        ? t(configUpdateIssue.configSaved
+            ? 'configSavedRefreshFailed'
+            : 'configNotSaved')
+        : '';
+
     return (
             <DndProvider backend={HTML5Backend}>
             <div className="min-h-screen bg-slate-50 py-10 px-6 font-[family-name:var(--font-jakarta)]">
@@ -1894,6 +1991,16 @@ const OptionsInner: React.FC = () => {
                             </button>
                         </div>
                     </div>
+
+                    {activeIssue && (
+                        <div
+                            className="bg-amber-50 text-amber-800 text-center py-3 px-4 font-medium text-sm border-b border-amber-200 flex items-center justify-center gap-2"
+                            role="alert"
+                        >
+                            <div className="w-2 h-2 bg-amber-500 rounded-full shrink-0"></div>
+                            <span>{issuePrefix}{issuePrefix && issueDetail ? ' ' : ''}{issueDetail}</span>
+                        </div>
+                    )}
 
                     {status && (
                         <div
@@ -2437,7 +2544,7 @@ const OptionsInner: React.FC = () => {
                                                         name="userInstructions"
                                                         aria-label={t('userInstructions')}
                                                         value={prefs.userInstructions || ""}
-                                                        onChange={(e) => { userTouchedFieldsRef.current.add('userInstructions'); setPrefs(prev => ({ ...prev, userInstructions: e.target.value })); }} onBlur={handlePrefBlur}
+                                                        onChange={(e) => { userInstructionsEditRevisionRef.current += 1; userTouchedFieldsRef.current.add('userInstructions'); setPrefs(prev => ({ ...prev, userInstructions: e.target.value })); }} onBlur={handlePrefBlur}
                                                         disabled={effectiveRepositoryOnly}
                                                         className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                         placeholder={t('userInstructionsPlaceholder')}

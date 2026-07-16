@@ -98,6 +98,20 @@ const openCopilotSection = async () => {
   fireEvent.click(nav)
 }
 
+const hydrateOptions = async (data: Record<string, unknown>) => {
+  const deferred = deferNextResponse('get_config')
+  render(<Options />)
+  await act(async () => deferred.resolve({ status: 'success', data }))
+  await openCopilotSection()
+}
+
+const openDhInstructionsEditor = async (): Promise<HTMLTextAreaElement> => {
+  fireEvent.click(screen.getAllByRole('button', { name: /edit|编辑/i })[0])
+  return screen.getByLabelText(
+    /DH-specific Instructions|DH 专用指令/i,
+  ) as HTMLTextAreaElement
+}
+
 // Pick the latest update_config sendMessage call whose
 // extension_preferences contains the given key/value pair.
 const findCatchUpCall = (key: string, value: unknown) =>
@@ -752,5 +766,539 @@ describe('Options prompt source mode matrix', () => {
     ) as HTMLTextAreaElement
     expect(prompt.disabled).toBe(false)
     expect(prompt.value).toBe('USER-PROMPT')
+  })
+})
+
+// ---------- Prompt health and inspected sparse writes (Task 6) ----------
+
+describe('Options prompt health and inspected sparse writes', () => {
+  beforeEach(() => {
+    resetChromeMock()
+    installChromeMock()
+  })
+
+  it('retains mirrored text when modern Host reports unreadable DH file', async () => {
+    seedStorage({
+      dh_prefs: { ...DEFAULT_PREFS, userInstructions: 'KEEP-MIRROR' },
+    })
+    await hydrateOptions({
+      root_path: '',
+      system_message: { content: 'DO-NOT-HYDRATE-CORE' },
+      prompt_source_status: {
+        status: 'error',
+        error_code: 'dh_specific_instructions_unreadable',
+        error: 'fallback',
+      },
+      extension_preferences: { use_workspace_only: false },
+    })
+    expect((await openDhInstructionsEditor()).value).toBe('KEEP-MIRROR')
+    expect(screen.queryByText('DO-NOT-HYDRATE-CORE')).toBeNull()
+    expect(screen.getByRole('alert').textContent).toMatch(
+      /DH-specific Instructions/i,
+    )
+  })
+
+  it('hydrates an explicit empty DH instruction value', async () => {
+    seedStorage({
+      dh_prefs: { ...DEFAULT_PREFS, userInstructions: 'STALE' },
+    })
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    expect((await openDhInstructionsEditor()).value).toBe('')
+  })
+
+  it('uses system_message only when prompt_source_status is absent', async () => {
+    seedStorage({
+      dh_prefs: { ...DEFAULT_PREFS, userInstructions: 'STALE' },
+    })
+    await hydrateOptions({
+      root_path: '',
+      system_message: { content: 'LEGACY-INSTRUCTIONS' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    expect((await openDhInstructionsEditor()).value).toBe(
+      'LEGACY-INSTRUCTIONS',
+    )
+  })
+
+  it('omits user_instructions from unrelated preference updates', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'UNCHANGED',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    const call = chromeMockSpies.sendMessage.mock.calls
+      .map(entry => entry[0] as any)
+      .find(message => message?.payload?.action === 'update_config')
+    expect(Object.prototype.hasOwnProperty.call(
+      call.payload.payload,
+      'user_instructions',
+    )).toBe(false)
+  })
+
+  it('sends explicit empty user_instructions when editor is cleared', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'CLEAR-ME',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const editor = await openDhInstructionsEditor()
+    fireEvent.change(editor, { target: { value: '' } })
+    fireEvent.blur(editor)
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    const calls = chromeMockSpies.sendMessage.mock.calls
+      .map(entry => entry[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(calls.at(-1).payload.payload.user_instructions).toBe('')
+  })
+
+  it('sends explicit empty user_instructions when Options is reset', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'CLEAR-ON-RESET',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await act(async () => update.resolve({
+        status: 'success',
+        data: { success: true, config_saved: true },
+      }))
+      const calls = chromeMockSpies.sendMessage.mock.calls
+        .map(entry => entry[0] as any)
+        .filter(message => message?.payload?.action === 'update_config')
+      expect(calls.at(-1).payload.payload.user_instructions).toBe('')
+    } finally {
+      confirmSpy.mockRestore()
+    }
+  })
+
+  it('UI-I7: saved refresh failure preserves value and shows localized warning', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'KEEP',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const editor = await openDhInstructionsEditor()
+    fireEvent.change(editor, { target: { value: 'SAVED-TEXT' } })
+    fireEvent.blur(editor)
+    await act(async () => update.resolve({
+      status: 'success',
+      data: {
+        success: false,
+        config_saved: true,
+        error_code: 'repository_instructions_missing',
+        error: 'DO-NOT-SHOW-FALLBACK',
+      },
+    }))
+    expect(editor.value).toBe('SAVED-TEXT')
+    const alert = screen.getByRole('alert').textContent || ''
+    expect(alert).toMatch(/saved/i)
+    expect(alert).not.toMatch(/not saved/i)
+    expect(alert).toMatch(/Repository Instructions/i)
+    expect(alert).not.toContain('DO-NOT-SHOW-FALLBACK')
+  })
+
+  it('UI-I7: outer/unsaved errors show not-saved fallback', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => update.resolve({
+      status: 'error',
+      error: 'OUTER-FALLBACK',
+    }))
+    const alert = screen.getByRole('alert').textContent || ''
+    expect(alert).toMatch(/not saved/i)
+    expect(alert).toContain('OUTER-FALLBACK')
+  })
+
+  it('unknown config error code uses Host fallback', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => update.resolve({
+      status: 'success',
+      data: {
+        success: false,
+        config_saved: false,
+        error_code: 'future_code',
+        error: 'FUTURE HOST FALLBACK',
+      },
+    }))
+    expect(screen.getByRole('alert').textContent).toContain(
+      'FUTURE HOST FALLBACK',
+    )
+  })
+
+  it('renders a known update issue in the current language', async () => {
+    const update = deferNextResponse('update_config')
+    seedStorage({
+      dh_prefs: { ...DEFAULT_PREFS, language: 'zh' },
+    })
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'KEEP',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: {
+        language: 'zh',
+        use_workspace_only: false,
+      },
+    })
+    const editor = await openDhInstructionsEditor()
+    fireEvent.change(editor, { target: { value: '已保存' } })
+    fireEvent.blur(editor)
+    await act(async () => update.resolve({
+      status: 'success',
+      data: {
+        success: false,
+        config_saved: true,
+        error_code: 'repository_instructions_missing',
+        error: 'DO-NOT-SHOW-FALLBACK',
+      },
+    }))
+    const alert = screen.getByRole('alert').textContent || ''
+    expect(alert).toContain('设置已保存')
+    expect(alert).toContain('仓库指令')
+    expect(alert).not.toContain('DO-NOT-SHOW-FALLBACK')
+  })
+
+  it('hydration catch-up inspects structured refresh errors', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const catchUp = deferNextResponse('update_config')
+    render(<Options />)
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+    await act(async () => catchUp.resolve({
+      status: 'success',
+      data: {
+        success: false,
+        config_saved: true,
+        error_code: 'dh_core_prompt_missing',
+        error: 'fallback',
+      },
+    }))
+    expect(screen.getByRole('alert').textContent).toMatch(/Core System Prompt/i)
+  })
+
+  it('suppresses chrome lastError from an expected hydration catch-up', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const catchUp = deferNextResponse('update_config')
+    render(<Options />)
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+
+    ;(chrome.runtime as any).lastError = { message: 'EXPECTED CATCH-UP ERROR' }
+    await act(async () => catchUp.reject(new Error('EXPECTED CATCH-UP ERROR')))
+    ;(chrome.runtime as any).lastError = undefined
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('non-success get_config catch-up inspects structured errors', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const catchUp = deferNextResponse('update_config')
+    render(<Options />)
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => getConfig.resolve({
+      status: 'error',
+      error: 'get failed',
+    }))
+    await act(async () => catchUp.resolve({
+      status: 'success',
+      data: {
+        success: false,
+        config_saved: true,
+        error_code: 'repository_instructions_missing',
+        error: 'fallback',
+      },
+    }))
+    expect(screen.getByRole('alert').textContent).toMatch(
+      /Repository Instructions/i,
+    )
+  })
+
+  it('host-unreachable catch-up suppresses only transport errors', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const catchUp = deferNextResponse('update_config')
+    render(<Options />)
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+
+    ;(chrome.runtime as any).lastError = { message: 'host unavailable' }
+    await act(async () => getConfig.reject(new Error('host unavailable')))
+    ;(chrome.runtime as any).lastError = undefined
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    await act(async () => catchUp.resolve({
+      status: 'success',
+      data: {
+        success: false,
+        config_saved: true,
+        error_code: 'dh_core_prompt_missing',
+        error: 'fallback',
+      },
+    }))
+    expect(screen.getByRole('alert').textContent).toMatch(/Core System Prompt/i)
+  })
+
+  it('successful unrelated update does not erase prompt health warning', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'KEEP',
+      prompt_source_status: {
+        status: 'error',
+        error_code: 'dh_core_prompt_missing',
+        error: 'fallback',
+      },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    expect(screen.getByRole('alert').textContent).toMatch(/Core System Prompt/i)
+  })
+
+  it('successful update reveals an existing health warning after an update warning', async () => {
+    const failedUpdate = deferNextResponse('update_config')
+    const successfulUpdate = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'KEEP',
+      prompt_source_status: {
+        status: 'error',
+        error_code: 'dh_core_prompt_missing',
+        error: 'health fallback',
+      },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => failedUpdate.resolve({
+      status: 'error',
+      error: 'LATEST UPDATE WARNING',
+    }))
+    expect(screen.getByRole('alert').textContent).toContain(
+      'LATEST UPDATE WARNING',
+    )
+
+    fireEvent.change(language, { target: { value: 'zh' } })
+    await act(async () => successfulUpdate.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    expect(screen.getByRole('alert').textContent).toMatch(/Core System Prompt/i)
+  })
+
+  it('a stale response cannot overwrite the newest update warning', async () => {
+    const firstUpdate = deferNextResponse('update_config')
+    const secondUpdate = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    fireEvent.change(language, { target: { value: 'zh' } })
+
+    await act(async () => secondUpdate.resolve({
+      status: 'error',
+      error: 'NEWEST WARNING',
+    }))
+    expect(screen.getByRole('alert').textContent).toContain('NEWEST WARNING')
+
+    await act(async () => firstUpdate.resolve({
+      status: 'success',
+      data: {
+        success: false,
+        config_saved: true,
+        error_code: 'repository_instructions_missing',
+        error: 'stale fallback',
+      },
+    }))
+    const alert = screen.getByRole('alert').textContent || ''
+    expect(alert).toContain('NEWEST WARNING')
+    expect(alert).not.toMatch(/Repository Instructions/i)
+  })
+
+  it('transport failure leaves instructions pending for an unrelated retry', async () => {
+    const failedUpdate = deferNextResponse('update_config')
+    const retry = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'initial',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const editor = await openDhInstructionsEditor()
+    fireEvent.change(editor, { target: { value: 'retry-me' } })
+    fireEvent.blur(editor)
+
+    ;(chrome.runtime as any).lastError = { message: 'PORT CLOSED' }
+    await act(async () => failedUpdate.reject(new Error('PORT CLOSED')))
+    ;(chrome.runtime as any).lastError = undefined
+    expect(screen.getByRole('alert').textContent).toContain('PORT CLOSED')
+
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => retry.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    const calls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(calls.at(-1).payload.payload.user_instructions).toBe('retry-me')
+  })
+
+  it('keeps revision 2 pending when revision 1 succeeds late', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const firstUpdate = deferNextResponse('update_config')
+    const secondUpdate = deferNextResponse('update_config')
+    const thirdUpdate = deferNextResponse('update_config')
+    render(<Options />)
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        _user_instructions_raw: 'initial',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+    await openCopilotSection()
+    const editor = await openDhInstructionsEditor()
+
+    fireEvent.change(editor, { target: { value: 'revision-1' } })
+    fireEvent.blur(editor)
+    fireEvent.change(editor, { target: { value: 'revision-2' } })
+    fireEvent.blur(editor)
+
+    await act(async () => firstUpdate.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    await act(async () => secondUpdate.resolve({
+      status: 'error',
+      error: 'retry revision 2',
+    }))
+
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => thirdUpdate.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+
+    const updateCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(updateCalls.at(-1).payload.payload.user_instructions).toBe(
+      'revision-2',
+    )
+  })
+
+  it('does not log raw Host prompt or preference values', async () => {
+    const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await hydrateOptions({
+        host_version: '2.0.74-test',
+        root_path: 'SECRET-ROOT',
+        _user_instructions_raw: 'SECRET-INSTRUCTIONS',
+        prompt_source_status: {
+          status: 'error',
+          error_code: 'dh_core_prompt_missing',
+          error: 'SECRET-FALLBACK',
+        },
+        extension_preferences: {
+          team_manifest_url: 'SECRET-URL',
+          use_workspace_only: false,
+        },
+      })
+      const output = JSON.stringify(consoleLog.mock.calls)
+      expect(output).toContain('2.0.74-test')
+      expect(output).toContain('dh_core_prompt_missing')
+      expect(output).not.toContain('SECRET-ROOT')
+      expect(output).not.toContain('SECRET-INSTRUCTIONS')
+      expect(output).not.toContain('SECRET-FALLBACK')
+      expect(output).not.toContain('SECRET-URL')
+    } finally {
+      consoleLog.mockRestore()
+    }
+  })
+
+  it('does not log raw non-success get_config responses', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      render(<Options />)
+      await act(async () => getConfig.resolve({
+        status: 'error',
+        error_code: 'future_code',
+        error: 'SAFE-FALLBACK',
+        data: { secret: 'SECRET-CONFIG' },
+      }))
+      const output = JSON.stringify(consoleWarn.mock.calls)
+      expect(output).toContain('future_code')
+      expect(output).not.toContain('SAFE-FALLBACK')
+      expect(output).not.toContain('SECRET-CONFIG')
+    } finally {
+      consoleWarn.mockRestore()
+    }
   })
 })
