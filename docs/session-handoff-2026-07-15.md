@@ -10,8 +10,8 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Prompt-scope implementation branch: `docs/prompt-scope-cleanup-design`
 - Isolated worktree: `C:\Users\zhaobo\AppData\Local\Temp\opencode\Dynamics-Helper-prompt-scope-spec`
 - Product implementation Tasks 1-6: approved through `0f57f8e`
-- Task 7 documentation: complete at `ca65519` plus this `docs(prompt): correct Task 7 review findings` follow-up
-- Task 8 final verification/evidence and release draft: pending
+- Implementation/documentation Tasks 1-7: approved through `90e6da3` (`docs(persistence): correct result lifecycle semantics`)
+- Task 8 verification head: the commit containing this update, `docs(verification): record prompt scope test evidence`; controller-owned broad code review follows
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
@@ -49,9 +49,13 @@ eacda76 fix(options): preserve skills across mode edits
 378fffd fix(options): serialize config update intents
 11cbed3 fix(options): order config mirror side effects
 0f57f8e fix(options): guard passive hydration mirrors
+ca65519 docs(prompt): document deterministic instruction scopes
+6fdd8f5 docs(prompt): correct Task 7 review findings
+90e6da3 docs(persistence): correct result lifecycle semantics
+HEAD docs(verification): record prompt scope test evidence
 ```
 
-These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Task 7 is complete; Task 8 remains pending. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming an ahead/behind count from this document.
+These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. The approved pre-verification head was `90e6da3a03050ef53526d253ec0cf7989efa8e47`, at which point the branch was 20 commits ahead of and 0 behind `origin/master`. Task 8 evidence is recorded below; the controller's final broad code review remains separate. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming an ahead/behind count from this document.
 
 ## Remote VM Bootstrap
 
@@ -170,7 +174,27 @@ Workspace regression coverage lives in:
 
 `host/test_session_workspace.py`
 
-Durable implementation evidence is the accepted spec `441d0db`, plan `21108d9`, Host range `e6e3155..8d9561a`, Extension error commit `527851b`, Options range `916c4b6..0f57f8e`, and Task 7 documentation commits `ca65519` plus `docs(prompt): correct Task 7 review findings`. Do not turn task-level historical counts into a final release claim. Task 8 owns a fresh complete Host/Extension/build/static gate, any authenticated smoke evidence, final totals, and the release-notes draft.
+Durable implementation evidence is the accepted spec `441d0db`, plan `21108d9`, Host range `e6e3155..8d9561a`, Extension error commit `527851b`, Options range `916c4b6..0f57f8e`, and Task 7 documentation/correction range `ca65519..90e6da3`. Do not turn task-level historical counts into a final release claim.
+
+## Prompt-Scope Final Verification - 2026-07-16
+
+Task 8 ran against approved pre-verification head `90e6da3a03050ef53526d253ec0cf7989efa8e47` in the isolated worktree on `docs/prompt-scope-cleanup-design`. The Host environment was Python **3.13.13** with `github-copilot-sdk` **1.0.5**. Native Messaging remained in the provided **PROD** mode; no registry switch was performed.
+
+Fresh gate results:
+
+- Python `compileall`: **passed** with exit 0 and no diagnostics.
+- Focused Host: **108/108** passed: `host.test_prompt_sources` 46, `host.test_prompt_session` 22, `host.test_session_workspace` 26, and `host.test_sdk_compat` 14.
+- Full Host discovery: **178/178** passed.
+- Focused Extension: **88/88** passed across 4 files.
+- Full Extension: **118/118** passed across 9 files.
+- Extension production build: **passed**; TypeScript and Vite completed, 2,215 modules were transformed, and 14 output artifacts were listed.
+- Static Git checks: `git diff --check` reported **0** whitespace errors; the pre-evidence worktree had **0** status entries, and the stale-marker scan over the handoff and release draft reported **0** matches.
+
+The focused module-form Host commands use `PYTHONPATH=host`, matching discovery's import environment. Without it, the brief's package-style invocation of `host.test_sdk_compat` reaches the Host's pre-existing bare sibling import `from pii_scrubber import PiiScrubber` without `host` on `sys.path`; that exact invocation produced 13 passes and 1 import error. Tasks 1 and 2 already documented this pre-existing import-topology constraint. No product code was changed for Task 8, and the unmodified authoritative full-discovery command passed 178/178.
+
+Optional authenticated marker smoke: **not run**. Proving all three source modes would require changing the DH-specific AppData instruction file and the CLI-global home instruction file. Task 8 explicitly prohibits modifying those VM-local files, and no verified isolated user-data/root/session arrangement was available that both preserves authentication and guarantees production prompt/session state cannot be read or written. The smoke is optional and is not a completion gate.
+
+The release prose is staged only as `releases/notes-prompt-scope-cleanup-draft.md`. No release version was selected; no version field, tag, package, registry value, AppData prompt file, MyCases canonical file, or publication target was changed. The controller must perform the final broad code review after this evidence commit and before any separately approved integration or release action.
 
 ## Session Identity Contract
 
@@ -328,7 +352,7 @@ Implemented under accepted spec `441d0db` and plan `21108d9`, through product co
 - renamed/documented DH-specific Instructions and expanded Repository ONLY semantics;
 - added Host/Extension invariant coverage and inspected Options persistence.
 
-Task 8 still owns final whole-branch verification and any authenticated SDK smoke; do not infer final release evidence from the task-level reports.
+Task 8 final whole-branch verification is recorded above. The optional authenticated SDK smoke was not run for the documented isolation reason; do not infer smoke evidence from task-level unit tests.
 
 ### Workstream B — MyCasesKit contracts
 
@@ -361,9 +385,9 @@ Blocked until the Contract Primitives spec freezes the adapter boundary:
 
 ## Current Decision State
 
-- Prompt-scope production implementation Tasks 1-6 is approved on `docs/prompt-scope-cleanup-design` through `0f57f8e`.
+- Prompt-scope implementation/documentation Tasks 1-7 are approved on `docs/prompt-scope-cleanup-design` through `90e6da3`; Task 8 final gate evidence and its unversioned release draft are recorded in the subsequent verification commit.
 - Accepted design and plan are `441d0db` and `21108d9`.
-- Task 7 documentation is complete at `ca65519` plus `docs(prompt): correct Task 7 review findings`; Task 8 owns final verification evidence and the release draft.
+- Final broad code review remains controller-owned after the Task 8 verification commit.
 - No MyCases integration code, mode preference, workspace detector, coordinator adapter, persistence adapter, or MyCases canonical-file write has been implemented.
 - MyCasesKit response `675006a` accepts Form ③ and the Stage 1 deterministic persistence-gate model.
 - Five shared JSON fixtures and a README exist as examples, but six README items remain tentative; not every interface is frozen.
