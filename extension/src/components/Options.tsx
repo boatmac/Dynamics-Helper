@@ -584,6 +584,7 @@ const OptionsInner: React.FC = () => {
     });
     const userInstructionsAckRevisionRef = useRef(0);
     const configUpdateRequestRevisionRef = useRef(0);
+    const promptHealthRequestRevisionRef = useRef(0);
     const prefsMirrorGenerationRef = useRef(0);
     const latestPrefsMirrorIntentRef = useRef<PrefsMirrorIntent | null>(null);
     const prefsRef = useRef<Preferences>(DEFAULT_PREFS);
@@ -786,6 +787,35 @@ const OptionsInner: React.FC = () => {
         return { action: 'update_config', payload };
     };
 
+    const refreshPromptHealth = (configGeneration: number) => {
+        const healthGeneration = ++promptHealthRequestRevisionRef.current;
+        chrome.runtime.sendMessage({
+            type: 'NATIVE_MSG',
+            payload: { action: 'get_config' },
+        }, (response) => {
+            if (chrome.runtime.lastError) return;
+            if (
+                healthGeneration !== promptHealthRequestRevisionRef.current
+                || configGeneration !== configUpdateRequestRevisionRef.current
+            ) {
+                return;
+            }
+            if (response?.status !== 'success' || !response.data) return;
+
+            const promptSourceStatus = response.data.prompt_source_status;
+            if (promptSourceStatus?.status === 'ok') {
+                setPromptHealthIssue(null);
+            } else if (promptSourceStatus?.status === 'error') {
+                setPromptHealthIssue({
+                    errorCode: typeof promptSourceStatus.error_code === 'string'
+                        ? promptSourceStatus.error_code
+                        : undefined,
+                    fallback: String(promptSourceStatus.error || ''),
+                });
+            }
+        });
+    };
+
     const sendHostConfigUpdate = (
         intent: ConfigUpdateIntent<Preferences>,
         options: {
@@ -822,6 +852,9 @@ const OptionsInner: React.FC = () => {
             }
             if (intent.generation === configUpdateRequestRevisionRef.current) {
                 setConfigUpdateIssue(decision.issue);
+                if (decision.acknowledged) {
+                    refreshPromptHealth(intent.generation);
+                }
             }
         });
     };
@@ -959,35 +992,32 @@ const OptionsInner: React.FC = () => {
 
     // Initial Load
     useEffect(() => {
+        const initialPromptHealthGeneration =
+            ++promptHealthRequestRevisionRef.current;
         // Load Prefs
         chrome.storage.local.get("dh_prefs", (result) => {
             if (result.dh_prefs) {
                 // Auto-migrate old default blue to new teal if user hasn't changed it
-                const loadedPrefs = result.dh_prefs as Preferences; // Cast to Preferences type
+                const loadedPrefs = {
+                    ...(result.dh_prefs as Preferences),
+                };
                 if (loadedPrefs.primaryColor === "#2563eb") { // Old default blue
                     loadedPrefs.primaryColor = "#0D9488"; // New default teal
                 }
                 // Seed the change-detection ref with whatever is on disk so the
                 // very first save after page open is a no-op for manifest fetch
                 // (only an explicit user-driven URL change should trigger fetch).
-                lastFetchedManifestUrlRef.current = loadedPrefs.teamManifestUrl || '';
+                if (!userTouchedFieldsRef.current.has('teamManifestUrl')) {
+                    lastFetchedManifestUrlRef.current = loadedPrefs.teamManifestUrl || '';
+                }
                 
-                const prev = prefsRef.current;
-                // Merge strategy: Default -> Loaded -> User Edits (prev)
-                // We must be careful not to let 'prev' (which starts as Default) overwrite 'loaded'
-                // unless the user actually changed it.
-                const final: any = { ...DEFAULT_PREFS, ...loadedPrefs };
-
-                // Apply only changed fields from prev
-                (Object.keys(prev) as Array<keyof Preferences>).forEach(k => {
-                    const key = k as keyof Preferences;
-                    if (prev[key] !== DEFAULT_PREFS[key]) {
-                        // User has modified this field, preserve it
-                        final[key] = prev[key];
-                    }
+                const current = prefsRef.current;
+                const final = { ...DEFAULT_PREFS, ...loadedPrefs };
+                userTouchedFieldsRef.current.forEach(key => {
+                    (final as any)[key] = current[key];
                 });
 
-                setCurrentPrefs(final as Preferences);
+                setCurrentPrefs(final);
             } else {
                 // No saved prefs yet (first run). The ref defaults to '' so the
                 // first save with a non-empty manifest URL triggers a fetch.
@@ -1032,14 +1062,20 @@ const OptionsInner: React.FC = () => {
                             : undefined,
                     });
 
-                    if (promptSourceStatus?.status === 'error') {
+                    if (
+                        initialPromptHealthGeneration === promptHealthRequestRevisionRef.current
+                        && promptSourceStatus?.status === 'error'
+                    ) {
                         setPromptHealthIssue({
                             errorCode: typeof promptSourceStatus.error_code === 'string'
                                 ? promptSourceStatus.error_code
                                 : undefined,
                             fallback: String(promptSourceStatus.error || ''),
                         });
-                    } else if (promptSourceStatus?.status === 'ok') {
+                    } else if (
+                        initialPromptHealthGeneration === promptHealthRequestRevisionRef.current
+                        && promptSourceStatus?.status === 'ok'
+                    ) {
                         setPromptHealthIssue(null);
                     }
 

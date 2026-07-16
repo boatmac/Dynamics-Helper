@@ -9,6 +9,7 @@ import { setupContextMenu } from './contextMenu';
 // ServiceWorkerGlobalScope per the HTML spec
 // (https://github.com/w3c/ServiceWorker/issues/1356).
 import { syncTeamBookmarks, clearTeamSelection, fetchManifest } from '../utils/teamCatalog';
+import { syncManifestOnly } from './teamManifestSync';
 import {
     handleAnalyzeForward,
     normalizeNativeHostResponse,
@@ -304,50 +305,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 const teamId = message.payload?.teamId;
                 const manifestOnly = message.payload?.manifestOnly === true;
                 if (manifestOnly) {
-                    // Manifest-only fetch: refresh dh_team_manifest from the URL stored
-                    // in dh_prefs.teamManifestUrl without touching the user's current
-                    // team selection. Triggered when the user saves a new manifest URL
-                    // so the team dropdown can populate before they pick one.
-                    const prefsData = await new Promise<any>((resolve) => {
-                        chrome.storage.local.get(['dh_prefs', 'dh_team_manifest_etag'], resolve);
+                    const response = await syncManifestOnly({
+                        readInitialState: async () => {
+                            const data = await chrome.storage.local.get([
+                                'dh_prefs',
+                                'dh_team_manifest_etag',
+                            ]);
+                            return {
+                                prefs: data.dh_prefs || {},
+                                etag: data.dh_team_manifest_etag as string | undefined,
+                            };
+                        },
+                        readCurrentPrefs: async () => {
+                            const data = await chrome.storage.local.get('dh_prefs');
+                            return data.dh_prefs || {};
+                        },
+                        fetchManifest,
+                        writeManifest: async (manifest, etag) => {
+                            await chrome.storage.local.set({
+                                dh_team_manifest: manifest,
+                                dh_team_manifest_etag: etag,
+                            });
+                        },
                     });
-                    const manifestUrl = prefsData.dh_prefs?.teamManifestUrl || '';
-                    if (!manifestUrl) {
-                        sendResponse({ status: "error", error: "Manifest URL not configured" });
-                        return;
-                    }
-                    const result = await fetchManifest(manifestUrl, prefsData.dh_team_manifest_etag);
-
-                    // Propagate classified fetch failure so Options can display
-                    // actionable UX (auth-expired / not-found / network etc).
-                    // Prior to this branch, `!result || !result.ok` was silently
-                    // coerced to status:success, hiding SAS-token expiries and
-                    // similar HTTP failures from the user entirely.
-                    if (!result) {
-                        sendResponse({ status: "error", error: "Manifest URL not configured" });
-                        return;
-                    }
-                    if (!result.ok) {
-                        sendResponse({
-                            status: "error",
-                            error: result.failure.message,
-                            errorKind: result.failure.kind,
-                            httpStatus: result.failure.httpStatus,
-                        });
-                        return;
-                    }
-                    if (result.changed) {
-                        await new Promise<void>((resolve) => {
-                            chrome.storage.local.set({
-                                dh_team_manifest: result.manifest,
-                                dh_team_manifest_etag: result.etag,
-                            }, resolve);
-                        });
-                    }
-                    // result.changed === false means 304 (cached manifest still valid).
-                    // The Options page can render the existing dropdown from the
-                    // storage-side cache.
-                    sendResponse({ status: "success", data: { manifestOnly: true, changed: result.changed } });
+                    sendResponse(response);
                 } else if (!teamId) {
                     await clearTeamSelection();
                     sendResponse({ status: "success", data: { items: [] } });
@@ -410,22 +391,31 @@ async function syncTeamCatalogOnStartup() {
             return;
         }
         if (!teamId) {
-            // No team selected - still refresh manifest so the dropdown gets
-            // populated next time the user opens Options.
-            const cached = await new Promise<any>((resolve) => {
-                chrome.storage.local.get(['dh_team_manifest_etag'], resolve);
+            // Use the same post-fetch preference gate as the Options-triggered
+            // path so Reset cannot resurrect a stale manifest.
+            await syncManifestOnly({
+                readInitialState: async () => {
+                    const current = await chrome.storage.local.get([
+                        'dh_prefs',
+                        'dh_team_manifest_etag',
+                    ]);
+                    return {
+                        prefs: current.dh_prefs || {},
+                        etag: current.dh_team_manifest_etag as string | undefined,
+                    };
+                },
+                readCurrentPrefs: async () => {
+                    const current = await chrome.storage.local.get('dh_prefs');
+                    return current.dh_prefs || {};
+                },
+                fetchManifest,
+                writeManifest: async (nextManifest, etag) => {
+                    await chrome.storage.local.set({
+                        dh_team_manifest: nextManifest,
+                        dh_team_manifest_etag: etag,
+                    });
+                },
             });
-            const result = await fetchManifest(manifestUrl, cached.dh_team_manifest_etag);
-            // Startup-hook manifest refresh — degrade silently on failure since
-            // there is no UI to notify. Errors already logged in fetchManifest.
-            if (result && result.ok && result.changed) {
-                await new Promise<void>((resolve) => {
-                    chrome.storage.local.set({
-                        dh_team_manifest: result.manifest,
-                        dh_team_manifest_etag: result.etag,
-                    }, resolve);
-                });
-            }
             return;
         }
 

@@ -13,12 +13,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
     getLastAnalysis,
+    getLastAnalysisIdentity,
     getPendingAnalysis,
     markSeen,
     STALE_WINDOW_MS,
     MAX_PENDING_DISPLAY_AGE_MS,
 } from '../utils/analysisStore'
-import type { LastAnalysis } from '../utils/analysisStore'
+import type {
+    LastAnalysis,
+    LastAnalysisIdentity,
+} from '../utils/analysisStore'
 
 export interface HydratedPopover {
     isOpen: true
@@ -27,6 +31,7 @@ export interface HydratedPopover {
     content: string
     savedTo?: string
     errorCode?: string
+    identity: LastAnalysisIdentity
 }
 
 export interface HydrationResult {
@@ -35,7 +40,7 @@ export interface HydrationResult {
     /** True when a fresh, case-matching pending marker exists. */
     isAnalyzing: boolean
     /** Mark the current result as seen and close the popover. */
-    dismissPopover: () => Promise<void>
+    dismissPopover: (identity: LastAnalysisIdentity) => Promise<void>
 }
 
 function shouldOpen(
@@ -54,7 +59,7 @@ function shouldOpen(
  *
  * Behavior contract (spec § 5):
  * - R-I1: matching unseen result inside STALE_WINDOW_MS → popover.isOpen=true
- * - R-I2: dismissPopover() flips storage seen=true; future mounts skip
+ * - R-I2: dismissPopover(identity) flips seen only for the displayed record
  * - R-I3: caseNumber mismatch → popover=null
  * - R-I4: result older than STALE_WINDOW_MS → popover=null
  * - R-I5: matching pending inside MAX_PENDING_DISPLAY_AGE_MS → isAnalyzing=true
@@ -95,6 +100,7 @@ export function useAnalysisHydration(caseNumber: string): HydrationResult {
                     content: l.content,
                     savedTo: l.savedTo,
                     errorCode: l.errorCode,
+                    identity: getLastAnalysisIdentity(l),
                 })
             } else {
                 setPopover(null)
@@ -114,8 +120,8 @@ export function useAnalysisHydration(caseNumber: string): HydrationResult {
         }
     }, [caseNumber])
 
-    const dismissPopover = useCallback(async () => {
-        await markSeen()
+    const dismissPopover = useCallback(async (identity: LastAnalysisIdentity) => {
+        await markSeen(identity)
         setPopover(null)
     }, [])
 

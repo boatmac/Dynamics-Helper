@@ -11,12 +11,13 @@
 //   that uses them — easy to find and change.
 //
 // Owner of writes: Service Worker only. FAB never writes dh_last_analysis
-// or dh_pending_analysis except to flip `seen: true` via markSeen() when
-// the user dismisses the popover.
+// or dh_pending_analysis except to flip `seen: true` via identity-qualified
+// markSeen() when the user dismisses the popover.
 
 /** Persisted analysis result. Overwritten on every new analysis. */
 export interface LastAnalysis {
     caseNumber: string;       // 16-digit case ID
+    requestId?: string;       // analyze request identity; absent on legacy records
     status: 'success' | 'error';
     title: string;            // popover title, already i18n'd at write time
     content: string;          // markdown body (success: full report; error: host message)
@@ -25,6 +26,12 @@ export interface LastAnalysis {
     durationSec?: number;     // success only
     savedTo?: string;         // success only, file path
     errorCode?: string;       // error only, raw Host machine-readable code
+}
+
+export interface LastAnalysisIdentity {
+    caseNumber: string;
+    timestamp?: number;
+    requestId?: string;
 }
 
 /** Pending-analysis marker. Cleared when result arrives or expires. */
@@ -82,15 +89,39 @@ export async function setLastAnalysis(value: LastAnalysis): Promise<void> {
 }
 
 /**
- * Set `seen: true` on the currently stored result. No-op if no result
- * exists. Called by FAB when the user closes the popover.
+ * Set `seen: true` only when the currently stored result still matches the
+ * displayed identity. Called by FAB when it consumes/closes the popover.
  *
  * Race-safe: re-reads storage immediately before write so it doesn't
  * stomp on a concurrent SW write of a newer result.
  */
-export async function markSeen(): Promise<void> {
+export function getLastAnalysisIdentity(
+    value: LastAnalysis,
+): LastAnalysisIdentity {
+    return {
+        caseNumber: value.caseNumber,
+        timestamp: value.timestamp,
+        ...(value.requestId ? { requestId: value.requestId } : {}),
+    };
+}
+
+function matchesLastAnalysisIdentity(
+    value: LastAnalysis,
+    expected: LastAnalysisIdentity,
+): boolean {
+    if (value.caseNumber !== expected.caseNumber) return false;
+    if (value.requestId || expected.requestId) {
+        return value.requestId === expected.requestId;
+    }
+    return expected.timestamp !== undefined && value.timestamp === expected.timestamp;
+}
+
+export async function markSeen(
+    expected: LastAnalysisIdentity,
+): Promise<void> {
     const current = await getLastAnalysis();
     if (!current) return;
+    if (!matchesLastAnalysisIdentity(current, expected)) return;
     if (current.seen) return;
     await chrome.storage.local.set({
         [KEY_LAST]: { ...current, seen: true },
@@ -174,6 +205,7 @@ export async function recordAnalyzeSuccess(
 ): Promise<void> {
     await setLastAnalysis({
         caseNumber: ctx.caseNumber,
+        requestId: ctx.requestId,
         status: 'success',
         title: ctx.successTitle,
         content: hostData?.markdown ?? '',
@@ -196,6 +228,7 @@ export async function recordAnalyzeError(
 ): Promise<void> {
     await setLastAnalysis({
         caseNumber: ctx.caseNumber,
+        requestId: ctx.requestId,
         status: 'error',
         title: ctx.errorTitle,
         content: errorMessage,

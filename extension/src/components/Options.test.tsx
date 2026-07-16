@@ -5,6 +5,7 @@ import {
   installChromeMock,
   resetChromeMock,
   deferNextResponse,
+  deferNextStorageGet,
   deferNextStorageRemove,
   deferNextStorageSet,
   getStorageSnapshot,
@@ -409,6 +410,375 @@ describe('Options About & Help tab', () => {
     expect(guideLink).not.toBeNull()
     expect(guideLink!.target).toBe('_blank')
     expect(guideLink!.rel).toContain('noopener')
+  })
+})
+
+describe('Options delayed initial chrome hydration', () => {
+  beforeEach(() => {
+    resetChromeMock()
+    installChromeMock()
+  })
+
+  it('keeps an explicit instruction clear over a delayed stale storage snapshot', async () => {
+    seedStorage({
+      dh_prefs: { ...DEFAULT_PREFS, userInstructions: 'STALE-STORAGE' },
+    })
+    const outerStorageGet = deferNextStorageGet('dh_prefs')
+    const storageGet = deferNextStorageGet('dh_prefs')
+    const getConfig = deferNextResponse('get_config')
+    const catchUp = deferNextResponse('update_config')
+    render(<Options />)
+    await openCopilotSection()
+    const editor = await openDhInstructionsEditor()
+    fireEvent.change(editor, { target: { value: 'temporary' } })
+    fireEvent.change(editor, { target: { value: '' } })
+    fireEvent.blur(editor)
+
+    await act(async () => {
+      outerStorageGet.resolve(undefined)
+      storageGet.resolve(undefined)
+    })
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        _user_instructions_raw: 'STALE-HOST',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+
+    const update = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .find(message => message?.payload?.action === 'update_config')
+    expect(update.payload.payload.user_instructions).toBe('')
+    expect(update.payload.payload.user_instructions).not.toBe('STALE-STORAGE')
+    expect(editor.value).toBe('')
+    expect((getStorageSnapshot().dh_prefs as any).userInstructions).toBe('')
+    await act(async () => catchUp.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it('keeps Reset defaults over a delayed stale storage snapshot', async () => {
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        language: 'zh',
+        buttonText: 'STALE',
+        userInstructions: 'STALE-STORAGE',
+      },
+    })
+    const outerStorageGet = deferNextStorageGet('dh_prefs')
+    const storageGet = deferNextStorageGet('dh_prefs')
+    const getConfig = deferNextResponse('get_config')
+    const catchUp = deferNextResponse('update_config')
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      render(<Options />)
+      fireEvent.click(await screen.findByRole('button', { name: /^reset$/i }))
+
+      await act(async () => {
+        outerStorageGet.resolve(undefined)
+        storageGet.resolve(undefined)
+      })
+      await act(async () => getConfig.resolve({
+        status: 'success',
+        data: {
+          root_path: 'C:\\Stale',
+          _user_instructions_raw: 'STALE-HOST',
+          prompt_source_status: { status: 'ok' },
+          extension_preferences: {
+            language: 'zh',
+            button_text: 'STALE',
+            use_workspace_only: false,
+          },
+        },
+      }))
+      await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+
+      const update = chromeMockSpies.sendMessage.mock.calls
+        .map(call => call[0] as any)
+        .find(message => message?.payload?.action === 'update_config')
+      const ext = update.payload.payload.config.extension_preferences
+      expect(ext.language).toBe(DEFAULT_PREFS.language)
+      expect(ext.button_text).toBe(DEFAULT_PREFS.buttonText)
+      expect(update.payload.payload.user_instructions).toBe('')
+      expect(getStorageSnapshot().dh_prefs).toMatchObject(DEFAULT_PREFS)
+      await act(async () => catchUp.resolve({
+        status: 'success',
+        data: { success: true, config_saved: true },
+      }))
+    } finally {
+      confirmSpy.mockRestore()
+    }
+  })
+
+  it('keeps an explicitly selected default-valued field over stale storage', async () => {
+    seedStorage({ dh_prefs: { ...DEFAULT_PREFS, language: 'zh' } })
+    const outerStorageGet = deferNextStorageGet('dh_prefs')
+    const storageGet = deferNextStorageGet('dh_prefs')
+    const getConfig = deferNextResponse('get_config')
+    const catchUp = deferNextResponse('update_config')
+    render(<Options />)
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    fireEvent.change(language, { target: { value: DEFAULT_PREFS.language } })
+
+    await act(async () => {
+      outerStorageGet.resolve(undefined)
+      storageGet.resolve(undefined)
+    })
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { language: 'zh', use_workspace_only: false },
+      },
+    }))
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+
+    const updates = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(updates[0].payload.payload.config.extension_preferences.language).toBe('auto')
+    expect(JSON.stringify(updates)).not.toContain('"language":"zh"')
+    expect(language.value).toBe('auto')
+    expect((getStorageSnapshot().dh_prefs as any).language).toBe('auto')
+    await act(async () => catchUp.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+})
+
+describe('Options prompt health repair refresh', () => {
+  beforeEach(() => {
+    resetChromeMock()
+    installChromeMock()
+  })
+
+  it('clears unreadable DH health after a successful instruction replacement', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: {
+        status: 'error',
+        error_code: 'dh_specific_instructions_unreadable',
+        error: 'fallback',
+      },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const health = deferNextResponse('get_config')
+    const editor = await openDhInstructionsEditor()
+    fireEvent.change(editor, { target: { value: 'replacement' } })
+    fireEvent.blur(editor)
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    expect(screen.getByRole('alert').textContent).toMatch(/DH-specific Instructions/i)
+
+    await act(async () => health.resolve({
+      status: 'success',
+      data: {
+        prompt_source_status: { status: 'ok' },
+        root_path: 'C:\\MUST-NOT-HYDRATE',
+      },
+    }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(editor.value).toBe('replacement')
+    await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+    const getConfigCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'get_config')
+    expect(getConfigCalls).toHaveLength(2)
+    expect(countUpdateConfigCalls()).toBe(1)
+  })
+
+  it('clears repository-missing health after Repository ONLY is disabled', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: 'C:\\Repo',
+      _user_instructions_raw: 'KEEP',
+      prompt_source_status: {
+        status: 'error',
+        error_code: 'repository_instructions_missing',
+        error: 'fallback',
+      },
+      extension_preferences: { use_workspace_only: true },
+    })
+    const health = deferNextResponse('get_config')
+    const toggle = screen.getByRole('checkbox', {
+      name: /repository SKILLS, MCP, and instructions ONLY/i,
+    }) as HTMLInputElement
+    fireEvent.click(toggle)
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    await act(async () => health.resolve({
+      status: 'success',
+      data: { prompt_source_status: { status: 'ok' } },
+    }))
+
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(toggle.checked).toBe(false)
+  })
+
+  it('ignores a stale health response after a newer health check', async () => {
+    const update1 = deferNextResponse('update_config')
+    const update2 = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: '',
+      prompt_source_status: {
+        status: 'error',
+        error_code: 'dh_core_prompt_missing',
+        error: 'fallback',
+      },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const health1 = deferNextResponse('get_config')
+    const health2 = deferNextResponse('get_config')
+    const language = await findLanguageSelect()
+
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => update1.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    fireEvent.change(language, { target: { value: 'zh' } })
+    await act(async () => update2.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+
+    await act(async () => health2.resolve({
+      status: 'success',
+      data: { prompt_source_status: { status: 'ok' } },
+    }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    await act(async () => health1.resolve({
+      status: 'success',
+      data: {
+        prompt_source_status: {
+          status: 'error',
+          error_code: 'repository_instructions_missing',
+          error: 'stale',
+        },
+      },
+    }))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('ignores a delayed StrictMode initial health response after repair', async () => {
+    const firstInitial = deferNextResponse('get_config')
+    const secondInitial = deferNextResponse('get_config')
+    const update = deferNextResponse('update_config')
+    render(<StrictMode><Options /></StrictMode>)
+    await act(async () => firstInitial.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        _user_instructions_raw: '',
+        prompt_source_status: {
+          status: 'error',
+          error_code: 'dh_specific_instructions_unreadable',
+          error: 'initial',
+        },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+    await openCopilotSection()
+    const health = deferNextResponse('get_config')
+    const editor = await openDhInstructionsEditor()
+    fireEvent.change(editor, { target: { value: 'replacement' } })
+    fireEvent.blur(editor)
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    await act(async () => health.resolve({
+      status: 'success',
+      data: { prompt_source_status: { status: 'ok' } },
+    }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+
+    await act(async () => secondInitial.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        _user_instructions_raw: 'stale',
+        prompt_source_status: {
+          status: 'error',
+          error_code: 'repository_instructions_missing',
+          error: 'stale',
+        },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(editor.value).toBe('replacement')
+  })
+
+  it('updates prompt health when the latest health check returns an error', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const health = deferNextResponse('get_config')
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    await act(async () => health.resolve({
+      status: 'success',
+      data: {
+        prompt_source_status: {
+          status: 'error',
+          error_code: 'repository_instructions_missing',
+          error: 'fallback',
+        },
+      },
+    }))
+    expect(screen.getByRole('alert').textContent).toMatch(
+      /Repository Instructions/i,
+    )
+  })
+
+  it('leaves existing health unchanged when the health transport fails', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: '',
+      prompt_source_status: {
+        status: 'error',
+        error_code: 'dh_core_prompt_missing',
+        error: 'fallback',
+      },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const health = deferNextResponse('get_config')
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+
+    ;(chrome.runtime as any).lastError = { message: 'health transport failed' }
+    await act(async () => health.resolve(undefined))
+    ;(chrome.runtime as any).lastError = undefined
+    expect(screen.getByRole('alert').textContent).toMatch(/Core System Prompt/i)
   })
 })
 

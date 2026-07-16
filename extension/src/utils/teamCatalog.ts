@@ -29,8 +29,8 @@ export interface TeamCatalogFile {
 
 /**
  * Classified failure reason from a manifest / bookmark fetch. Callers use
- * `kind` to pick localised UX copy; `httpStatus` / `message` provide detail
- * for developer console + advanced diagnostics.
+ * `kind` to pick localised UX copy; `httpStatus` / `message` provide fixed,
+ * credential-safe diagnostics. They must never echo a URL or thrown value.
  *
  *   - `auth`     — HTTP 401/403; SAS token expired, private URL, wrong scope
  *   - `notFound` — HTTP 404/410; URL typo, blob deleted, container renamed
@@ -48,14 +48,21 @@ export interface FetchFailure {
     message: string;
 }
 
-function classifyHttpStatus(status: number, statusText: string): FetchFailure {
+function classifyHttpStatus(status: number): FetchFailure {
     if (status === 401 || status === 403) {
-        return { kind: 'auth', httpStatus: status, message: `HTTP ${status} ${statusText} — auth (SAS/token expired or insufficient permissions)` };
+        return { kind: 'auth', httpStatus: status, message: `HTTP ${status} authentication or authorization failure` };
     }
     if (status === 404 || status === 410) {
-        return { kind: 'notFound', httpStatus: status, message: `HTTP ${status} ${statusText} — URL not found` };
+        return { kind: 'notFound', httpStatus: status, message: `HTTP ${status} resource not found` };
     }
-    return { kind: 'http', httpStatus: status, message: `HTTP ${status} ${statusText}` };
+    return { kind: 'http', httpStatus: status, message: `HTTP ${status} request failure` };
+}
+
+function warnFetchFailure(stage: 'manifest' | 'bookmarks', failure: FetchFailure): void {
+    console.warn(`[DH] Team ${stage} fetch failed`, {
+        kind: failure.kind,
+        ...(failure.httpStatus === undefined ? {} : { httpStatus: failure.httpStatus }),
+    });
 }
 
 // --- Internal Helpers ---
@@ -111,25 +118,25 @@ export async function fetchManifest(
             return { ok: true, changed: false, etag: currentEtag || '' };
         }
         if (!res.ok) {
-            const failure = classifyHttpStatus(res.status, res.statusText);
-            console.warn(`[DH] Failed to fetch team manifest from ${url}: ${failure.message}`);
+            const failure = classifyHttpStatus(res.status);
+            warnFetchFailure('manifest', failure);
             return { ok: false, failure };
         }
 
         let raw: TeamManifest;
         try {
             raw = await res.json() as TeamManifest;
-        } catch (parseErr) {
-            const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-            console.warn(`[DH] Manifest JSON parse failed for ${url}:`, parseErr);
-            return { ok: false, failure: { kind: 'parse', message: `JSON parse failed: ${msg}` } };
+        } catch {
+            const failure: FetchFailure = { kind: 'parse', message: 'JSON parse failed' };
+            warnFetchFailure('manifest', failure);
+            return { ok: false, failure };
         }
         const etag = res.headers.get('ETag') || res.headers.get('etag') || '';
 
         // Drop entries missing url (migration guard for old `file`-shaped manifests)
         const validTeams = (raw.teams || []).filter(t => {
             if (!t.url) {
-                console.warn(`[DH] Manifest entry '${t.id || '(no id)'}' missing 'url' field; skipping.`);
+                console.warn('[DH] Manifest entry missing url; skipping.');
                 return false;
             }
             return true;
@@ -137,10 +144,10 @@ export async function fetchManifest(
         const manifest: TeamManifest = { version: raw.version, teams: validTeams };
 
         return { ok: true, changed: true, manifest, etag };
-    } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`[DH] Network error fetching team manifest from ${url}:`, e);
-        return { ok: false, failure: { kind: 'network', message: msg } };
+    } catch {
+        const failure: FetchFailure = { kind: 'network', message: 'Network request failed' };
+        warnFetchFailure('manifest', failure);
+        return { ok: false, failure };
     }
 }
 
@@ -175,18 +182,18 @@ export async function fetchTeamBookmarks(
             return { ok: true, changed: false, etag: currentEtag || '' };
         }
         if (!res.ok) {
-            const failure = classifyHttpStatus(res.status, res.statusText);
-            console.warn(`[DH] Failed to fetch team bookmarks from ${url}: ${failure.message}`);
+            const failure = classifyHttpStatus(res.status);
+            warnFetchFailure('bookmarks', failure);
             return { ok: false, failure };
         }
 
         let data: any;
         try {
             data = await res.json();
-        } catch (parseErr) {
-            const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-            console.warn(`[DH] Team bookmarks JSON parse failed for ${url}:`, parseErr);
-            return { ok: false, failure: { kind: 'parse', message: `JSON parse failed: ${msg}` } };
+        } catch {
+            const failure: FetchFailure = { kind: 'parse', message: 'JSON parse failed' };
+            warnFetchFailure('bookmarks', failure);
+            return { ok: false, failure };
         }
         const etag = res.headers.get('ETag') || res.headers.get('etag') || '';
         // Accept two shapes:
@@ -204,10 +211,10 @@ export async function fetchTeamBookmarks(
         const items = stampTeamSource(rawItems);
 
         return { ok: true, changed: true, items, etag };
-    } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`[DH] Network error fetching team bookmarks from ${url}:`, e);
-        return { ok: false, failure: { kind: 'network', message: msg } };
+    } catch {
+        const failure: FetchFailure = { kind: 'network', message: 'Network request failed' };
+        warnFetchFailure('bookmarks', failure);
+        return { ok: false, failure };
     }
 }
 
@@ -273,7 +280,7 @@ export async function syncTeamBookmarks(
         return { items: cachedItemsForTeam() };
     }
     if (!manifestResult.ok) {
-        console.warn(`[DH] Manifest fetch failure (${manifestResult.failure.kind}): ${manifestResult.failure.message}`);
+        warnFetchFailure('manifest', manifestResult.failure);
         return {
             items: cachedItemsForTeam(),
             failure: manifestResult.failure,
@@ -283,6 +290,17 @@ export async function syncTeamBookmarks(
 
     if (manifestResult.changed) {
         manifest = manifestResult.manifest;
+        const current = await chrome.storage.local.get('dh_prefs');
+        const currentPrefs = current.dh_prefs as {
+            teamCatalogEnabled?: boolean;
+            teamManifestUrl?: string;
+        } | undefined;
+        if (
+            currentPrefs?.teamCatalogEnabled !== true
+            || currentPrefs.teamManifestUrl !== manifestUrl
+        ) {
+            return { items: cachedItemsForTeam() };
+        }
         // Persist the new manifest + its ETag
         await new Promise<void>((resolve) => {
             chrome.storage.local.set({
@@ -306,7 +324,7 @@ export async function syncTeamBookmarks(
     if (!teamId) return { items: [] };
     const entry = manifest.teams.find(t => t.id === teamId);
     if (!entry) {
-        console.warn(`[DH] Selected team '${teamId}' not found in manifest; using cached items if any.`);
+        console.warn('[DH] Selected team not found in manifest; using cached items if any.');
         return { items: cachedItemsForTeam() };
     }
 
@@ -319,7 +337,7 @@ export async function syncTeamBookmarks(
         return { items: cachedItemsForTeam() };
     }
     if (!bookmarksResult.ok) {
-        console.warn(`[DH] Bookmark fetch for team '${teamId}' failed (${bookmarksResult.failure.kind}): ${bookmarksResult.failure.message}`);
+        warnFetchFailure('bookmarks', bookmarksResult.failure);
         return {
             items: cachedItemsForTeam(),
             failure: bookmarksResult.failure,

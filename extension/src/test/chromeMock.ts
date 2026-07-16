@@ -8,7 +8,7 @@ import { vi } from 'vitest'
 //   accidentally use undefined response data.
 // - deferNextResponse(action) lets the test caller decide WHEN to resolve
 //   the response (timing-sensitive tests like hydration window need this).
-// - deferNextStorageSet/Remove optionally delay matching storage commits and
+// - deferNextStorageGet/Set/Remove optionally delay matching storage work and
 //   callbacks; when unused, storage retains its original immediate behavior.
 // - resolveNext / rejectNext fire pending deferrals in FIFO order per action.
 // - storage uses an in-memory Map; reset via resetChromeMock() in beforeEach.
@@ -26,8 +26,12 @@ type DeferredStorageSet = DeferredResponse & {
 type DeferredStorageRemove = DeferredResponse & {
   matches: (keys: string[]) => boolean
 }
+type DeferredStorageGet = DeferredResponse & {
+  matches: (keys: unknown) => boolean
+}
 
 let pendingByAction: PendingMap = new Map()
+let pendingStorageGets: DeferredStorageGet[] = []
 let pendingStorageSets: DeferredStorageSet[] = []
 let pendingStorageRemoves: DeferredStorageRemove[] = []
 let storageData: Record<string, unknown> = {}
@@ -45,6 +49,7 @@ function makeDeferred(): DeferredResponse {
 
 export function resetChromeMock(): void {
   pendingByAction = new Map()
+  pendingStorageGets = []
   pendingStorageSets = []
   pendingStorageRemoves = []
   storageData = {}
@@ -79,6 +84,20 @@ export function deferNextStorageSet(key?: string): DeferredResponse {
     matches: items => key === undefined || Object.hasOwn(items, key),
   }
   pendingStorageSets.push(deferred)
+  return deferred
+}
+
+export function deferNextStorageGet(key?: string): DeferredResponse {
+  const deferred: DeferredStorageGet = {
+    ...makeDeferred(),
+    matches: keys => {
+      if (key === undefined || keys == null) return true
+      if (typeof keys === 'string') return keys === key
+      if (Array.isArray(keys)) return keys.includes(key)
+      return Object.hasOwn(keys as object, key)
+    },
+  }
+  pendingStorageGets.push(deferred)
   return deferred
 }
 
@@ -161,6 +180,18 @@ const storageGet = vi.fn((keys?: unknown, maybeCallback?: unknown) => {
     return out
   }
   const result = compute()
+  const deferredIndex = pendingStorageGets.findIndex(entry => entry.matches(keys))
+  const deferred = deferredIndex >= 0
+    ? pendingStorageGets.splice(deferredIndex, 1)[0]
+    : undefined
+  if (deferred) {
+    const completion = deferred.promise.then(() => result)
+    if (cb) {
+      void completion.then(value => cb(value))
+      return undefined
+    }
+    return completion
+  }
   if (cb) {
     // Fire callback async to match real chrome behavior.
     queueMicrotask(() => cb(result))

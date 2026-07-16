@@ -29,6 +29,7 @@ function makeLast(overrides: Partial<LastAnalysis> = {}): LastAnalysis {
         content: '# Report\nBody',
         timestamp: Date.now(),
         seen: false,
+        requestId: 'req-A',
         savedTo: 'C:\\path\\dh_case_report.md',
         ...overrides,
     }
@@ -67,6 +68,11 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
             content: '# Report\nBody',
             status: 'success',
             savedTo: 'C:\\path\\dh_case_report.md',
+            identity: {
+                requestId: 'req-A',
+                caseNumber: CASE_A,
+                timestamp: expect.any(Number),
+            },
         })
     })
 
@@ -78,7 +84,9 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
         await waitFor(() => expect(first.result.current.popover).not.toBeNull())
 
         await act(async () => {
-            await first.result.current.dismissPopover()
+            await (first.result.current.dismissPopover as any)(
+                first.result.current.popover!.identity,
+            )
         })
 
         // Verify storage was updated with seen=true.
@@ -176,6 +184,82 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
             status: 'error',
             title: '❌ Analysis Failed',
             content: 'Copilot request timed out after 600.0 seconds.',
+        })
+    })
+
+    it('does not mark a newer result seen when it replaces the displayed record', async () => {
+        const displayed = makeLast({
+            requestId: 'req-A',
+            errorCode: 'dh_core_prompt_missing',
+        })
+        seedStorage({ dh_last_analysis: displayed })
+        const hook = renderHook(() => useAnalysisHydration(CASE_A))
+        await waitFor(() => expect(hook.result.current.popover).not.toBeNull())
+        const identity = (hook.result.current.popover as any).identity
+
+        seedStorage({
+            dh_last_analysis: makeLast({
+                requestId: 'req-B',
+                timestamp: displayed.timestamp + 1,
+                errorCode: 'repository_instructions_missing',
+            }),
+        })
+        await act(async () => {
+            await (hook.result.current.dismissPopover as any)(identity)
+        })
+
+        const stored = await chrome.storage.local.get('dh_last_analysis')
+        expect(stored.dh_last_analysis).toMatchObject({
+            requestId: 'req-B',
+            seen: false,
+            errorCode: 'repository_instructions_missing',
+        })
+    })
+
+    it('marks a matching legacy record seen by case number and timestamp', async () => {
+        const legacy = makeLast({ requestId: undefined })
+        seedStorage({ dh_last_analysis: legacy })
+        const hook = renderHook(() => useAnalysisHydration(CASE_A))
+        await waitFor(() => expect(hook.result.current.popover).not.toBeNull())
+
+        await act(async () => {
+            await (hook.result.current.dismissPopover as any)(
+                (hook.result.current.popover as any).identity,
+            )
+        })
+
+        const stored = await chrome.storage.local.get('dh_last_analysis')
+        expect(stored.dh_last_analysis).toMatchObject({
+            requestId: undefined,
+            caseNumber: CASE_A,
+            timestamp: legacy.timestamp,
+            seen: true,
+        })
+    })
+
+    it('does not wildcard-match a different legacy timestamp', async () => {
+        const displayed = makeLast({ requestId: undefined })
+        seedStorage({ dh_last_analysis: displayed })
+        const hook = renderHook(() => useAnalysisHydration(CASE_A))
+        await waitFor(() => expect(hook.result.current.popover).not.toBeNull())
+        const identity = (hook.result.current.popover as any).identity
+
+        seedStorage({
+            dh_last_analysis: makeLast({
+                requestId: undefined,
+                timestamp: displayed.timestamp + 1,
+                errorCode: 'newer-legacy-error',
+            }),
+        })
+        await act(async () => {
+            await (hook.result.current.dismissPopover as any)(identity)
+        })
+
+        const stored = await chrome.storage.local.get('dh_last_analysis')
+        expect(stored.dh_last_analysis).toMatchObject({
+            timestamp: displayed.timestamp + 1,
+            seen: false,
+            errorCode: 'newer-legacy-error',
         })
     })
 

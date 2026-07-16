@@ -8,10 +8,12 @@ import { usePrefs, mergeRootPathOverride } from '../utils/prefs';
 import { trackEvent, trackException, hashCaseId } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { useAnalysisHydration } from '../hooks/useAnalysisHydration';
+import type { LastAnalysisIdentity } from '../utils/analysisStore';
 import {
     localizePromptSourceError,
     normalizeErrorCode,
 } from '../utils/promptSourceErrors';
+import { applyCurrentUserPrompt } from '../utils/analysisPrompt';
 import { 
     X, 
     Settings, 
@@ -241,6 +243,7 @@ const FAB: React.FC = () => {
         errorCode?: string;
         path?: string;
         duration?: string;
+        identity?: LastAnalysisIdentity;
     }>({ isOpen: false, title: '', content: '' });
     // NOTE: legacy `errorMsg` state was removed in v2.0.71 (C2a+). It had
     // 9 setters and 0 readers — confirmed dead in
@@ -324,11 +327,12 @@ const FAB: React.FC = () => {
             content: hydration.popover.content,
             errorCode: hydration.popover.errorCode,
             path: hydration.popover.savedTo,
+            identity: hydration.popover.identity,
         });
         popoverIsAnalyze.current = true;
         // Fire-and-forget; dismissPopover only marks storage seen=true and
         // closes the hook's internal popover state — both safe to ignore.
-        void hydration.dismissPopover();
+        void hydration.dismissPopover(hydration.popover.identity);
     }, [hydration.popover, resultPopover.isOpen, hydration]);
 
     // Mirror hook's isAnalyzing into local state so the FAB shows the
@@ -470,6 +474,7 @@ const FAB: React.FC = () => {
         fallback: string,
         caseNumberOfRun?: string,
         errorCode?: string,
+        identity?: LastAnalysisIdentity,
     ) => {
         const isStillOnRunCase =
             !caseNumberOfRun ||
@@ -481,6 +486,7 @@ const FAB: React.FC = () => {
                 title: `❌ ${t('analysisFailed')}`,
                 content: fallback,
                 errorCode,
+                identity,
             });
             popoverIsAnalyze.current = true;
             showStatusBubble(t('analysisFailed'), 'error', 4000);
@@ -514,7 +520,7 @@ const FAB: React.FC = () => {
     };
 
     // Helper to construct the standardized context template
-    const constructTemplate = (data: ScrapedData, userPrompt: string = "") => {
+    const constructTemplate = (data: ScrapedData) => {
         // If the errorText is ALREADY a template (and we are forced to reconstruct for some reason),
         // we should try to preserve it? 
         // Actually, this function is usually called when we *don't* have a template yet,
@@ -529,10 +535,6 @@ const FAB: React.FC = () => {
             // Be careful not to double-include if description IS the errorText
             `## Description\n\n${data.description || ((data.errorText && !isFormattedTemplate(data.errorText)) ? data.errorText : '')}`
         ];
-
-        if (userPrompt) {
-            parts.push(`## User Prompt\n\n${userPrompt}`);
-        }
 
         return parts.join('\n\n');
     };
@@ -721,7 +723,10 @@ const FAB: React.FC = () => {
             // Check if we have valid data to analyze
             // For auto-analyze, we construct the template if needed to ensure length check passes
             // We use the helper to get the "full" text that would be analyzed
-            const fullText = constructTemplate(scrapedData, prefs.userPrompt);
+            const fullText = applyCurrentUserPrompt(
+                constructTemplate(scrapedData),
+                prefs.userPrompt,
+            );
             // Simple check: do we have enough *real* content (description/title)? 
             // The template adds headers, so length > 50 is a safe bet for "non-empty".
             // A safer check might be to look at the raw fields again.
@@ -845,6 +850,7 @@ const FAB: React.FC = () => {
         // and bubbles should reference the originating case rather than
         // visually attach to the unrelated case currently on screen.
         const caseNumberOfRun = targetData.caseNumber || '';
+        let requestId: string | undefined;
         
         // Safety timeout to prevent infinite "Analyzing..." state.
         // Derived from prefs.analyzeTimeoutSeconds (C2b-lite, user-
@@ -856,7 +862,14 @@ const FAB: React.FC = () => {
         const timeoutId = setTimeout(() => {
             setIsAnalyzing(prev => {
                 if (prev) {
-                    showAnalysisError(t('analysisFailed'), caseNumberOfRun);
+                    showAnalysisError(
+                        t('analysisFailed'),
+                        caseNumberOfRun,
+                        undefined,
+                        requestId
+                            ? { requestId, caseNumber: caseNumberOfRun }
+                            : undefined,
+                    );
                     trackEvent('Analyze Timeout');
                     return false;
                 }
@@ -872,15 +885,16 @@ const FAB: React.FC = () => {
             if (targetData.errorText && (targetData.errorText.startsWith('## Ticket ID') || targetData.errorText.startsWith('## Case Number'))) {
                 fullContext = targetData.errorText;
             } else {
-                fullContext = constructTemplate(targetData, prefs.userPrompt);
+                fullContext = constructTemplate(targetData);
             }
+            fullContext = applyCurrentUserPrompt(fullContext, prefs.userPrompt);
 
             // Only show bubble if we initiated manually and it wasn't already shown by auto-analyze logic
             if (!statusBubble.visible) {
                  showStatusBubble(t('analyzing'), 'default', 0);
             }
 
-            const requestId = crypto.randomUUID();
+            requestId = crypto.randomUUID();
             latestRequestId.current = requestId;
 
             const response = await chrome.runtime.sendMessage({
@@ -974,7 +988,11 @@ const FAB: React.FC = () => {
                                 title: `🤖 Copilot ${t('analyze')}`,
                                 content: analysisData.markdown || JSON.stringify(analysisData, null, 2),
                                 path: analysisData.saved_to,
-                                duration: `${duration.toFixed(1)}s`
+                                duration: `${duration.toFixed(1)}s`,
+                                identity: {
+                                    requestId,
+                                    caseNumber: caseNumberOfRun,
+                                },
                             });
                             popoverIsAnalyze.current = true;
                             setIsOpen(false); // Close menu to show result
@@ -992,6 +1010,7 @@ const FAB: React.FC = () => {
                             `${t('analysisFailed')}: ${errMsg}`,
                             caseNumberOfRun,
                             errorCode,
+                            { requestId, caseNumber: caseNumberOfRun },
                         );
                         trackEvent('Analyze Failed', {
                             errorCode: errorCode ?? 'unclassified',
@@ -1004,6 +1023,7 @@ const FAB: React.FC = () => {
                         `${t('hostErrorLabel')}: ${hostError}`,
                         caseNumberOfRun,
                         errorCode,
+                        { requestId, caseNumber: caseNumberOfRun },
                     );
                     trackEvent('Analyze Host Error', {
                         errorCode: errorCode ?? 'unclassified',
@@ -1015,10 +1035,20 @@ const FAB: React.FC = () => {
                     `${t('errorLabel')}: ${response.error || response.message || t('unknownError')}`,
                     caseNumberOfRun,
                     errorCode,
+                    requestId
+                        ? { requestId, caseNumber: caseNumberOfRun }
+                        : undefined,
                 );
             }
         } catch (e: any) {
-            showAnalysisError(`${t('errorLabel')}: ${e.message}`, caseNumberOfRun);
+            showAnalysisError(
+                `${t('errorLabel')}: ${e.message}`,
+                caseNumberOfRun,
+                undefined,
+                requestId
+                    ? { requestId, caseNumber: caseNumberOfRun }
+                    : undefined,
+            );
             trackEvent('Analyze Exception', { errorCode: 'unclassified' });
         } finally {
             setIsAnalyzing(false);
@@ -1114,7 +1144,9 @@ const FAB: React.FC = () => {
                 // the flag untouched.
                 if (popoverIsAnalyze.current) {
                     popoverIsAnalyze.current = false;
-                    hydration.dismissPopover();
+                    if (resultPopover.identity) {
+                        void hydration.dismissPopover(resultPopover.identity);
+                    }
                 }
                 setResultPopover(prev => ({ ...prev, isOpen: false }));
             }} 
@@ -1249,7 +1281,10 @@ const FAB: React.FC = () => {
                                                         return scrapedData.errorText;
                                                     }
                                                     // Use the shared helper to construct the template from raw fields
-                                                    return constructTemplate(scrapedData, prefs.userPrompt);
+                                                    return applyCurrentUserPrompt(
+                                                        constructTemplate(scrapedData),
+                                                        prefs.userPrompt,
+                                                    );
                                                 })()
                                                 : ''
                                         }

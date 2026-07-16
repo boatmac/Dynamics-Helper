@@ -42,6 +42,8 @@ vi.mock('../utils/pageReader', () => ({
     },
 }))
 
+const hydrationDismiss = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+
 vi.mock('../hooks/useAnalysisHydration', () => {
     const hydration = {
         popover: {
@@ -50,9 +52,14 @@ vi.mock('../hooks/useAnalysisHydration', () => {
             title: 'Analysis Failed',
             content: 'HYDRATED HOST FALLBACK',
             errorCode: 'repository_instructions_missing',
+            identity: {
+                requestId: 'req-hydrated',
+                caseNumber: '1234567890123456',
+                timestamp: 123,
+            },
         },
         isAnalyzing: false,
-        dismissPopover: vi.fn().mockResolvedValue(undefined),
+        dismissPopover: hydrationDismiss,
     }
     return { useAnalysisHydration: () => hydration }
 })
@@ -74,6 +81,7 @@ describe('FAB prompt-source error display', () => {
         resetChromeMock()
         installChromeMock()
         seedStorage({ dh_prefs: { language: 'en' } })
+        hydrationDismiss.mockClear()
     })
 
     it('UI-I6: known code localizes immediate fallback in the current language', () => {
@@ -129,5 +137,10 @@ describe('FAB prompt-source error display', () => {
             /Repository Instructions are missing/i,
         )).toBeTruthy()
         expect(screen.queryByText('HYDRATED HOST FALLBACK')).toBeNull()
+        expect(hydrationDismiss).toHaveBeenCalledWith({
+            requestId: 'req-hydrated',
+            caseNumber: '1234567890123456',
+            timestamp: 123,
+        })
     })
 })

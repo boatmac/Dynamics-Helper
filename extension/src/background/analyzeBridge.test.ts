@@ -113,6 +113,7 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
 
         expect(last).toMatchObject({
             caseNumber: CTX.caseNumber,
+            requestId: CTX.requestId,
             status: 'success',
             title: CTX.successTitle,
             content: '# Report\nBody',
@@ -135,6 +136,7 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
         const last = await readStorage('dh_last_analysis')
         expect(last).toMatchObject({
             caseNumber: CTX.caseNumber,
+            requestId: CTX.requestId,
             status: 'error',
             title: CTX.errorTitle,
             content: 'Copilot request timed out after 600.0 seconds.',

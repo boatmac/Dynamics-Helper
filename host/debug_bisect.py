@@ -28,7 +28,7 @@ async def main():
             copilot_path = npm_path
 
     client = CopilotClient({"cli_path": copilot_path} if copilot_path else None)
-    session = await client.create_session()
+    session = await client.create_session(skip_custom_instructions=True)
 
     parts = ["Hello", "Title"]
 

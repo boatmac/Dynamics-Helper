@@ -79,7 +79,8 @@ async def main():
     print("\nCreating Session...")
     try:
         session = await client.create_session(
-            {"on_permission_request": permission_handler}
+            {"on_permission_request": permission_handler},
+            skip_custom_instructions=True,
         )
         print("Session created successfully.")
     except Exception as e:

@@ -1,7 +1,7 @@
 # Analysis Result Persistence — Design
 
 **Date:** 2026-06-03
-**Status:** Implemented; amended 2026-07-15 for optional prompt error codes
+**Status:** Implemented; amended 2026-07-15 for optional prompt error codes and 2026-07-17 for identity-safe seen acknowledgment
 **Author:** opencode session 2026-06-03
 
 ## 1. Historical Pre-Implementation Context (2026-06-03)
@@ -48,11 +48,12 @@ The implementation uses two keys in `chrome.storage.local`:
 // Persisted analysis result. Overwritten on every new analysis.
 type LastAnalysis = {
   caseNumber: string;       // 16-digit case ID
+  requestId?: string;       // Analyze request identity; absent on legacy records
   status: 'success' | 'error';
   title: string;            // popover title (already i18n'd at write time)
   content: string;          // markdown body (success: full report; error: host message)
   timestamp: number;        // Date.now() at write
-  seen: boolean;            // false until immediate dismissal or hydrated consumption
+  seen: boolean;            // false until identity-matched dismissal/consumption
   durationSec?: number;     // success only
   savedTo?: string;         // success only, file path
   errorCode?: string;       // error only, raw Host machine-readable code
@@ -79,8 +80,8 @@ The implemented Service Worker bridge wraps `NATIVE_MSG` requests whose action
 is `analyze_error` with these storage operations:
 
 1. **Before forwarding to host:** write `dh_pending_analysis` with `caseNumber`, `requestId`, `startTime`.
-2. **After host responds (success path):** write `dh_last_analysis` with status `success`, then delete `dh_pending_analysis`.
-3. **After Host responds (Host returned `{status: 'error', error: '...', error_code?: '...'}`):** write `dh_last_analysis` with status `error`, `content` equal to the raw safe Host fallback, and optional `errorCode` equal to a non-empty raw `error_code`; then delete `dh_pending_analysis`. For double-wrapped responses, an inner Analyze code takes precedence over an outer wrapper code.
+2. **After host responds (success path):** write `dh_last_analysis` with status `success` and the request-scoped `requestId`, then delete `dh_pending_analysis`.
+3. **After Host responds (Host returned `{status: 'error', error: '...', error_code?: '...'}`):** write `dh_last_analysis` with status `error`, the request-scoped `requestId`, `content` equal to the raw safe Host fallback, and optional `errorCode` equal to a non-empty raw `error_code`; then delete `dh_pending_analysis`. For double-wrapped responses, an inner Analyze code takes precedence over an outer wrapper code.
 4. **SW-side rejection** (`sendNativeMessage` Promise rejects, e.g., disconnected pipe): write `dh_last_analysis` with status `error`, `content` equal to the exception message, and no fabricated `errorCode`.
 
 ### 4.3 Read paths (FAB)
@@ -88,7 +89,7 @@ is `analyze_error` with these storage operations:
 `useAnalysisHydration(caseNumber)` reads storage on mount and whenever the case
 identity changes:
 
-1. **FAB mount** — read `dh_last_analysis`. If it matches the current page case, is unseen, and is inside `STALE_WINDOW_MS`, return an open hydrated popover. The FAB marks it seen when consumed/dismissed so it does not reopen on a later mount.
+1. **FAB mount** — read `dh_last_analysis`. If it matches the current page case, is unseen, and is inside `STALE_WINDOW_MS`, return an open hydrated popover together with its identity. New records use `requestId`; legacy records use exact `caseNumber + timestamp`. Consumption/dismissal re-reads storage and sets `seen=true` only if the displayed identity still matches, so a concurrent newer result remains untouched.
 2. **Case identity change** — rerun the same checks when `caseNumber` changes.
 3. **Pending check** — on mount, read `dh_pending_analysis`. If matches current case, set the local `isAnalyzing` state so the FAB shows the "analyzing" spinner.
 
@@ -140,7 +141,7 @@ These are testable assertions the implementation must satisfy.
 | **P-I3** | When Host responds with `{status: 'error', error, error_code?}`, `dh_last_analysis` is written with `status='error'`, `content === error`, and the optional raw code; an inner Analyze code wins over an outer code. |
 | **P-I4** | When `sendNativeMessage` Promise rejects, `dh_last_analysis` is written with `status='error'`, no fabricated code, AND `dh_pending_analysis` is deleted. |
 | **R-I1** | FAB mount with matching unseen result inside stale window opens the popover automatically. |
-| **R-I2** | Immediate dismissal or hydrated-result consumption sets `seen=true`; subsequent remounts on the same case do NOT auto-open. |
+| **R-I2** | Immediate dismissal or hydrated-result consumption sets `seen=true` only when the currently stored record still matches the displayed request identity (or exact legacy case/timestamp). A concurrent newer record remains unseen and retains all fields; a matching seen record does not reopen. |
 | **R-I3** | FAB mount with non-matching `caseNumber` does NOT open the popover. |
 | **R-I4** | FAB mount with result older than `STALE_WINDOW_MS` does NOT open the popover. |
 | **R-I5** | FAB mount with matching `dh_pending_analysis` sets `isAnalyzing = true`. |
@@ -153,7 +154,7 @@ These are testable assertions the implementation must satisfy.
 User opens case A on tab 1, initiates analysis, switches to a separate window where they also have case A open in tab 2 (different FAB instance). When the response arrives:
 
 - SW writes storage (single source of truth, no contention).
-- Tab 1 (originating FAB): receives `sendResponse` from SW → renders popover immediately. Sets `seen: true` when dismissed.
+- Tab 1 (originating FAB): receives `sendResponse` from SW → renders the popover with the outgoing request identity. Dismissal sets `seen: true` only if storage still contains that result.
 - Tab 2 (passive FAB): the implemented hydration hook reads on mount/case change, not via a live `chrome.storage.onChanged` subscription. If it mounts after tab 1 consumed the result (`seen=true`), it does not reopen it. This preserves one-shot semantics.
 
 **Possible follow-up:** add a live storage-change subscription if cross-tab
@@ -204,15 +205,17 @@ Markdown bodies for a full analysis report can be 5-50 KB. `chrome.storage.local
 ## 8. Implemented References
 
 - `extension/src/utils/analysisStore.ts` — canonical `LastAnalysis` /
-  `PendingAnalysis` schema, raw fallback + optional `errorCode`, storage writes,
-  age constants, and request-ID-safe pending clear.
+  `PendingAnalysis` schema, raw fallback + optional `errorCode`, optional result
+  `requestId`, identity-qualified seen writes, age constants, and request-ID-safe
+  pending clear.
 - `extension/src/background/analyzeBridge.ts` — pre-forward pending write,
   success/error persistence, inner-code precedence, and transport-error
   behavior.
 - `extension/src/background/serviceWorker.ts` — strips `_persist`, invokes the
   bridge, and logs Native Host metadata rather than prompt-bearing payloads.
 - `extension/src/hooks/useAnalysisHydration.ts` — case/age/seen checks, pending
-  hydration, optional code transport, and one-shot dismissal.
+  hydration, optional code transport, displayed identity, and race-safe one-shot
+  dismissal.
 - `extension/src/components/FAB.tsx` — immediate safe fallback prefixes,
   hydrated state mirroring, `showAnalysisError`, `popoverIsAnalyze`, and
   `ResultPopover` render-time localization.

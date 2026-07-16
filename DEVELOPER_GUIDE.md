@@ -21,6 +21,8 @@ The project consists of three main components:
 * **`src/components/MarkdownPreview.tsx`**: Shared Markdown renderer using `react-markdown` + `remark-gfm`. Provides styled GFM rendering (headings, code blocks, tables, links, lists, blockquotes). Used by Options.tsx for preview toggles.
 * **`src/utils/pageReader.ts`**: Logic for scraping Dynamics/Azure Portal pages to extract case numbers, error text, and context. Uses a 4-strategy cascade (header controls, label search, header container regex, ticket title fallback).
 * **`src/background/serviceWorker.ts`**: Service worker handling telemetry (with stable anonymous UUID via `chrome.storage.local`), native messaging relay, analysis-result persistence, and extension version injection. Native-message logging is metadata-only; it must not log prompt-bearing payloads.
+* **`src/background/teamManifestSync.ts`**: Manifest-only fetch/commit boundary. It re-reads `dh_prefs` after fetch and writes manifest/ETag only when Team Catalog remains enabled and the URL still exactly matches the captured URL.
+* **`src/utils/analysisPrompt.ts`**: Idempotent send-time Custom User Prompt assembly for both constructed and preformatted FAB context.
 * **`src/utils/telemetry.ts`**: Azure Application Insights integration for anonymous telemetry.
 * **`manifest.json`**: Defines permissions (`nativeMessaging`) and background scripts.
 * **`dist/`**: The build output directory. Load the extension from here (`extension/dist`).
@@ -126,7 +128,17 @@ Strict Analyze/session resolution fails closed:
 
 `get_config` is intentionally softer. `_get_session_config(include_prompt_status=True)` returns normal configuration plus `prompt_source_status` without creating or committing a session snapshot. It returns readable `_user_instructions_raw`, including explicit empty content; if that file is unreadable, the raw field is omitted so Options retains its Chrome mirror and shows the safe health warning.
 
+After the latest `update_config` intent is durably acknowledged, Options sends one additional health-only `get_config`. This callback changes only `promptHealthIssue`; it never re-enters the full hydration merge. Both config and health generations must still match before applying a response, so an older health result cannot replace newer state. Transport/non-success responses leave the existing health issue unchanged.
+
 Prompt-source errors carry a stable `error_code` and safe English fallback. Options/FAB preserve unknown non-empty codes, localize the five known codes only at render time, and never tell users to re-authenticate for a source/configuration error. Logs may include safe source mode, classified code, or a short fingerprint prefix, but never instruction contents, Custom User Prompt contents, or prompt-source paths.
+
+FAB applies Custom User Prompt immediately before every send. It removes an existing trailing `## User Prompt` section from either preformatted or freshly assembled context, then appends the current non-empty value once; an empty current value leaves the stale section removed. The resulting complete text still enters the Host's existing PII scrub path unchanged.
+
+Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe parse/network messages and logs only failure kind plus numeric HTTP status. It must not log URL/status-text/exception values. Manifest-only Service Worker commits also re-read `dh_prefs` after fetch to prevent Reset or a URL change from being overwritten by a stale response.
+
+Analysis result dismissal is identity-qualified. New `LastAnalysis` records carry their Analyze `requestId`; legacy records are identified by exact `caseNumber + timestamp`. Hydration passes that identity to FAB, and `markSeen` re-reads storage before writing. If a newer Service Worker record replaced the displayed one, dismissal is a no-op so the new record stays unseen with its complete error metadata.
+
+The standalone `host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` files are historical pre-1.0.5 probes. They retain `skip_custom_instructions=True` on session creation, but other imports, constructor arguments, and message shapes are obsolete; they are explicitly outside supported diagnostics until separately migrated. Use `host/venv` tests or the SDK 1.0.5 wire-drift probe documented in `AGENTS.md` instead.
 
 ### 4. Skills Configuration
 
@@ -199,7 +211,7 @@ Analyze runs are long (often 60-300 s). The user can navigate away from the case
 **Storage schema** (`extension/src/utils/analysisStore.ts`):
 
 * `dh_pending_analysis` — `{caseNumber, requestId, startTime}` written by SW before forwarding the host RPC, cleared on success/error/timeout/edge-6.3.
-* `dh_last_analysis` — `{status: 'success'|'error', caseNumber, title, content, timestamp, seen, durationSec?, savedTo?, errorCode?}` written by SW on Host response. An immediate popover marks it seen on dismissal; FAB marks a rehydrated result seen when consuming it for display. `errorCode` is an optional raw machine-readable Host code; legacy records omit it.
+* `dh_last_analysis` — `{status: 'success'|'error', caseNumber, requestId?, title, content, timestamp, seen, durationSec?, savedTo?, errorCode?}` written by SW on Host response. New records use `requestId` as result identity; legacy records use exact `caseNumber + timestamp`. Dismissal/consumption marks it seen only when that displayed identity still matches storage. `errorCode` is an optional raw machine-readable Host code; legacy records omit both optional fields.
 
 **Two ages, do not confuse them:**
 
@@ -216,12 +228,12 @@ For errors, persistence stores the raw safe Host fallback in `content` and prese
 **Pure-helper boundary:**
 
 * `extension/src/background/analyzeBridge.ts` exposes `handleAnalyzeForward(payload, ctx, deps)` with DI'd `send`. Its focused suite covers P-I1..P-I4, error-code transport, and edge 6.3 without spinning up a real Chrome port; the test count is not a contract.
-* `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, isAnalyzing, dismissPopover}`. Its focused suite covers result/pending hydration, one-shot dismissal, and optional `errorCode` using only a mocked `chrome.storage.local`; the test count is not a contract.
-* FAB calls `useAnalysisHydration(scrapedData?.caseNumber || '')` once at the top of the component, then mirrors `popover`/`isAnalyzing` into local state in two `useEffect` hooks. The mirror is one-way (storage → local); user dismissal goes through `hydration.dismissPopover()` which writes `seen=true`.
+* `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, isAnalyzing, dismissPopover(identity)}`. Its focused suite covers result/pending hydration, identity-safe one-shot dismissal, and optional `errorCode` using only a mocked `chrome.storage.local`; the test count is not a contract.
+* FAB calls `useAnalysisHydration(scrapedData?.caseNumber || '')` once at the top of the component, then mirrors `popover`/`isAnalyzing` into local state in two `useEffect` hooks. The mirror is one-way (storage → local); user dismissal passes the displayed identity through `hydration.dismissPopover(identity)`, which re-reads storage before writing `seen=true`.
 
 **popoverIsAnalyze ref discriminator:**
 
-`ResultPopover` is shared between analyze flow and bookmark markdown previews. `popoverIsAnalyze.current` is set `true` whenever an analyze success/error opens the popover, and the close handler only calls `hydration.dismissPopover()` when this flag is set — otherwise dismissing a bookmark popover would spuriously mark a stale analysis result as seen.
+`ResultPopover` is shared between analyze flow and bookmark markdown previews. `popoverIsAnalyze.current` is set `true` whenever an analyze success/error opens the popover, and the close handler only calls `hydration.dismissPopover(resultPopover.identity)` when this flag and an analysis identity are present — otherwise dismissing a bookmark popover would spuriously acknowledge analysis state.
 
 **Edge cases handled:**
 
