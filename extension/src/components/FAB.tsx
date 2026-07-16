@@ -302,7 +302,8 @@ const FAB: React.FC = () => {
 
     // C2a+: re-hydrate persisted analysis result on mount and on case change.
     // See docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md
-    // The hook reads dh_last_analysis / dh_pending_analysis from
+    // The hook reads dh_last_analysis / dh_pending_analysis /
+    // dh_seen_analysis from
     // chrome.storage.local and tells us whether to auto-open the popover
     // (matching unseen result inside STALE_WINDOW_MS) or show the spinner
     // (matching pending marker inside MAX_PENDING_DISPLAY_AGE_MS).
@@ -316,8 +317,8 @@ const FAB: React.FC = () => {
     }, [scrapedData?.caseNumber]);
 
     // When the hook surfaces a persisted result and no popover is open, mirror
-    // it into the local resultPopover state. Then immediately mark it seen so
-    // a future remount doesn't re-open the same result (one-shot semantics).
+    // it into local resultPopover state. Then acknowledge its identity so a
+    // future remount doesn't re-open the same result (one-shot semantics).
     useEffect(() => {
         if (!hydration.popover) return;
         if (resultPopover.isOpen) return;
@@ -330,8 +331,8 @@ const FAB: React.FC = () => {
             identity: hydration.popover.identity,
         });
         popoverIsAnalyze.current = true;
-        // Fire-and-forget; dismissPopover only marks storage seen=true and
-        // closes the hook's internal popover state — both safe to ignore.
+        // Fire-and-forget; dismissPopover only writes the separate seen
+        // identity and closes the hook's internal state - both safe to ignore.
         void hydration.dismissPopover(hydration.popover.identity);
     }, [hydration.popover, resultPopover.isOpen, hydration]);
 
@@ -1143,9 +1144,9 @@ const FAB: React.FC = () => {
             isOpen={resultPopover.isOpen} 
             onClose={() => {
                 // C2a+: if the popover came from an analyze flow (success or
-                // error), mark the persisted result as seen so it does not
-                // re-hydrate on the next page load. Bookmark popovers leave
-                // the flag untouched.
+                // error), acknowledge its identity so it does not re-hydrate
+                // on the next page load. Bookmark popovers leave analysis
+                // acknowledgment state untouched.
                 if (popoverIsAnalyze.current) {
                     popoverIsAnalyze.current = false;
                     if (resultPopover.identity) {

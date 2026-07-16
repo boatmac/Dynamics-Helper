@@ -22,7 +22,7 @@ export interface LastAnalysis {
     title: string;            // popover title, already i18n'd at write time
     content: string;          // markdown body (success: full report; error: host message)
     timestamp: number;        // Date.now() at write
-    seen: boolean;            // false until user dismisses popover
+    seen: boolean;            // legacy compatibility; new acknowledgments use KEY_SEEN
     durationSec?: number;     // success only
     savedTo?: string;         // success only, file path
     errorCode?: string;       // error only, raw Host machine-readable code

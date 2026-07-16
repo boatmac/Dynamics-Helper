@@ -344,8 +344,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         // Forward classified failure so a caller (currently
                         // hypothetical — no non-Options code uses this
                         // response payload) can distinguish silent degradation
-                        // from a real sync. Items always carry the cache
-                        // fallback so UI never sees an empty list on failure.
+                        // from a real sync. Ordinary failures carry the cache;
+                        // stale responses expose no items to callers.
                         sendResponse(toSelectedTeamSyncResponse(result, teamId));
                     }
                 }
