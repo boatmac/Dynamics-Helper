@@ -16,11 +16,11 @@ The project consists of three main components:
 
 ### `extension/` (Frontend)
 
-* **`src/components/FAB.tsx`**: The main UI component. It contains the "Analyze" logic, the safety timeout configuration (currently 600s), and the `isUserEdited` ref pattern for protecting user edits from background scans. All user-facing strings use `t()` from `useTranslation()` for i18n support.
-* **`src/components/Options.tsx`**: The extension settings page. Handles preferences, Root Path, MCP/Skill directory config, team catalog sync, and update checking. User Instructions and User Prompt textareas include an Edit/Preview toggle for rendered Markdown preview.
+* **`src/components/FAB.tsx`**: The main UI component. It contains the Analyze logic, derives its safety timeout from the Host preference with a 10-second grace period, localizes prompt-source errors at render time, and uses the `isUserEdited` ref pattern to protect user edits from background scans. All user-facing strings use `t()` from `useTranslation()` for i18n support.
+* **`src/components/Options.tsx`**: The extension settings page. Handles preferences, Root Path, MCP/Skill directory config, team catalog sync, and update checking. DH-specific Instructions and Custom User Prompt textareas include an Edit/Preview toggle for rendered Markdown preview.
 * **`src/components/MarkdownPreview.tsx`**: Shared Markdown renderer using `react-markdown` + `remark-gfm`. Provides styled GFM rendering (headings, code blocks, tables, links, lists, blockquotes). Used by Options.tsx for preview toggles.
 * **`src/utils/pageReader.ts`**: Logic for scraping Dynamics/Azure Portal pages to extract case numbers, error text, and context. Uses a 4-strategy cascade (header controls, label search, header container regex, ticket title fallback).
-* **`src/background/serviceWorker.ts`**: Service worker handling telemetry (with stable anonymous UUID via `chrome.storage.local`), native messaging relay, and extension version injection.
+* **`src/background/serviceWorker.ts`**: Service worker handling telemetry (with stable anonymous UUID via `chrome.storage.local`), native messaging relay, analysis-result persistence, and extension version injection. Native-message logging is metadata-only; it must not log prompt-bearing payloads.
 * **`src/utils/telemetry.ts`**: Azure Application Insights integration for anonymous telemetry.
 * **`manifest.json`**: Defines permissions (`nativeMessaging`) and background scripts.
 * **`dist/`**: The build output directory. Load the extension from here (`extension/dist`).
@@ -46,10 +46,11 @@ The project consists of three main components:
 
 ### `%LOCALAPPDATA%\DynamicsHelper\` (User Configuration)
 
-* **`config.json`**: Defines the MCP servers and Skill directories the Agent can use. Ships with a minimal default (`fetch` server); additional servers (Kusto, WorkIQ, etc.) are user-configured.
+* **`config.json`**: Defines Root Path, Repository ONLY, MCP, Skills, model/performance settings, and mirrored extension preferences. Ships with a minimal default; additional capabilities are user-configured.
   * *Note:* In Production mode, this file is shared between the installed app and the user's overrides.
 * **`native_host.log`**: The primary debug log.
-* **`copilot-instructions.md`**: The active system prompt (User overrides).
+* **`copilot-instructions.md`**: DH-specific Instructions. This is one editable system source, selected only when Repository ONLY is not effective.
+* **`user_prompt.md`**: Custom User Prompt backup/source, inserted into every PII-scrubbed Analyze user turn.
 
 ---
 
@@ -68,8 +69,10 @@ Understanding how a user request becomes an AI response.
 4. **Session Management:**
     * The backend validates the case number via `_extract_case_id()` (accepts 16 or 19 digits).
     * A stable deterministic UUIDv5 is derived via `_case_to_session_id()` from the bare case number and the shared MyCasesKit namespace. The same UUID is the SDK `session_id` argument and the shell-CLI resume handle.
+    * Before every Analyze, the Host validates the effective Root and resolves an immutable prompt snapshot containing exact DH Core bytes plus exactly one selected editable source. Strict UTF-8 decode or source-availability failures stop before any model turn.
     * Smart refresh compares `current_case_id` plus `current_session_root_path` (the root actually applied to the active session), not just the desired `self.root_path` config value.
-    * On session creation, `resume_session(uuid, working_directory=root)` is tried first (restores conversation history/tool state and self-heals old cwd metadata). It falls back to `create_session(session_id=uuid, working_directory=root)`.
+    * Smart refresh also compares `current_prompt_fingerprint` with the snapshot's versioned fingerprint. A changed source mode, Core bytes, or selected-source bytes resumes/creates the same UUIDv5 session before sending the turn.
+    * On session creation or refresh, `resume_session(uuid, ...)` is tried first and falls back to `create_session(session_id=uuid, ...)`. Resume, create fallback, and transport retry receive equivalent Root, prompt, isolation, Skills, MCP, hook, permission, and model/performance kwargs.
     * The session UUID is injected into the `system_message` content as `## Session Info` / `Session Name: <uuid>`, making it available for `context.md` frontmatter `session_name:`.
 5. **SDK Execution (`send_and_wait`):**
     * The backend sends the prompt as a plain string (SDK 0.2.0+, still applies in 1.0.5) with a **user-configurable timeout** (default 1200s, range 60–3600s, set via Options → Analyze Timeout). The FAB safety timeout is derived as `(value + 10) * 1000` ms so the host's truthful "Copilot did not finish within Ns" error always fires first.
@@ -81,30 +84,49 @@ The host maintains persistent sessions so users can continue analysis in the Cop
 * **Session ID:** A deterministic UUID v5 derived from the case ID via `_case_to_session_id()`. The same case always produces the same UUID, enabling resume across restarts. The Copilot CLI requires session IDs to be valid UUIDs (not arbitrary strings like `dh-{caseId}`).
 * **Server Verification:** After `create_session()`, the session ID is read from `session.session_id` and stored in `self.current_session_id`.
 * **Case Tracking:** `self.current_case_id` tracks which case the current session belongs to, used for smart-refresh comparison (not the session ID itself).
-* **SDK Mechanism:** `client.resume_session(session_id, working_directory=root)` restores state from `~/.copilot/session-state/{session_id}/` and explicitly applies the configured root. `CopilotClient` also receives the same root so its CLI subprocess never falls back to the Native Host install cwd.
+* **SDK Mechanism:** `client.resume_session(session_id, working_directory=root, skip_custom_instructions=True, ...)` restores state from `~/.copilot/session-state/{session_id}/` and explicitly applies the configured Root. `CopilotClient` also receives the same Root so its CLI subprocess never falls back to the Native Host install cwd. Every create/resume/retry path keeps `skip_custom_instructions=True`.
 * **Graceful Fallback:** If the SDK version doesn't support `resume_session()`, an `AttributeError` is caught and a new session is created instead.
-* **Report Integration:** `dh_case_report.md` includes the UUID and `copilot -C '<root>' --resume=<uuid>`. `-C` runs before CLI workspace discovery, ensuring root-level skills/MCP/instructions load even if an old session persisted the wrong cwd.
+* **Report Integration:** `dh_case_report.md` includes the UUID and `copilot -C '<root>' --resume=<uuid>`. `-C` applies the correct Root before the interactive CLI continuation resolves workspace capabilities even if an old session persisted the wrong cwd. DH's SDK session does not rely on CLI automatic instruction discovery.
 * **Response Payload:** The session name is returned to the extension as `session_name` in the analysis response for frontend visibility (renamed from `session_id` in B82 to match the B81 cross-CLI naming RFC).
 * **System Message Injection:** The UUID is appended to the `system_message` content as a `## Session Info` section (labelled `Session Name: <uuid>`) before session creation. This ensures the AI can reference it (e.g., for `context.md` frontmatter `session_name:` field) without relying on a fallback value.
 * **Lifecycle:** Startup initializes only the SDK client; session creation is lazy until Analyze supplies a case. Config updates preserve an active deterministic case session and never replace it with a generic UUIDv4 session. Root changes restart the client and refresh the session. `update_config` is authoritative for clearing root; a missing/empty Analyze `rootPath` reloads host config so a pre-hydration extension default cannot overwrite the canonical disk value.
 
-### 3. Instruction Hierarchy (The Context)
+### 3. Deterministic Prompt Sources
 
-The "System Prompt" is built from three layers, merged at runtime in `_get_session_config`. The resulting dict is unpacked into keyword-only arguments for `create_session()` (SDK 0.2.0 no longer accepts a single config dict; 0.3.0 also requires keyword-only — see `docs/sdk-upgrade-2026-05-0.3.0.md`). After the three layers are merged, the session ID is appended as a `## Session Info` section (runtime augmentation in `_refresh_session`):
+DH owns instruction selection. Every SDK `create_session()` and `resume_session()` call, including fallback/retry paths, sets `skip_custom_instructions=True`. The spawned Copilot CLI therefore does not automatically add CLI-global instructions, Root/ancestor `AGENTS.md`, path-specific `.instructions.md` files, agent instruction files, or automatically discovered `.github/copilot-instructions.md` to a DH session.
 
-1. **Layer 1: System Instructions (Immutable)**
-    * Source: `host/system_prompt.md` (or beside exe).
-    * Content: Base persona, core capabilities, safety rules.
+The Host explicitly injects DH Core plus exactly one editable system source. Custom User Prompt remains separate PII-scrubbed user-role content on every Analyze:
 
-2. **Layer 2: User Instructions (Customizable)**
-    * Source: `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`.
-    * Content: User-specific preferences managed via the Extension Options Page.
+| Root Path | Persisted Repository ONLY | Effective system sources | Analyze user content |
+|---|---:|---|---|
+| Empty | false or true | DH Core + DH-specific Instructions | Case payload + Custom User Prompt |
+| Non-empty | false | DH Core + DH-specific Instructions | Case payload + Custom User Prompt |
+| Non-empty | true | DH Core + `<Root>/.github/copilot-instructions.md` | Case payload + Custom User Prompt |
 
-3. **Layer 3: Workspace Instructions (Project-Specific)**
-    * Source: `[Root Path]/.github/copilot-instructions.md`.
-    * Content: Project-specific rules (if a Root Path is configured in the extension).
+`effective_repository_only = bool(effective_root) and use_workspace_only`. A non-empty Root does not select Repository Instructions by itself. DH-specific and Repository Instructions are mutually exclusive, and only the Root-level `.github/copilot-instructions.md` is supported. Repository ONLY still controls Skills and MCP according to their existing rules; DH Core, SDK built-ins, Session Info, hooks, tool definitions, and Custom User Prompt remain active.
 
-**Repository ONLY Logic:** If "Repo Only" is enabled (`useWorkspaceOnly = true`) and a Root Path is configured, only Workspace Instructions (Layer 3) are used. Layer 2 (User) and Layer 1 (System) instructions are still loaded, but Workspace Skills and MCP servers completely replace their global counterparts.
+#### Immutable Snapshot and Fingerprint
+
+`_resolve_prompt_snapshot()` reads DH Core and the selected editable source exactly once in binary mode. It stores the exact bytes and strict UTF-8 decoded strings in frozen `PromptSnapshot`; it performs no BOM, newline, or whitespace normalization. `_build_system_message()` uses only that snapshot, in this order:
+
+1. DH Core System Prompt.
+2. The selected editable source, omitted from assembly only when its decoded content is empty/whitespace.
+3. Deterministic Session Info.
+
+The snapshot fingerprint is `v1:` plus SHA-256 over length-framed version marker, source mode, exact Core bytes, and exact selected bytes. Root identity remains a separate refresh condition. Before each Analyze, an unchanged case/Root/fingerprint reuses the active session; any change refreshes the same UUIDv5 session. The candidate fingerprint is committed only after awaited SDK resume/create succeeds. `_invalidate_active_session()` always clears `current_prompt_fingerprint`, so resolution, refresh, timeout, transport, and uncertain durable-write failures cannot reuse stale prompt state.
+
+#### Source Errors and Config Health
+
+Strict Analyze/session resolution fails closed:
+
+* Missing or unreadable/invalid-UTF-8 DH Core blocks Analyze.
+* A missing DH-specific file is valid empty content; an existing unreadable/invalid-UTF-8 file blocks Analyze when selected.
+* An existing empty Repository Instructions file is valid; a missing or unreadable/invalid-UTF-8 selected Repository file blocks Analyze.
+* The Host never falls back to the unselected DH-specific, Repository, or CLI-global source, and no user turn is sent on failure.
+
+`get_config` is intentionally softer. `_get_session_config(include_prompt_status=True)` returns normal configuration plus `prompt_source_status` without creating or committing a session snapshot. It returns readable `_user_instructions_raw`, including explicit empty content; if that file is unreadable, the raw field is omitted so Options retains its Chrome mirror and shows the safe health warning.
+
+Prompt-source errors carry a stable `error_code` and safe English fallback. Options/FAB preserve unknown non-empty codes, localize the five known codes only at render time, and never tell users to re-authenticate for a source/configuration error. Logs may include safe source mode, classified code, or a short fingerprint prefix, but never prompt content or prompt-source paths.
 
 ### 4. Skills Configuration
 
@@ -177,7 +199,7 @@ Analyze runs are long (often 60-300 s). The user can navigate away from the case
 **Storage schema** (`extension/src/utils/analysisStore.ts`):
 
 * `dh_pending_analysis` — `{caseNumber, requestId, startTime}` written by SW before forwarding the host RPC, cleared on success/error/timeout/edge-6.3.
-* `dh_last_analysis` — `{status: 'success'|'error', caseNumber, title, content, path?, durationSec?, completedAt, seen}` written by SW on host response, marked `seen=true` when the user dismisses the popover.
+* `dh_last_analysis` — `{status: 'success'|'error', caseNumber, title, content, timestamp, seen, durationSec?, savedTo?, errorCode?}` written by SW on Host response, marked `seen=true` when the user dismisses the popover. `errorCode` is an optional raw machine-readable Host code; legacy records omit it.
 
 **Two ages, do not confuse them:**
 
@@ -187,7 +209,9 @@ Analyze runs are long (often 60-300 s). The user can navigate away from the case
 
 **Wire protocol — `_persist` field on outgoing NATIVE_MSG:**
 
-FAB attaches a `_persist: {caseNumber, successTitle, errorTitle}` to the analyze payload. The SW reads this, calls `recordAnalyzeStart` before forwarding, calls `recordAnalyzeSuccess`/`recordAnalyzeError` on response, and **strips `_persist` before sending to the host** (the host has never seen this field and will reject unknown keys). Titles are pre-translated by FAB because the SW has no `t()` access.
+FAB attaches a `_persist: {caseNumber, successTitle, errorTitle}` to the analyze payload. The SW reads this, calls `recordAnalyzeStart` before forwarding, calls `recordAnalyzeSuccess`/`recordAnalyzeError` on response, and **strips `_persist` before sending to the Host** (the Host has never seen this field and will reject unknown keys). Titles are pre-translated by FAB because the SW has no `t()` access.
+
+For errors, persistence stores the raw safe Host fallback in `content` and preserves a non-empty `error_code` as optional `errorCode`; an inner Analyze code takes precedence over an outer wrapper code, and transport rejection does not fabricate one. Immediate and rehydrated popovers both pass the raw pair to `localizePromptSourceError()` at render time. Known codes use the current UI language; unknown or absent codes display the stored fallback.
 
 **Pure-helper boundary:**
 
@@ -299,15 +323,32 @@ Do **not** call `chrome.storage.local.get('dh_prefs')` directly inside a React c
 
 ### Writing prefs
 
-Only `Options.tsx::persistPrefs(nextPrefs, opts?)` writes. It (a) calls `chrome.storage.local.set({ dh_prefs })`, (b) fires `update_config` RPC to the host so `config.json` is mirrored (see AGENTS.md § 3 "Options config persistence principle"), (c) optionally re-fetches the team manifest if `opts.fetchManifest` is set. Other components do **not** write to `dh_prefs`.
+Only `Options.tsx::persistPrefs(nextPrefs, opts?)` writes user preference changes. It creates an immutable `ConfigUpdateIntent` containing a generation, a frozen preference snapshot, and, only when needed, a frozen `{revision, value}` DH-instruction token. Other React components do **not** write `dh_prefs`.
+
+The persistence path is ordered and inspected:
+
+1. Write the captured preference snapshot to the `dh_prefs` Chrome mirror. Generation checks converge delayed/out-of-order callbacks back to the newest snapshot.
+2. After Host hydration, send one `update_config` payload built only from that captured intent. Stale storage callbacks do not dispatch older Host updates.
+3. Inspect the outer Native Messaging envelope and the inner Host result with `classifyConfigUpdateResponse()`; this RPC is not universally fire-and-forget.
+4. Flush a requested team-manifest fetch only after the latest matching mirror commits and only for the still-active URL.
+
+`user_instructions` is sparse. It is included only while an instruction edit revision remains unacknowledged. An explicit empty string from editor clear or Reset is a real write and truncates `copilot-instructions.md`; omission means no instruction-file write. The Host retains `system_instructions` only as a legacy fallback when the primary field is absent, never when `user_instructions` is present and empty.
+
+Host update outcomes separate persistence from active-session refresh:
+
+* `success: true` acknowledges the captured instruction revision and clears the newest update warning.
+* `success: false, config_saved: true` means all requested persistent writes completed but session refresh failed. Options acknowledges exactly the revision that was sent, keeps the saved UI values, and shows a persistent localized warning.
+* `config_saved: false`, malformed responses, and transport failures do not acknowledge the instruction revision, so it remains pending for a later intent. The Host conservatively invalidates active session/fingerprint state after any attempted durable write that raises because truncation or partial output may already have occurred; it does not claim rollback.
+
+Get-config health and update warnings are separate state. The newest update warning takes precedence; after a later successful update, any still-current prompt health warning becomes visible again. Known prompt codes are localized at render time, while unknown codes use the safe Host fallback.
 
 #### Hydration guard (v2.0.70-beta.4+)
 
-`persistPrefs` checks `prefsHydratedRef.current` at entry and **no-ops if false**. The ref starts `false` at mount and flips to `true` only after the host's `get_config` response is merged into state (success branch). It also flips to `true` on the `chrome.runtime.lastError` branch and the non-success-response branch — those are "host down / broken" fallbacks so the user can still operate Options without deadlocking, accepting that `dh_prefs` is the only source of truth in that session.
+`prefsHydratedRef` starts `false` and flips to `true` after the Host's `get_config` response is merged, or on host-unreachable/non-success fallback so the user is not deadlocked. While it is false, `persistPrefs` still records the captured user state in the ordered `dh_prefs` mirror, but it gates the Host RPC and manifest fetch. Once hydration settles, an epoch-driven post-render catch-up sends committed user-touched values through the same inspected update path. It does not perform Host side effects inside the React state-updater closure, which is important under React StrictMode replay.
 
 Why: between OptionsInner mount and the host's `get_config` response (≈100ms typical, multi-second if host is cold-starting or crashed), `prefs` holds `DEFAULT_PREFS` merged with `chrome.storage.local.dh_prefs`. If both are empty (fresh install, Remove+Load Unpacked, or any cache clear), fields like `rootPath` / `teamManifestUrl` / `team` / `userPrompt` are empty strings. A fast user click on a Language dropdown / toggle in that window would call `persistPrefs(DEFAULT_PREFS-merged)` and shallow-merge those empty values into `config.json` + truncate `user_prompt.md` (because the host's `handle_update_config` does `current_data.update(payload["config"])` and writes `user_prompt.md` whenever `user_prompt is not None` — empty string is not None).
 
-If you add a new code path that writes prefs before hydration finishes — e.g. an effect that calls `updatePref` based on URL params — you must either wait for hydration or accept that the write will be silently dropped. The guard does not retry queued writes; the next user-triggered `persistPrefs` after hydration is what will sync state. UI local state is unaffected by the guard, so the user still sees their click take effect — only the disk write is suppressed.
+If you add a new path that writes before hydration finishes, route it through `updatePref`/`persistPrefs` and mark its keys touched. Do not call the Host directly, bypass immutable intent creation, or move catch-up into a React updater. Passive Host-hydration mirrors capture their own snapshot and user-generation value; they must skip when newer user persistence has started so they cannot suppress the user's Host update.
 
 ### Documented exception — runtime overrides
 

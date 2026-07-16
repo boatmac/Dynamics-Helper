@@ -5,6 +5,17 @@
 - **Audience:** Dynamics Helper and MyCasesKit maintainers
 - **Decision owner:** MyCasesKit design session for the integrated Stage 0 contract
 
+> **Superseded prompt-scope recommendation (2026-07-15):** The accepted
+> `docs/superpowers/specs/2026-07-15-dh-prompt-scope-cleanup-design.md`
+> supersedes this research document wherever it recommends relying on Copilot
+> CLI automatic workspace instruction discovery. Implemented DH sessions set
+> `skip_custom_instructions=True` and explicitly inject DH Core plus exactly one
+> editable source: DH-specific Instructions, or only
+> `<Root>/.github/copilot-instructions.md` when Repository ONLY is effective.
+> CLI-global, `AGENTS.md`, path-specific, and other automatically discovered
+> instructions are excluded. This note does not change the Stage 0/1 contract
+> research below; no MyCases integration described here has been implemented.
+
 > **2026-07-14 discussion update:** MyCasesKit's follow-up proposal,
 > `stage0-coordinator-design.md`, identifies the missing deterministic `New-Case`
 > coordinator as the keystone and recommends Form ③ (coordinator rather than

@@ -1,7 +1,7 @@
 # Analysis Result Persistence — Design
 
 **Date:** 2026-06-03
-**Status:** Draft → ready for review
+**Status:** Implemented; amended 2026-07-15 for optional prompt error codes
 **Author:** opencode session 2026-06-03
 
 ## 1. Context
@@ -47,6 +47,7 @@ type LastAnalysis = {
   seen: boolean;            // false until user dismisses popover
   durationSec?: number;     // success only
   savedTo?: string;         // success only, file path
+  errorCode?: string;       // error only, raw Host machine-readable code
 };
 
 // Pending-analysis marker. Cleared when result arrives or expires.
@@ -70,8 +71,8 @@ Two new SW hooks inside `chrome.runtime.onMessage` handler for `NATIVE_MSG` with
 
 1. **Before forwarding to host:** write `dh_pending_analysis` with `caseNumber`, `requestId`, `startTime`.
 2. **After host responds (success path):** write `dh_last_analysis` with status `success`, then delete `dh_pending_analysis`.
-3. **After host responds (host returned `{status: 'error', error: '...'}`):** write `dh_last_analysis` with status `error`, content = host's `error` field, then delete `dh_pending_analysis`.
-4. **SW-side rejection** (`sendNativeMessage` Promise rejects, e.g., disconnected pipe): write `dh_last_analysis` with status `error`, content = exception message.
+3. **After Host responds (Host returned `{status: 'error', error: '...', error_code?: '...'}`):** write `dh_last_analysis` with status `error`, `content` equal to the raw safe Host fallback, and optional `errorCode` equal to a non-empty raw `error_code`; then delete `dh_pending_analysis`. For double-wrapped responses, an inner Analyze code takes precedence over an outer wrapper code.
+4. **SW-side rejection** (`sendNativeMessage` Promise rejects, e.g., disconnected pipe): write `dh_last_analysis` with status `error`, `content` equal to the exception message, and no fabricated `errorCode`.
 
 ### 4.3 Read paths (FAB)
 
@@ -95,7 +96,7 @@ The existing `ResultPopover` component already supports markdown content with ti
 
 Status bubble is kept as a brief visual flash (still 4 seconds), but the popover carries the full message and persists until dismissed.
 
-Same code path for both immediate display (when FAB is alive at response time) and re-hydrated display (when FAB mounts later).
+The stored error body is not pre-localized. Immediate display (when FAB is alive at response time) and rehydrated display (when FAB mounts later) both pass `errorCode` plus the raw stored fallback through the same render-time localization helper. Known prompt-source codes use the UI's current language; unknown codes and legacy records without a code display the raw fallback. This keeps persistence language-neutral and makes an English-written record render in Chinese after a language change, or vice versa.
 
 ### 4.6 Garbage collection
 
@@ -111,13 +112,14 @@ These are testable assertions the implementation must satisfy.
 |---|---|
 | **P-I1** | When SW forwards `analyze_error` to host, `dh_pending_analysis` is written before `postMessage`. |
 | **P-I2** | When host responds successfully, `dh_last_analysis` is written with `status='success'` AND `dh_pending_analysis` is deleted. |
-| **P-I3** | When host responds with `{status: 'error', error}`, `dh_last_analysis` is written with `status='error'` AND `content === error`. |
-| **P-I4** | When `sendNativeMessage` Promise rejects, `dh_last_analysis` is written with `status='error'` AND `dh_pending_analysis` is deleted. |
+| **P-I3** | When Host responds with `{status: 'error', error, error_code?}`, `dh_last_analysis` is written with `status='error'`, `content === error`, and the optional raw code; an inner Analyze code wins over an outer code. |
+| **P-I4** | When `sendNativeMessage` Promise rejects, `dh_last_analysis` is written with `status='error'`, no fabricated code, AND `dh_pending_analysis` is deleted. |
 | **R-I1** | FAB mount with matching unseen result inside stale window opens the popover automatically. |
 | **R-I2** | After user dismisses popover, `seen` is set to `true` in storage; subsequent re-mounts on the same case do NOT auto-open. |
 | **R-I3** | FAB mount with non-matching `caseNumber` does NOT open the popover. |
 | **R-I4** | FAB mount with result older than `STALE_WINDOW_MS` does NOT open the popover. |
 | **R-I5** | FAB mount with matching `dh_pending_analysis` sets `isAnalyzing = true`. |
+| **R-I6** | Immediate and rehydrated prompt-source errors localize a known stored `errorCode` at display time and use stored `content` for unknown/absent codes. |
 
 ## 6. Edge cases
 
@@ -166,7 +168,7 @@ Markdown bodies for a full analysis report can be 5-50 KB. `chrome.storage.local
 - **Multi-case result list** ("you have 3 unread results"). Bigger schema change; not needed unless users actually request.
 - **Desktop notifications** (chrome.notifications). Permission re-prompt risk; not worth it for v1.
 - **Pending-state cross-tab visibility** (other tabs see "analyzing in progress" for case X). Tied to C2b health UI.
-- **Spec test scaffolding**: 9 invariants in §5 should each map to a Vitest test, mirroring the Options 6-invariant pattern. Spec'd here, planned separately.
+- **Spec test scaffolding**: 10 invariants in §5 should each map to a Vitest test, mirroring the Options invariant pattern. Spec'd here and implemented in focused persistence/error suites.
 
 ## 8. References
 

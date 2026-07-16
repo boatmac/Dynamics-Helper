@@ -7,24 +7,49 @@ This file is the durable continuation point for moving Dynamics Helper developme
 ## Repository State
 
 - Repository: `boatmac/Dynamics-Helper`
-- Branch: `master`
-- Origin sync before this handoff commit: `0 behind / 0 ahead`
-- Working tree before this handoff commit: clean
+- Prompt-scope implementation branch: `docs/prompt-scope-cleanup-design`
+- Isolated worktree: `C:\Users\zhaobo\AppData\Local\Temp\opencode\Dynamics-Helper-prompt-scope-spec`
+- Product implementation Tasks 1-6: approved through `0f57f8e`
+- Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
+- Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
-- Latest published prerelease: `v2.0.74-beta.4`
+- Historical published baseline: `v2.0.74-beta.4`
 - Release URL: <https://github.com/boatmac/Dynamics-Helper/releases/tag/v2.0.74-beta.4>
 - Release asset: `DynamicsHelper_v2.0.74-beta.4.zip`
-- Local machine Native Messaging registry mode at handoff: **DEV** (machine-local state; it does not transfer through Git)
+- Historical local-machine Native Messaging registry mode at the original handoff: **DEV** (machine-local state; it does not transfer through Git)
 
-Most recent commits before this handoff:
+Historical beta.4/research baseline before prompt-scope implementation:
 
 ```text
+0040b1d docs(handoff): persist remote VM continuation state
 3241656 docs(research): add integrated Stage 0/1 pipeline and DH plan
 d91c92a docs(research): DH x MyCasesKit Stage 0 instructions brief
 88bdd0d chore: release v2.0.74-beta.4
 0b0bb66 fix(session): bind Copilot sessions to configured workspace root
 c5e282e chore: release v2.0.74-beta.3
 ```
+
+Prompt-scope implementation commits after the accepted spec/plan:
+
+```text
+e6e3155 feat(prompt): add deterministic prompt source resolver
+2601663 feat(session): isolate and refresh prompt sources
+abc9d1f fix(session): repair prompt lifecycle transitions
+ef257ec fix(session): invalidate exited active sessions
+2428172 fix(config): surface prompt source health and clears
+6da6120 fix(config): harden partial update failures
+8d9561a fix(config): invalidate attempted durable writes
+527851b feat(extension): preserve prompt source errors
+916c4b6 feat(options): expose deterministic prompt source mode
+55decd3 fix(options): hydrate skills by effective prompt mode
+eacda76 fix(options): preserve skills across mode edits
+6fdd22e fix(options): inspect prompt config persistence
+378fffd fix(options): serialize config update intents
+11cbed3 fix(options): order config mirror side effects
+0f57f8e fix(options): guard passive hydration mirrors
+```
+
+These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` for the current Task 7/8 continuation state rather than assuming an ahead/behind count from this document.
 
 ## Remote VM Bootstrap
 
@@ -100,7 +125,7 @@ The VM must have GitHub Copilot CLI installed and authenticated. The host venv m
 
 Fixed the root cause of Copilot CLI `/resume` restoring a DH session into the Native Host/extension directory instead of the configured Root Path.
 
-Key behavior now:
+Historical beta.4 behavior at release:
 
 - Config loads before `CopilotClient` construction.
 - Client, `create_session`, and `resume_session` receive the same explicit `working_directory`.
@@ -109,7 +134,7 @@ Key behavior now:
 - Options updates preserve deterministic UUIDv5 case-session identity.
 - Desired config root, client process root, and active-session root are tracked separately.
 - Empty/missing Analyze `rootPath` falls back to canonical Host config (protects the extension pre-hydration window).
-- Runtime root overrides drive cwd, skills, MCP, and workspace instructions consistently.
+- Runtime Root overrides drove cwd, Skills, MCP, and the then-current workspace-instruction behavior consistently.
 - Relative roots are rejected.
 - Corrupt config fails closed instead of silently persisting Host cwd.
 - Refresh/retry/broken-pipe/timeout failure paths invalidate stale state.
@@ -119,11 +144,11 @@ Key behavior now:
 copilot -C '<root>' --resume=<uuid>
 ```
 
-This applies the root before CLI discovers workspace instructions, skills, MCP, and hooks, and overrides stale cwd metadata from old sessions.
+At the beta.4 baseline, this applied the Root before CLI workspace discovery and overrode stale cwd metadata from old sessions. Current DH SDK instruction selection is the explicit, discovery-disabled architecture documented below; the report command still establishes the correct Root for interactive CLI continuation.
 
-## Verification Baseline
+## Historical Verification Baseline
 
-Last full verification for the beta.4 session fix:
+The following is historical evidence for the published beta.4 workspace-root session fix, not final verification of the prompt-scope implementation:
 
 - Host: **109/109** tests passed.
 - Extension: **43/43** tests passed.
@@ -143,6 +168,8 @@ Workspace regression coverage lives in:
 
 `host/test_session_workspace.py`
 
+Task-specific prompt-scope checks were run during Tasks 1-6 and are recorded in `.superpowers/sdd/task-1-report.md` through `task-6-report.md`. Do not copy their evolving totals here as a final release claim. Task 8 owns a fresh complete Host/Extension/build/static gate, any authenticated smoke evidence, final totals, and the release-notes draft.
+
 ## Session Identity Contract
 
 - Case session ID is deterministic UUIDv5 derived from the bare 16-digit case number.
@@ -153,49 +180,33 @@ Workspace regression coverage lives in:
 - DH external/report/frontmatter contract currently calls the opaque resume handle `session_name`.
 - `context.md` is not written directly by DH Host. Duplicate `session_name` + `session_id` observed in legacy MyCases files was traced to an old MyCases template/agent plus DH instructions, not the current Host response.
 
-## Current Prompt Architecture — Verified Facts
+## Implemented Prompt Architecture
 
-DH currently has these effective layers:
+The accepted 2026-07-15 design replaces the older mixed/manual-plus-automatic proposal with deterministic DH-owned selection:
 
-1. `host/system_prompt.md`
-   - Product-managed DH core rules.
-   - SDK **system** role via `system_message(mode="append")`.
-   - Session scope.
+1. Every DH SDK `create_session` and `resume_session` path sets `skip_custom_instructions=True`.
+   - CLI-global `~/.copilot/copilot-instructions.md`, Root/ancestor `AGENTS.md`, path-specific instructions, agent files, and other CLI automatic custom-instruction sources do not enter DH sessions.
+2. DH always injects product-managed **DH Core System Prompt** as system content.
+3. DH injects exactly one editable system source:
+   - Root empty, regardless of stored Repository ONLY: `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md` (**DH-specific Instructions**).
+   - Root non-empty and Repository ONLY off: DH-specific Instructions.
+   - Root non-empty and Repository ONLY on: only `<Root>/.github/copilot-instructions.md` (**Repository Instructions**).
+4. **Custom User Prompt** remains PII-scrubbed user content on every Analyze and is never moved into system content.
+5. Session Info remains the final DH system section and carries the unchanged deterministic UUIDv5 session name.
 
-2. Options “Custom User Instructions”
-   - Canonical file: `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`.
-   - Also SDK **system** role, despite the UI name.
-   - Applies to all DH sessions for the Windows user.
+Only the Root-level `.github/copilot-instructions.md` is supported. DH-specific and Repository Instructions never coexist. DH Core and Custom User Prompt remain active in Repository ONLY mode.
 
-3. Options “Custom User Prompt”
-   - Canonical Host backup: `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md`.
-   - Inserted into each Analyze request as **user** content.
-   - PII-scrubbed with the case payload.
+Each Analyze resolves exact Core and selected-source bytes once, decodes strict UTF-8, and uses one frozen `PromptSnapshot` for text assembly and a versioned, length-framed SHA-256 fingerprint. A source-mode or byte change refreshes the same UUIDv5 session. Failed source resolution/refresh sends no model turn and clears stale session/fingerprint state; all active-session invalidation clears `current_prompt_fingerprint`.
 
-4. Hidden workspace layer
-   - DH currently manually reads `<root>/.github/copilot-instructions.md` and appends it to `system_message`.
-   - Copilot CLI also auto-discovers the same file from `working_directory`.
-   - Therefore repository instructions are currently injected twice.
+Source failures are fail-closed. Missing DH-specific Instructions is valid empty content; an existing empty Repository Instructions file is also valid. Missing/unreadable Core, unreadable selected DH-specific content, or missing/unreadable selected Repository content blocks Analyze without fallback. `get_config` exposes soft `prompt_source_status` so Options remains usable for repair.
 
-Copilot CLI global instructions are loaded from:
+Options now distinguishes omitted and explicit-empty instruction writes, inspects structured `update_config` results including `config_saved`, and preserves optional prompt `error_code` through Service Worker persistence/hydration. Known prompt-source codes are localized only at immediate/rehydrated display time; raw safe Host fallback text remains stored for unknown codes.
 
-`~/.copilot/copilot-instructions.md`
+### Existing Preference Migration
 
-not `~/.github/copilot-instructions.md`.
+No instruction prose is moved or repartitioned. Existing files and internal preference keys remain in place. Existing `use_workspace_only=true` immediately selects Root Repository Instructions when Root is non-empty. A Root without `.github/copilot-instructions.md` therefore blocks Analyze until the file is added or Repository ONLY is disabled.
 
-## Independent Prompt Fixes Identified (Not Implemented)
-
-These are documented but not yet implemented:
-
-1. Remove DH's manual append of Root `.github/copilot-instructions.md`; rely on official CLI discovery.
-2. Fix empty-string clearing of `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md` (`a or b` currently treats empty as absent).
-3. Rename/re-document the user field as **DH-specific Instructions**.
-4. Keep **Custom User Prompt** as the per-analysis user message.
-5. Move global preferences to `~/.copilot/copilot-instructions.md`.
-6. Move MyCases workflow/schema content to the MyCases workspace SSoT.
-7. Correct documentation that overstates “Repository ONLY” behavior; the current option isolates skills/MCP, not instructions.
-
-Do not implement these directly from this handoff. The research is not an approved DH spec yet; resume design discussion first unless the user explicitly approves an independent Workstream A item.
+The July 14 recommendation to remove DH's manual append and rely on CLI automatic workspace discovery is superseded. The accepted implementation instead disables all CLI custom-instruction discovery and explicitly injects the one selected Root file. The July 14 Stage 0/1 contract research remains research and is not altered by this prompt foundation.
 
 ## Cross-Repo MyCasesKit Research
 
@@ -281,13 +292,16 @@ DH integrated orchestration must not guess these interfaces:
 
 ### Workstream A — independent cleanup
 
-May proceed only after explicit user approval/design:
+Implemented under accepted spec `441d0db` and plan `21108d9`, through product commit `0f57f8e`:
 
-- remove workspace instruction double injection;
-- fix Custom User Instructions empty clear;
-- clarify DH Core / DH-specific Instructions / Custom User Prompt scopes;
-- correct Repository ONLY documentation;
-- add instruction-discovery E2E coverage.
+- disabled CLI automatic custom-instruction discovery for all DH create/resume paths;
+- explicitly selected DH Core plus exactly one editable source;
+- fixed explicit-empty DH-specific instruction clearing;
+- exposed prompt-source health/errors and deterministic refresh fingerprints;
+- renamed/documented DH-specific Instructions and expanded Repository ONLY semantics;
+- added Host/Extension invariant coverage and inspected Options persistence.
+
+Task 8 still owns final whole-branch verification and any authenticated SDK smoke; do not infer final release evidence from the task-level reports.
 
 ### Workstream B — MyCasesKit contracts
 
@@ -318,16 +332,17 @@ Blocked until Workstream B contracts are approved:
 
 ## Current Decision State
 
-- No production code has been changed for prompt-scope or MyCases integration refactoring.
-- Research docs are committed and pushed.
+- Prompt-scope production implementation Tasks 1-6 is approved on `docs/prompt-scope-cleanup-design` through `0f57f8e`.
+- Accepted design and plan are `441d0db` and `21108d9`.
+- Documentation alignment is Task 7; Task 8 still owns final verification evidence and the release draft.
+- No MyCases integration code, mode preference, workspace detector, coordinator adapter, persistence adapter, or MyCases canonical-file write has been implemented.
 - Form ③ remains a proposal pending explicit MyCasesKit acceptance.
 - Stage 1 persistence is a newly identified required contract, not yet designed/implemented.
-- The next substantive step should occur in MyCasesKit: return approved contract artifacts listed above.
-- After those artifacts return, create an approved DH design spec before implementation.
+- Any future MyCases implementation remains blocked on approved cross-repo contracts and a separate DH design/spec.
 
 ## Release Discipline
 
-- Latest release is beta.4; do not publish stable `v2.0.74` without explicit approval.
+- Historical published baseline for this development line is beta.4; do not publish stable `v2.0.74` without explicit approval.
 - Do not run release helper with `--publish` without explicit user confirmation.
 - Prefer a beta release for any prompt/integration architecture change.
 - User preference in this development line: do not push feature code until smoke passes, unless the user explicitly asks to push.
@@ -344,29 +359,31 @@ Reconfigure and inspect these on the remote VM instead of assuming they match th
 
 ## Remote VM New-Session Prompt
 
-Copy the following into a new development session after pulling the repository:
+Use the following for continuation; update the exact HEAD and status from Git rather than treating embedded counts as current:
 
 ```text
-我们在远程 Windows VM 上继续 Dynamics Helper 开发。请先不要修改代码。
+我们在远程 Windows VM 上继续 Dynamics Helper 的 prompt-scope cleanup。请先不要修改代码。
 
 1. 读取并遵守仓库根目录 AGENTS.md。
 2. 读取 docs/session-handoff-2026-07-15.md，作为本次会话的唯一进度来源；不要依赖旧聊天记忆。
 3. 读取：
+   - docs/superpowers/specs/2026-07-15-dh-prompt-scope-cleanup-design.md
+   - docs/superpowers/plans/2026-07-15-dh-prompt-scope-cleanup.md
    - docs/superpowers/research/2026-07-14-dh-mycaseskit-stage0-instructions-brief.md
    - docs/superpowers/research/2026-07-14-dh-extension-stage0-integration-plan.md
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-当前代码基线：v2.0.74-beta.4 已发布。最新核心修复是 0b0bb66（Copilot session 绑定 Root Path）；Host 基线 109 tests，Extension 43 tests。最新研究提交是 3241656。
+历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据，不是 prompt-scope 最终总数。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9，产品 Tasks 1-6 已批准到 0f57f8e。Task 8 才负责完整最终验证、真实 smoke 证据和 release draft；不要提前声称最终 totals。
 
-当前设计主题：重构 DH 的 prompt scope，并设计 Standalone / MyCases-integrated 两种模式。已确认 Root .github/copilot-instructions.md 当前被 DH 手工注入一次、Copilot CLI 自动发现一次，存在结构性重复。DH 的 Custom User Instructions 实际是 system-role、DH-wide；Custom User Prompt 是每次 Analyze 的 user-role。
+已实现行为：所有 DH create/resume 都设置 skip_custom_instructions=True；CLI global、AGENTS、path instructions 等自动发现源全部排除。DH 显式注入 Core + 恰好一个可编辑源：Root 为空或 Repository ONLY 关闭时使用 DH-specific Instructions；Root 非空且 Repository ONLY 开启时只使用 <Root>/.github/copilot-instructions.md。Custom User Prompt 仍是每次 Analyze 的 PII-scrubbed user content。使用严格 UTF-8 immutable byte snapshot、framed fingerprint、same-UUID refresh 和 fail-closed errors。Options 区分 explicit empty（清空文件）与 omitted（不写），检查 update_config/config_saved，并保留可选 errorCode 到持久化和本地化显示。
 
 Integrated 目标不是取消 DH 自动分析。目标流水线是：
 DH Extract → MyCases New-Case（Stage 0 deterministic scaffold）→ DH Automatic Initial Triage（Stage 1）→ MyCases Deterministic Persistence。
 
-MyCasesKit 的 stage0-coordinator-design.md 目前只是 Proposal，推荐 Form ③ New-Case coordinator，尚未形成正式跨仓库契约。DH integrated 实现必须等待 MyCasesKit 返回：workspace marker/canaries、Stage0Envelope、coordinator API、Stage 1 persistence API、幂等规则、生命周期/会话字段 ownership、错误分类和 legacy migration policy。
+MyCasesKit 的 stage0-coordinator-design.md 仍只是 Proposal，推荐 Form ③ New-Case coordinator，尚未形成正式跨仓库契约。当前没有实现任何 MyCases integration。DH integrated 实现必须等待 MyCasesKit 返回：workspace marker/canaries、Stage0Envelope、coordinator API、Stage 1 persistence API、幂等规则、生命周期/会话字段 ownership、错误分类和 legacy migration policy。
 
-在正式契约返回前，不要猜测 MyCases 接口，不要让 DH 直接写 MyCases canonical 文件。可独立讨论但仍需用户批准的 Workstream A：移除 workspace instruction 双重注入、修复 Custom User Instructions 空字符串无法清除、重新命名/说明 DH-specific Instructions 与 Custom User Prompt 的作用域、修正 Repository ONLY 文档。
+2026-07-14 research 中“依赖 CLI 自动 workspace instruction discovery”的建议已被 2026-07-15 accepted spec supersede；不要恢复该方案。在正式 MyCases 契约返回前，不要猜测 MyCases 接口，也不要让 DH 直接写 MyCases canonical 文件。
 
-请先简要总结你读取到的状态与 VM 环境差异，再根据我提供的 MyCasesKit 最新讨论结果继续 brainstorming/design。任何实现前先形成并批准 DH spec。不要未经明确批准 push 或 publish；任何 release --publish 都必须再次获得我的明确确认。
+请先简要总结你读取到的状态与 VM 环境差异，再按当前 Task brief 继续。不要未经明确批准 push 或 publish；任何 release --publish 都必须再次获得我的明确确认。
 ```

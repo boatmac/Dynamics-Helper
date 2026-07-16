@@ -101,7 +101,7 @@ The host maintains Copilot sessions so users can continue analysis in the Copilo
 2. **Subsequent analyses for same case:** Session is reused only when `current_case_id` and `current_session_root_path` still match and the client/session are available.
 3. **Case or root change:** The client is restarted when its process cwd differs from the configured root; the deterministic session is then resumed with explicit `working_directory=root` (or created under that root). Analyze payloads with missing/empty `rootPath` use host `config.json`; only `update_config` can clear the canonical root.
 4. **SDK compatibility:** `AttributeError` is caught gracefully if the SDK version doesn't support `resume_session()`.
-5. **Shell resume:** Reports print `copilot -C '<root>' --resume=<uuid>`, applying the root before CLI discovers workspace skills/MCP/instructions and overriding stale cwd metadata in sessions created by older DH versions.
+5. **Shell resume:** Reports print `copilot -C '<root>' --resume=<uuid>`, applying the Root before the interactive CLI continuation resolves workspace capabilities and overriding stale cwd metadata in sessions created by older DH versions. DH SDK sessions separately disable CLI automatic custom-instruction discovery and supply their selected instructions explicitly.
 
 ### Storage
 
@@ -116,3 +116,39 @@ How case numbers flow from the browser to the host:
 2. **FAB.tsx**: Passes `caseNumber` in the analyze payload to the service worker.
 3. **serviceWorker.ts**: Transparent relay — passes the payload through to the native host.
 4. **dh_native_host.py**: `payload.get("caseNumber", "Unspecified")` extracts the value. `_extract_case_id()` validates the format. Invalid numbers fall back to generic (non-persistent) sessions.
+
+## 7. Deterministic Prompt Architecture
+
+### Source Selection Boundary
+
+The Native Host, not Copilot CLI discovery, owns every configurable instruction source used by DH. Every SDK `create_session()` and `resume_session()` call, including create fallback and transport retry, sets `skip_custom_instructions=True`. This excludes CLI-global instructions, `AGENTS.md`/related agent files, path-specific instruction files, and automatically discovered repository instructions from all DH sessions.
+
+DH explicitly assembles system content from:
+
+1. Product-managed DH Core (`host/system_prompt.md` in development or beside the installed Host executable).
+2. Exactly one editable source selected by `effective_repository_only = bool(effective_root) and use_workspace_only`:
+   * false: `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md` (DH-specific Instructions);
+   * true: `<Root>/.github/copilot-instructions.md` (Repository Instructions).
+3. Deterministic Session Info containing the UUIDv5 session name.
+
+Custom User Prompt (`%LOCALAPPDATA%\DynamicsHelper\user_prompt.md`) never enters system content. It remains PII-scrubbed user content on every Analyze. The only supported repository instruction path is the Root-level `.github/copilot-instructions.md`; DH does not reproduce the CLI's parent, agent-file, or path-specific discovery rules.
+
+### Snapshot and Refresh Boundary
+
+`PromptSnapshot` is frozen and contains source mode, effective Root, exact Core/selected bytes, strict UTF-8 decoded strings, and a `v1:` SHA-256 fingerprint. Core and the selected source are each opened once per resolution attempt. The fingerprint length-frames the version marker, source mode, Core bytes, and selected bytes, preventing ambiguous concatenation and ensuring assembly and comparison observe the same bytes.
+
+Analyze resolves a fresh snapshot before every turn. The active session is reused only when client/session, case identity, active Root, and fingerprint all match. Any source-mode or byte change refreshes/resumes the same UUIDv5 session, preserving persisted history. The candidate fingerprint becomes active only after awaited SDK resume/create succeeds. All active-session invalidation routes use `_invalidate_active_session()`, which clears session identity, active Root, and `current_prompt_fingerprint`; transport failures may also clear the client.
+
+Prompt resolution is fail-closed. Missing/unreadable Core, unreadable selected DH-specific Instructions, and missing/unreadable selected Repository Instructions return stable safe errors and send no model turn. A missing DH-specific file and an existing empty Repository file are valid empty editable layers. There is no fallback to an unselected source.
+
+### Config and Error Boundary
+
+`get_config` uses a soft health projection rather than creating a strict session snapshot. It returns normal configuration plus `prompt_source_status`; Options therefore remains available to repair a bad source. Readable DH-specific text is returned separately as `_user_instructions_raw`, including an explicit empty string. If unreadable, that field is omitted so the Chrome mirror is not overwritten with a false empty value.
+
+`update_config` distinguishes sparse field omission from explicit empty content. Omitted `user_instructions` performs no instruction write; explicit `""` truncates the file. Its structured result separates durable persistence (`config_saved`) from session refresh (`success`). Options inspects every result, preserves values acknowledged as saved, retries unacknowledged instruction revisions, and shows render-time localized warnings. The Host does not roll back uncertain partial writes; it invalidates stale active prompt state once a durable writer was attempted.
+
+Analyze errors may carry optional `error_code`. The Service Worker persists raw safe fallback text plus optional `LastAnalysis.errorCode`, preserving an inner Analyze code over an outer wrapper code. Immediate and rehydrated FAB display use the same render-time localization helper; unknown/legacy codes retain the stored fallback. Prompt content and prompt-source paths are excluded from normal logs and telemetry.
+
+### Product Scope
+
+Repository ONLY selects repository Skills, MCP, and the single Root instruction file while DH Core and Custom User Prompt remain active. This architecture is generic to any absolute Root. It does not implement MyCases detection, Stage 0 coordination, Stage 1 persistence, MyCases file writes, or an Auto/Standalone/Integrated mode.
