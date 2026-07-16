@@ -325,7 +325,7 @@ The tool includes a built-in "PII Scrubber" that attempts to remove the followin
 
 ### Auditing
 
-* Local logs contain operational diagnostics and may include non-prompt paths or SDK response diagnostics at verbose levels. DH does not log instruction content, Custom User Prompt content, or prompt-source paths.
+* Local logs contain operational diagnostics and may include non-prompt paths or SDK response diagnostics at verbose levels. DH does not log instruction contents, Custom User Prompt contents, or prompt-source paths; safe source mode, error classification, and a short fingerprint prefix may be logged.
 * **Log Location**: `%LOCALAPPDATA%\DynamicsHelper\native_host.log`
 * The generated report contains the analysis response. Review it separately from the operational log.
 

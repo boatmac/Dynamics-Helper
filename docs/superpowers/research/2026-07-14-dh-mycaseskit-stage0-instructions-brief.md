@@ -1,7 +1,7 @@
 # Dynamics Helper × MyCasesKit Stage 0 Instructions — Design Discussion Brief
 
 - **Date:** 2026-07-14
-- **Status:** Research / cross-repo discussion input — not an approved design
+- **Status:** Historical research/discussion input; prompt proposal superseded 2026-07-15; Stage 0/1 research retained
 - **Audience:** Dynamics Helper and MyCasesKit maintainers
 - **Decision owner:** MyCasesKit design session for the integrated Stage 0 contract
 
@@ -15,11 +15,18 @@
 > CLI-global, `AGENTS.md`, path-specific, and other automatically discovered
 > instructions are excluded. This note does not change the Stage 0/1 contract
 > research below; no MyCases integration described here has been implemented.
+> Sections 2-3, the prompt options/phases in Sections 7-8, and the suggested
+> discussion prompt are a historical 2026-07-14 baseline/proposal. See
+> `docs/session-handoff-2026-07-15.md` for the latest MyCasesKit response state.
+> `session_name` ownership statements throughout this brief are likewise
+> historical; response `675006a` supersedes hook-only ownership with
+> creator-write/model-read-only semantics.
 
 > **2026-07-14 discussion update:** MyCasesKit's follow-up proposal,
 > `stage0-coordinator-design.md`, identifies the missing deterministic `New-Case`
 > coordinator as the keystone and recommends Form ③ (coordinator rather than
-> agent prose). The proposal is not yet an approved cross-repo contract. This
+> agent prose). At that date, the proposal was not yet an approved cross-repo
+> contract; response `675006a` later accepted Form ③. This
 > brief now also records an important correction: integrated DH must continue
 > its automatic first-pass analysis after deterministic Stage 0 initialization.
 > That analysis is Stage 1 initial triage and must be persisted into canonical
@@ -49,17 +56,21 @@ DH has two intended deployment modes:
    - MyCases owns lifecycle semantics, product mapping, templates, case-folder layout, MCP, skills, hooks, and deterministic persistence of Stage 0/1 results.
    - DH must not create a second, drifting copy of MyCases workflow rules.
 
-The current prompt architecture predates a clear separation between these modes.
+The prompt architecture observed on 2026-07-14 predated a clear separation between these modes.
 
-## 2. Current DH Prompt Architecture
+## 2. Historical 2026-07-14 DH Prompt Architecture — Superseded 2026-07-15
 
-DH currently exposes or injects three primary prompt layers.
+> Every behavior in Sections 2-3 is a historical 2026-07-14 observation, not a
+> statement about current DH. The accepted 2026-07-15 prompt-scope design and
+> its implementation supersede this baseline.
+
+At that baseline, DH exposed or injected three primary prompt layers.
 
 ### 2.1 Product system prompt
 
 **Source:** `Dynamics Helper/host/system_prompt.md`
 
-**Current behavior:**
+**2026-07-14 behavior:**
 
 - Read by the Native Host during session config construction.
 - Added to SDK `system_message` using `mode: "append"`.
@@ -79,10 +90,10 @@ DH currently exposes or injects three primary prompt layers.
 - Chrome mirror: `chrome.storage.local.dh_prefs.userInstructions`
 - Canonical Host file: `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`
 
-**Current behavior:**
+**2026-07-14 behavior:**
 
 - Appended to `system_prompt.md` inside the same SDK `system_message` content.
-- Applies to every DH session and every Root Path for the current Windows user.
+- Applied to every DH session and every Root Path for the Windows user.
 - Despite the UI name, it is not sent as a user-role message; it is system-role instruction content.
 - The file is not a standard Copilot CLI discovery path, so DH normally injects it only once.
 
@@ -90,7 +101,7 @@ DH currently exposes or injects three primary prompt layers.
 
 **Lifecycle:** added on session create/resume/refresh.
 
-**Known defect:** Host update currently uses `payload.get("user_instructions") or ...`; an explicit empty string can be treated as absent, so clearing the field may fail to truncate the file. This should be fixed independently of the larger architecture decision.
+**Historical defect:** At the 2026-07-14 baseline, Host update used `payload.get("user_instructions") or ...`; an explicit empty string could be treated as absent, so clearing the field could fail to truncate the file.
 
 ### 2.3 Options “Custom User Prompt”
 
@@ -100,7 +111,7 @@ DH currently exposes or injects three primary prompt layers.
 - Chrome mirror: `chrome.storage.local.dh_prefs.userPrompt`
 - Host backup/source file: `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md`
 
-**Current behavior:**
+**2026-07-14 behavior:**
 
 - FAB inserts the text into the case payload under a `## User Prompt` section.
 - The full case payload is sent through the PII scrubber and passed to `send_and_wait()` as the Analyze turn's prompt.
@@ -114,15 +125,15 @@ This layer has a genuinely different scope and role from the first two and shoul
 
 ### 2.4 Root Path workspace instructions (hidden fourth layer)
 
-When Root Path is configured, DH currently reads:
+At the 2026-07-14 baseline, when Root Path was configured, DH read:
 
 ```text
 <Root Path>\.github\copilot-instructions.md
 ```
 
-and manually appends its contents to the same `system_message` as the DH system prompt and DH custom user instructions.
+and manually appended its contents to the same `system_message` as the DH system prompt and DH custom user instructions.
 
-At the same time, DH now passes Root Path as the Copilot client/session `working_directory`. Copilot CLI automatically discovers repository instructions from the workspace, including:
+At the same baseline, DH passed Root Path as the Copilot client/session `working_directory`, and Copilot CLI automatically discovered repository instructions from the workspace, including:
 
 - `.github/copilot-instructions.md`
 - `.github/instructions/**/*.instructions.md`
@@ -135,56 +146,56 @@ Copilot CLI also loads global instructions from:
 ~/.copilot/copilot-instructions.md
 ```
 
-Repository instructions take precedence over global instructions. SDK `system_message.mode="append"` adds caller content after SDK/CLI-managed system content; it does not disable custom-instruction discovery. DH does not set `skip_custom_instructions=True`.
+Repository instructions took precedence over global instructions. SDK `system_message.mode="append"` added caller content after SDK/CLI-managed system content and did not disable custom-instruction discovery. At that baseline, DH did not set `skip_custom_instructions=True`.
 
-## 3. Confirmed Problems
+## 3. Historical 2026-07-14 Prompt Problems — Superseded 2026-07-15
 
-### 3.1 Repository instructions are injected twice
+### 3.1 Repository instructions were injected twice
 
 For a Root Path containing `.github/copilot-instructions.md`:
 
-1. Copilot CLI discovers and loads the file from `working_directory`.
-2. DH reads the same file and appends the raw content to SDK `system_message`.
+1. Copilot CLI discovered and loaded the file from `working_directory`.
+2. DH read the same file and appended the raw content to SDK `system_message`.
 
-There is no DH hash/path marker or deduplication. CLI deduplication cannot be assumed to recognize identical text manually embedded in caller-provided `system_message`.
+There was no DH hash/path marker or deduplication. CLI deduplication could not be assumed to recognize identical text manually embedded in caller-provided `system_message`.
 
-**Conclusion:** this is structural double injection, not merely a possible conflict.
+**2026-07-14 conclusion:** this was structural double injection, not merely a possible conflict.
 
-### 3.2 DH user instructions and Copilot global instructions overlap
+### 3.2 DH user instructions and Copilot global instructions overlapped
 
-The current machine has both:
+The machine inspected on 2026-07-14 had both:
 
 - `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md` (DH-specific injection)
 - `~/.copilot/copilot-instructions.md` (CLI-global automatic discovery)
 
-These are not duplicate files, but both are system instructions with user-wide scope. If they describe the same tool, workflow, or response preferences, the model receives two potentially divergent sources.
+These were not duplicate files, but both were system instructions with user-wide scope. If they described the same tool, workflow, or response preferences, the model received two potentially divergent sources.
 
 Note: `~/.github/copilot-instructions.md` is not the current Copilot CLI global instruction path; `~/.copilot/copilot-instructions.md` is.
 
-### 3.3 DH instructions currently contain MyCases workflow behavior
+### 3.3 DH instructions contained MyCases workflow behavior
 
-The active DH custom user instructions include Stage 0/MyCases behavior (for example, case-folder initialization and `context.md` session metadata). In integrated mode this competes with workspace instructions and hooks.
+The DH custom user instructions inspected on 2026-07-14 included Stage 0/MyCases behavior (for example, case-folder initialization and `context.md` session metadata). In the proposed integrated mode this competed with workspace instructions and hooks.
 
 One confirmed conflict is session metadata ownership:
 
 - DH user instructions tell the model to write `session_name` during initialization.
-- MyCases workspace instructions state that launcher/hooks own the field and the model must not write it.
+- The 2026-07-14 MyCases workspace instructions stated that launcher/hooks owned the field and the model must not write it. This historical ownership statement is superseded; see the handoff for the creator-write/model-read-only decision returned in `675006a`.
 
 The previously observed duplicate `session_name`/`session_id` frontmatter came from this type of split ownership combined with a legacy workspace template.
 
-### 3.4 “Repository ONLY Mode” does not control instructions
+### 3.4 “Repository ONLY Mode” did not control instructions
 
-The current preference controls only skills and MCP merging. It does not change instruction loading. DH always adds product system + DH custom user instructions, and it currently always manually adds Root `.github/copilot-instructions.md` when present.
+At the 2026-07-14 baseline, the preference controlled only Skills and MCP merging. It did not change instruction loading. DH added product system + DH custom user instructions and manually added Root `.github/copilot-instructions.md` when present.
 
-The UI label (“Use repository SKILLS and MCP ONLY”) is accurate; broader documentation saying it excludes all global/user instructions is not.
+The then-current UI label (“Use repository SKILLS and MCP ONLY”) was accurate; broader documentation saying it excluded all global/user instructions was not.
 
-### 3.5 The three named layers have only two model roles
+### 3.5 The three named layers had only two model roles
 
 There is no developer-role layer:
 
 - Product system prompt: system
 - Custom User Instructions: system
-- Workspace instructions: system (CLI-managed plus current DH duplicate)
+- Workspace instructions: system (CLI-managed plus the 2026-07-14 DH duplicate)
 - Custom User Prompt: user
 
 Therefore, “three layers” is a product/UI taxonomy, not three distinct model-message roles.
@@ -383,7 +394,11 @@ Example intent (illustrative, not final wording):
 
 This handoff should not duplicate product maps, file schemas, or lifecycle instructions.
 
-## 7. Candidate Architectures
+## 7. Historical 2026-07-14 Prompt Options — Superseded 2026-07-15
+
+> These options are retained as decision history. The accepted 2026-07-15
+> design selected deterministic DH-owned source selection and disabled CLI
+> automatic custom-instruction discovery for DH sessions.
 
 ### Option A — Keep three DH fields, clarify scopes
 
@@ -407,7 +422,7 @@ This handoff should not duplicate product maps, file schemas, or lifecycle instr
 
 **Benefits:** maps UI to actual roles and ownership; avoids presenting the internal product prompt as a user layer; preserves standalone extensibility without competing with workspace SSoT.
 
-**Risks:** existing DH user instruction content needs review/migration because it currently mixes DH, MyCases, and global preferences.
+**Risks:** the DH user instruction content observed on 2026-07-14 needed review/migration because it mixed DH, MyCases, and global preferences.
 
 ### Option C — Remove DH user instructions entirely
 
@@ -448,16 +463,16 @@ Integration mode:
 
 Because the current MyCases workspace is legacy/partial, the design must decide whether to support a documented legacy signature temporarily or require migration before integrated mode.
 
-### Phase 2 — Remove instruction duplication in DH
+### Historical Phase 2 Prompt Proposal — Superseded 2026-07-15
 
 Independent of the final Stage 0 writer:
 
 1. Stop manually appending Root `.github/copilot-instructions.md`.
 2. Continue using Root Path as client/session working directory so CLI performs official discovery.
 3. Add tests that verify workspace instructions/skills/MCP/hooks are discoverable through the SDK child process.
-4. Correct documentation that currently overstates Repository ONLY behavior.
+4. Correct documentation that overstated Repository ONLY behavior at the 2026-07-14 baseline.
 
-### Phase 3 — Refactor DH prompt scopes
+### Historical Phase 3 Prompt Proposal — Superseded 2026-07-15
 
 Recommended direction:
 
@@ -523,11 +538,13 @@ The workspace persister validates/idempotently applies those outputs to canonica
 11. What deterministic Stage 1 persistence API accepts DH's analysis proposal and owns `troubleshooting.md`, `context.md`, fact patches, and lifecycle transition?
 12. What is the idempotency identity for one automatic analysis run (`analysis_run_id`, envelope ID, content hash, or another key)?
 
-## 10. Suggested MyCasesKit Design-Session Prompt
+## 10. Historical 2026-07-14 MyCasesKit Design-Session Prompt
 
-The following can be pasted into the MyCasesKit design session:
+The following records the prompt used for the 2026-07-14 discussion. It must
+not be reused as current DH/MyCasesKit state without the accepted prompt-scope
+spec and the latest response in the handoff.
 
-> We need to define a stable, adapter-neutral Stage 0 contract for MyCasesKit. Dynamics Helper is one adapter and must also work standalone. Today DH injects its product system prompt, a DH user-level system instruction file, and a per-analysis user prompt; it also manually appends Root `.github/copilot-instructions.md`, while Copilot CLI auto-discovers the same workspace file, causing duplicate instructions. DH's user instructions currently contain MyCases workflow rules that can conflict with workspace hooks (notably `session_name` ownership).
+> We need to define a stable, adapter-neutral Stage 0 contract for MyCasesKit. Dynamics Helper is one adapter and must also work standalone. At the 2026-07-14 baseline, DH injected its product system prompt, a DH user-level system instruction file, and a per-analysis user prompt; it also manually appended Root `.github/copilot-instructions.md`, while Copilot CLI auto-discovered the same workspace file, causing duplicate instructions. The DH user instructions inspected then contained MyCases workflow rules that could conflict with workspace hooks (notably the ownership then proposed for `session_name`).
 >
 > Please use `Dynamics Helper/docs/superpowers/research/2026-07-14-dh-mycaseskit-stage0-instructions-brief.md` as the research brief and `stage0-coordinator-design.md` as the MyCasesKit follow-up proposal. Decide: (1) whether Form ③ / deterministic `New-Case` is accepted, (2) the versioned Stage0Envelope, (3) canonical Stage 0 schemas/ownership/idempotency, (4) integration marker and legacy policy, and (5) a deterministic Stage 1 persistence API. Integrated DH must continue automatic initial triage after Stage 0; the intended pipeline is Extract → New-Case → DH Analyze → MyCases Persist. Preserve the boundary that DH produces extraction and analysis while MyCases owns mapping, templates, file writes, lifecycle, skills, MCP, hooks, and Stage 2+ workflow. Do not implement until both Stage 0 and Stage 1 cross-repo contracts are approved.
 
@@ -539,7 +556,7 @@ The following can be pasted into the MyCasesKit design session:
 - Session UUID injection: `host/dh_native_host.py::_refresh_session`
 - Per-analysis prompt construction: `extension/src/components/FAB.tsx::constructTemplate` / Analyze path
 - Persistence and hydration: `extension/src/components/Options.tsx`, `extension/src/utils/prefs.ts`
-- Current instruction docs: `DEVELOPER_GUIDE.md`, `USER_GUIDE.md`, `AGENTS.md`
+- 2026-07-14 instruction docs: `DEVELOPER_GUIDE.md`, `USER_GUIDE.md`, `AGENTS.md`
 
 ### MyCasesKit
 
@@ -549,10 +566,10 @@ The following can be pasted into the MyCasesKit design session:
 - Session identity: `docs/session-identity.md`
 - Installer manifest and deployment: `installer/Install-Toolkit.ps1`
 - Generator/deploy boundary: `scripts/sync-agent-configs.ps1`, `docs/deploy-boundary.md`
-- Current DH-oriented future prompt source: `core/extension-prompts/`
+- 2026-07-14 DH-oriented future prompt source: `core/extension-prompts/`
 
 ### Official Copilot behavior
 
 - Copilot CLI custom instruction discovery: global `~/.copilot/copilot-instructions.md`, repository `.github/copilot-instructions.md`, path-specific instructions, and agent instruction files; repository rules take precedence over global rules.
 - Copilot SDK `system_message.mode="append"`: caller content is appended to SDK/CLI-managed system content.
-- Disabling automatic custom instructions requires `skip_custom_instructions` (or an equivalent Empty-mode architecture); DH currently does not disable discovery.
+- Disabling automatic custom instructions requires `skip_custom_instructions` (or an equivalent Empty-mode architecture); at the 2026-07-14 baseline, DH did not disable discovery.

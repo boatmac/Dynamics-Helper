@@ -147,7 +147,7 @@ Prompt resolution is fail-closed. Missing/unreadable Core, unreadable selected D
 
 `update_config` distinguishes sparse field omission from explicit empty content. Omitted `user_instructions` performs no instruction write; explicit `""` truncates the file. Its structured result separates durable persistence (`config_saved`) from session refresh (`success`). Options inspects every result, preserves values acknowledged as saved, retries unacknowledged instruction revisions, and shows render-time localized warnings. The Host does not roll back uncertain partial writes; it invalidates stale active prompt state once a durable writer was attempted.
 
-Analyze errors may carry optional `error_code`. The Service Worker persists raw safe fallback text plus optional `LastAnalysis.errorCode`, preserving an inner Analyze code over an outer wrapper code. Immediate and rehydrated FAB display use the same render-time localization helper; unknown/legacy codes retain the stored fallback. Prompt content and prompt-source paths are excluded from normal logs and telemetry.
+Analyze errors may carry optional `error_code`. The Service Worker persists raw safe fallback text plus optional `LastAnalysis.errorCode`, preserving an inner Analyze code over an outer wrapper code. Immediate and rehydrated FAB display use the same render-time localization helper for known codes; immediate unknown-code fallbacks may include a safe UI prefix, while rehydrated unknown/legacy codes retain the raw stored fallback. Instruction contents, Custom User Prompt contents, and prompt-source paths are excluded from normal logs and telemetry.
 
 ### Product Scope
 

@@ -126,14 +126,14 @@ Strict Analyze/session resolution fails closed:
 
 `get_config` is intentionally softer. `_get_session_config(include_prompt_status=True)` returns normal configuration plus `prompt_source_status` without creating or committing a session snapshot. It returns readable `_user_instructions_raw`, including explicit empty content; if that file is unreadable, the raw field is omitted so Options retains its Chrome mirror and shows the safe health warning.
 
-Prompt-source errors carry a stable `error_code` and safe English fallback. Options/FAB preserve unknown non-empty codes, localize the five known codes only at render time, and never tell users to re-authenticate for a source/configuration error. Logs may include safe source mode, classified code, or a short fingerprint prefix, but never prompt content or prompt-source paths.
+Prompt-source errors carry a stable `error_code` and safe English fallback. Options/FAB preserve unknown non-empty codes, localize the five known codes only at render time, and never tell users to re-authenticate for a source/configuration error. Logs may include safe source mode, classified code, or a short fingerprint prefix, but never instruction contents, Custom User Prompt contents, or prompt-source paths.
 
 ### 4. Skills Configuration
 
 Capabilities (Skills) are loaded based on the following precedence:
 
 1. **Base Skills:**
-    * **User Skills:** Defined in `%LOCALAPPDATA%\config.json`.
+    * **User Skills:** Defined in `%LOCALAPPDATA%\DynamicsHelper\config.json`.
     * **Default Skills:** The `host/skills/` directory is reserved for bundled skills but currently ships empty. Skills are user-configured.
     * *Rule:* User Settings **override** Default Settings. If `skill_directories` exists in User Config, Default is ignored.
 
@@ -149,7 +149,7 @@ Capabilities (Skills) are loaded based on the following precedence:
 Model Context Protocol (MCP) servers follow similar logic:
 
 1. **Base MCP:**
-    * **User Config:** Defined in `%LOCALAPPDATA%\config.json` (legacy) or `~/.copilot/mcp-config.json` (standard).
+    * **User Config:** Defined in `%LOCALAPPDATA%\DynamicsHelper\config.json` (legacy) or `~/.copilot/mcp-config.json` (standard).
     * **Default Config:** Bundled `mcp-config.json` (if any).
     * *Rule:* User Settings **override** Default Settings.
 
@@ -199,24 +199,24 @@ Analyze runs are long (often 60-300 s). The user can navigate away from the case
 **Storage schema** (`extension/src/utils/analysisStore.ts`):
 
 * `dh_pending_analysis` — `{caseNumber, requestId, startTime}` written by SW before forwarding the host RPC, cleared on success/error/timeout/edge-6.3.
-* `dh_last_analysis` — `{status: 'success'|'error', caseNumber, title, content, timestamp, seen, durationSec?, savedTo?, errorCode?}` written by SW on Host response, marked `seen=true` when the user dismisses the popover. `errorCode` is an optional raw machine-readable Host code; legacy records omit it.
+* `dh_last_analysis` — `{status: 'success'|'error', caseNumber, title, content, timestamp, seen, durationSec?, savedTo?, errorCode?}` written by SW on Host response. An immediate popover marks it seen on dismissal; FAB marks a rehydrated result seen when consuming it for display. `errorCode` is an optional raw machine-readable Host code; legacy records omit it.
 
 **Two ages, do not confuse them:**
 
 * `MAX_PENDING_AGE_MS = 2h` — GC threshold; pending markers older than this are treated as orphans (likely SW crash mid-flight).
 * `MAX_PENDING_DISPLAY_AGE_MS = 15min` — UI threshold for `useAnalysisHydration`; older pending markers are not surfaced as "Analyzing…" because the user has likely abandoned the run.
-* `MAX_RESULT_AGE_MS = 1h` — re-hydration window for `dh_last_analysis`; older results are not popped open on mount.
+* `STALE_WINDOW_MS = 1h` — rehydration window for `dh_last_analysis`; older results are not popped open on mount.
 
 **Wire protocol — `_persist` field on outgoing NATIVE_MSG:**
 
 FAB attaches a `_persist: {caseNumber, successTitle, errorTitle}` to the analyze payload. The SW reads this, calls `recordAnalyzeStart` before forwarding, calls `recordAnalyzeSuccess`/`recordAnalyzeError` on response, and **strips `_persist` before sending to the Host** (the Host has never seen this field and will reject unknown keys). Titles are pre-translated by FAB because the SW has no `t()` access.
 
-For errors, persistence stores the raw safe Host fallback in `content` and preserves a non-empty `error_code` as optional `errorCode`; an inner Analyze code takes precedence over an outer wrapper code, and transport rejection does not fabricate one. Immediate and rehydrated popovers both pass the raw pair to `localizePromptSourceError()` at render time. Known codes use the current UI language; unknown or absent codes display the stored fallback.
+For errors, persistence stores the raw safe Host fallback in `content` and preserves a non-empty `error_code` as optional `errorCode`; an inner Analyze code takes precedence over an outer wrapper code, and transport rejection does not fabricate one. Both immediate and rehydrated popovers localize known codes in `ResultPopover` at render time. The immediate path may prefix its safe fallback before opening the popover (for example, `Analysis failed:` or the Host-error label); rehydration supplies the raw stored fallback. Unknown or absent codes therefore display the fallback from their own path rather than a shared prelocalized string.
 
 **Pure-helper boundary:**
 
-* `extension/src/background/analyzeBridge.ts` exposes `handleAnalyzeForward(payload, ctx, deps)` with DI'd `send`. The 6 tests in `analyzeBridge.test.ts` cover P-I1..P-I4 + edge 6.3 without spinning up a real Chrome port.
-* `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, isAnalyzing, dismissPopover}`. The 10 tests in `useAnalysisHydration.test.ts` cover R-I1..R-I5 + variants by mocking `chrome.storage.local` only.
+* `extension/src/background/analyzeBridge.ts` exposes `handleAnalyzeForward(payload, ctx, deps)` with DI'd `send`. Its focused suite covers P-I1..P-I4, error-code transport, and edge 6.3 without spinning up a real Chrome port; the test count is not a contract.
+* `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, isAnalyzing, dismissPopover}`. Its focused suite covers result/pending hydration, one-shot dismissal, and optional `errorCode` using only a mocked `chrome.storage.local`; the test count is not a contract.
 * FAB calls `useAnalysisHydration(scrapedData?.caseNumber || '')` once at the top of the component, then mirrors `popover`/`isAnalyzing` into local state in two `useEffect` hooks. The mirror is one-way (storage → local); user dismissal goes through `hydration.dismissPopover()` which writes `seen=true`.
 
 **popoverIsAnalyze ref discriminator:**
@@ -228,7 +228,7 @@ For errors, persistence stores the raw safe Host fallback in `content` and prese
 * **Race in handleAnalyzeForward (edge 6.3):** if `recordAnalyzeStart` resolves *after* the host response, the post-response success/error write is a no-op for the marker because `clearPendingIfMatches(requestId)` only deletes if the requestId matches what is on disk. The pending row is written, then immediately cleared on the next event loop tick, so the user sees a brief "Analyzing…" flicker instead of a stuck pending marker.
 * **Stale pending on mount:** `useAnalysisHydration` checks `Date.now() - startTime > MAX_PENDING_DISPLAY_AGE_MS` and ignores pending markers older than 15 min. The marker stays on disk until GC; this is intentional (the user might still want to know if the run eventually completes).
 * **Case mismatch on pending:** if the on-disk pending marker is for case A but the FAB is mounted on case B, the hook ignores the pending row entirely (no false "Analyzing…").
-* **Options Reset:** the Reset button now also removes `dh_last_analysis` and `dh_pending_analysis` so a user-initiated reset wipes persisted analysis state. See `Options.tsx:1159`.
+* **Options Reset:** the Reset button also removes `dh_last_analysis` and `dh_pending_analysis` so a user-initiated reset wipes persisted analysis state.
 
 ---
 

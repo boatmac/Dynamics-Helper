@@ -10,6 +10,8 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Prompt-scope implementation branch: `docs/prompt-scope-cleanup-design`
 - Isolated worktree: `C:\Users\zhaobo\AppData\Local\Temp\opencode\Dynamics-Helper-prompt-scope-spec`
 - Product implementation Tasks 1-6: approved through `0f57f8e`
+- Task 7 documentation: complete at `ca65519` plus this `docs(prompt): correct Task 7 review findings` follow-up
+- Task 8 final verification/evidence and release draft: pending
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
@@ -49,7 +51,7 @@ eacda76 fix(options): preserve skills across mode edits
 0f57f8e fix(options): guard passive hydration mirrors
 ```
 
-These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` for the current Task 7/8 continuation state rather than assuming an ahead/behind count from this document.
+These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Task 7 is complete; Task 8 remains pending. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming an ahead/behind count from this document.
 
 ## Remote VM Bootstrap
 
@@ -168,7 +170,7 @@ Workspace regression coverage lives in:
 
 `host/test_session_workspace.py`
 
-Task-specific prompt-scope checks were run during Tasks 1-6 and are recorded in `.superpowers/sdd/task-1-report.md` through `task-6-report.md`. Do not copy their evolving totals here as a final release claim. Task 8 owns a fresh complete Host/Extension/build/static gate, any authenticated smoke evidence, final totals, and the release-notes draft.
+Durable implementation evidence is the accepted spec `441d0db`, plan `21108d9`, Host range `e6e3155..8d9561a`, Extension error commit `527851b`, Options range `916c4b6..0f57f8e`, and Task 7 documentation commits `ca65519` plus `docs(prompt): correct Task 7 review findings`. Do not turn task-level historical counts into a final release claim. Task 8 owns a fresh complete Host/Extension/build/static gate, any authenticated smoke evidence, final totals, and the release-notes draft.
 
 ## Session Identity Contract
 
@@ -208,20 +210,42 @@ No instruction prose is moved or repartitioned. Existing files and internal pref
 
 The July 14 recommendation to remove DH's manual append and rely on CLI automatic workspace discovery is superseded. The accepted implementation instead disables all CLI custom-instruction discovery and explicitly injects the one selected Root file. The July 14 Stage 0/1 contract research remains research and is not altered by this prompt foundation.
 
-## Cross-Repo MyCasesKit Research
+## MyCasesKit Response State
 
 Primary documents:
 
 - `docs/superpowers/research/2026-07-14-dh-mycaseskit-stage0-instructions-brief.md`
 - `docs/superpowers/research/2026-07-14-dh-extension-stage0-integration-plan.md`
 
-An external MyCasesKit discussion result was reviewed from:
+The two July 14 documents above remain historical research. The latest
+user-provided MyCasesKit response is external commit `675006a`.
 
-`stage0-coordinator-design.md`
+Accepted decisions in that response:
 
-It is a **proposal**, not a formally approved contract. It recommends Form ③: implement the deterministic `New-Case` coordinator that the existing MyCasesKit Stage 0 architecture assumed but never built.
+- Form ③, a deterministic `New-Case` coordinator, is accepted.
+- The Stage 1 deterministic persistence gate model is accepted: DH/LLM produces
+  a structured analysis proposal and a MyCases-owned deterministic gate
+  validates and writes canonical state.
+- A 19-digit collaboration task folds to its 16-digit main case. The
+  coordinator owns normalization, records `collaboration_task[]`, and creates
+  the main-case folder with `origin: collaboration-task` when needed.
+- `session_name` is creator-written at initialization and read-only to the AI
+  model during the session. DH continues to compute and provide the same
+  deterministic UUIDv5 handle; when the coordinator initializes canonical
+  files, the coordinator is the canonical writer.
 
-### Correct integrated pipeline
+Artifacts and freeze status:
+
+- Five shared JSON fixtures plus a README exist as build/test examples.
+- They are not proof that every interface is formally frozen; the README still
+  labels six items tentative.
+- Coordinator invocation and the error enum must freeze before DH implements a
+  coordinator adapter.
+- Required/optional/null semantics, field limits, and `session_name` envelope
+  transport remain gaps for a separate **Contract Primitives** spec.
+- No DH MyCases integration code has been implemented.
+
+### Accepted Integrated Direction (Not Implemented)
 
 Integrated mode must not reduce DH to a passive importer. Target architecture:
 
@@ -234,7 +258,7 @@ DH Extract
 
 Form ③ replaces AI-improvised schema/file writes; it does **not** replace DH automatic analysis.
 
-### File ownership under discussion
+### File Ownership Direction
 
 - `case.md`
   - Stage 0 coordinator creates source-backed facts and `status: open`.
@@ -251,13 +275,16 @@ Form ③ replaces AI-improvised schema/file writes; it does **not** replace DH a
 
 - `context.md`
   - Stage 0 skeleton.
-  - Hook/runtime owns `session_name` and likely `last_agent`.
+  - The creator writes deterministic `session_name` at initialization; the AI
+    model treats it as read-only mid-session. In a coordinator-created case,
+    the coordinator is the canonical file writer while DH supplies the same
+    UUIDv5 handle.
   - Stage 1 persistence updates concise summary/findings/questions/tasks/next steps.
 
 - `root-cause.md`
   - Not created during normal Stage 1 triage; Stage 3 only when evidence supports RCA.
 
-### Proposed structured analysis output
+### Accepted Stage 1 Gate Direction
 
 DH analysis should return a proposal rather than freely editing canonical files:
 
@@ -268,25 +295,25 @@ context_patch
 requested_status_transition
 ```
 
-A MyCases-owned persistence layer validates/idempotently writes these outputs.
+A MyCases-owned deterministic persistence gate validates/idempotently writes
+these outputs. Exact field semantics remain subject to the Contract Primitives
+spec.
 
-## Contracts Required from MyCasesKit Before DH Integrated Implementation
+## Contract Primitives Required Before DH Integrated Implementation
 
-DH integrated orchestration must not guess these interfaces:
+The accepted architecture does not make every fixture or interface frozen. DH
+must not build the coordinator adapter until a separate Contract Primitives spec
+resolves at least:
 
-1. Formal accept/reject of Form ③.
-2. Workspace marker/manifest/canary schema.
-3. Versioned `Stage0Envelope` fixture/schema.
-4. `New-Case` coordinator command/API and response fixture.
-5. Existing-case/idempotency policy.
-6. Product fallback and 19-digit task normalization.
-7. Canonical Stage 0 files/provenance/report/attachment contract.
-8. Stage 1 analysis-proposal schema.
-9. Deterministic Stage 1 persistence API and response fixture.
-10. Lifecycle transition ownership.
-11. Session metadata ownership.
-12. Error taxonomy/version negotiation.
-13. Legacy workspace migration policy.
+1. The coordinator invocation mechanism and request/response boundary.
+2. The frozen error enum, version negotiation, and retryability semantics.
+3. Required, optional, and nullable fields plus size/value limits.
+4. How `session_name` is transported in the envelope while preserving creator
+   write ownership and the shared UUIDv5 contract.
+5. Which of the README's six tentative items become normative.
+
+The five shared fixtures and README should be consumed as examples for building
+and testing that spec, not treated as a complete frozen adapter API.
 
 ## DH Conditional Work Plan
 
@@ -305,11 +332,13 @@ Task 8 still owns final whole-branch verification and any authenticated SDK smok
 
 ### Workstream B — MyCasesKit contracts
 
-Owned by the MyCasesKit design/implementation session; see required contracts above.
+MyCasesKit response `675006a` accepted Form ③ and the Stage 1 persistence-gate
+model. The remaining work is the separate Contract Primitives spec described
+above; fixture existence alone does not unblock a DH coordinator adapter.
 
 ### Workstream C — integrated DH implementation
 
-Blocked until Workstream B contracts are approved:
+Blocked until the Contract Primitives spec freezes the adapter boundary:
 
 - `Auto / Standalone / MyCases-integrated` preference;
 - strong workspace health detection;
@@ -334,11 +363,11 @@ Blocked until Workstream B contracts are approved:
 
 - Prompt-scope production implementation Tasks 1-6 is approved on `docs/prompt-scope-cleanup-design` through `0f57f8e`.
 - Accepted design and plan are `441d0db` and `21108d9`.
-- Documentation alignment is Task 7; Task 8 still owns final verification evidence and the release draft.
+- Task 7 documentation is complete at `ca65519` plus `docs(prompt): correct Task 7 review findings`; Task 8 owns final verification evidence and the release draft.
 - No MyCases integration code, mode preference, workspace detector, coordinator adapter, persistence adapter, or MyCases canonical-file write has been implemented.
-- Form ③ remains a proposal pending explicit MyCasesKit acceptance.
-- Stage 1 persistence is a newly identified required contract, not yet designed/implemented.
-- Any future MyCases implementation remains blocked on approved cross-repo contracts and a separate DH design/spec.
+- MyCasesKit response `675006a` accepts Form ③ and the Stage 1 deterministic persistence-gate model.
+- Five shared JSON fixtures and a README exist as examples, but six README items remain tentative; not every interface is frozen.
+- A separate DH Contract Primitives spec remains pending before any coordinator adapter or integration implementation.
 
 ## Release Discipline
 
@@ -374,14 +403,14 @@ Use the following for continuation; update the exact HEAD and status from Git ra
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据，不是 prompt-scope 最终总数。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9，产品 Tasks 1-6 已批准到 0f57f8e。Task 8 才负责完整最终验证、真实 smoke 证据和 release draft；不要提前声称最终 totals。
+历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据，不是 prompt-scope 最终总数。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9，产品 Tasks 1-6 已批准到 0f57f8e，Task 7 文档已完成。Task 8 才负责完整最终验证、真实 smoke 证据和 release draft；不要提前声称最终 totals。
 
 已实现行为：所有 DH create/resume 都设置 skip_custom_instructions=True；CLI global、AGENTS、path instructions 等自动发现源全部排除。DH 显式注入 Core + 恰好一个可编辑源：Root 为空或 Repository ONLY 关闭时使用 DH-specific Instructions；Root 非空且 Repository ONLY 开启时只使用 <Root>/.github/copilot-instructions.md。Custom User Prompt 仍是每次 Analyze 的 PII-scrubbed user content。使用严格 UTF-8 immutable byte snapshot、framed fingerprint、same-UUID refresh 和 fail-closed errors。Options 区分 explicit empty（清空文件）与 omitted（不写），检查 update_config/config_saved，并保留可选 errorCode 到持久化和本地化显示。
 
 Integrated 目标不是取消 DH 自动分析。目标流水线是：
 DH Extract → MyCases New-Case（Stage 0 deterministic scaffold）→ DH Automatic Initial Triage（Stage 1）→ MyCases Deterministic Persistence。
 
-MyCasesKit 的 stage0-coordinator-design.md 仍只是 Proposal，推荐 Form ③ New-Case coordinator，尚未形成正式跨仓库契约。当前没有实现任何 MyCases integration。DH integrated 实现必须等待 MyCasesKit 返回：workspace marker/canaries、Stage0Envelope、coordinator API、Stage 1 persistence API、幂等规则、生命周期/会话字段 ownership、错误分类和 legacy migration policy。
+MyCasesKit response commit 675006a 已接受 Form ③ New-Case coordinator 和 Stage 1 deterministic persistence gate。19 位 collaboration task 归一到 16 位 main case，由 coordinator 记录 collaboration_task[]，必要时以 origin: collaboration-task 创建主 case 目录。session_name 由 creator 在初始化时写入，AI model 在 session 中只读；DH 继续计算并提供相同 UUIDv5，coordinator 是 canonical file writer。已有 5 个共享 JSON fixtures 和 README 作为 build/test examples，但 README 仍标记 6 项 tentative，不能声称所有接口已冻结。当前没有实现任何 MyCases integration；在 coordinator invocation、error enum、required/optional/null/limits、session_name envelope transport 由独立 Contract Primitives spec 冻结前，不实现 coordinator adapter。
 
 2026-07-14 research 中“依赖 CLI 自动 workspace instruction discovery”的建议已被 2026-07-15 accepted spec supersede；不要恢复该方案。在正式 MyCases 契约返回前，不要猜测 MyCases 接口，也不要让 DH 直接写 MyCases canonical 文件。
 
