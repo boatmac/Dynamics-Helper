@@ -1,9 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { StrictMode } from 'react'
 import { render, fireEvent, waitFor, act, screen } from '@testing-library/react'
 import {
   installChromeMock,
   resetChromeMock,
   deferNextResponse,
+  deferNextStorageRemove,
+  deferNextStorageSet,
+  getStorageSnapshot,
   seedStorage,
   chromeMockSpies,
 } from '../test/chromeMock'
@@ -1154,6 +1158,7 @@ describe('Options prompt health and inspected sparse writes', () => {
     })
     const language = await findLanguageSelect()
     fireEvent.change(language, { target: { value: 'en' } })
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
     fireEvent.change(language, { target: { value: 'zh' } })
 
     await act(async () => secondUpdate.resolve({
@@ -1226,6 +1231,7 @@ describe('Options prompt health and inspected sparse writes', () => {
 
     fireEvent.change(editor, { target: { value: 'revision-1' } })
     fireEvent.blur(editor)
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
     fireEvent.change(editor, { target: { value: 'revision-2' } })
     fireEvent.blur(editor)
 
@@ -1251,6 +1257,182 @@ describe('Options prompt health and inspected sparse writes', () => {
     expect(updateCalls.at(-1).payload.payload.user_instructions).toBe(
       'revision-2',
     )
+  })
+
+  it('skips an older intent when storage callbacks complete out of order', async () => {
+    const newestUpdate = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const olderStorage = deferNextStorageSet('dh_prefs')
+    const newerStorage = deferNextStorageSet('dh_prefs')
+
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    fireEvent.change(language, { target: { value: 'zh' } })
+
+    await act(async () => newerStorage.resolve(undefined))
+    await act(async () => newestUpdate.resolve({
+      status: 'error',
+      error: 'NEWEST WARNING',
+    }))
+    await act(async () => olderStorage.resolve(undefined))
+
+    const updateCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(updateCalls).toHaveLength(1)
+    expect(
+      updateCalls[0].payload.payload.config.extension_preferences.language,
+    ).toBe('zh')
+    expect((getStorageSnapshot().dh_prefs as any).language).toBe('zh')
+    expect(screen.getByRole('alert').textContent).toContain('NEWEST WARNING')
+  })
+
+  it('pairs each instruction intent with its captured text and revision', async () => {
+    const firstUpdate = deferNextResponse('update_config')
+    const retryUpdate = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'initial',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const firstStorage = deferNextStorageSet('dh_prefs')
+    const secondStorage = deferNextStorageSet('dh_prefs')
+    const editor = await openDhInstructionsEditor()
+
+    fireEvent.change(editor, { target: { value: 'text-1' } })
+    fireEvent.blur(editor)
+    fireEvent.change(editor, { target: { value: 'text-2' } })
+
+    await act(async () => firstStorage.resolve(undefined))
+    const firstCall = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+      .at(-1)
+    expect(firstCall.payload.payload.user_instructions).toBe('text-1')
+
+    await act(async () => firstUpdate.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+
+    fireEvent.blur(editor)
+    await act(async () => secondStorage.resolve(undefined))
+    const retryCall = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+      .at(-1)
+    expect(retryCall.payload.payload.user_instructions).toBe('text-2')
+    await act(async () => retryUpdate.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it('sends one committed latest instruction catch-up after rapid edits', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const catchUp = deferNextResponse('update_config')
+    const unrelatedUpdate = deferNextResponse('update_config')
+    render(<StrictMode><Options /></StrictMode>)
+    await openCopilotSection()
+    const editor = await openDhInstructionsEditor()
+
+    fireEvent.change(editor, { target: { value: 'revision-1' } })
+    fireEvent.blur(editor)
+    fireEvent.change(editor, { target: { value: 'revision-2' } })
+    fireEvent.blur(editor)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        _user_instructions_raw: 'stale-host-value',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+
+    await waitFor(() => {
+      const updateCalls = chromeMockSpies.sendMessage.mock.calls
+        .map(call => call[0] as any)
+        .filter(message => message?.payload?.action === 'update_config')
+      expect(updateCalls).toHaveLength(1)
+      expect(updateCalls[0].payload.payload.user_instructions).toBe(
+        'revision-2',
+      )
+    })
+    await act(async () => catchUp.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(2))
+    const updateCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(Object.hasOwn(
+      updateCalls.at(-1).payload.payload,
+      'user_instructions',
+    )).toBe(false)
+    await act(async () => unrelatedUpdate.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it('keeps a post-reset instruction edit when cleanup finishes late', async () => {
+    const cleanup = deferNextStorageRemove('dh_items')
+    const resetUpdate = deferNextResponse('update_config')
+    const editUpdate = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'before-reset',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      const editor = await openDhInstructionsEditor()
+      fireEvent.change(editor, { target: { value: 'after-reset' } })
+      fireEvent.blur(editor)
+
+      await act(async () => resetUpdate.resolve({
+        status: 'success',
+        data: { success: true, config_saved: true },
+      }))
+      await act(async () => editUpdate.resolve({
+        status: 'success',
+        data: { success: true, config_saved: true },
+      }))
+      const countPrefsWrites = () => chromeMockSpies.storageSet.mock.calls
+        .filter(call => Object.hasOwn(call[0] as object, 'dh_prefs'))
+        .length
+      const writesBeforeCleanup = countPrefsWrites()
+      await act(async () => cleanup.resolve(undefined))
+
+      expect(countPrefsWrites()).toBe(writesBeforeCleanup)
+      expect(chromeMockSpies.storageRemove.mock.calls.some(call => {
+        const keys = call[0] as string[]
+        return keys.includes('dh_prefs')
+      })).toBe(false)
+      expect(editor.value).toBe('after-reset')
+      const updateCalls = chromeMockSpies.sendMessage.mock.calls
+        .map(call => call[0] as any)
+        .filter(message => message?.payload?.action === 'update_config')
+      expect(updateCalls.at(-1).payload.payload.user_instructions).toBe(
+        'after-reset',
+      )
+    } finally {
+      confirmSpy.mockRestore()
+    }
   })
 
   it('does not log raw Host prompt or preference values', async () => {

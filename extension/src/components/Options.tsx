@@ -42,8 +42,11 @@ import { localizePromptSourceError } from '../utils/promptSourceErrors';
 import {
     acknowledgeInstructionRevision,
     classifyConfigUpdateResponse,
+    createConfigUpdateIntent,
     shouldIncludeUserInstructions,
+    type ConfigUpdateIntent,
     type ConfigUpdateIssue,
+    type InstructionUpdateToken,
 } from '../utils/configUpdateResult';
 
 type PromptSourceIssue = {
@@ -558,18 +561,24 @@ const OptionsInner: React.FC = () => {
     //   3. host get_config response → merged into state → ref = true
     //   4. Any subsequent user-triggered persistPrefs() proceeds normally
     //
-    // If hydration fails (host down, error response, etc.) the ref stays
-    // false and persistPrefs is no-op'd. Local state still updates so the
-    // UI is responsive, but nothing is written to disk until hydration
-    // succeeds on a later session. This is the right trade-off: writing
-    // unhydrated state is the failure mode we are trying to prevent.
+    // Failure branches mark the local mirror hydrated so Options remains
+    // usable, then schedule any missed Host update through the same catch-up
+    // effect as a successful response.
     const prefsHydratedRef = useRef(false);
 
     const [promptHealthIssue, setPromptHealthIssue] = useState<PromptSourceIssue | null>(null);
     const [configUpdateIssue, setConfigUpdateIssue] = useState<ConfigUpdateIssue | null>(null);
-    const userInstructionsEditRevisionRef = useRef(0);
+    const userInstructionsEditTokenRef = useRef<InstructionUpdateToken>({
+        revision: 0,
+        value: DEFAULT_PREFS.userInstructions ?? '',
+    });
     const userInstructionsAckRevisionRef = useRef(0);
     const configUpdateRequestRevisionRef = useRef(0);
+    const latestConfigUpdateIntentRef = useRef<ConfigUpdateIntent<Preferences> | null>(null);
+    const prefsRef = useRef<Preferences>(DEFAULT_PREFS);
+    const [catchUpEpoch, setCatchUpEpoch] = useState(0);
+    const catchUpRequestedEpochRef = useRef(0);
+    const catchUpProcessedEpochRef = useRef(0);
 
     // Hydration-window edit protection. Tracks which dh_prefs keys the user
     // has edited during this Options session. Used by:
@@ -621,6 +630,11 @@ const OptionsInner: React.FC = () => {
     };
     const showSuccess = (message: string, autoDismissMs?: number) => showStatus(message, 'success', autoDismissMs);
     const showError = (message: string, autoDismissMs?: number) => showStatus(message, 'error', autoDismissMs);
+    useEffect(() => () => {
+        if (statusTimerRef.current !== null) {
+            clearTimeout(statusTimerRef.current);
+        }
+    }, []);
     const [hostVersion, setHostVersion] = useState<string>("");
     const [updateAvailable, setUpdateAvailable] = useState<{version: string, url: string} | null>(null);
     const [isUpdating, setIsUpdating] = useState(false);
@@ -693,9 +707,24 @@ const OptionsInner: React.FC = () => {
     const [previewInstructions, setPreviewInstructions] = useState(true);
     const [previewPrompt, setPreviewPrompt] = useState(true);
 
+    useEffect(() => {
+        prefsRef.current = prefs;
+    }, [prefs]);
+
+    const setCurrentPrefs = (nextPrefs: Preferences) => {
+        prefsRef.current = nextPrefs;
+        setPrefs(nextPrefs);
+    };
+
+    const updateCurrentPrefs = (patch: Partial<Preferences>) => {
+        const nextPrefs = { ...prefsRef.current, ...patch };
+        setCurrentPrefs(nextPrefs);
+        return nextPrefs;
+    };
+
     const buildHostConfigPayload = (
-        nextPrefs: Preferences,
-        options: { includeUserInstructions: boolean },
+        nextPrefs: Readonly<Preferences>,
+        instruction?: { value: string },
     ) => {
         const payload: Record<string, unknown> = {
             user_prompt: nextPrefs.userPrompt,
@@ -731,38 +760,29 @@ const OptionsInner: React.FC = () => {
                 },
             },
         };
-        if (options.includeUserInstructions) {
-            payload.user_instructions = nextPrefs.userInstructions ?? '';
+        if (instruction) {
+            payload.user_instructions = instruction.value;
         }
         return { action: 'update_config', payload };
     };
 
     const sendHostConfigUpdate = (
-        nextPrefs: Preferences,
+        intent: ConfigUpdateIntent<Preferences>,
         options: {
             suppressTransportWarning?: boolean;
-            instructionRevision?: number;
         } = {},
     ) => {
-        const instructionRevision = options.instructionRevision
-            ?? userInstructionsEditRevisionRef.current;
-        const includeUserInstructions = shouldIncludeUserInstructions(
-            instructionRevision,
-            userInstructionsAckRevisionRef.current,
-        );
-        const requestRevision = ++configUpdateRequestRevisionRef.current;
+        const instruction = intent.instruction;
 
         chrome.runtime.sendMessage({
             type: 'NATIVE_MSG',
-            payload: buildHostConfigPayload(nextPrefs, {
-                includeUserInstructions,
-            }),
+            payload: buildHostConfigPayload(intent.prefs, instruction),
         }, (response) => {
             const transportError = chrome.runtime.lastError;
             if (transportError) {
                 if (
                     !options.suppressTransportWarning
-                    && requestRevision === configUpdateRequestRevisionRef.current
+                    && intent.generation === configUpdateRequestRevisionRef.current
                 ) {
                     setConfigUpdateIssue({
                         fallback: transportError.message || '',
@@ -773,18 +793,62 @@ const OptionsInner: React.FC = () => {
             }
 
             const decision = classifyConfigUpdateResponse(response);
-            if (includeUserInstructions) {
+            if (instruction) {
                 userInstructionsAckRevisionRef.current = acknowledgeInstructionRevision(
                     userInstructionsAckRevisionRef.current,
-                    instructionRevision,
+                    instruction.revision,
                     decision.acknowledged,
                 );
             }
-            if (requestRevision === configUpdateRequestRevisionRef.current) {
+            if (intent.generation === configUpdateRequestRevisionRef.current) {
                 setConfigUpdateIssue(decision.issue);
             }
         });
     };
+
+    const createIntent = (nextPrefs: Preferences) => {
+        const generation = ++configUpdateRequestRevisionRef.current;
+        const instructionToken = userInstructionsEditTokenRef.current;
+        const instruction = shouldIncludeUserInstructions(
+            instructionToken.revision,
+            userInstructionsAckRevisionRef.current,
+        )
+            ? instructionToken
+            : undefined;
+        const intent = createConfigUpdateIntent(generation, nextPrefs, instruction);
+        latestConfigUpdateIntentRef.current = intent;
+        return intent;
+    };
+
+    const requestHydrationCatchUp = () => {
+        if (userTouchedFieldsRef.current.size === 0) return;
+        const epoch = ++catchUpRequestedEpochRef.current;
+        setCatchUpEpoch(epoch);
+    };
+
+    const repairPrefsStorage = (intent: ConfigUpdateIntent<Preferences>) => {
+        chrome.storage.local.set({ dh_prefs: intent.prefs }, () => {
+            const latestIntent = latestConfigUpdateIntentRef.current;
+            if (latestIntent && latestIntent.generation !== intent.generation) {
+                repairPrefsStorage(latestIntent);
+            }
+        });
+    };
+
+    useEffect(() => {
+        if (
+            catchUpEpoch === 0
+            || catchUpEpoch !== catchUpRequestedEpochRef.current
+            || catchUpProcessedEpochRef.current === catchUpEpoch
+        ) {
+            return;
+        }
+        catchUpProcessedEpochRef.current = catchUpEpoch;
+        console.log('[DH] Hydration catch-up: pushing', userTouchedFieldsRef.current.size, 'user-touched field(s) to host');
+        sendHostConfigUpdate(createIntent(prefsRef.current), {
+            suppressTransportWarning: true,
+        });
+    }, [catchUpEpoch]);
 
     // Initial Load
     useEffect(() => {
@@ -846,15 +910,7 @@ const OptionsInner: React.FC = () => {
                      // Host is unreachable so this RPC will almost certainly
                      // also fail, but it's a no-op cost and recovers when
                      // host comes back within the same Options session.
-                     if (userTouchedFieldsRef.current.size > 0) {
-                         setPrefs(currentPrefs => {
-                             sendHostConfigUpdate(currentPrefs, {
-                                 suppressTransportWarning: true,
-                                 instructionRevision: userInstructionsEditRevisionRef.current,
-                             });
-                             return currentPrefs;
-                         });
-                     }
+                     requestHydrationCatchUp();
                      return;
                 }
                 
@@ -1023,38 +1079,13 @@ const OptionsInner: React.FC = () => {
                         // even if `changed` was false (e.g. host config already
                         // matches dh_prefs), state is now known-good.
                         //
-                        // Placed INSIDE the updater so it runs synchronously
-                        // with the state merge. React 19 + StrictMode-style
-                        // double-invoke can schedule updaters across multiple
-                        // microtask ticks; placing the ref flip and catch-up
-                        // RPC inside the same updater closure guarantees they
-                        // observe the just-merged value.
-                        prefsHydratedRef.current = true;
-
-                        // Catch-up RPC: if the user edited any field during the
-                        // hydration window, persistPrefs skipped the host RPC
-                        // for those writes. Push the merged state to host now
-                        // so config.json matches what the user actually
-                        // clicked. See spec § 4.4. Empty touched set = no edits
-                        // during window = no RPC needed (avoid noise).
-                        //
-                        // Inside the updater closure so we read `newPrefs`
-                        // (or `prev` when nothing changed) directly without
-                        // relying on a closure variable assigned by the
-                        // updater — that pattern is racy when React schedules
-                        // the updater on a later microtask tick (verified by
-                        // T7 Options hydration test in jsdom + React 19).
-                        const merged = changed ? newPrefs : prev;
-                        if (userTouchedFieldsRef.current.size > 0) {
-                            console.log('[DH] Hydration catch-up: pushing', userTouchedFieldsRef.current.size, 'user-touched field(s) to host');
-                            sendHostConfigUpdate(merged, {
-                                suppressTransportWarning: true,
-                                instructionRevision: userInstructionsEditRevisionRef.current,
-                            });
-                        }
-
-                        return merged;
+                        // Keep this updater free of Host side effects. Catch-up
+                        // is requested below and runs after this state has
+                        // committed, so StrictMode replay cannot duplicate it.
+                        return changed ? newPrefs : prev;
                     });
+                    prefsHydratedRef.current = true;
+                    requestHydrationCatchUp();
                 } else {
                     // Host responded but not with success+data. Same
                     // rationale as the lastError branch above — don't
@@ -1075,19 +1106,7 @@ const OptionsInner: React.FC = () => {
                     // probably also fail (host is broken), but it's a no-op
                     // cost and keeps storage-vs-host eventually consistent
                     // when host recovers within the same Options session.
-                    if (userTouchedFieldsRef.current.size > 0) {
-                        // Read state via functional setPrefs (state may not be
-                        // committed yet from the merge above; we ran with prev
-                        // and bailed). Re-enter setPrefs to capture current
-                        // value as 'prev'.
-                        setPrefs(currentPrefs => {
-                            sendHostConfigUpdate(currentPrefs, {
-                                suppressTransportWarning: true,
-                                instructionRevision: userInstructionsEditRevisionRef.current,
-                            });
-                            return currentPrefs;
-                        });
-                    }
+                    requestHydrationCatchUp();
                 }
             });
         });
@@ -1194,19 +1213,15 @@ const OptionsInner: React.FC = () => {
         // currently editing.
         userTouchedFieldsRef.current.add(name as keyof Preferences);
         const isNumeric = name.startsWith('offset') || name === 'analyzeTimeoutSeconds';
-        setPrefs(prev => ({
-            ...prev,
-            [name]: isNumeric ? Number(value) : value
-        }));
+        updateCurrentPrefs({
+            [name]: isNumeric ? Number(value) : value,
+        });
     };
 
     // onBlur sibling of handlePrefChange — commits whatever the user typed
     // by routing through persistPrefs against the latest state snapshot.
     const handlePrefBlur = () => {
-        setPrefs(prev => {
-            persistPrefs(prev);
-            return prev;
-        });
+        persistPrefs(prefsRef.current);
     };
 
     // --- Persistence: single entry point for ALL prefs writes ---
@@ -1247,8 +1262,15 @@ const OptionsInner: React.FC = () => {
         // The pre-hydration warn that used to live here was removed because
         // hitting it during normal cold start is expected, not exceptional.
         // See docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md
-        const instructionRevision = userInstructionsEditRevisionRef.current;
-        chrome.storage.local.set({ dh_prefs: nextPrefs }, () => {
+        const intent = createIntent(nextPrefs);
+        chrome.storage.local.set({ dh_prefs: intent.prefs }, () => {
+            if (intent.generation !== configUpdateRequestRevisionRef.current) {
+                const latestIntent = latestConfigUpdateIntentRef.current;
+                if (latestIntent) {
+                    repairPrefsStorage(latestIntent);
+                }
+                return;
+            }
             if (!prefsHydratedRef.current) {
                 // Window edit — touched ref will route it through the
                 // catch-up RPC once hydration completes. Storage is
@@ -1256,14 +1278,14 @@ const OptionsInner: React.FC = () => {
                 return;
             }
 
-            sendHostConfigUpdate(nextPrefs, { instructionRevision });
+            sendHostConfigUpdate(intent);
 
             // Manifest fetch — only when caller opts in AND URL actually
             // changed since last fetch. Diff guard prevents a refetch when
             // the user toggles e.g. teamCatalogEnabled without touching URL.
-            if (opts?.fetchManifest && nextPrefs.teamCatalogEnabled && nextPrefs.teamManifestUrl) {
+            if (opts?.fetchManifest && intent.prefs.teamCatalogEnabled && intent.prefs.teamManifestUrl) {
                 const previousUrl = lastFetchedManifestUrlRef.current;
-                const currentUrl = nextPrefs.teamManifestUrl;
+                const currentUrl = intent.prefs.teamManifestUrl;
                 if (currentUrl !== previousUrl) {
                     lastFetchedManifestUrlRef.current = currentUrl;
                     chrome.runtime.sendMessage(
@@ -1309,16 +1331,16 @@ const OptionsInner: React.FC = () => {
         // (if still pending) does not overwrite our value, and so the
         // catch-up RPC knows to push these fields after hydration.
         (Object.keys(patch) as Array<keyof Preferences>).forEach(k => userTouchedFieldsRef.current.add(k));
-        setPrefs(prev => {
-            const next = { ...prev, ...patch };
-            persistPrefs(next, opts);
-            return next;
-        });
+        const next = updateCurrentPrefs(patch);
+        persistPrefs(next, opts);
     };
 
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
-            userInstructionsEditRevisionRef.current += 1;
+            userInstructionsEditTokenRef.current = {
+                revision: userInstructionsEditTokenRef.current.revision + 1,
+                value: DEFAULT_PREFS.userInstructions ?? '',
+            };
             // Mark ALL prefs keys as user-touched so a late host hydration
             // response cannot un-reset us. DEFAULT_PREFS is the user's
             // explicit choice — protect it from being merged-over. Without
@@ -1327,8 +1349,9 @@ const OptionsInner: React.FC = () => {
             (Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>).forEach(
                 k => userTouchedFieldsRef.current.add(k)
             );
-            setPrefs(DEFAULT_PREFS);
-            chrome.storage.local.remove(["dh_prefs", "dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels", "dh_last_analysis", "dh_pending_analysis"], () => {
+            setCurrentPrefs(DEFAULT_PREFS);
+            persistPrefs(DEFAULT_PREFS);
+            chrome.storage.local.remove(["dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels", "dh_last_analysis", "dh_pending_analysis"], () => {
                 // Wrap loaded items in collapseFolders so Reset produces the
                 // same folded-by-default tree the mount path produces. Without
                 // this, items.json defaults render fully expanded after Reset
@@ -1339,12 +1362,6 @@ const OptionsInner: React.FC = () => {
                 setTeamItems([]);
                 setTeamSynced("");
                 setTeamCollapsedLabels(new Set());
-                // Sync host with default prefs so config.json matches the
-                // freshly-reset extension state. persistPrefs writes dh_prefs
-                // back too — that's OK because we just removed it; the
-                // overwrite is the same defaults we'd otherwise hydrate from
-                // DEFAULT_PREFS on next load.
-                persistPrefs(DEFAULT_PREFS);
                 showSuccess(t('resetComplete'), 2000);
             });
         }
@@ -2231,15 +2248,12 @@ const OptionsInner: React.FC = () => {
                                                     // clamped value on next get_config (e.g. restart),
                                                     // which would otherwise be a surprising silent
                                                     // change for the user.
-                                                    setPrefs(prev => {
-                                                        const raw = Number(prev.analyzeTimeoutSeconds ?? 1200);
-                                                        const clamped = Number.isFinite(raw)
-                                                            ? Math.max(60, Math.min(3600, Math.round(raw)))
-                                                            : 1200;
-                                                        const next = { ...prev, analyzeTimeoutSeconds: clamped };
-                                                        persistPrefs(next);
-                                                        return next;
-                                                    });
+                                                    const raw = Number(prefsRef.current.analyzeTimeoutSeconds ?? 1200);
+                                                    const clamped = Number.isFinite(raw)
+                                                        ? Math.max(60, Math.min(3600, Math.round(raw)))
+                                                        : 1200;
+                                                    const next = updateCurrentPrefs({ analyzeTimeoutSeconds: clamped });
+                                                    persistPrefs(next);
                                                 }}
                                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm"
                                             />
@@ -2310,7 +2324,7 @@ const OptionsInner: React.FC = () => {
                                                             // fixing the typo.
                                                             if (manifestUrlInvalid) setManifestUrlInvalid(false);
                                                             userTouchedFieldsRef.current.add('teamManifestUrl');
-                                                            setPrefs(prev => ({ ...prev, teamManifestUrl: e.target.value }));
+                                                            updateCurrentPrefs({ teamManifestUrl: e.target.value });
                                                         }}
                                                         onBlur={() => {
                                                             // Plan A: persist on focus loss. Three cases:
@@ -2357,7 +2371,7 @@ const OptionsInner: React.FC = () => {
                                                             }
                                                             // (b) valid: persist + fetch if changed.
                                                             setManifestUrlInvalid(false);
-                                                            persistPrefs(prefs, { fetchManifest: true });
+                                                            persistPrefs(prefsRef.current, { fetchManifest: true });
                                                         }}
                                                         className={`w-full px-3 py-2 border rounded-lg outline-none transition-all text-sm bg-white ${
                                                             manifestUrlInvalid
@@ -2449,7 +2463,7 @@ const OptionsInner: React.FC = () => {
                                                     name="rootPath"
                                                     aria-label={t('rootPath')}
                                                     value={prefs.rootPath || ""}
-                                                    onChange={(e) => { userTouchedFieldsRef.current.add('rootPath'); setPrefs(prev => ({ ...prev, rootPath: e.target.value })); }} onBlur={handlePrefBlur}
+                                                    onChange={(e) => { userTouchedFieldsRef.current.add('rootPath'); updateCurrentPrefs({ rootPath: e.target.value }); }} onBlur={handlePrefBlur}
                                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
                                                     placeholder="C:\MyCases"
                                                 />
@@ -2485,7 +2499,7 @@ const OptionsInner: React.FC = () => {
                                                     name="skillDirectories"
                                                     aria-label={t('skillDirectories')}
                                                     value={prefs.skillDirectories || ""}
-                                                    onChange={(e) => { userTouchedFieldsRef.current.add('skillDirectories'); setPrefs(prev => ({ ...prev, skillDirectories: e.target.value })); }} onBlur={handlePrefBlur}
+                                                    onChange={(e) => { userTouchedFieldsRef.current.add('skillDirectories'); updateCurrentPrefs({ skillDirectories: e.target.value }); }} onBlur={handlePrefBlur}
                                                     disabled={effectiveRepositoryOnly}
                                                     className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/skills"
@@ -2503,7 +2517,7 @@ const OptionsInner: React.FC = () => {
                                                     name="mcpConfigPath"
                                                     aria-label={t('mcpConfigPath')}
                                                     value={prefs.mcpConfigPath || ""}
-                                                    onChange={(e) => { userTouchedFieldsRef.current.add('mcpConfigPath'); setPrefs(prev => ({ ...prev, mcpConfigPath: e.target.value })); }} onBlur={handlePrefBlur}
+                                                    onChange={(e) => { userTouchedFieldsRef.current.add('mcpConfigPath'); updateCurrentPrefs({ mcpConfigPath: e.target.value }); }} onBlur={handlePrefBlur}
                                                     disabled={effectiveRepositoryOnly}
                                                     className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/mcp-config.json"
@@ -2544,7 +2558,7 @@ const OptionsInner: React.FC = () => {
                                                         name="userInstructions"
                                                         aria-label={t('userInstructions')}
                                                         value={prefs.userInstructions || ""}
-                                                        onChange={(e) => { userInstructionsEditRevisionRef.current += 1; userTouchedFieldsRef.current.add('userInstructions'); setPrefs(prev => ({ ...prev, userInstructions: e.target.value })); }} onBlur={handlePrefBlur}
+                                                        onChange={(e) => { userInstructionsEditTokenRef.current = { revision: userInstructionsEditTokenRef.current.revision + 1, value: e.target.value }; userTouchedFieldsRef.current.add('userInstructions'); updateCurrentPrefs({ userInstructions: e.target.value }); }} onBlur={handlePrefBlur}
                                                         disabled={effectiveRepositoryOnly}
                                                         className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                         placeholder={t('userInstructionsPlaceholder')}
@@ -2591,7 +2605,7 @@ const OptionsInner: React.FC = () => {
                                                         name="userPrompt"
                                                         aria-label={t('userPrompt')}
                                                         value={prefs.userPrompt || ""}
-                                                        onChange={(e) => { userTouchedFieldsRef.current.add('userPrompt'); setPrefs(prev => ({ ...prev, userPrompt: e.target.value })); }} onBlur={handlePrefBlur}
+                                                        onChange={(e) => { userTouchedFieldsRef.current.add('userPrompt'); updateCurrentPrefs({ userPrompt: e.target.value }); }} onBlur={handlePrefBlur}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
                                                         placeholder={t('userPromptPlaceholder')}
                                                     />

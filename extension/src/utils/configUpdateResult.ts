@@ -11,6 +11,31 @@ export interface ConfigUpdateDecision {
   issue: ConfigUpdateIssue | null
 }
 
+export interface InstructionUpdateToken {
+  revision: number
+  value: string
+}
+
+export interface ConfigUpdateIntent<T extends object> {
+  generation: number
+  prefs: Readonly<T>
+  instruction?: Readonly<InstructionUpdateToken>
+}
+
+export function createConfigUpdateIntent<T extends object>(
+  generation: number,
+  prefs: T,
+  instruction?: InstructionUpdateToken,
+): ConfigUpdateIntent<T> {
+  return Object.freeze({
+    generation,
+    prefs: Object.freeze({ ...prefs }),
+    instruction: instruction
+      ? Object.freeze({ ...instruction })
+      : undefined,
+  })
+}
+
 export function shouldIncludeUserInstructions(
   editRevision: number,
   acknowledgedRevision: number,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   acknowledgeInstructionRevision,
   classifyConfigUpdateResponse,
+  createConfigUpdateIntent,
   shouldIncludeUserInstructions,
 } from './configUpdateResult'
 
@@ -81,5 +82,31 @@ describe('config update results', () => {
 
   it('does not acknowledge transport or unsaved failures', () => {
     expect(acknowledgeInstructionRevision(0, 1, false)).toBe(0)
+  })
+
+  it('captures an immutable prefs snapshot and instruction value', () => {
+    const prefs = {
+      userInstructions: 'revision-1',
+      language: 'en',
+    }
+    const intent = createConfigUpdateIntent(1, prefs, {
+      revision: 1,
+      value: prefs.userInstructions,
+    })
+
+    prefs.userInstructions = 'revision-2'
+    prefs.language = 'zh'
+
+    expect(intent).toEqual({
+      generation: 1,
+      prefs: {
+        userInstructions: 'revision-1',
+        language: 'en',
+      },
+      instruction: { revision: 1, value: 'revision-1' },
+    })
+    expect(Object.isFrozen(intent)).toBe(true)
+    expect(Object.isFrozen(intent.prefs)).toBe(true)
+    expect(Object.isFrozen(intent.instruction)).toBe(true)
   })
 })

@@ -8,6 +8,8 @@ import { vi } from 'vitest'
 //   accidentally use undefined response data.
 // - deferNextResponse(action) lets the test caller decide WHEN to resolve
 //   the response (timing-sensitive tests like hydration window need this).
+// - deferNextStorageSet/Remove optionally delay matching storage commits and
+//   callbacks; when unused, storage retains its original immediate behavior.
 // - resolveNext / rejectNext fire pending deferrals in FIFO order per action.
 // - storage uses an in-memory Map; reset via resetChromeMock() in beforeEach.
 
@@ -18,8 +20,16 @@ type DeferredResponse = {
 }
 
 type PendingMap = Map<string, DeferredResponse[]>
+type DeferredStorageSet = DeferredResponse & {
+  matches: (items: Record<string, unknown>) => boolean
+}
+type DeferredStorageRemove = DeferredResponse & {
+  matches: (keys: string[]) => boolean
+}
 
 let pendingByAction: PendingMap = new Map()
+let pendingStorageSets: DeferredStorageSet[] = []
+let pendingStorageRemoves: DeferredStorageRemove[] = []
 let storageData: Record<string, unknown> = {}
 let messageLog: Array<{ action: string; payload: unknown }> = []
 
@@ -35,6 +45,8 @@ function makeDeferred(): DeferredResponse {
 
 export function resetChromeMock(): void {
   pendingByAction = new Map()
+  pendingStorageSets = []
+  pendingStorageRemoves = []
   storageData = {}
   messageLog = []
   sendMessage.mockClear()
@@ -58,6 +70,24 @@ export function deferNextResponse(action: string): DeferredResponse {
   const list = pendingByAction.get(action) ?? []
   list.push(deferred)
   pendingByAction.set(action, list)
+  return deferred
+}
+
+export function deferNextStorageSet(key?: string): DeferredResponse {
+  const deferred: DeferredStorageSet = {
+    ...makeDeferred(),
+    matches: items => key === undefined || Object.hasOwn(items, key),
+  }
+  pendingStorageSets.push(deferred)
+  return deferred
+}
+
+export function deferNextStorageRemove(key?: string): DeferredResponse {
+  const deferred: DeferredStorageRemove = {
+    ...makeDeferred(),
+    matches: keys => key === undefined || keys.includes(key),
+  }
+  pendingStorageRemoves.push(deferred)
   return deferred
 }
 
@@ -140,8 +170,20 @@ const storageGet = vi.fn((keys?: unknown, maybeCallback?: unknown) => {
 })
 
 const storageSet = vi.fn((items: Record<string, unknown>, maybeCallback?: unknown) => {
-  Object.assign(storageData, items)
   const cb = typeof maybeCallback === 'function' ? (maybeCallback as () => void) : undefined
+  const deferredIndex = pendingStorageSets.findIndex(entry => entry.matches(items))
+  const deferred = deferredIndex >= 0
+    ? pendingStorageSets.splice(deferredIndex, 1)[0]
+    : undefined
+  const commit = () => {
+    Object.assign(storageData, items)
+    cb?.()
+  }
+  if (deferred) {
+    const completion = deferred.promise.then(commit)
+    return cb ? undefined : completion
+  }
+  Object.assign(storageData, items)
   if (cb) {
     queueMicrotask(() => cb())
     return undefined
@@ -151,8 +193,20 @@ const storageSet = vi.fn((items: Record<string, unknown>, maybeCallback?: unknow
 
 const storageRemove = vi.fn((keys: string | string[], maybeCallback?: unknown) => {
   const arr = Array.isArray(keys) ? keys : [keys]
-  for (const k of arr) delete storageData[k]
   const cb = typeof maybeCallback === 'function' ? (maybeCallback as () => void) : undefined
+  const deferredIndex = pendingStorageRemoves.findIndex(entry => entry.matches(arr))
+  const deferred = deferredIndex >= 0
+    ? pendingStorageRemoves.splice(deferredIndex, 1)[0]
+    : undefined
+  const commit = () => {
+    for (const k of arr) delete storageData[k]
+    cb?.()
+  }
+  if (deferred) {
+    const completion = deferred.promise.then(commit)
+    return cb ? undefined : completion
+  }
+  for (const k of arr) delete storageData[k]
   if (cb) {
     queueMicrotask(() => cb())
     return undefined
@@ -162,6 +216,10 @@ const storageRemove = vi.fn((keys: string | string[], maybeCallback?: unknown) =
 
 export function seedStorage(data: Record<string, unknown>): void {
   Object.assign(storageData, data)
+}
+
+export function getStorageSnapshot(): Readonly<Record<string, unknown>> {
+  return structuredClone(storageData)
 }
 
 export function installChromeMock(): void {
