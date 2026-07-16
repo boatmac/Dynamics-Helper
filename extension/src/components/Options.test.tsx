@@ -497,13 +497,13 @@ describe('Options prompt source mode matrix', () => {
     expect(dhInstructions.value).toBe('CANONICAL-DH')
   })
 
-  it('UI-I2: touched Root controls effective Skill hydration during the hydration window', async () => {
+  it('UI-I2: touched Root preserves local Skills during the hydration window', async () => {
     const deferred = deferNextResponse('get_config')
     seedStorage({
       dh_prefs: {
         ...DEFAULT_PREFS,
         rootPath: 'C:\\StoredRoot',
-        skillDirectories: 'C:\\StaleSkills',
+        skillDirectories: 'C:\\RetainedGlobalSkills',
         useWorkspaceOnly: true,
       },
     })
@@ -516,7 +516,7 @@ describe('Options prompt source mode matrix', () => {
       status: 'success',
       data: {
         root_path: 'C:\\HostRoot',
-        skill_directories: ['C:\\CanonicalSkills'],
+        skill_directories: ['C:\\HostRoot\\.github\\skills'],
         prompt_source_status: { status: 'ok' },
         extension_preferences: { use_workspace_only: true },
       },
@@ -530,16 +530,16 @@ describe('Options prompt source mode matrix', () => {
     expect(toggle.disabled).toBe(true)
     expect(toggle.checked).toBe(true)
     expect(skills.disabled).toBe(false)
-    expect(skills.value).toBe('C:\\CanonicalSkills')
+    expect(skills.value).toBe('C:\\RetainedGlobalSkills')
   })
 
-  it('UI-I2: touched Repository ONLY controls Skill hydration during the hydration window', async () => {
+  it('UI-I2: touched Repository ONLY preserves local Skills during the hydration window', async () => {
     const deferred = deferNextResponse('get_config')
     seedStorage({
       dh_prefs: {
         ...DEFAULT_PREFS,
         rootPath: 'C:\\StoredRoot',
-        skillDirectories: 'C:\\StaleSkills',
+        skillDirectories: 'C:\\RetainedGlobalSkills',
         useWorkspaceOnly: true,
       },
     })
@@ -554,7 +554,7 @@ describe('Options prompt source mode matrix', () => {
       status: 'success',
       data: {
         root_path: 'C:\\HostRoot',
-        skill_directories: ['C:\\CanonicalSkills'],
+        skill_directories: ['C:\\HostRoot\\.github\\skills'],
         prompt_source_status: { status: 'ok' },
         extension_preferences: { use_workspace_only: true },
       },
@@ -564,7 +564,7 @@ describe('Options prompt source mode matrix', () => {
     expect(toggle.disabled).toBe(false)
     expect(toggle.checked).toBe(false)
     expect(skills.disabled).toBe(false)
-    expect(skills.value).toBe('C:\\CanonicalSkills')
+    expect(skills.value).toBe('C:\\RetainedGlobalSkills')
   })
 
   it('UI-I2: non-empty Root with stored false keeps all DH-specific inputs enabled', async () => {

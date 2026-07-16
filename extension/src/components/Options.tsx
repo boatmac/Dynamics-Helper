@@ -777,7 +777,12 @@ const OptionsInner: React.FC = () => {
                         }
 
                         // 2. Skill Directories (Array -> CSV String)
-                        if (Array.isArray(hostConfig.skill_directories) && !touched.has('skillDirectories')) {
+                        if (
+                            Array.isArray(hostConfig.skill_directories)
+                            && !touched.has('skillDirectories')
+                            && !touched.has('rootPath')
+                            && !touched.has('useWorkspaceOnly')
+                        ) {
                             // Check incoming preference first
                             const incomingWorkspaceOnly = touched.has('useWorkspaceOnly')
                                 ? prev.useWorkspaceOnly
