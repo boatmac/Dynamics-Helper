@@ -233,11 +233,133 @@ export async function fetchTeamBookmarks(
  */
 export type SyncStatus = 'committed' | 'unchanged' | 'failed' | 'skipped' | 'stale';
 
+export interface TeamSyncIdentity {
+    enabled: true;
+    manifestUrl: string;
+    teamId: string;
+}
+
 export interface SyncResult {
     status: SyncStatus;
+    identity: TeamSyncIdentity;
     items: any[];
+    syncedAt?: string;
     failure?: FetchFailure;
     failureStage?: 'manifest' | 'bookmarks';
+}
+
+export const TEAM_CACHE_KEYS = [
+    'dh_team',
+    'dh_team_items',
+    'dh_team_etag',
+    'dh_team_manifest',
+    'dh_team_manifest_etag',
+    'dh_team_manifest_url',
+    'dh_team_synced',
+] as const;
+
+let teamMutationQueue: Promise<void> = Promise.resolve();
+let teamSyncGeneration = 0;
+
+export function beginTeamSyncGeneration(): number {
+    teamSyncGeneration += 1;
+    return teamSyncGeneration;
+}
+
+function queueTeamMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const run = teamMutationQueue.then(mutation, mutation);
+    teamMutationQueue = run.then(() => undefined, () => undefined);
+    return run;
+}
+
+function readStorage(keys: string | string[]): Promise<any> {
+    return new Promise(resolve => chrome.storage.local.get(keys, resolve));
+}
+
+function setStorage(values: Record<string, unknown>): Promise<void> {
+    return new Promise(resolve => chrome.storage.local.set(values, resolve));
+}
+
+function removeStorage(keys: readonly string[]): Promise<void> {
+    return new Promise(resolve => chrome.storage.local.remove([...keys], resolve));
+}
+
+async function currentIdentityMatches(identity: TeamSyncIdentity): Promise<boolean> {
+    const current = await readStorage('dh_prefs');
+    const prefs = current.dh_prefs as {
+        teamCatalogEnabled?: boolean;
+        teamManifestUrl?: string;
+        team?: string;
+    } | undefined;
+    return prefs?.teamCatalogEnabled === identity.enabled
+        && prefs.teamManifestUrl === identity.manifestUrl
+        && prefs.team === identity.teamId;
+}
+
+async function commitForIdentity(
+    identity: TeamSyncIdentity,
+    expectedGeneration: number,
+    values: Record<string, unknown>,
+): Promise<boolean> {
+    return queueTeamMutation(async () => {
+        if (expectedGeneration !== teamSyncGeneration) return false;
+        if (!await currentIdentityMatches(identity)) return false;
+        await setStorage(values);
+        return true;
+    });
+}
+
+export async function writeTeamManifestForUrl(
+    manifestUrl: string,
+    manifest: TeamManifest,
+    etag: string,
+    expectedGeneration: number,
+): Promise<boolean> {
+    return queueTeamMutation(async () => {
+        if (expectedGeneration !== teamSyncGeneration) return false;
+        const current = await readStorage('dh_prefs');
+        const prefs = current.dh_prefs as {
+            teamCatalogEnabled?: boolean;
+            teamManifestUrl?: string;
+        } | undefined;
+        if (
+            prefs?.teamCatalogEnabled !== true
+            || prefs.teamManifestUrl !== manifestUrl
+        ) {
+            return false;
+        }
+        await setStorage({
+            dh_team_manifest: manifest,
+            dh_team_manifest_etag: etag,
+            dh_team_manifest_url: manifestUrl,
+        });
+        return true;
+    });
+}
+
+export async function readTeamManifestState(): Promise<{
+    prefs: {
+        teamCatalogEnabled?: boolean;
+        teamManifestUrl?: string;
+    };
+    etag?: string;
+    generation: number;
+}> {
+    return queueTeamMutation(async () => {
+        const data = await readStorage([
+            'dh_prefs',
+            'dh_team_manifest_etag',
+            'dh_team_manifest_url',
+        ]);
+        const prefs = data.dh_prefs || {};
+        return {
+            prefs,
+            etag: data.dh_team_manifest_url === prefs.teamManifestUrl
+                ? data.dh_team_manifest_etag as string | undefined
+                : undefined,
+            generation: beginTeamSyncGeneration(),
+        };
+    });
 }
 
 /**
@@ -260,46 +382,57 @@ export async function syncTeamBookmarks(
     manifestUrl: string,
     teamId: string,
 ): Promise<SyncResult> {
-    if (!manifestUrl) return { status: 'skipped', items: [] };
+    const generation = beginTeamSyncGeneration();
+    const identity: TeamSyncIdentity = {
+        enabled: true,
+        manifestUrl,
+        teamId,
+    };
+    if (!manifestUrl || !teamId) return { status: 'skipped', identity, items: [] };
 
     const cache = await new Promise<any>((resolve) => {
         chrome.storage.local.get(
-            ['dh_team_items', 'dh_team_etag', 'dh_team_manifest_etag', 'dh_team'],
+            [
+                'dh_team_items',
+                'dh_team_etag',
+                'dh_team_manifest_etag',
+                'dh_team_manifest_url',
+                'dh_team',
+            ],
             resolve,
         );
     });
+    const cacheMatchesUrl = cache.dh_team_manifest_url === manifestUrl;
 
     const cachedItemsForTeam = (): any[] =>
         cache.dh_team === teamId && Array.isArray(cache.dh_team_items)
             ? cache.dh_team_items
             : [];
-    const staleResult = (): SyncResult => ({ status: 'stale', items: [] });
-    const preferencesStillMatch = async (): Promise<boolean> => {
-        const current = await chrome.storage.local.get('dh_prefs');
-        const prefs = current.dh_prefs as {
-            teamCatalogEnabled?: boolean;
-            teamManifestUrl?: string;
-            team?: string;
-        } | undefined;
-        return prefs?.teamCatalogEnabled === true
-            && prefs.teamManifestUrl === manifestUrl
-            && prefs.team === teamId;
-    };
+    const staleResult = (): SyncResult => ({ status: 'stale', identity, items: [] });
+    const preferencesStillMatch = () => currentIdentityMatches(identity);
 
     // Step 1: refresh the manifest
-    const manifestResult = await fetchManifest(manifestUrl, cache.dh_team_manifest_etag);
+    const manifestResult = await fetchManifest(
+        manifestUrl,
+        cacheMatchesUrl ? cache.dh_team_manifest_etag : undefined,
+    );
     let manifest: TeamManifest | null = null;
 
     if (manifestResult === null) {
         // Empty URL (defensive; guarded above). Return quietly.
-        return { status: 'skipped', items: cachedItemsForTeam() };
+        return {
+            status: 'skipped',
+            identity,
+            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
+        };
     }
     if (!await preferencesStillMatch()) return staleResult();
     if (!manifestResult.ok) {
         warnFetchFailure('manifest', manifestResult.failure);
         return {
             status: 'failed',
-            items: cachedItemsForTeam(),
+            identity,
+            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
             failure: manifestResult.failure,
             failureStage: 'manifest',
         };
@@ -308,47 +441,65 @@ export async function syncTeamBookmarks(
     if (manifestResult.changed) {
         manifest = manifestResult.manifest;
         // Persist the new manifest + its ETag
-        await new Promise<void>((resolve) => {
-            chrome.storage.local.set({
-                dh_team_manifest: manifest,
-                dh_team_manifest_etag: manifestResult.etag,
-            }, resolve);
-        });
+        if (!await commitForIdentity(identity, generation, {
+            dh_team_manifest: manifest,
+            dh_team_manifest_etag: manifestResult.etag,
+            dh_team_manifest_url: manifestUrl,
+        })) return staleResult();
     } else {
         // 304 — reuse cached manifest
         const cached = await new Promise<any>((resolve) => {
-            chrome.storage.local.get(['dh_team_manifest'], resolve);
+            chrome.storage.local.get(
+                ['dh_team_manifest', 'dh_team_manifest_url'],
+                resolve,
+            );
         });
-        manifest = cached.dh_team_manifest || null;
+        manifest = cached.dh_team_manifest_url === manifestUrl
+            ? cached.dh_team_manifest || null
+            : null;
     }
     if (!await preferencesStillMatch()) return staleResult();
 
     if (!manifest) {
-        return { status: 'skipped', items: cachedItemsForTeam() };
+        return {
+            status: 'skipped',
+            identity,
+            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
+        };
     }
 
     // Step 2: find the entry for the currently-selected team
-    if (!teamId) return { status: 'skipped', items: [] };
     const entry = manifest.teams.find(t => t.id === teamId);
     if (!entry) {
         console.warn('[DH] Selected team not found in manifest; using cached items if any.');
-        return { status: 'skipped', items: cachedItemsForTeam() };
+        return {
+            status: 'skipped',
+            identity,
+            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
+        };
     }
 
     // Step 3: fetch the team's bookmark JSON
     // If we switched team since last sync, ignore old ETag
-    const currentEtag = cache.dh_team === teamId ? cache.dh_team_etag : undefined;
+    const currentEtag = cacheMatchesUrl && cache.dh_team === teamId
+        ? cache.dh_team_etag
+        : undefined;
     const bookmarksResult = await fetchTeamBookmarks(entry.url, currentEtag);
     if (!await preferencesStillMatch()) return staleResult();
 
     if (bookmarksResult === null) {
-        return { status: 'skipped', items: cachedItemsForTeam() };
+        return {
+            status: 'skipped',
+            identity,
+            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
+        };
     }
     if (!bookmarksResult.ok) {
         warnFetchFailure('bookmarks', bookmarksResult.failure);
         return {
             status: 'failed',
-            items: cachedItemsForTeam(),
+            identity,
+            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
             failure: bookmarksResult.failure,
             failureStage: 'bookmarks',
         };
@@ -356,26 +507,35 @@ export async function syncTeamBookmarks(
 
     if (!bookmarksResult.changed) {
         // 304 — refresh sync timestamp only
-        await new Promise<void>((resolve) => {
-            chrome.storage.local.set({ dh_team_synced: new Date().toISOString() }, resolve);
-        });
+        const syncedAt = new Date().toISOString();
+        if (!await commitForIdentity(identity, generation, { dh_team_synced: syncedAt })) {
+            return staleResult();
+        }
         return {
             status: 'unchanged',
-            items: Array.isArray(cache.dh_team_items) ? cache.dh_team_items : [],
+            identity,
+            items: cacheMatchesUrl && Array.isArray(cache.dh_team_items)
+                ? cache.dh_team_items
+                : [],
+            syncedAt,
         };
     }
 
     // New bookmarks — persist
-    await new Promise<void>((resolve) => {
-        chrome.storage.local.set({
-            dh_team: teamId,
-            dh_team_items: bookmarksResult.items,
-            dh_team_etag: bookmarksResult.etag,
-            dh_team_synced: new Date().toISOString(),
-        }, resolve);
-    });
+    const syncedAt = new Date().toISOString();
+    if (!await commitForIdentity(identity, generation, {
+        dh_team: teamId,
+        dh_team_items: bookmarksResult.items,
+        dh_team_etag: bookmarksResult.etag,
+        dh_team_synced: syncedAt,
+    })) return staleResult();
 
-    return { status: 'committed', items: bookmarksResult.items };
+    return {
+        status: 'committed',
+        identity,
+        items: bookmarksResult.items,
+        syncedAt,
+    };
 }
 
 /**
@@ -387,11 +547,9 @@ export async function syncTeamBookmarks(
  * Use this when the user picks "No team" from the dropdown.
  */
 export async function clearTeamSelection(): Promise<void> {
-    await new Promise<void>((resolve) => {
-        chrome.storage.local.remove(
-            ['dh_team', 'dh_team_items', 'dh_team_etag', 'dh_team_synced'],
-            resolve,
-        );
+    beginTeamSyncGeneration();
+    await queueTeamMutation(async () => {
+        await removeStorage(['dh_team', 'dh_team_items', 'dh_team_etag', 'dh_team_synced']);
     });
 }
 
@@ -402,10 +560,8 @@ export async function clearTeamSelection(): Promise<void> {
  * - the manifest survives and the dropdown remains populated.
  */
 export async function clearTeamBookmarks(): Promise<void> {
-    await new Promise<void>((resolve) => {
-        chrome.storage.local.remove(
-            ['dh_team', 'dh_team_items', 'dh_team_etag', 'dh_team_manifest', 'dh_team_manifest_etag', 'dh_team_synced'],
-            resolve,
-        );
+    beginTeamSyncGeneration();
+    await queueTeamMutation(async () => {
+        await removeStorage(TEAM_CACHE_KEYS);
     });
 }

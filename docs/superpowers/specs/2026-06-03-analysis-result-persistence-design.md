@@ -1,7 +1,7 @@
 # Analysis Result Persistence — Design
 
 **Date:** 2026-06-03
-**Status:** Implemented; amended 2026-07-15 for optional prompt error codes and 2026-07-17 for race-free separate identity acknowledgment
+**Status:** Implemented; amended 2026-07-15 for optional prompt error codes and 2026-07-17 for serialized mutations, coherent hydration, and per-identity acknowledgment keys
 **Author:** opencode session 2026-06-03
 
 ## 1. Historical Pre-Implementation Context (2026-06-03)
@@ -66,7 +66,7 @@ type PendingAnalysis = {
   startTime: number;        // Date.now() when SW forwarded to host
 };
 
-// Identity-only one-shot acknowledgment. It never contains/replaces a result.
+// Identity-only one-shot acknowledgment value. It never contains/replaces a result.
 type LastAnalysisIdentity = {
   caseNumber: string;
   requestId?: string;        // new records
@@ -74,7 +74,7 @@ type LastAnalysisIdentity = {
 };
 ```
 
-Storage keys: `dh_last_analysis`, `dh_pending_analysis`, `dh_seen_analysis`.
+Storage keys: `dh_last_analysis`, `dh_pending_analysis`, and one deterministic acknowledgment key per identity: `dh_seen_analysis:request:<encoded-case>:<encoded-requestId>` or `dh_seen_analysis:legacy:<encoded-case>:<timestamp>`. The historical singleton `dh_seen_analysis` remains a read-only compatibility fallback until Reset removes it.
 
 ### 4.2 Write paths (Service Worker owns writes)
 
@@ -96,10 +96,11 @@ is `analyze_error` with these storage operations:
 `useAnalysisHydration(caseNumber)` reads storage on mount and whenever the case
 identity changes:
 
-1. **FAB mount** — read `dh_last_analysis`, `dh_pending_analysis`, and `dh_seen_analysis`. If the result matches the current page case, is inside `STALE_WINDOW_MS`, has no legacy `seen=true`, and its identity does not match `dh_seen_analysis`, return an open hydrated popover together with its identity. New records use `requestId`; legacy records use exact `caseNumber + timestamp`.
+1. **FAB mount** — perform one `chrome.storage.local.get(null)` and derive `dh_last_analysis`, `dh_pending_analysis`, and the current result's per-identity acknowledgment from the same returned generation. If the result matches the current page case, is inside `STALE_WINDOW_MS`, has no legacy `seen=true`, and has no matching acknowledgment, return an open hydrated popover together with its identity.
 2. **Case identity change** — rerun the same checks when `caseNumber` changes.
 3. **Pending check** — on mount, read `dh_pending_analysis`. If matches current case, set the local `isAnalyzing` state so the FAB shows the "analyzing" spinner.
-4. **Consumption/dismissal** — write only the displayed identity to `dh_seen_analysis`. Never read-modify-write `dh_last_analysis`; an acknowledgment for A therefore cannot overwrite a newer B, even if the acknowledgment storage write completes last.
+4. **Consumption/dismissal** — write only the displayed identity to its deterministic key. Never read-modify-write `dh_last_analysis`; acknowledgments for A and B coexist and neither can overwrite a result.
+5. **Mutation serialization** — all pending/result/reset storage mutations use one module-level Promise queue. Host RPC runs outside this queue. Result completion enters the queue only for the short last-result write plus matching pending check/remove.
 
 ### 4.4 Constants
 
@@ -149,10 +150,10 @@ These are testable assertions the implementation must satisfy.
 | **P-I3** | When Host responds with `{status: 'error', error, error_code?}`, `dh_last_analysis` is written with `status='error'`, `content === error`, and the optional raw code; an inner Analyze code wins over an outer code. |
 | **P-I4** | When `sendNativeMessage` Promise rejects, `dh_last_analysis` is written with `status='error'`, no fabricated code, AND `dh_pending_analysis` is deleted. |
 | **R-I1** | FAB mount with matching unseen result inside stale window opens the popover automatically. |
-| **R-I2** | Immediate dismissal or hydrated-result consumption writes only the displayed identity to `dh_seen_analysis`. Hydration suppresses legacy `last.seen=true` or an exact seen-identity match. An A acknowledgment completing after newer B cannot rewrite B; B remains unseen and retains every field. |
+| **R-I2** | Immediate dismissal or hydrated-result consumption writes only the displayed identity's deterministic key. Hydration suppresses legacy `last.seen=true`, the legacy singleton match, or an exact prefixed-key match. A/B acknowledgments remain independently seen. |
 | **R-I3** | FAB mount with non-matching `caseNumber` does NOT open the popover. |
 | **R-I4** | FAB mount with result older than `STALE_WINDOW_MS` does NOT open the popover. |
-| **R-I5** | FAB mount with matching `dh_pending_analysis` sets `isAnalyzing = true`. |
+| **R-I5** | FAB mount with matching `dh_pending_analysis` from the same batched snapshot sets `isAnalyzing = true`; serialized A clear cannot remove newer B pending. |
 | **R-I6** | Immediate and rehydrated prompt-source errors localize a known `errorCode` at display time; unknown/absent codes retain the immediate path's safe fallback or the rehydrated raw stored fallback respectively. |
 
 ## 6. Edge cases
@@ -162,7 +163,7 @@ These are testable assertions the implementation must satisfy.
 User opens case A on tab 1, initiates analysis, switches to a separate window where they also have case A open in tab 2 (different FAB instance). When the response arrives:
 
 - SW writes storage (single source of truth, no contention).
-- Tab 1 (originating FAB): receives `sendResponse` from SW → renders the popover with the outgoing request identity. Dismissal writes that identity to `dh_seen_analysis` without touching the result.
+- Tab 1 (originating FAB): receives `sendResponse` from SW → renders the popover with the outgoing request identity. Dismissal writes that identity's deterministic `dh_seen_analysis:*` key without touching the result.
 - Tab 2 (passive FAB): the implemented hydration hook reads on mount/case change, not via a live `chrome.storage.onChanged` subscription. If it mounts after tab 1 wrote the matching acknowledgment, it does not reopen the result. This preserves one-shot semantics.
 
 **Possible follow-up:** add a live storage-change subscription if cross-tab

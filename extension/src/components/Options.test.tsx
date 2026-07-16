@@ -350,6 +350,7 @@ describe('Options hydration window — Inv6: Reset during window survives merge'
 
   it('does NOT revert reset values when host get_config responds with pre-reset config', async () => {
     const getConfigDeferred = deferNextResponse('get_config')
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
 
     render(<Options />)
     await findLanguageSelect()
@@ -362,6 +363,7 @@ describe('Options hydration window — Inv6: Reset during window survives merge'
     if (!resetButton) throw new Error('Reset button not found')
 
     fireEvent.click(resetButton)
+    await act(async () => resetResponse.resolve({ status: 'success' }))
 
     // Host responds with a NON-default value that would un-reset us if
     // touched set were empty. We pick language='zh' (DEFAULT_PREFS is
@@ -484,10 +486,12 @@ describe('Options delayed initial chrome hydration', () => {
     const storageGet = deferNextStorageGet('dh_prefs')
     const getConfig = deferNextResponse('get_config')
     const catchUp = deferNextResponse('update_config')
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     try {
       render(<Options />)
       fireEvent.click(await screen.findByRole('button', { name: /^reset$/i }))
+      await act(async () => resetResponse.resolve({ status: 'success' }))
 
       await act(async () => {
         outerStorageGet.resolve(undefined)
@@ -573,6 +577,14 @@ describe('Options selected-team refresh generation', () => {
 
   async function hydrateTeamOptions() {
     seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        teamCatalogEnabled: true,
+        teamManifestUrl: 'https://example.com/manifest.json',
+        team: 'team-a',
+      },
+      dh_team: 'team-a',
+      dh_team_manifest_url: 'https://example.com/manifest.json',
       dh_team_items: [{ type: 'link', label: 'Cached' }],
       dh_team_synced: '2026-01-01T00:00:00.000Z',
       dh_team_manifest: {
@@ -597,10 +609,7 @@ describe('Options selected-team refresh generation', () => {
   }
 
   it('ignores a stale refresh result after the selected team changes', async () => {
-    let resolveSync!: (value: unknown) => void
-    teamCatalogMock.syncTeamBookmarks.mockReturnValue(
-      new Promise(resolve => { resolveSync = resolve }),
-    )
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
     await hydrateTeamOptions()
 
     fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
@@ -612,18 +621,23 @@ describe('Options selected-team refresh generation', () => {
         teams: [{ id: 'stale', label: 'Stale Team', url: 'https://example.com/stale.json' }],
       },
     })
-    resolveSync({
-      status: 'stale',
-      items: [
-        { type: 'link', label: 'STALE ONE' },
-        { type: 'link', label: 'STALE TWO' },
-      ],
-    })
+    await act(async () => response.resolve({
+      status: 'error',
+      error: 'OLD TEAM FAILURE',
+      data: {
+        syncStatus: 'failed',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-a',
+        },
+      },
+    }))
 
-    await waitFor(() => expect(teamCatalogMock.syncTeamBookmarks).toHaveBeenCalled())
     expect(teamSelect.value).toBe('team-b')
     expect(document.body.textContent).not.toContain('Stale Team')
     expect(document.body.textContent).not.toContain('STALE ONE')
+    expect(document.body.textContent).not.toContain('OLD TEAM FAILURE')
     expect(document.body.textContent).toContain('1 items')
     expect(document.body.textContent).toContain(
       new Date('2026-01-01T00:00:00.000Z').toLocaleString(),
@@ -631,10 +645,8 @@ describe('Options selected-team refresh generation', () => {
   })
 
   it('ignores a stale refresh result after Reset without restoring UI state', async () => {
-    let resolveSync!: (value: unknown) => void
-    teamCatalogMock.syncTeamBookmarks.mockReturnValue(
-      new Promise(resolve => { resolveSync = resolve }),
-    )
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     try {
       await hydrateTeamOptions()
@@ -647,33 +659,40 @@ describe('Options selected-team refresh generation', () => {
       })
       fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await act(async () => resetResponse.resolve({ status: 'success' }))
       await waitFor(() => {
         expect(screen.getByRole('status').textContent).toContain('Reset complete')
       })
-      await act(async () => resolveSync({
-          status: 'stale',
-          items: [{ type: 'link', label: 'STALE AFTER RESET' }],
-          failure: { kind: 'auth', message: 'unsafe stale failure' },
+      await act(async () => response.resolve({
+        status: 'error',
+        error: 'OLD RESET FAILURE',
+        data: {
+          syncStatus: 'failed',
+          identity: {
+            enabled: true,
+            manifestUrl: 'https://example.com/manifest.json',
+            teamId: 'team-a',
+          },
+        },
       }))
 
       await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
       expect(document.body.textContent).not.toContain('STALE AFTER RESET')
+      expect(document.body.textContent).not.toContain('OLD RESET FAILURE')
       expect(document.body.textContent).not.toContain('Manifest auth failed')
-      expect(getStorageSnapshot()).not.toHaveProperty('dh_seen_analysis')
+      expect(chromeMockSpies.sendMessage.mock.calls.some(
+        call => (call[0] as any)?.type === 'RESET_EXTENSION_STATE',
+      )).toBe(true)
     } finally {
       confirm.mockRestore()
     }
   })
 
   it('ignores a stale refresh result after the manifest URL changes', async () => {
-    let resolveSync!: (value: unknown) => void
-    teamCatalogMock.syncTeamBookmarks.mockReturnValue(
-      new Promise(resolve => { resolveSync = resolve }),
-    )
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
     await hydrateTeamOptions()
 
     fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
-    await waitFor(() => expect(teamCatalogMock.syncTeamBookmarks).toHaveBeenCalled())
     const manifest = screen.getByPlaceholderText(
       'https://example.com/team-manifest.json',
     ) as HTMLInputElement
@@ -681,38 +700,359 @@ describe('Options selected-team refresh generation', () => {
       target: { value: 'https://example.com/new-manifest.json' },
     })
     await act(async () => {
-      resolveSync({
-        status: 'stale',
-        items: [
-          { type: 'link', label: 'STALE ONE' },
-          { type: 'link', label: 'STALE TWO' },
-        ],
-        failure: { kind: 'auth', message: 'stale auth failure' },
+      response.resolve({
+        status: 'error',
+        error: 'OLD URL FAILURE',
+        data: {
+          syncStatus: 'failed',
+          identity: {
+            enabled: true,
+            manifestUrl: 'https://example.com/manifest.json',
+            teamId: 'team-a',
+          },
+        },
       })
       await new Promise(resolve => setTimeout(resolve, 20))
     })
 
     expect(manifest.value).toBe('https://example.com/new-manifest.json')
     expect(document.body.textContent).not.toContain('STALE ONE')
+    expect(document.body.textContent).not.toContain('OLD URL FAILURE')
     expect(document.body.textContent).not.toContain('Manifest auth failed')
-    expect(document.body.textContent).toContain('1 items')
+    expect(document.body.textContent).toContain('0 items')
+    expect(document.body.textContent).toContain('Never synced')
+  })
+
+  it('applies an unchanged valid refresh result', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
+    await act(async () => response.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'unchanged',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-a',
+        },
+        items: [{ type: 'link', label: 'Cached' }],
+      },
+    }))
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('Last synced')
+      expect(document.body.textContent).toContain('1 items')
+    })
+  })
+
+  it('routes manual Refresh through the Service Worker and never calls the storage helper', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
+
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.some(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.teamId === 'team-a',
+    )).toBe(true))
+    expect(teamCatalogMock.syncTeamBookmarks).not.toHaveBeenCalled()
+    await act(async () => response.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'unchanged',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-a',
+        },
+        items: [{ type: 'link', label: 'Cached' }],
+        syncedAt: '2026-07-17T00:00:00.000Z',
+      },
+    }))
+  })
+
+  it('does not dispatch a team change until its preference mirror commits', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    const mirror = deferNextStorageSet('dh_prefs')
+    const before = chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG',
+    ).length
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'team-b' } })
+    await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+    expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG',
+    )).toHaveLength(before)
+
+    await act(async () => mirror.resolve(undefined))
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.some(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.teamId === 'team-b',
+    )).toBe(true))
+    await act(async () => response.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'skipped',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-b',
+        },
+      },
+    }))
+  })
+
+  it('does not timestamp a current skipped response', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
+    await act(async () => response.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'skipped',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-a',
+        },
+      },
+    }))
+
     expect(document.body.textContent).toContain(
       new Date('2026-01-01T00:00:00.000Z').toLocaleString(),
     )
   })
 
-  it('applies an unchanged valid refresh result', async () => {
-    teamCatalogMock.syncTeamBookmarks.mockResolvedValue({
-      status: 'unchanged',
-      items: [{ type: 'link', label: 'Cached' }],
-    })
+  it('surfaces a current identity-less Service Worker failure', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
     await hydrateTeamOptions()
-
     fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
+    await act(async () => response.resolve({
+      status: 'error',
+      error: 'generic Service Worker failure',
+    }))
+
+    await waitFor(() => expect(document.body.textContent).toContain(
+      'Could not fetch manifest',
+    ))
+  })
+
+  it('surfaces a current identity-less team-change failure', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'team-b' } })
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.some(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.teamId === 'team-b',
+    )).toBe(true))
+    await act(async () => response.resolve({
+      status: 'error',
+      error: 'generic team-change failure',
+    }))
+
+    await waitFor(() => expect(document.body.textContent).toContain(
+      'generic team-change failure',
+    ))
+  })
+
+  it('timestamps a current unchanged response', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
+    await act(async () => response.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'unchanged',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-a',
+        },
+        items: [{ type: 'link', label: 'Cached' }],
+        syncedAt: '2026-07-17T00:00:00.000Z',
+      },
+    }))
+
+    await waitFor(() => expect(document.body.textContent).toContain(
+      new Date('2026-07-17T00:00:00.000Z').toLocaleString(),
+    ))
+  })
+
+  it('ignores an old team-change failure after the URL changes', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'team-b' } })
+    const manifest = screen.getByPlaceholderText(
+      'https://example.com/team-manifest.json',
+    ) as HTMLInputElement
+    fireEvent.change(manifest, { target: { value: 'https://example.com/new.json' } })
+    await act(async () => response.resolve({
+      status: 'error',
+      error: 'OLD FAILURE MUST NOT WIN',
+      data: {
+        syncStatus: 'failed',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-b',
+        },
+      },
+    }))
+
+    expect(document.body.textContent).not.toContain('OLD FAILURE MUST NOT WIN')
+  })
+
+  it('an old callback cannot stop the spinner for a newer team sync', async () => {
+    const oldResponse = deferNextResponse('SYNC_TEAM_CATALOG')
+    const currentResponse = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    const teamSelect = screen.getByRole('combobox')
+    fireEvent.change(teamSelect, { target: { value: 'team-b' } })
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.some(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.teamId === 'team-b',
+    )).toBe(true))
+    fireEvent.change(teamSelect, { target: { value: 'team-a' } })
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG',
+    )).toHaveLength(2))
+    await waitFor(() => expect(screen.getByText('Syncing...')).toBeInTheDocument())
+    await act(async () => oldResponse.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'committed',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-b',
+        },
+        items: [],
+      },
+    }))
+
+    expect(screen.getByText('Syncing...')).toBeInTheDocument()
+    await act(async () => currentResponse.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'unchanged',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-a',
+        },
+        items: [{ type: 'link', label: 'Cached' }],
+      },
+    }))
+  })
+
+  it('an old failure cannot replace a newer successful team result', async () => {
+    const oldResponse = deferNextResponse('SYNC_TEAM_CATALOG')
+    const currentResponse = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    const teamSelect = screen.getByRole('combobox')
+    fireEvent.change(teamSelect, { target: { value: 'team-b' } })
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.some(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.teamId === 'team-b',
+    )).toBe(true))
+    fireEvent.change(teamSelect, { target: { value: 'team-a' } })
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG',
+    )).toHaveLength(2))
+
+    await act(async () => currentResponse.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'committed',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-a',
+        },
+        items: [{ type: 'link', label: 'NEW SUCCESS ITEM' }],
+        syncedAt: '2026-07-17T01:00:00.000Z',
+      },
+    }))
+    await act(async () => oldResponse.resolve({
+      status: 'error',
+      error: 'OLD FAILURE AFTER SUCCESS',
+      data: {
+        syncStatus: 'failed',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-b',
+        },
+      },
+    }))
+
+    expect(document.body.textContent).not.toContain('OLD FAILURE AFTER SUCCESS')
+    expect(document.body.textContent).toContain('1 items')
+    expect(document.body.textContent).toContain(
+      new Date('2026-07-17T01:00:00.000Z').toLocaleString(),
+    )
+  })
+
+  it('does not hydrate a cache stamped for another manifest URL', async () => {
+    seedStorage({
+      dh_team: 'team-a',
+      dh_team_manifest_url: 'https://example.com/old-manifest.json',
+      dh_team_items: [{ type: 'link', label: 'STALE CACHE ITEM' }],
+      dh_team_synced: '2026-07-17T00:00:00.000Z',
+      dh_team_manifest: {
+        version: 1,
+        teams: [{ id: 'stale', label: 'Stale Team', url: 'https://example.com/stale.json' }],
+      },
+    })
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: {
+        team_catalog_enabled: true,
+        team_manifest_url: 'https://example.com/manifest.json',
+        team: 'team-a',
+        use_workspace_only: false,
+      },
+    })
+    fireEvent.click(document.querySelector('[data-section="team"]') as HTMLButtonElement)
+
+    expect(document.body.textContent).not.toContain('Stale Team')
+    expect(document.body.textContent).not.toContain('STALE CACHE ITEM')
+    expect(document.body.textContent).toContain('Never synced')
+    expect(document.body.textContent).toContain('(0 items)')
+  })
+
+  it('hydrates a valid stamped cache after Host prefs arrive', async () => {
+    seedStorage({
+      dh_team: 'team-a',
+      dh_team_manifest_url: 'https://example.com/manifest.json',
+      dh_team_items: [{ type: 'link', label: 'CURRENT CACHE ITEM' }],
+      dh_team_synced: '2026-07-17T00:00:00.000Z',
+      dh_team_manifest: {
+        version: 1,
+        teams: [{ id: 'team-a', label: 'Team A', url: 'https://example.com/a.json' }],
+      },
+    })
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: {
+        team_catalog_enabled: true,
+        team_manifest_url: 'https://example.com/manifest.json',
+        team: 'team-a',
+        use_workspace_only: false,
+      },
+    })
+    fireEvent.click(document.querySelector('[data-section="team"]') as HTMLButtonElement)
 
     await waitFor(() => {
-      expect(document.body.textContent).toContain('Last synced')
-      expect(document.body.textContent).toContain('1 items')
+      expect(document.body.textContent).toContain('Team A')
+      expect(document.body.textContent).toContain('(1 items)')
+      expect(document.body.textContent).toContain(
+        new Date('2026-07-17T00:00:00.000Z').toLocaleString(),
+      )
     })
   })
 })
@@ -1407,6 +1747,7 @@ describe('Options prompt health and inspected sparse writes', () => {
 
   it('sends explicit empty user_instructions when Options is reset', async () => {
     const update = deferNextResponse('update_config')
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
     await hydrateOptions({
       root_path: '',
       _user_instructions_raw: 'CLEAR-ON-RESET',
@@ -1416,6 +1757,7 @@ describe('Options prompt health and inspected sparse writes', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     try {
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await act(async () => resetResponse.resolve({ status: 'success' }))
       await act(async () => update.resolve({
         status: 'success',
         data: { success: true, config_saved: true },
@@ -1923,6 +2265,7 @@ describe('Options prompt health and inspected sparse writes', () => {
     const cleanup = deferNextStorageRemove('dh_items')
     const resetUpdate = deferNextResponse('update_config')
     const editUpdate = deferNextResponse('update_config')
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
     await hydrateOptions({
       root_path: '',
       _user_instructions_raw: 'before-reset',
@@ -1932,6 +2275,7 @@ describe('Options prompt health and inspected sparse writes', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     try {
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await act(async () => resetResponse.resolve({ status: 'success' }))
       const editor = await openDhInstructionsEditor()
       fireEvent.change(editor, { target: { value: 'after-reset' } })
       fireEvent.blur(editor)
@@ -2091,6 +2435,7 @@ describe('Options prompt health and inspected sparse writes', () => {
       && message?.payload?.manifestOnly === true,
     )
     expect(manifestCalls).toHaveLength(1)
+    expect(manifestCalls[0].payload.resetCache).toBe(true)
     expect((getStorageSnapshot().dh_prefs as any).teamManifestUrl).toBe(
       'https://example.com/new-manifest.json',
     )

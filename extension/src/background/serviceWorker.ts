@@ -8,14 +8,29 @@ import { setupContextMenu } from './contextMenu';
 // teamCatalog is imported statically: dynamic import() is disallowed in
 // ServiceWorkerGlobalScope per the HTML spec
 // (https://github.com/w3c/ServiceWorker/issues/1356).
-import { syncTeamBookmarks, clearTeamSelection, fetchManifest } from '../utils/teamCatalog';
-import { syncManifestOnly, toSelectedTeamSyncResponse } from './teamManifestSync';
+import {
+    clearTeamBookmarks,
+    clearTeamSelection,
+    fetchManifest,
+    readTeamManifestState,
+    syncTeamBookmarks,
+    writeTeamManifestForUrl,
+} from '../utils/teamCatalog';
+import {
+    shouldClearSelectedTeamCache,
+    shouldReportTeamSyncFailure,
+    syncManifestOnly,
+    toSelectedTeamSyncResponse,
+} from './teamManifestSync';
 import {
     handleAnalyzeForward,
     normalizeNativeHostResponse,
     summarizeNativeHostMessage,
 } from './analyzeBridge';
-import type { AnalyzePersistContext } from '../utils/analysisStore';
+import {
+    resetAnalysisState,
+    type AnalyzePersistContext,
+} from '../utils/analysisStore';
 
 const NATIVE_HOST_NAME = "com.dynamics.helper.native";
 
@@ -305,48 +320,70 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 const teamId = message.payload?.teamId;
                 const manifestOnly = message.payload?.manifestOnly === true;
                 if (manifestOnly) {
+                    if (message.payload?.resetCache === true) {
+                        await clearTeamBookmarks();
+                    }
                     const response = await syncManifestOnly({
-                        readInitialState: async () => {
-                            const data = await chrome.storage.local.get([
-                                'dh_prefs',
-                                'dh_team_manifest_etag',
-                            ]);
-                            return {
-                                prefs: data.dh_prefs || {},
-                                etag: data.dh_team_manifest_etag as string | undefined,
-                            };
-                        },
+                        readInitialState: readTeamManifestState,
                         readCurrentPrefs: async () => {
                             const data = await chrome.storage.local.get('dh_prefs');
                             return data.dh_prefs || {};
                         },
                         fetchManifest,
-                        writeManifest: async (manifest, etag) => {
-                            await chrome.storage.local.set({
-                                dh_team_manifest: manifest,
-                                dh_team_manifest_etag: etag,
-                            });
-                        },
+                        writeManifest: (manifest, etag, manifestUrl, generation) =>
+                            writeTeamManifestForUrl(
+                                manifestUrl,
+                                manifest,
+                                etag,
+                                generation ?? -1,
+                            ),
                     });
                     sendResponse(response);
                 } else if (!teamId) {
                     await clearTeamSelection();
-                    sendResponse({ status: "success", data: { items: [] } });
+                    sendResponse({
+                        status: "success",
+                        data: {
+                            syncStatus: "skipped",
+                            identity: {
+                                enabled: true,
+                                manifestUrl: "",
+                                teamId: "",
+                            },
+                        },
+                    });
                 } else {
                     const prefsData = await new Promise<any>((resolve) => {
-                        chrome.storage.local.get(['dh_prefs'], resolve);
+                        chrome.storage.local.get(['dh_prefs', 'dh_team'], resolve);
                     });
                     const manifestUrl = prefsData.dh_prefs?.teamManifestUrl || '';
                     if (!manifestUrl) {
-                        sendResponse({ status: "error", error: "Manifest URL not configured" });
+                        sendResponse({
+                            status: "error",
+                            error: "Manifest URL not configured",
+                            data: {
+                                syncStatus: "failed",
+                                identity: {
+                                    enabled: true,
+                                    manifestUrl,
+                                    teamId,
+                                },
+                            },
+                        });
                     } else {
+                        if (shouldClearSelectedTeamCache(
+                            prefsData.dh_team as string | undefined,
+                            teamId,
+                        )) {
+                            await clearTeamSelection();
+                        }
                         const result = await syncTeamBookmarks(manifestUrl, teamId);
                         // Forward classified failure so a caller (currently
                         // hypothetical — no non-Options code uses this
                         // response payload) can distinguish silent degradation
                         // from a real sync. Ordinary failures carry the cache;
                         // stale responses expose no items to callers.
-                        sendResponse(toSelectedTeamSyncResponse(result, teamId));
+                        sendResponse(toSelectedTeamSyncResponse(result));
                     }
                 }
             } catch {
@@ -355,6 +392,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
         })();
         return true; // Keep channel open for async response
+    }
+
+    if (message.type === "CLEAR_TEAM_CATALOG") {
+        clearTeamBookmarks()
+            .then(() => sendResponse({ status: "success" }))
+            .catch(() => sendResponse({
+                status: "error",
+                error: "Team catalog clear failed",
+            }));
+        return true;
+    }
+
+    if (message.type === "RESET_EXTENSION_STATE") {
+        (async () => {
+            try {
+                await clearTeamBookmarks();
+                await resetAnalysisState();
+                sendResponse({ status: "success" });
+            } catch {
+                sendResponse({
+                    status: "error",
+                    error: "Extension state reset failed",
+                });
+            }
+        })();
+        return true;
     }
 });
 
@@ -383,27 +446,19 @@ async function syncTeamCatalogOnStartup() {
             // Use the same post-fetch preference gate as the Options-triggered
             // path so Reset cannot resurrect a stale manifest.
             await syncManifestOnly({
-                readInitialState: async () => {
-                    const current = await chrome.storage.local.get([
-                        'dh_prefs',
-                        'dh_team_manifest_etag',
-                    ]);
-                    return {
-                        prefs: current.dh_prefs || {},
-                        etag: current.dh_team_manifest_etag as string | undefined,
-                    };
-                },
+                readInitialState: readTeamManifestState,
                 readCurrentPrefs: async () => {
                     const current = await chrome.storage.local.get('dh_prefs');
                     return current.dh_prefs || {};
                 },
                 fetchManifest,
-                writeManifest: async (nextManifest, etag) => {
-                    await chrome.storage.local.set({
-                        dh_team_manifest: nextManifest,
-                        dh_team_manifest_etag: etag,
-                    });
-                },
+                writeManifest: (nextManifest, etag, capturedUrl, generation) =>
+                    writeTeamManifestForUrl(
+                        capturedUrl,
+                        nextManifest,
+                        etag,
+                        generation ?? -1,
+                    ),
             });
             return;
         }
@@ -412,16 +467,29 @@ async function syncTeamCatalogOnStartup() {
         // Startup hook has no UI to notify — log the outcome including any
         // classified failure. Cached items still get returned so the popup
         // has something to render.
-        if (result.status === 'stale') return;
-        if (result.failure) {
+        if (result.status === 'stale' || result.status === 'skipped') return;
+        const current = await chrome.storage.local.get('dh_prefs');
+        if (shouldReportTeamSyncFailure(result, current.dh_prefs || {})) {
+            const failure = result.failure!;
             console.warn('[DH-SW] Startup team sync failed', {
                 stage: result.failureStage,
-                kind: result.failure.kind,
-                ...(result.failure.httpStatus === undefined
+                kind: failure.kind,
+                ...(failure.httpStatus === undefined
                     ? {}
-                    : { httpStatus: result.failure.httpStatus }),
+                    : { httpStatus: failure.httpStatus }),
             });
+            return;
         }
+        const currentPrefs = (current.dh_prefs || {}) as {
+            teamCatalogEnabled?: boolean;
+            teamManifestUrl?: string;
+            team?: string;
+        };
+        if (
+            currentPrefs.teamCatalogEnabled !== result.identity.enabled
+            || currentPrefs.teamManifestUrl !== result.identity.manifestUrl
+            || currentPrefs.team !== result.identity.teamId
+        ) return;
         console.log(`[DH-SW] Team catalog sync completed with ${result.items.length} items.`);
     } catch {
         console.warn('[DH-SW] Team catalog sync failed unexpectedly.');

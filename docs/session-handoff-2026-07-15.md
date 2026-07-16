@@ -13,7 +13,7 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Implementation/documentation Tasks 1-7: approved through `90e6da3` (`docs(persistence): correct result lifecycle semantics`)
 - Task 8 evidence: `9127546` plus `73b8adf`; first-review fixes/evidence are `907acd0` and `6b9631f`
 - Second whole-branch Important-finding implementation: `cb760a4` plus comment-only follow-up `3e18244`
-- Controller broad whole-branch review: **pending rerun after the second fix wave**
+- Controller broad whole-branch review: **pending rerun after the third fix wave**
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
@@ -267,7 +267,7 @@ Starting head: `6b9631f0a42e7934913831c989214aea59a1ade0`. Product/test/document
 The coordinated TDD wave closes the six remaining Important findings:
 
 - Full selected-team sync rechecks current enabled/URL/team preferences before manifest, 304 timestamp, and changed bookmark commits; stale results are discriminated and ignored by Options and Service Worker consumers.
-- Analysis consumption writes a separate identity-only `dh_seen_analysis` acknowledgment and never read-modify-writes `dh_last_analysis`; legacy `last.seen` and exact case/timestamp identities remain supported.
+- Analysis consumption writes separate identity-only `dh_seen_analysis:*` acknowledgments and never read-modify-writes `dh_last_analysis`; the singleton acknowledgment, legacy `last.seen`, and exact case/timestamp identities remain supported for compatibility.
 - `usePrefs` registers `storage.onChanged` before its initial get and generation-gates a delayed stale snapshot, including reset-empty/default values.
 - Custom User Prompt truncation starts at the first authoritative line-level marker, so duplicate stale sections cannot survive.
 - Bookmark telemetry contains label/source/type but no URL, and related catch logs avoid thrown URL text.
@@ -283,6 +283,12 @@ Fresh gates run from product head `cb760a4` with every Host process using an iso
 - Isolated Python `compileall -q host` and `git diff --check 6b9631f..cb760a4`: **passed** with no diagnostics.
 
 The optional authenticated marker smoke remains skipped because safe isolation of authenticated user/session state was not guaranteed. The controller broad whole-branch review remains pending and must not be inferred from these focused/self-review results.
+
+## Third Review Fix Addendum - 2026-07-17
+
+Starting head: `b39b46a01de5c6a00176a89f084e61a50a7ce196`. The third coordinated TDD wave makes the Service Worker the serialized owner of Team Catalog cache/clear/reset state, preserves full selected-team sync status and identity, generation-gates every Options callback branch, and stamps/rejects mismatched cache identities. Analysis state now uses one mutation queue, one coherent hydration snapshot, and deterministic per-identity seen keys with legacy singleton compatibility. Host SDK/CLI exception paths log and return safe operation/type summaries only while preserving transport invalidation. Full commands, totals, mutations, commits, and concerns are recorded in `.superpowers/sdd/third-final-review-fix-report.md` after final verification.
+
+The optional authenticated marker smoke remains skipped unless safe authenticated isolation can be guaranteed. The controller broad whole-branch review remains pending after this wave; no focused/self-review result substitutes for it.
 
 ## Session Identity Contract
 

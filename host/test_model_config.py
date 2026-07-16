@@ -13,6 +13,7 @@ Covers:
 
 import inspect
 import unittest
+from unittest.mock import AsyncMock, MagicMock
 
 from host.dh_native_host import NativeHost
 import host.dh_native_host as dhm
@@ -59,6 +60,24 @@ class TestClassifyListModelsError(unittest.TestCase):
             NativeHost._classify_list_models_error(Exception("weird nonspecific error")),
             "unknown",
         )
+
+
+class TestListModelsSecrecy(unittest.IsolatedAsyncioTestCase):
+    async def test_sdk_exception_text_is_classified_but_never_logged_or_returned(self):
+        marker = "LIST-MODELS-SECRET-MARKER /private/prompt"
+        host = NativeHost.__new__(NativeHost)
+        host.client = MagicMock()
+        host.client.list_models = AsyncMock(
+            side_effect=RuntimeError(f"authentication failed {marker}")
+        )
+
+        with self.assertLogs("dh", level="WARNING") as captured:
+            result = await host.handle_list_models()
+
+        self.assertEqual(result["errorKind"], "auth")
+        observed = str(result) + "\n".join(captured.output)
+        self.assertNotIn(marker, observed)
+        self.assertIn("RuntimeError", result["error"])
 
 
 class TestModelConfigContract(unittest.TestCase):

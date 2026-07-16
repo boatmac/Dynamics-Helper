@@ -94,6 +94,22 @@ class TestClientWorkspaceInitialization(unittest.IsolatedAsyncioTestCase):
 
         host._refresh_session.assert_not_awaited()
 
+    async def test_initial_client_start_exception_does_not_log_raw_text(self):
+        marker = "INITIAL-START-SECRET-MARKER /private/prompt"
+        host = self._host_shell(r"C:\MyWorkbench\MyCases")
+        client = MagicMock()
+        client.start = AsyncMock(side_effect=RuntimeError(marker))
+
+        with (
+            patch.object(dhm.RuntimeConnection, "for_stdio", return_value=object()),
+            patch.object(dhm, "CopilotClient", return_value=client),
+            self.assertLogs("dh", level="INFO") as captured,
+        ):
+            await host.initialize_sdk()
+
+        self.assertNotIn(marker, "\n".join(captured.output))
+        self.assertIsNone(host.client)
+
     async def test_refresh_reinitializes_client_in_configured_root(self):
         root_path = r"C:\MyWorkbench\MyCases"
         host = self._host_shell(root_path, mock_refresh=False)
@@ -323,7 +339,7 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         host.root_path = root_path
         host.session = object()
         host.client = object()
-        host.last_session_error = "workspace config invalid"
+        host.last_session_error = "refresh Copilot session failed (RuntimeError)."
         host._refresh_session = AsyncMock(return_value=False)
         host.current_request_id = None
         host.send_progress = MagicMock()
@@ -343,7 +359,10 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result["status"], "error")
-        self.assertIn("workspace config invalid", result["error"])
+        self.assertEqual(
+            result["error"],
+            "refresh Copilot session failed (RuntimeError).",
+        )
         self.assertIsNone(host.session)
         self.assertIsNone(host.current_session_id)
         self.assertIsNone(host.current_case_id)

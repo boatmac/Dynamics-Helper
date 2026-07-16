@@ -131,7 +131,9 @@ const sendMessage = vi.fn((payload: unknown, maybeCallback?: unknown) => {
           typeof (payload as { payload: { action?: unknown } }).payload === 'object' &&
           'action' in (payload as { payload: { action?: unknown } }).payload
         ? String((payload as { payload: { action: unknown } }).payload.action)
-        : '<unknown>'
+        : payload && typeof payload === 'object' && 'type' in payload
+          ? String((payload as { type: unknown }).type)
+          : '<unknown>'
   messageLog.push({ action, payload })
 
   const queue = pendingByAction.get(action)

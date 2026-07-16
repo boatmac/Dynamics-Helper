@@ -12,6 +12,7 @@ interface TeamCatalogPrefs {
 interface ManifestInitialState {
     prefs: TeamCatalogPrefs
     etag?: string
+    generation?: number
 }
 
 export interface ManifestOnlyDeps {
@@ -21,7 +22,12 @@ export interface ManifestOnlyDeps {
         url: string,
         currentEtag?: string,
     ) => Promise<ManifestFetchResult | null>
-    writeManifest: (manifest: TeamManifest, etag: string) => Promise<void>
+    writeManifest: (
+        manifest: TeamManifest,
+        etag: string,
+        manifestUrl: string,
+        generation?: number,
+    ) => Promise<boolean | void>
 }
 
 export async function syncManifestOnly(deps: ManifestOnlyDeps): Promise<any> {
@@ -38,6 +44,16 @@ export async function syncManifestOnly(deps: ManifestOnlyDeps): Promise<any> {
     }
 
     const result = await deps.fetchManifest(manifestUrl, initial.etag)
+    const currentPrefs = await deps.readCurrentPrefs()
+    if (
+        currentPrefs.teamCatalogEnabled !== true
+        || currentPrefs.teamManifestUrl !== manifestUrl
+    ) {
+        return {
+            status: 'success',
+            data: { manifestOnly: true, changed: false, syncStatus: 'stale' },
+        }
+    }
     if (!result) {
         return { status: 'error', error: 'Manifest URL not configured' }
     }
@@ -50,34 +66,47 @@ export async function syncManifestOnly(deps: ManifestOnlyDeps): Promise<any> {
         }
     }
 
-    const currentPrefs = await deps.readCurrentPrefs()
-    if (
-        currentPrefs.teamCatalogEnabled !== true
-        || currentPrefs.teamManifestUrl !== manifestUrl
-    ) {
-        return {
-            status: 'success',
-            data: { manifestOnly: true, changed: false, skipped: true },
-        }
-    }
-
     if (result.changed) {
-        await deps.writeManifest(result.manifest, result.etag)
+        const committed = await deps.writeManifest(
+            result.manifest,
+            result.etag,
+            manifestUrl,
+            initial.generation,
+        )
+        if (committed === false) {
+            return {
+                status: 'success',
+                data: { manifestOnly: true, changed: false, syncStatus: 'stale' },
+            }
+        }
     }
     return {
         status: 'success',
-        data: { manifestOnly: true, changed: result.changed },
+        data: {
+            manifestOnly: true,
+            changed: result.changed,
+            syncStatus: result.changed ? 'committed' : 'unchanged',
+        },
     }
 }
 
 export function toSelectedTeamSyncResponse(
     result: SyncResult,
-    teamId: string,
 ): any {
-    if (result.status === 'stale') {
+    const data = {
+        syncStatus: result.status,
+        identity: result.identity,
+        ...(
+            result.status === 'skipped' || result.status === 'stale'
+                ? {}
+                : { items: result.items }
+        ),
+        ...(result.syncedAt ? { syncedAt: result.syncedAt } : {}),
+    }
+    if (result.status === 'skipped' || result.status === 'stale') {
         return {
             status: 'success',
-            data: { skipped: true, stale: true, teamId },
+            data,
         }
     }
     if (result.failure) {
@@ -87,8 +116,26 @@ export function toSelectedTeamSyncResponse(
             errorKind: result.failure.kind,
             httpStatus: result.failure.httpStatus,
             failureStage: result.failureStage,
-            data: { items: result.items, teamId },
+            data,
         }
     }
-    return { status: 'success', data: { items: result.items, teamId } }
+    return { status: 'success', data }
+}
+
+export function shouldClearSelectedTeamCache(
+    cachedTeamId: string | undefined,
+    requestedTeamId: string,
+): boolean {
+    return Boolean(cachedTeamId && cachedTeamId !== requestedTeamId)
+}
+
+export function shouldReportTeamSyncFailure(
+    result: SyncResult,
+    prefs: TeamCatalogPrefs & { team?: string },
+): boolean {
+    return result.status === 'failed'
+        && Boolean(result.failure)
+        && prefs.teamCatalogEnabled === result.identity.enabled
+        && prefs.teamManifestUrl === result.identity.manifestUrl
+        && prefs.team === result.identity.teamId
 }

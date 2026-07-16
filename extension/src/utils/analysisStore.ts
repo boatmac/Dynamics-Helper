@@ -1,5 +1,5 @@
 // Analysis result persistence — wrapper over chrome.storage.local for the
-// two new keys introduced by the C2a+ work (see
+// C2a+ result, pending, and per-identity acknowledgement keys (see
 // docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md).
 //
 // Why a dedicated module:
@@ -10,9 +10,10 @@
 // - Constants (STALE_WINDOW_MS, MAX_PENDING_AGE_MS) live next to the code
 //   that uses them — easy to find and change.
 //
-// Owner of result writes: Service Worker only. FAB acknowledges a displayed
-// identity through the separate dh_seen_analysis key, never by rewriting the
-// latest result.
+// Owner of result/pending/reset writes: Service Worker only. Short storage
+// mutations are serialized so a pending conditional clear cannot interleave a
+// newer pending write. FAB acknowledges a displayed identity through its own
+// per-identity key, never by rewriting the latest result.
 
 /** Persisted analysis result. Overwritten on every new analysis. */
 export interface LastAnalysis {
@@ -22,7 +23,7 @@ export interface LastAnalysis {
     title: string;            // popover title, already i18n'd at write time
     content: string;          // markdown body (success: full report; error: host message)
     timestamp: number;        // Date.now() at write
-    seen: boolean;            // legacy compatibility; new acknowledgments use KEY_SEEN
+    seen: boolean;            // legacy compatibility; new acks use prefixed identity keys
     durationSec?: number;     // success only
     savedTo?: string;         // success only, file path
     errorCode?: string;       // error only, raw Host machine-readable code
@@ -62,7 +63,46 @@ export const MAX_PENDING_DISPLAY_AGE_MS = 15 * 60 * 1000;
 
 const KEY_LAST = 'dh_last_analysis';
 const KEY_PENDING = 'dh_pending_analysis';
-const KEY_SEEN = 'dh_seen_analysis';
+const LEGACY_KEY_SEEN = 'dh_seen_analysis';
+export const SEEN_ANALYSIS_KEY_PREFIX = 'dh_seen_analysis:';
+
+let analysisMutationQueue: Promise<void> = Promise.resolve();
+
+function queueAnalysisMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const run = analysisMutationQueue.then(mutation, mutation);
+    analysisMutationQueue = run.then(() => undefined, () => undefined);
+    return run;
+}
+
+export function seenAnalysisKey(identity: LastAnalysisIdentity): string {
+    const encodedCase = encodeURIComponent(identity.caseNumber);
+    if (identity.requestId) {
+        return `${SEEN_ANALYSIS_KEY_PREFIX}request:${encodedCase}:${encodeURIComponent(identity.requestId)}`;
+    }
+    return `${SEEN_ANALYSIS_KEY_PREFIX}legacy:${encodedCase}:${String(identity.timestamp ?? '')}`;
+}
+
+export interface AnalysisSnapshot {
+    last: LastAnalysis | null;
+    pending: PendingAnalysis | null;
+    seen: LastAnalysisIdentity | null;
+}
+
+/** One storage generation for result, pending, and the current result's ack. */
+export async function getAnalysisSnapshot(): Promise<AnalysisSnapshot> {
+    const stored = await chrome.storage.local.get(null);
+    const last = (stored[KEY_LAST] as LastAnalysis | undefined) ?? null;
+    const pending = (stored[KEY_PENDING] as PendingAnalysis | undefined) ?? null;
+    const identity = last ? getLastAnalysisIdentity(last) : null;
+    const seen = identity
+        ? (
+            stored[seenAnalysisKey(identity)] as LastAnalysisIdentity | undefined
+            ?? stored[LEGACY_KEY_SEEN] as LastAnalysisIdentity | undefined
+            ?? null
+        )
+        : null;
+    return { last, pending, seen };
+}
 
 /** Read the current dh_last_analysis, or null if absent. */
 export async function getLastAnalysis(): Promise<LastAnalysis | null> {
@@ -78,15 +118,9 @@ export async function getLastAnalysis(): Promise<LastAnalysis | null> {
  * future mounts.
  */
 export async function setLastAnalysis(value: LastAnalysis): Promise<void> {
-    const pending = await getPendingAnalysis();
-    const toRemove: string[] = [];
-    if (pending && (Date.now() - pending.startTime) > MAX_PENDING_AGE_MS) {
-        toRemove.push(KEY_PENDING);
-    }
-    await chrome.storage.local.set({ [KEY_LAST]: value });
-    if (toRemove.length > 0) {
-        await chrome.storage.local.remove(toRemove);
-    }
+    await queueAnalysisMutation(async () => {
+        await setLastAnalysisInMutation(value);
+    });
 }
 
 /**
@@ -119,13 +153,26 @@ export function matchesLastAnalysisIdentity(
 export async function markSeen(
     expected: LastAnalysisIdentity,
 ): Promise<void> {
-    await chrome.storage.local.set({ [KEY_SEEN]: { ...expected } });
+    await queueAnalysisMutation(async () => {
+        await chrome.storage.local.set({
+            [seenAnalysisKey(expected)]: { ...expected },
+        });
+    });
 }
 
-/** Read the last identity acknowledged by FAB, or null if absent. */
-export async function getSeenAnalysis(): Promise<LastAnalysisIdentity | null> {
-    const result = await chrome.storage.local.get(KEY_SEEN);
-    return (result[KEY_SEEN] as LastAnalysisIdentity | undefined) ?? null;
+/** Read the acknowledgement for an identity, including the singleton legacy key. */
+export async function getSeenAnalysis(
+    identity?: LastAnalysisIdentity,
+): Promise<LastAnalysisIdentity | null> {
+    const keys = identity
+        ? [seenAnalysisKey(identity), LEGACY_KEY_SEEN]
+        : [LEGACY_KEY_SEEN];
+    const result = await chrome.storage.local.get(keys);
+    return (
+        (identity ? result[seenAnalysisKey(identity)] : undefined) as LastAnalysisIdentity | undefined
+        ?? result[LEGACY_KEY_SEEN] as LastAnalysisIdentity | undefined
+        ?? null
+    );
 }
 
 /** Read the current dh_pending_analysis, or null if absent. */
@@ -136,12 +183,16 @@ export async function getPendingAnalysis(): Promise<PendingAnalysis | null> {
 
 /** Write dh_pending_analysis. */
 export async function setPendingAnalysis(value: PendingAnalysis): Promise<void> {
-    await chrome.storage.local.set({ [KEY_PENDING]: value });
+    await queueAnalysisMutation(async () => {
+        await chrome.storage.local.set({ [KEY_PENDING]: value });
+    });
 }
 
 /** Unconditionally clear dh_pending_analysis. */
 export async function clearPendingAnalysis(): Promise<void> {
-    await chrome.storage.local.remove(KEY_PENDING);
+    await queueAnalysisMutation(async () => {
+        await chrome.storage.local.remove(KEY_PENDING);
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -203,17 +254,18 @@ export async function recordAnalyzeSuccess(
     ctx: AnalyzePersistContext,
     hostData: { markdown?: string; saved_to?: string },
 ): Promise<void> {
-    await setLastAnalysis({
-        caseNumber: ctx.caseNumber,
-        requestId: ctx.requestId,
-        status: 'success',
-        title: ctx.successTitle,
-        content: hostData?.markdown ?? '',
-        timestamp: Date.now(),
-        seen: false,
-        savedTo: hostData?.saved_to,
+    await queueAnalysisMutation(async () => {
+        await setLastAnalysisInMutation({
+            caseNumber: ctx.caseNumber,
+            requestId: ctx.requestId,
+            status: 'success',
+            title: ctx.successTitle,
+            content: hostData?.markdown ?? '',
+            timestamp: Date.now(),
+            seen: false,
+            savedTo: hostData?.saved_to,
+        });
     });
-    await clearPendingIfMatches(ctx.requestId);
 }
 
 /**
@@ -226,17 +278,41 @@ export async function recordAnalyzeError(
     errorMessage: string,
     errorCode?: string,
 ): Promise<void> {
-    await setLastAnalysis({
-        caseNumber: ctx.caseNumber,
-        requestId: ctx.requestId,
-        status: 'error',
-        title: ctx.errorTitle,
-        content: errorMessage,
-        timestamp: Date.now(),
-        seen: false,
-        ...(errorCode ? { errorCode } : {}),
+    await queueAnalysisMutation(async () => {
+        await setLastAnalysisInMutation({
+            caseNumber: ctx.caseNumber,
+            requestId: ctx.requestId,
+            status: 'error',
+            title: ctx.errorTitle,
+            content: errorMessage,
+            timestamp: Date.now(),
+            seen: false,
+            ...(errorCode ? { errorCode } : {}),
+        });
     });
-    await clearPendingIfMatches(ctx.requestId);
+}
+
+async function setLastAnalysisInMutation(value: LastAnalysis): Promise<void> {
+    const stored = await chrome.storage.local.get(KEY_PENDING);
+    const pending = (stored[KEY_PENDING] as PendingAnalysis | undefined) ?? null;
+    await chrome.storage.local.set({ [KEY_LAST]: value });
+    if (
+        pending
+        && (
+            pending.requestId === value.requestId
+            || (Date.now() - pending.startTime) > MAX_PENDING_AGE_MS
+        )
+    ) {
+        await chrome.storage.local.remove(KEY_PENDING);
+    }
+}
+
+async function clearPendingIfMatchesInMutation(requestId: string): Promise<void> {
+    const stored = await chrome.storage.local.get(KEY_PENDING);
+    const current = (stored[KEY_PENDING] as PendingAnalysis | undefined) ?? null;
+    if (current?.requestId === requestId) {
+        await chrome.storage.local.remove(KEY_PENDING);
+    }
 }
 
 /**
@@ -247,8 +323,23 @@ export async function recordAnalyzeError(
  * wipe B's pending marker. Guard with requestId equality.
  */
 export async function clearPendingIfMatches(requestId: string): Promise<void> {
-    const current = await getPendingAnalysis();
-    if (current && current.requestId === requestId) {
-        await chrome.storage.local.remove(KEY_PENDING);
-    }
+    await queueAnalysisMutation(async () => {
+        await clearPendingIfMatchesInMutation(requestId);
+    });
+}
+
+/** Serialized Service Worker reset for all analysis state and ack generations. */
+export async function resetAnalysisState(): Promise<void> {
+    await queueAnalysisMutation(async () => {
+        const stored = await chrome.storage.local.get(null);
+        const keys = Object.keys(stored).filter(key =>
+            key === KEY_LAST
+            || key === KEY_PENDING
+            || key === LEGACY_KEY_SEEN
+            || key.startsWith(SEEN_ANALYSIS_KEY_PREFIX),
+        );
+        if (keys.length > 0) {
+            await chrome.storage.local.remove(keys);
+        }
+    });
 }

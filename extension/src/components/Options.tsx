@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { mergeMenus, MenuItem } from './MenuLogic';
+import { mergeMenus, MenuItem, teamCacheIsCurrent } from './MenuLogic';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { 
@@ -921,9 +921,18 @@ const OptionsInner: React.FC = () => {
             if (pendingManifestUrl === previousUrl) return;
 
             lastFetchedManifestUrlRef.current = pendingManifestUrl;
+            const generation = ++teamRefreshGenerationRef.current;
             chrome.runtime.sendMessage(
-                { type: "SYNC_TEAM_CATALOG", payload: { manifestOnly: true } },
+                {
+                    type: "SYNC_TEAM_CATALOG",
+                    payload: { manifestOnly: true, resetCache: true },
+                },
                 (response) => {
+                    if (
+                        generation !== teamRefreshGenerationRef.current
+                        || prefsRef.current.teamCatalogEnabled !== true
+                        || prefsRef.current.teamManifestUrl !== pendingManifestUrl
+                    ) return;
                     if (chrome.runtime.lastError) {
                         showError(t('manifestFetchFailed'), 5000);
                         setTeamFetchError({ kind: 'network' });
@@ -1264,14 +1273,34 @@ const OptionsInner: React.FC = () => {
 
         // Load team catalog metadata
         chrome.storage.local.get(
-            ['dh_team_synced', 'dh_team_items', 'dh_team_manifest', 'dh_team_collapsed_labels'],
+            [
+                'dh_team_synced',
+                'dh_team_items',
+                'dh_team_manifest',
+                'dh_team_manifest_url',
+                'dh_team',
+                'dh_prefs',
+                'dh_team_collapsed_labels',
+            ],
             (data: any) => {
-                if (data.dh_team_synced) setTeamSynced(data.dh_team_synced);
-                if (Array.isArray(data.dh_team_items)) setTeamItems(data.dh_team_items);
+                const cacheCurrent = teamCacheIsCurrent(data);
+                if (cacheCurrent && data.dh_team_synced) {
+                    setTeamSynced(data.dh_team_synced);
+                }
+                if (cacheCurrent && Array.isArray(data.dh_team_items)) {
+                    setTeamItems(data.dh_team_items);
+                }
                 // Populate dropdown from cached manifest. No fetch here - the service
                 // worker startup hook is the only auto-fetch trigger (spec § 3.4).
                 // To force a refresh, the user clicks the Refresh button below.
-                if (data.dh_team_manifest && Array.isArray(data.dh_team_manifest.teams)) {
+                const manifestMatchesUrl =
+                    data.dh_team_manifest_url === data.dh_prefs?.teamManifestUrl;
+                if (
+                    data.dh_prefs?.teamCatalogEnabled === true
+                    && manifestMatchesUrl
+                    && data.dh_team_manifest
+                    && Array.isArray(data.dh_team_manifest.teams)
+                ) {
                     setTeamList(
                         data.dh_team_manifest.teams.map((t: any) => ({ id: t.id, label: t.label })),
                     );
@@ -1300,6 +1329,51 @@ const OptionsInner: React.FC = () => {
         });
     }, [teamCollapsedLabels]);
 
+    useEffect(() => {
+        if (
+            prefs.teamCatalogEnabled !== true
+            || !prefs.teamManifestUrl
+        ) {
+            return;
+        }
+        let cancelled = false;
+        chrome.storage.local.get([
+            'dh_team_synced',
+            'dh_team_items',
+            'dh_team_manifest',
+            'dh_team_manifest_url',
+            'dh_team',
+        ], data => {
+            if (cancelled) return;
+            const current = { ...data, dh_prefs: prefsRef.current };
+            const manifest = data.dh_team_manifest as {
+                teams?: Array<{ id: string; label: string }>;
+            } | undefined;
+            const manifestCurrent =
+                data.dh_team_manifest_url === prefsRef.current.teamManifestUrl;
+            if (
+                manifestCurrent
+                && manifest
+                && Array.isArray(manifest.teams)
+            ) {
+                setTeamList(manifest.teams.map(
+                    (team: any) => ({ id: team.id, label: team.label }),
+                ));
+            }
+            if (teamCacheIsCurrent(current)) {
+                setTeamItems(Array.isArray(data.dh_team_items) ? data.dh_team_items : []);
+                setTeamSynced(
+                    typeof data.dh_team_synced === 'string'
+                        ? data.dh_team_synced
+                        : '',
+                );
+            }
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [prefs.teamCatalogEnabled, prefs.teamManifestUrl, prefs.team]);
+
     // Watch chrome.storage for team-catalog writes from elsewhere — most
     // importantly the Service Worker's manifestOnly fetch (triggered by
     // the URL field onBlur) writing dh_team_manifest. Before this hook,
@@ -1313,28 +1387,54 @@ const OptionsInner: React.FC = () => {
             areaName: string
         ) => {
             if (areaName !== 'local') return;
-            if (changes.dh_team_manifest) {
-                const newVal: any = changes.dh_team_manifest.newValue;
-                if (newVal && Array.isArray(newVal.teams)) {
-                    setTeamList(
-                        newVal.teams.map((t: any) => ({ id: t.id, label: t.label })),
-                    );
-                } else {
-                    // dh_team_manifest was deleted (e.g. clearTeamBookmarks).
-                    // Clearing teamList here is redundant with the explicit
-                    // setTeamList([]) in the case (a) onBlur path, but
-                    // covers any future call site that forgets to do it.
-                    setTeamList([]);
+            const hasRelevantChange = changes.dh_team_manifest
+                || changes.dh_team_items
+                || changes.dh_team_synced;
+            if (!hasRelevantChange) return;
+
+            chrome.storage.local.get([
+                'dh_team_manifest_url',
+                'dh_team',
+            ], identity => {
+                const current = {
+                    ...identity,
+                    dh_prefs: prefsRef.current,
+                };
+                const manifestCurrent = prefsRef.current.teamCatalogEnabled === true
+                    && identity.dh_team_manifest_url === prefsRef.current.teamManifestUrl;
+                const selectedCacheCurrent = teamCacheIsCurrent(current);
+
+                if (changes.dh_team_manifest) {
+                    const newVal: any = changes.dh_team_manifest.newValue;
+                    if (
+                        manifestCurrent
+                        && newVal
+                        && Array.isArray(newVal.teams)
+                    ) {
+                        setTeamList(
+                            newVal.teams.map((t: any) => ({ id: t.id, label: t.label })),
+                        );
+                    } else if (newVal === undefined) {
+                        setTeamList([]);
+                    }
                 }
-            }
-            if (changes.dh_team_items) {
-                const newVal: any = changes.dh_team_items.newValue;
-                setTeamItems(Array.isArray(newVal) ? newVal : []);
-            }
-            if (changes.dh_team_synced) {
-                const newVal: any = changes.dh_team_synced.newValue;
-                setTeamSynced(typeof newVal === 'string' ? newVal : '');
-            }
+                if (changes.dh_team_items) {
+                    const newVal: any = changes.dh_team_items.newValue;
+                    if (selectedCacheCurrent && Array.isArray(newVal)) {
+                        setTeamItems(newVal);
+                    } else if (newVal === undefined) {
+                        setTeamItems([]);
+                    }
+                }
+                if (changes.dh_team_synced) {
+                    const newVal: any = changes.dh_team_synced.newValue;
+                    if (selectedCacheCurrent && typeof newVal === 'string') {
+                        setTeamSynced(newVal);
+                    } else if (newVal === undefined) {
+                        setTeamSynced('');
+                    }
+                }
+            });
         };
         chrome.storage.onChanged.addListener(onStorageChanged);
         return () => chrome.storage.onChanged.removeListener(onStorageChanged);
@@ -1383,7 +1483,13 @@ const OptionsInner: React.FC = () => {
     // setItems directly into chrome.storage via its own useEffect (see
     // dh_items persistence above). Mixing the two would create double-writes
     // on every editor click. Spec § 3.5 / AGENTS.md § 3 (after C7 update).
-    const persistPrefs = (nextPrefs: Preferences, opts?: { fetchManifest?: boolean }) => {
+    const persistPrefs = (
+        nextPrefs: Preferences,
+        opts?: {
+            fetchManifest?: boolean;
+            onMirrorCommitted?: () => void;
+        },
+    ) => {
         // Three-segment persist (see spec § 4.1):
         //
         //   Segment 1: storage write — always runs (safe, storage is just a
@@ -1410,6 +1516,9 @@ const OptionsInner: React.FC = () => {
         }
         const mirrorIntent = createPrefsMirrorIntent(intent.prefs);
         writePrefsMirror(mirrorIntent, () => {
+            if (intent.generation === configUpdateRequestRevisionRef.current) {
+                opts?.onMirrorCommitted?.();
+            }
             if (prefsHydratedRef.current) {
                 flushPendingManifestFetch(mirrorIntent.prefs);
             }
@@ -1444,6 +1553,15 @@ const OptionsInner: React.FC = () => {
         setIsSyncingTeam(false);
     };
 
+    const teamSyncIsCurrent = (
+        generation: number,
+        manifestUrl: string,
+        teamId: string,
+    ) => generation === teamRefreshGenerationRef.current
+        && prefsRef.current.teamCatalogEnabled === true
+        && prefsRef.current.teamManifestUrl === manifestUrl
+        && prefsRef.current.team === teamId;
+
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
             invalidateTeamRefresh();
@@ -1459,7 +1577,8 @@ const OptionsInner: React.FC = () => {
             markUserTouched(Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>);
             setCurrentPrefs(DEFAULT_PREFS);
             persistPrefs(DEFAULT_PREFS);
-            chrome.storage.local.remove(["dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels", "dh_last_analysis", "dh_pending_analysis", "dh_seen_analysis"], () => {
+            chrome.runtime.sendMessage({ type: "RESET_EXTENSION_STATE" }, () => {
+                chrome.storage.local.remove(["dh_items", "dh_team_collapsed_labels"], () => {
                 // Wrap loaded items in collapseFolders so Reset produces the
                 // same folded-by-default tree the mount path produces. Without
                 // this, items.json defaults render fully expanded after Reset
@@ -1471,6 +1590,7 @@ const OptionsInner: React.FC = () => {
                 setTeamSynced("");
                 setTeamCollapsedLabels(new Set());
                 showSuccess(t('resetComplete'), 2000);
+                });
             });
         }
     };
@@ -1478,6 +1598,8 @@ const OptionsInner: React.FC = () => {
     // --- Team Catalog Handlers ---
     const handleTeamChange = (teamId: string) => {
         invalidateTeamRefresh();
+        const generation = teamRefreshGenerationRef.current;
+        const manifestUrl = prefsRef.current.teamManifestUrl || '';
         const selectedTeam = teamList.find(t => t.id === teamId);
         // Plan A: team selection is "instant persist". Symptom 3 fix —
         // previously this only called setPrefs (React state), so refreshing
@@ -1485,46 +1607,69 @@ const OptionsInner: React.FC = () => {
         // dh_team_items was already cleared (the SW message below ran
         // immediately). Now updatePref writes dh_prefs to storage AND fires
         // update_config to host in a single shot, keeping state aligned.
-        updatePref({
+        const dispatchTeamSync = () => {
+            if (!teamSyncIsCurrent(generation, manifestUrl, teamId)) return;
+            setIsSyncingTeam(true);
+            chrome.runtime.sendMessage({
+                type: "SYNC_TEAM_CATALOG",
+                payload: { teamId }
+            }, (response) => {
+                if (!teamSyncIsCurrent(generation, manifestUrl, teamId)) return;
+                setIsSyncingTeam(false);
+                if (chrome.runtime.lastError) {
+                    showError(`${t('teamSyncFailed')}: ${chrome.runtime.lastError.message}`, 3000);
+                    return;
+                }
+                const syncStatus = response?.data?.syncStatus;
+                const responseIdentity = response?.data?.identity;
+                const hasResponseIdentity = responseIdentity !== undefined;
+                if (
+                    hasResponseIdentity
+                    && (
+                        responseIdentity?.enabled !== true
+                        || responseIdentity?.manifestUrl !== manifestUrl
+                        || responseIdentity?.teamId !== teamId
+                    )
+                ) return;
+                if (response?.status === "success") {
+                    if (syncStatus === 'committed' || syncStatus === 'unchanged') {
+                        setTeamItems(response.data.items || []);
+                        setTeamSynced(response.data.syncedAt || new Date().toISOString());
+                    }
+                } else {
+                    showError(`${t('teamSyncFailed')}: ${response?.error || t('unknownError')}`, 3000);
+                }
+            });
+        };
+        const dispatchTeamClear = () => {
+            if (
+                generation !== teamRefreshGenerationRef.current
+                || prefsRef.current.teamCatalogEnabled !== true
+                || prefsRef.current.teamManifestUrl !== manifestUrl
+                || prefsRef.current.team
+            ) return;
+            chrome.runtime.sendMessage({
+                type: "SYNC_TEAM_CATALOG",
+                payload: { teamId: null }
+            });
+        };
+        const next = updateCurrentPrefs({
             team: teamId || undefined,
             teamLabel: selectedTeam?.label || undefined,
+        });
+        markUserTouched(['team', 'teamLabel']);
+        persistPrefs(next, {
+            onMirrorCommitted: teamId ? dispatchTeamSync : dispatchTeamClear,
         });
 
         if (!teamId) {
             // Clear team data
             setTeamItems([]);
             setTeamSynced("");
-            chrome.runtime.sendMessage({
-                type: "SYNC_TEAM_CATALOG",
-                payload: { teamId: null }
-            });
             return;
         }
 
-        // Trigger sync
-        setIsSyncingTeam(true);
-        chrome.runtime.sendMessage({
-            type: "SYNC_TEAM_CATALOG",
-            payload: { teamId }
-        }, (response) => {
-            setIsSyncingTeam(false);
-            if (chrome.runtime.lastError) {
-                showError(`${t('teamSyncFailed')}: ${chrome.runtime.lastError.message}`, 3000);
-                return;
-            }
-            if (response?.status === "success") {
-                if (
-                    response.data?.stale === true
-                    || prefsRef.current.team !== teamId
-                ) {
-                    return;
-                }
-                setTeamItems(response.data.items || []);
-                setTeamSynced(new Date().toISOString());
-            } else {
-                showError(`${t('teamSyncFailed')}: ${response?.error || t('unknownError')}`, 3000);
-            }
-        });
+        // Sync starts only after the matching dh_prefs mirror is committed.
     };
 
     // Model & Performance: fetch the available Copilot models from the host
@@ -1583,65 +1728,72 @@ const OptionsInner: React.FC = () => {
     }, []);
 
     const handleTeamRefresh = async () => {
-        const manifestUrl = prefs.teamManifestUrl;
-        const teamId = prefs.team;
+        const manifestUrl = prefsRef.current.teamManifestUrl;
+        const teamId = prefsRef.current.team;
         if (!manifestUrl || !teamId) return;
         const generation = ++teamRefreshGenerationRef.current;
-        const refreshIsCurrent = () =>
-            generation === teamRefreshGenerationRef.current
-            && prefsRef.current.teamCatalogEnabled === true
-            && prefsRef.current.teamManifestUrl === manifestUrl
-            && prefsRef.current.team === teamId;
+        const refreshIsCurrent = () => teamSyncIsCurrent(
+            generation,
+            manifestUrl,
+            teamId,
+        );
         setIsSyncingTeam(true);
         setTeamFetchError(null);
-        try {
-            const { syncTeamBookmarks } = await import('../utils/teamCatalog');
-            const result = await syncTeamBookmarks(manifestUrl, teamId);
-            if (result.status === 'stale' || !refreshIsCurrent()) {
+        chrome.runtime.sendMessage({
+            type: "SYNC_TEAM_CATALOG",
+            payload: { teamId },
+        }, async (response) => {
+            if (!refreshIsCurrent()) return;
+            if (chrome.runtime.lastError) {
+                setTeamFetchError({ kind: 'network' });
+                setIsSyncingTeam(false);
                 return;
             }
-
-            if (result.failure) {
+            const syncStatus = response?.data?.syncStatus;
+            const responseIdentity = response?.data?.identity;
+            const hasResponseIdentity = responseIdentity !== undefined;
+            if (
+                hasResponseIdentity
+                && (
+                    responseIdentity?.enabled !== true
+                    || responseIdentity?.manifestUrl !== manifestUrl
+                    || responseIdentity?.teamId !== teamId
+                )
+            ) {
+                setIsSyncingTeam(false);
+                return;
+            }
+            if (response?.status !== 'success') {
                 // Render the selected team's cache on an ordinary failure.
-                setTeamItems(result.items);
+                setTeamItems(response?.data?.items || []);
                 // Refresh actually failed. Show the classified error and
                 // — crucially — do NOT bump the synced-at timestamp. The
                 // pre-fix behaviour of setTeamSynced(now) on a silently-
                 // failed refresh was exactly what the SAS-expiry bug
                 // report was about.
                 setTeamFetchError({
-                    kind: result.failure.kind,
-                    httpStatus: result.failure.httpStatus,
+                    kind: response?.errorKind || 'unknown',
+                    httpStatus: response?.httpStatus,
                 });
-                if (result.failure.kind === 'auth') {
+                if (response?.errorKind === 'auth') {
                     showError(t('manifestFetchAuthToast'), 6000);
                 }
-            } else {
+            } else if (syncStatus === 'committed' || syncStatus === 'unchanged') {
                 // Refresh the dropdown if the manifest changed during this sync
                 const cached = await new Promise<any>((resolve) => {
                     chrome.storage.local.get(['dh_team_manifest'], resolve);
                 });
                 if (!refreshIsCurrent()) return;
-                setTeamItems(result.items);
-                setTeamSynced(new Date().toISOString());
+                setTeamItems(response.data.items || []);
+                setTeamSynced(response.data.syncedAt || new Date().toISOString());
                 if (cached.dh_team_manifest && Array.isArray(cached.dh_team_manifest.teams)) {
                     setTeamList(
                         cached.dh_team_manifest.teams.map((t: any) => ({ id: t.id, label: t.label })),
                     );
                 }
             }
-        } catch {
-            if (!refreshIsCurrent()) return;
-            console.warn('[Options] Team refresh failed unexpectedly.');
-            // Exception here (not caught inside syncTeamBookmarks) means
-            // module load / storage access broke — more severe than a
-            // fetch failure. Report generic.
-            setTeamFetchError({ kind: 'unknown' });
-        } finally {
-            if (refreshIsCurrent()) {
-                setIsSyncingTeam(false);
-            }
-        }
+            if (refreshIsCurrent()) setIsSyncingTeam(false);
+        });
     };
 
     // Listen for updates
@@ -2454,6 +2606,10 @@ const OptionsInner: React.FC = () => {
                                                             // fixing the typo.
                                                             if (manifestUrlInvalid) setManifestUrlInvalid(false);
                                                             invalidateTeamRefresh();
+                                                            setTeamList([]);
+                                                            setTeamItems([]);
+                                                            setTeamSynced('');
+                                                            setTeamFetchError(null);
                                                             markUserTouched(['teamManifestUrl']);
                                                             updateCurrentPrefs({ teamManifestUrl: e.target.value });
                                                         }}
@@ -2479,8 +2635,7 @@ const OptionsInner: React.FC = () => {
                                                                 // (a) clear-out
                                                                 setManifestUrlInvalid(false);
                                                                 (async () => {
-                                                                    const { clearTeamBookmarks } = await import('../utils/teamCatalog');
-                                                                    await clearTeamBookmarks();
+                                                                    await chrome.runtime.sendMessage({ type: 'CLEAR_TEAM_CATALOG' });
                                                                     setTeamList([]);
                                                                     setTeamItems([]);
                                                                     setTeamCollapsedLabels(new Set());

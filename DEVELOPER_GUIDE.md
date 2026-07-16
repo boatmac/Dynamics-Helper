@@ -21,7 +21,7 @@ The project consists of three main components:
 * **`src/components/MarkdownPreview.tsx`**: Shared Markdown renderer using `react-markdown` + `remark-gfm`. Provides styled GFM rendering (headings, code blocks, tables, links, lists, blockquotes). Used by Options.tsx for preview toggles.
 * **`src/utils/pageReader.ts`**: Logic for scraping Dynamics/Azure Portal pages to extract case numbers, error text, and context. Uses a 4-strategy cascade (header controls, label search, header container regex, ticket title fallback).
 * **`src/background/serviceWorker.ts`**: Service worker handling telemetry (with stable anonymous UUID via `chrome.storage.local`), native messaging relay, analysis-result persistence, and extension version injection. Native-message logging is metadata-only; it must not log prompt-bearing payloads.
-* **`src/background/teamManifestSync.ts`**: Manifest-only fetch/commit boundary. It re-reads `dh_prefs` after fetch and writes manifest/ETag only when Team Catalog remains enabled and the URL still exactly matches the captured URL.
+* **`src/background/teamManifestSync.ts`**: Team sync response boundary. Manifest-only fetches re-read `dh_prefs` after every fetch result, including failure/null/304. Selected-team responses preserve `committed|unchanged|failed|skipped|stale` plus captured identity.
 * **`src/utils/analysisPrompt.ts`**: Idempotent send-time Custom User Prompt assembly for both constructed and preformatted FAB context.
 * **`src/utils/telemetry.ts`**: Azure Application Insights integration for anonymous telemetry.
 * **`manifest.json`**: Defines permissions (`nativeMessaging`) and background scripts.
@@ -134,9 +134,9 @@ Prompt-source errors carry a stable `error_code` and safe English fallback. Opti
 
 FAB applies Custom User Prompt immediately before every send. It truncates from the first authoritative line-level `## User Prompt` marker in either preformatted or freshly assembled context, then appends the current non-empty value once; an empty current value leaves all stale/duplicate sections removed. The resulting complete text still enters the Host's existing PII scrub path unchanged.
 
-Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe parse/network messages and logs only failure kind plus numeric HTTP status. It must not log URL/status-text/exception values. Manifest-only Service Worker commits also re-read `dh_prefs` after fetch to prevent Reset or a URL change from being overwritten by a stale response.
+Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe parse/network messages and logs only failure kind plus numeric HTTP status. It must not log URL/status-text/exception values. The Service Worker owns all Team Catalog cache mutations. `teamCatalog.ts` serializes manifest/item/ETag/timestamp commits and clear/reset operations in one module-level queue, checks captured generation and enabled/URL/team identity inside the queued critical section, and stamps cache data with `dh_team_manifest_url`. Options sends messages only; FAB and Options reject cache data whose URL/team stamp does not match current prefs.
 
-Analysis result dismissal uses a separate identity acknowledgment. New `LastAnalysis` records carry their Analyze `requestId`; legacy records are identified by exact `caseNumber + timestamp`. Hydration reads `dh_last_analysis`, `dh_pending_analysis`, and `dh_seen_analysis` together and suppresses a result when its legacy `seen` flag is true or its identity matches the acknowledgment. `markSeen` writes only `dh_seen_analysis`, so acknowledgment A can never rewrite newer result B or remove B's error metadata, regardless of storage completion order.
+Analysis result dismissal uses per-identity acknowledgment keys. New `LastAnalysis` records carry their Analyze `requestId`; legacy records are identified by exact `caseNumber + timestamp`. `seenAnalysisKey()` produces deterministic `dh_seen_analysis:*` keys, so A/B acknowledgments coexist. Hydration performs one `chrome.storage.local.get(null)` and derives last/pending/matching seen from that coherent snapshot; the singleton `dh_seen_analysis` remains a read-only legacy fallback. A module-level mutation queue serializes pending/result/reset writes, and result completion atomically writes `dh_last_analysis` plus conditionally removes only the matching pending request.
 
 The standalone `host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` files are historical pre-1.0.5 probes. They retain `skip_custom_instructions=True` on session creation, but other imports, constructor arguments, and message shapes are obsolete; they are explicitly outside supported diagnostics until separately migrated. Use `host/venv` tests or the SDK 1.0.5 wire-drift probe documented in `AGENTS.md` instead.
 
@@ -212,7 +212,7 @@ Analyze runs are long (often 60-300 s). The user can navigate away from the case
 
 * `dh_pending_analysis` — `{caseNumber, requestId, startTime}` written by SW before forwarding the host RPC, cleared on success/error/timeout/edge-6.3.
 * `dh_last_analysis` — `{status: 'success'|'error', caseNumber, requestId?, title, content, timestamp, seen, durationSec?, savedTo?, errorCode?}` written by SW on Host response. New records use `requestId` as result identity; legacy records use exact `caseNumber + timestamp`. The legacy `seen` field remains readable for compatibility but is no longer rewritten for acknowledgment. `errorCode` is an optional raw machine-readable Host code; legacy records may omit optional fields.
-* `dh_seen_analysis` — `{caseNumber, requestId?, timestamp?}` written by FAB on immediate/hydrated consumption. New identities match `requestId` plus case; legacy identities match exact `caseNumber + timestamp`. It contains no result body and never requires clearing when a new result arrives because the new identity differs.
+* `dh_seen_analysis:request:<case>:<requestId>` / `dh_seen_analysis:legacy:<case>:<timestamp>` — one identity-only acknowledgment per consumed result. The old singleton `dh_seen_analysis` is accepted only for backward compatibility.
 
 **Two ages, do not confuse them:**
 
@@ -230,7 +230,7 @@ For errors, persistence stores the raw safe Host fallback in `content` and prese
 
 * `extension/src/background/analyzeBridge.ts` exposes `handleAnalyzeForward(payload, ctx, deps)` with DI'd `send`. Its focused suite covers P-I1..P-I4, error-code transport, and edge 6.3 without spinning up a real Chrome port; the test count is not a contract.
 * `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, isAnalyzing, dismissPopover(identity)}`. Its focused suite covers result/pending/seen hydration, identity-safe one-shot dismissal, write-order races, and optional `errorCode` using only a mocked `chrome.storage.local`; the test count is not a contract.
-* FAB calls `useAnalysisHydration(scrapedData?.caseNumber || '')` once at the top of the component, then mirrors `popover`/`isAnalyzing` into local state in two `useEffect` hooks. The mirror is one-way (storage → local); user dismissal passes the displayed identity through `hydration.dismissPopover(identity)`, which writes only `dh_seen_analysis`.
+* FAB calls `useAnalysisHydration(scrapedData?.caseNumber || '')` once at the top of the component, then mirrors `popover`/`isAnalyzing` into local state in two `useEffect` hooks. The mirror is one-way (storage → local); user dismissal passes the displayed identity through `hydration.dismissPopover(identity)`, which writes only that identity's `dh_seen_analysis:*` key.
 
 **popoverIsAnalyze ref discriminator:**
 
@@ -242,7 +242,7 @@ For errors, persistence stores the raw safe Host fallback in `content` and prese
 * **Late response versus newer pending (edge 6.3):** Analysis A can remain in flight while analysis B starts and replaces the single-slot pending marker with B's request ID. When A's response arrives, A's result is persisted, but `clearPendingIfMatches(A.requestId)` rereads the pending marker and leaves B's marker intact because the request IDs differ. A late response therefore cannot clear a newer analysis's pending state.
 * **Stale pending on mount:** `useAnalysisHydration` checks `Date.now() - startTime > MAX_PENDING_DISPLAY_AGE_MS` and ignores pending markers older than 15 min. The marker stays on disk until GC; this is intentional (the user might still want to know if the run eventually completes).
 * **Case mismatch on pending:** if the on-disk pending marker is for case A but the FAB is mounted on case B, the hook ignores the pending row entirely (no false "Analyzing…").
-* **Options Reset:** the Reset button removes `dh_last_analysis`, `dh_pending_analysis`, and `dh_seen_analysis` so a user-initiated reset wipes persisted analysis state and acknowledgment state.
+* **Options Reset:** sends `RESET_EXTENSION_STATE` to the Service Worker. The serialized reset removes `dh_last_analysis`, `dh_pending_analysis`, legacy `dh_seen_analysis`, and every `dh_seen_analysis:*` key together with queued Team Catalog cache state.
 
 ---
 

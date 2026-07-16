@@ -963,8 +963,11 @@ class NativeHost:
         )
         try:
             await self.client.stop()
-        except Exception as e:
-            logger.warning(f"Failed to stop old Copilot client cleanly: {e}")
+        except Exception as error:
+            logger.warning(
+                "Failed to stop old Copilot client cleanly (%s).",
+                type(error).__name__,
+            )
         self._invalidate_active_session(clear_client=True)
 
     async def initialize_sdk(self):
@@ -996,8 +999,11 @@ class NativeHost:
             await self.client.start()
             logger.info("Copilot Client started.")
 
-        except Exception as e:
-            logger.error(f"Failed to initialize SDK: {e}")
+        except Exception as error:
+            logger.error(
+                "Failed to initialize SDK client (%s).",
+                type(error).__name__,
+            )
             self._invalidate_active_session(clear_client=True)
 
     # ------------------------------------------------------------------
@@ -1488,8 +1494,11 @@ class NativeHost:
                     f"[infinite-sessions] {origin} session has no workspace_path "
                     "attribute (infinite sessions may be disabled or unsupported)."
                 )
-        except Exception as e:
-            logger.debug(f"[infinite-sessions] observability log failed: {e}")
+        except Exception as error:
+            logger.debug(
+                "[infinite-sessions] observability log failed (%s).",
+                type(error).__name__,
+            )
 
     @staticmethod
     def _extract_case_id(case_number: str) -> str | None:
@@ -1573,6 +1582,11 @@ class NativeHost:
         fence = "`" * (longest_run + 1)
         return f"{fence}{value}{fence}"
 
+    @staticmethod
+    def _safe_sdk_error(operation: str, error: BaseException) -> str:
+        """Return an operation/type summary without serializing SDK text."""
+        return f"{operation} failed ({type(error).__name__})."
+
     async def _refresh_session(
         self,
         session_id: str | None = None,
@@ -1608,14 +1622,22 @@ class NativeHost:
                 bool(full_config.get("_use_workspace_only")),
             )
         except PromptSourceError as error:
-            logger.error(f"Failed to resolve prompt sources: {error}")
+            logger.error(
+                "Failed to resolve prompt sources (%s).",
+                error.error_code,
+            )
             self.last_prompt_source_error = error
             self.last_session_error = str(error)
             self._invalidate_active_session()
             return False
         except Exception as error:
-            logger.error(f"Failed to build session config: {error}")
-            self.last_session_error = str(error)
+            logger.error(
+                "Failed to build session config (%s).",
+                type(error).__name__,
+            )
+            self.last_session_error = self._safe_sdk_error(
+                "build session config", error
+            )
             self._invalidate_active_session()
             return False
 
@@ -1643,9 +1665,14 @@ class NativeHost:
                 )
                 await self.client.start()
                 logger.info("Client re-initialized successfully.")
-            except Exception as e:
-                logger.error(f"Client re-initialization failed: {e}")
-                self.last_session_error = str(e)
+            except Exception as error:
+                logger.error(
+                    "Client re-initialization failed (%s).",
+                    type(error).__name__,
+                )
+                self.last_session_error = self._safe_sdk_error(
+                    "start Copilot client", error
+                )
                 self._invalidate_active_session(clear_client=True)
                 return False
 
@@ -1705,17 +1732,18 @@ class NativeHost:
                 logger.info(
                     "SDK does not support resume_session. Will create new session."
                 )
-            except (OSError, ProcessExitedError) as e:
-                transport_error = e
+            except (OSError, ProcessExitedError) as error:
+                transport_error = error
                 logger.warning(
-                    f"Session transport failed while resuming {session_id}: {e}. "
-                    "Re-initializing client."
+                    "Session transport failed while resuming (%s). "
+                    "Re-initializing client.",
+                    type(error).__name__,
                 )
-            except Exception as e:
+            except Exception as error:
                 logger.info(
-                    f"No existing session to resume ({session_id}): {e}. Creating new session."
+                    "Existing session could not be resumed (%s). Creating it.",
+                    type(error).__name__,
                 )
-                logger.debug(f"Resume traceback: {traceback.format_exc()}")
 
         try:
             if session_id:
@@ -1754,10 +1782,10 @@ class NativeHost:
             )
             self._log_session_observability(self.session, "created")
             return True
-        except (OSError, ProcessExitedError) as e:
+        except (OSError, ProcessExitedError) as error:
             logger.warning(
-                f"Session transport failed: {e}. "
-                "Re-initializing client and retrying..."
+                "Session transport failed (%s). Re-initializing client and retrying...",
+                type(error).__name__,
             )
             broken_client = self.client
             if broken_client:
@@ -1765,7 +1793,8 @@ class NativeHost:
                     await broken_client.stop()
                 except Exception as stop_error:
                     logger.warning(
-                        f"Failed to stop broken Copilot client cleanly: {stop_error}"
+                        "Failed to stop broken Copilot client cleanly (%s).",
+                        type(stop_error).__name__,
                     )
             self._invalidate_active_session(clear_client=True)
             try:
@@ -1787,9 +1816,13 @@ class NativeHost:
                 await self.client.start()
                 logger.info("Client re-initialized after transport failure.")
             except Exception as retry_err:
-                logger.error(f"Client re-initialization failed: {retry_err}")
-                logger.error(f"Full traceback: {traceback.format_exc()}")
-                self.last_session_error = str(retry_err)
+                logger.error(
+                    "Client re-initialization failed after transport error (%s).",
+                    type(retry_err).__name__,
+                )
+                self.last_session_error = self._safe_sdk_error(
+                    "restart Copilot client", retry_err
+                )
                 self._invalidate_active_session(clear_client=True)
                 return False
 
@@ -1809,30 +1842,42 @@ class NativeHost:
                 self._log_session_observability(self.session, "created-after-retry")
                 return True
             except (OSError, ProcessExitedError) as retry_err:
-                logger.error(f"Retry transport failed: {retry_err}")
-                logger.error(f"Full traceback: {traceback.format_exc()}")
-                self.last_session_error = str(retry_err)
+                logger.error(
+                    "Session retry transport failed (%s).",
+                    type(retry_err).__name__,
+                )
+                self.last_session_error = self._safe_sdk_error(
+                    "retry Copilot session", retry_err
+                )
                 retry_client = self.client
                 if retry_client:
                     try:
                         await retry_client.stop()
                     except Exception as stop_error:
                         logger.warning(
-                            "Failed to stop retry Copilot client cleanly: "
-                            f"{stop_error}"
+                            "Failed to stop retry Copilot client cleanly (%s).",
+                            type(stop_error).__name__,
                         )
                 self._invalidate_active_session(clear_client=True)
                 return False
             except Exception as retry_err:
-                logger.error(f"Retry after re-init also failed: {retry_err}")
-                logger.error(f"Full traceback: {traceback.format_exc()}")
-                self.last_session_error = str(retry_err)
+                logger.error(
+                    "Session retry after client restart failed (%s).",
+                    type(retry_err).__name__,
+                )
+                self.last_session_error = self._safe_sdk_error(
+                    "retry Copilot session", retry_err
+                )
                 self._invalidate_active_session()
                 return False
-        except Exception as e:
-            logger.error(f"Failed to create/refresh session: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            self.last_session_error = str(e)
+        except Exception as error:
+            logger.error(
+                "Failed to create or refresh Copilot session (%s).",
+                type(error).__name__,
+            )
+            self.last_session_error = self._safe_sdk_error(
+                "create Copilot session", error
+            )
             self._invalidate_active_session()
             return False
 
@@ -2159,8 +2204,16 @@ class NativeHost:
             return {"status": "success", "data": {"models": out}}
         except Exception as e:
             kind = self._classify_list_models_error(e)
-            logger.warning(f"list_models failed ({kind}): {e}")
-            return {"status": "error", "error": str(e), "errorKind": kind}
+            logger.warning(
+                "list_models failed (%s, %s).",
+                kind,
+                type(e).__name__,
+            )
+            return {
+                "status": "error",
+                "error": f"Copilot model listing failed ({type(e).__name__}).",
+                "errorKind": kind,
+            }
 
     async def handle_analyze_error(self, payload):
         """Uses the Copilot SDK to analyze the error."""
@@ -2258,34 +2311,26 @@ class NativeHost:
                 prompt_snapshot=snapshot,
             )
             if not refreshed:
-                detail = getattr(self, "last_session_error", None) or "unknown error"
+                detail = getattr(self, "last_session_error", None)
                 prompt_error = getattr(self, "last_prompt_source_error", None)
                 self._invalidate_active_session()
                 if prompt_error:
                     return prompt_error.to_result()
                 return {
                     "status": "error",
-                    "error": f"Copilot session refresh failed: {detail}",
+                    "error": detail or "Copilot session refresh failed.",
                 }
 
         if not text:
             return {"status": "error", "error": "No text provided for analysis."}
 
         if not self.session or not self.client:
-            detail = getattr(self, "last_session_error", None) or ""
-            hint = ""
-            low = detail.lower()
-            if "does not support reasoning effort" in low:
-                hint = (
-                    " The selected model does not support a reasoning effort. "
-                    "Set Reasoning effort back to 'Use CLI default' in Options → "
-                    "Model & Performance, or choose a model that supports it."
-                )
-            elif "does not support" in low:
-                hint = " Check your Model / Reasoning effort / Context tier in Options → Model & Performance."
             return {
                 "status": "error",
-                "error": (f"Copilot session/client not initialized. {detail}{hint}").strip(),
+                "error": (
+                    getattr(self, "last_session_error", None)
+                    or "Copilot session/client not initialized."
+                ),
             }
 
         self.send_progress("Checking authentication...")
@@ -2309,8 +2354,11 @@ class NativeHost:
         except asyncio.TimeoutError:
             logger.warning("Auth status check timed out after 15s, continuing...")
             self.send_progress("Auth check timed out, continuing...")
-        except Exception as e:
-            logger.error(f"Failed to check auth status: {e}")
+        except Exception as error:
+            logger.error(
+                "Failed to check auth status (%s).",
+                type(error).__name__,
+            )
             self.send_progress("Auth check skipped, continuing...")
 
         try:
@@ -2368,11 +2416,15 @@ class NativeHost:
                         break  # Success, exit loop
                     except Exception as e:
                         # Check for Session Not Found (JSON-RPC -32603)
+                        session_failure_text = str(e)
                         if (
-                            "Session not found" in str(e) or "-32603" in str(e)
+                            "Session not found" in session_failure_text
+                            or "-32603" in session_failure_text
                         ) and attempt == 0:
                             logger.warning(
-                                f"Session error encountered: {e}. Refreshing session..."
+                                "Session-not-found response encountered (%s). "
+                                "Refreshing session...",
+                                type(e).__name__,
                             )
                             refreshed = await self._refresh_session(
                                 session_id=session_id,
@@ -2384,12 +2436,12 @@ class NativeHost:
                                 prompt_error = getattr(
                                     self, "last_prompt_source_error", None
                                 )
-                                detail = self.last_session_error or "unknown error"
+                                detail = self.last_session_error
                                 self._invalidate_active_session()
                                 if prompt_error:
                                     return prompt_error.to_result()
                                 raise RuntimeError(
-                                    f"Copilot session reconnect failed: {detail}"
+                                    detail or "Copilot session reconnect failed."
                                 )
                             continue
                         # Re-raise other errors (including TimeoutError) to be handled by outer blocks
@@ -2571,12 +2623,15 @@ class NativeHost:
                 },
             }
 
-        except Exception as e:
-            logger.error(f"SDK Error: {e}")
+        except Exception as error:
+            logger.error(
+                "Copilot request failed during send (%s).",
+                type(error).__name__,
+            )
             # Invalidate session on pipe/subprocess errors so next request reconnects
-            error_text = str(e).lower()
+            error_text = str(error).lower()
             if (
-                isinstance(e, ProcessExitedError)
+                isinstance(error, ProcessExitedError)
                 or "invalid argument" in error_text
                 or "broken pipe" in error_text
             ):
@@ -2587,10 +2642,14 @@ class NativeHost:
                         await dead_client.stop()
                     except Exception as stop_error:
                         logger.warning(
-                            f"Failed to stop dead Copilot client cleanly: {stop_error}"
+                            "Failed to stop dead Copilot client cleanly (%s).",
+                            type(stop_error).__name__,
                         )
                 self._invalidate_active_session(clear_client=True)
-            return {"status": "error", "error": f"SDK Error: {str(e)}"}
+            return {
+                "status": "error",
+                "error": f"Copilot request failed ({type(error).__name__}).",
+            }
 
     async def process_message(self, message):
         """Dispatches messages to handlers."""
@@ -2707,7 +2766,9 @@ class NativeHost:
         except Exception as e:
             response["status"] = "error"
             response["error"] = "internal_error"
-            response["message"] = str(e)
+            response["message"] = (
+                f"Host action failed ({type(e).__name__})."
+            )
 
         # Clear current request ID after processing
         self.current_request_id = None

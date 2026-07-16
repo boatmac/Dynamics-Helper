@@ -25,14 +25,14 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Analysis consumption uses a separate identity-only acknowledgment, so it cannot rewrite a newer result; legacy seen records remain supported.
 - Team Catalog diagnostics and bookmark telemetry no longer expose credential-bearing manifest or bookmark URLs.
 - Host SDK response diagnostics contain metadata only and no-content reports never serialize raw response events or model content.
+- Service Worker queues now serialize Team Catalog cache/reset commits and analysis pending/result/reset mutations; stale cache identities are rejected by consumers.
+- Analysis acknowledgments use independent per-result keys, and hydration reads one coherent storage snapshot.
+- SDK session/model failures expose safe operation and exception type only; raw SDK/CLI exception text is not logged, returned, or persisted.
 
 ## Verification
 
-- Reviewed implementation: `cb760a4` plus comment-only `3e18244`.
-- Isolated Host: **111/111 focused** and **181/181 full** tests passed.
-- Extension: **127/127 focused** and **166/166 full** tests passed.
-- Production build passed with **2,217 modules transformed** and **14 artifacts** listed.
-- Isolated Python compileall, `git diff --check`, and static review checks passed.
+- Third review fix implementation and final evidence commits: pending completion in this branch.
+- Final isolated test/build totals: pending the post-commit verification recorded in `.superpowers/sdd/third-final-review-fix-report.md`.
 - Optional authenticated marker smoke was not run because safe model-backed user/session isolation was not available; it remains a non-gating check.
 - The controller's broad whole-branch review remains pending after this fix wave.
 

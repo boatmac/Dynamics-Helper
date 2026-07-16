@@ -12,6 +12,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
 import {
+    chromeMockSpies,
+    deferNextStorageGet,
     deferNextStorageSet,
     getStorageSnapshot,
     installChromeMock,
@@ -19,7 +21,11 @@ import {
     seedStorage,
 } from '../test/chromeMock'
 import {
+    clearPendingIfMatches,
     markSeen,
+    recordAnalyzeStart,
+    resetAnalysisState,
+    seenAnalysisKey,
     STALE_WINDOW_MS,
     MAX_PENDING_DISPLAY_AGE_MS,
 } from '../utils/analysisStore'
@@ -103,7 +109,10 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
         // The last result is not rewritten; the separate identity is stored.
         const stored = await chrome.storage.local.get('dh_last_analysis')
         expect((stored.dh_last_analysis as LastAnalysis).seen).toBe(false)
-        expect(getStorageSnapshot().dh_seen_analysis).toEqual({
+        expect(getStorageSnapshot()[seenAnalysisKey({
+            requestId: 'req-A',
+            caseNumber: CASE_A,
+        })]).toEqual({
             requestId: 'req-A',
             caseNumber: CASE_A,
             timestamp: expect.any(Number),
@@ -233,10 +242,105 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
             seen: false,
             errorCode: 'repository_instructions_missing',
         })
-        expect(getStorageSnapshot().dh_seen_analysis).toMatchObject({
+        expect(getStorageSnapshot()[seenAnalysisKey({
+            requestId: 'req-A',
+            caseNumber: CASE_A,
+        })]).toMatchObject({
             requestId: 'req-A',
             caseNumber: CASE_A,
         })
+    })
+
+    it('keeps A and B acknowledgements independently when A is acknowledged last', async () => {
+        await markSeen({ caseNumber: CASE_B, requestId: 'req-B', timestamp: 2 })
+        await markSeen({ caseNumber: CASE_A, requestId: 'req-A', timestamp: 1 })
+
+        const snapshot = getStorageSnapshot()
+        expect(snapshot[seenAnalysisKey({ caseNumber: CASE_A, requestId: 'req-A' })]).toBeDefined()
+        expect(snapshot[seenAnalysisKey({ caseNumber: CASE_B, requestId: 'req-B' })]).toBeDefined()
+    })
+
+    it('a previously acknowledged B result does not reopen after A is acknowledged', async () => {
+        await markSeen({ caseNumber: CASE_B, requestId: 'req-B', timestamp: 2 })
+        await markSeen({ caseNumber: CASE_A, requestId: 'req-A', timestamp: 1 })
+        seedStorage({ dh_last_analysis: makeLast({ caseNumber: CASE_B, requestId: 'req-B' }) })
+
+        const hook = renderHook(() => useAnalysisHydration(CASE_B))
+        await new Promise(resolve => setTimeout(resolve, 20))
+        expect(hook.result.current.popover).toBeNull()
+    })
+
+    it('uses a deterministic per-identity key for legacy acknowledgements', async () => {
+        const legacy = { caseNumber: CASE_A, timestamp: 12345 }
+        await markSeen(legacy)
+        expect(getStorageSnapshot()[seenAnalysisKey(legacy)]).toEqual(legacy)
+    })
+
+    it('hydrates last, pending, and seen from one coherent batched snapshot', async () => {
+        const lastA = makeLast({ requestId: 'req-A', timestamp: 1 })
+        const lastB = makeLast({ requestId: 'req-B', timestamp: Date.now() })
+        chromeMockSpies.storageGet
+            .mockResolvedValueOnce({
+                dh_last_analysis: lastB,
+                dh_pending_analysis: makePending({ requestId: 'req-B' }),
+                dh_seen_analysis: {
+                    caseNumber: CASE_A,
+                    requestId: 'req-A',
+                    timestamp: 1,
+                },
+            })
+
+        const hook = renderHook(() => useAnalysisHydration(CASE_A))
+        await waitFor(() => expect(hook.result.current.popover?.identity.requestId).toBe('req-B'))
+        expect(hook.result.current.isAnalyzing).toBe(true)
+        expect(chromeMockSpies.storageGet).toHaveBeenCalledTimes(1)
+        expect(chromeMockSpies.storageGet).toHaveBeenCalledWith(null)
+    })
+
+    it('serializes A conditional clear with a newer B pending write', async () => {
+        seedStorage({ dh_pending_analysis: makePending({ requestId: 'req-A' }) })
+        const delayedRead = deferNextStorageGet('dh_pending_analysis')
+        const clearA = clearPendingIfMatches('req-A')
+        await act(async () => undefined)
+        const startB = recordAnalyzeStart({
+            caseNumber: CASE_B,
+            requestId: 'req-B',
+            successTitle: 'success',
+            errorTitle: 'error',
+        })
+        await act(async () => delayedRead.resolve(undefined))
+        await Promise.all([clearA, startB])
+
+        expect(getStorageSnapshot().dh_pending_analysis).toMatchObject({
+            caseNumber: CASE_B,
+            requestId: 'req-B',
+        })
+    })
+
+    it('normally clears a matching pending marker', async () => {
+        seedStorage({ dh_pending_analysis: makePending({ requestId: 'req-A' }) })
+        await clearPendingIfMatches('req-A')
+        expect(getStorageSnapshot()).not.toHaveProperty('dh_pending_analysis')
+    })
+
+    it('analysis reset removes last, pending, singleton legacy seen, and every seen prefix key', async () => {
+        const requestKey = seenAnalysisKey({ caseNumber: CASE_A, requestId: 'req-A' })
+        const legacyKey = seenAnalysisKey({ caseNumber: CASE_B, timestamp: 42 })
+        seedStorage({
+            dh_last_analysis: makeLast(),
+            dh_pending_analysis: makePending(),
+            dh_seen_analysis: { caseNumber: CASE_A, requestId: 'old-singleton' },
+            [requestKey]: { caseNumber: CASE_A, requestId: 'req-A' },
+            [legacyKey]: { caseNumber: CASE_B, timestamp: 42 },
+        })
+
+        await resetAnalysisState()
+        const snapshot = getStorageSnapshot()
+        expect(snapshot).not.toHaveProperty('dh_last_analysis')
+        expect(snapshot).not.toHaveProperty('dh_pending_analysis')
+        expect(snapshot).not.toHaveProperty('dh_seen_analysis')
+        expect(snapshot).not.toHaveProperty(requestKey)
+        expect(snapshot).not.toHaveProperty(legacyKey)
     })
 
     it('suppresses a legacy record acknowledged by exact case number and timestamp', async () => {

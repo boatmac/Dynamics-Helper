@@ -217,6 +217,76 @@ class TestPromptSessionKwargs(
         self.assertIsNone(self.host.session)
         self.assertIsNone(self.host.current_prompt_fingerprint)
 
+    async def test_client_start_exception_never_exposes_raw_text(self):
+        marker = "CLIENT-START-SECRET-MARKER /private/prompt"
+        self.host.client = None
+        replacement = MagicMock()
+        replacement.start = AsyncMock(side_effect=RuntimeError(marker))
+        with (
+            patch("host.dh_native_host.RuntimeConnection.for_stdio"),
+            patch("host.dh_native_host.CopilotClient", return_value=replacement),
+            self.assertLogs("dh", level="INFO") as captured,
+        ):
+            success = await self.host._refresh_session(
+                session_id=self.session_id,
+                case_id=self.case_id,
+                session_config=self.config,
+                prompt_snapshot=self.snapshot,
+            )
+        self.assertFalse(success)
+        self.assertNotIn(marker, "\n".join(captured.output))
+        self.assertNotIn(marker, self.host.last_session_error or "")
+
+    async def test_resume_exception_never_exposes_raw_text(self):
+        marker = "RESUME-SECRET-MARKER /private/prompt"
+        self.host.client.resume_session.side_effect = RuntimeError(marker)
+        with self.assertLogs("dh", level="INFO") as captured:
+            success = await self.host._refresh_session(
+                session_id=self.session_id,
+                case_id=self.case_id,
+                session_config=self.config,
+                prompt_snapshot=self.snapshot,
+            )
+        self.assertTrue(success)
+        self.assertNotIn(marker, "\n".join(captured.output))
+
+    async def test_create_exception_never_exposes_raw_text(self):
+        marker = "CREATE-SECRET-MARKER /private/prompt"
+        self.host.client.resume_session.side_effect = AttributeError("unsupported")
+        self.host.client.create_session.side_effect = RuntimeError(marker)
+        with self.assertLogs("dh", level="INFO") as captured:
+            success = await self.host._refresh_session(
+                session_id=self.session_id,
+                case_id=self.case_id,
+                session_config=self.config,
+                prompt_snapshot=self.snapshot,
+            )
+        self.assertFalse(success)
+        observed = "\n".join(captured.output) + (self.host.last_session_error or "")
+        self.assertNotIn(marker, observed)
+
+    async def test_retry_exception_never_exposes_raw_text(self):
+        marker = "RETRY-SECRET-MARKER /private/prompt"
+        self.host.client.resume_session.side_effect = AttributeError("unsupported")
+        self.host.client.create_session.side_effect = OSError("broken pipe")
+        replacement = MagicMock()
+        replacement.start = AsyncMock()
+        replacement.create_session = AsyncMock(side_effect=RuntimeError(marker))
+        with (
+            patch("host.dh_native_host.RuntimeConnection.for_stdio"),
+            patch("host.dh_native_host.CopilotClient", return_value=replacement),
+            self.assertLogs("dh", level="INFO") as captured,
+        ):
+            success = await self.host._refresh_session(
+                session_id=self.session_id,
+                case_id=self.case_id,
+                session_config=self.config,
+                prompt_snapshot=self.snapshot,
+            )
+        self.assertFalse(success)
+        observed = "\n".join(captured.output) + (self.host.last_session_error or "")
+        self.assertNotIn(marker, observed)
+
 
 class TestPromptFingerprintLifecycle(
     PromptSessionFixture,
@@ -514,18 +584,25 @@ class TestPromptFingerprintLifecycle(
 
     async def test_send_process_exit_clears_all_active_session_state(self):
         self.host.current_prompt_fingerprint = self.snapshot.fingerprint
-        self.active_session.send_and_wait.side_effect = ProcessExitedError(
-            "active CLI exited"
-        )
+        marker = "SEND-TRANSPORT-SECRET-MARKER /private/prompt"
+        self.active_session.send_and_wait.side_effect = ProcessExitedError(marker)
         dead_client = self.host.client
-        dead_client.stop.side_effect = RuntimeError("process already exited")
+        stop_marker = "STOP-SECRET-MARKER /private/prompt"
+        dead_client.stop.side_effect = RuntimeError(stop_marker)
 
-        result = await self.host.handle_analyze_error(self.payload)
+        with self.assertLogs("dh", level="INFO") as captured:
+            result = await self.host.handle_analyze_error(self.payload)
 
         self.assertEqual(
             result,
-            {"status": "error", "error": "SDK Error: active CLI exited"},
+            {
+                "status": "error",
+                "error": "Copilot request failed (ProcessExitedError).",
+            },
         )
+        observed = str(result) + "\n".join(captured.output) + (self.host.last_session_error or "")
+        self.assertNotIn(marker, observed)
+        self.assertNotIn(stop_marker, observed)
         dead_client.stop.assert_awaited_once()
         self.assertIsNone(self.host.client)
         self.assertIsNone(self.host.client_working_directory)
@@ -537,17 +614,23 @@ class TestPromptFingerprintLifecycle(
 
     async def test_ordinary_send_error_retains_healthy_active_state(self):
         self.host.current_prompt_fingerprint = self.snapshot.fingerprint
-        self.active_session.send_and_wait.side_effect = RuntimeError(
-            "tool execution rejected"
-        )
+        marker = "SEND-SECRET-MARKER /private/prompt"
+        self.active_session.send_and_wait.side_effect = RuntimeError(marker)
         healthy_client = self.host.client
 
-        result = await self.host.handle_analyze_error(self.payload)
+        with self.assertLogs("dh", level="INFO") as captured:
+            result = await self.host.handle_analyze_error(self.payload)
 
         self.assertEqual(
             result,
-            {"status": "error", "error": "SDK Error: tool execution rejected"},
+            {"status": "error", "error": "Copilot request failed (RuntimeError)."},
         )
+        observed = str(result) + "\n".join(captured.output) + (self.host.last_session_error or "")
+        for root, _dirs, files in os.walk(self.root):
+            for filename in files:
+                with open(os.path.join(root, filename), "r", encoding="utf-8") as stream:
+                    observed += stream.read()
+        self.assertNotIn(marker, observed)
         healthy_client.stop.assert_not_awaited()
         self.assertIs(self.host.client, healthy_client)
         self.assertIs(self.host.session, self.active_session)

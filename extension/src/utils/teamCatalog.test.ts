@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  clearTeamBookmarks,
+  clearTeamSelection,
   fetchManifest,
   fetchTeamBookmarks,
   syncTeamBookmarks,
 } from './teamCatalog'
 import {
+  deferNextStorageSet,
   getStorageSnapshot,
   installChromeMock,
   resetChromeMock,
@@ -156,6 +159,7 @@ describe('team catalog sync preference commit gate', () => {
       dh_team_etag: 'bookmark-old',
       dh_team_synced: '2026-01-01T00:00:00.000Z',
       dh_team_manifest_etag: 'manifest-old',
+      dh_team_manifest_url: SECRET_URL,
       dh_team_manifest: {
         version: 1,
         teams: [{ id: 'team-a', label: 'Team A', url: BOOKMARK_URL }],
@@ -183,7 +187,7 @@ describe('team catalog sync preference commit gate', () => {
       : response(200, { version: 1, team: 'team-a', items: CHANGED_ITEMS }, 'bookmark-new'))
 
     const result = await sync
-    expect(result).toEqual({ status: 'stale', items: [] })
+    expect(result).toMatchObject({ status: 'stale', items: [] })
     expect(getStorageSnapshot()).toMatchObject({
       dh_team: 'team-a',
       dh_team_items: CACHED_ITEMS,
@@ -222,7 +226,7 @@ describe('team catalog sync preference commit gate', () => {
     seedStorage({ dh_prefs: { teamCatalogEnabled: false, teamManifestUrl: '', team: '' } })
     resolveBookmarks(response(403))
 
-    await expect(sync).resolves.toEqual({ status: 'stale', items: [] })
+    await expect(sync).resolves.toMatchObject({ status: 'stale', items: [] })
   })
 
   it('commits changed bookmarks when enabled, URL, and selected team remain exact', async () => {
@@ -254,11 +258,111 @@ describe('team catalog sync preference commit gate', () => {
 
     const result = await syncTeamBookmarks(SECRET_URL, 'team-a')
 
-    expect(result).toEqual({ status: 'unchanged', items: CACHED_ITEMS })
+    expect(result).toMatchObject({ status: 'unchanged', items: CACHED_ITEMS })
     expect(getStorageSnapshot()).toMatchObject({
       dh_team_items: CACHED_ITEMS,
       dh_team_etag: 'bookmark-old',
       dh_team_synced: expect.not.stringMatching(/^2026-01-01/),
     })
+  })
+
+  it('rejects cached manifest, ETag, and items stamped for another URL', async () => {
+    seedSelectedTeam()
+    seedStorage({ dh_team_manifest_url: `${SECRET_URL}-old` })
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(response(403))
+    vi.stubGlobal('fetch', fetch)
+
+    const result = await syncTeamBookmarks(SECRET_URL, 'team-a')
+
+    expect(fetch).toHaveBeenCalledWith(
+      SECRET_URL,
+      expect.objectContaining({ headers: {} }),
+    )
+    expect(result).toMatchObject({ status: 'failed', items: [] })
+  })
+
+  it('does not resurrect a changed manifest when Reset queues behind its deferred write', async () => {
+    seedSelectedTeam()
+    const manifestWrite = deferNextStorageSet('dh_team_manifest')
+    let resolveBookmarks!: (value: unknown) => void
+    const bookmarksResponse = new Promise(resolve => { resolveBookmarks = resolve })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response(200, {
+        version: 1,
+        teams: [{ id: 'team-a', label: 'Team A', url: BOOKMARK_URL }],
+      }, 'manifest-new'))
+      .mockImplementationOnce(() => bookmarksResponse))
+
+    const sync = syncTeamBookmarks(SECRET_URL, 'team-a')
+    await vi.waitFor(() => expect(
+      (chrome.storage.local.set as any).mock.calls.some(
+        ([value]: any[]) => value?.dh_team_manifest_etag === 'manifest-new',
+      ),
+    ).toBe(true))
+    seedStorage({ dh_prefs: { teamCatalogEnabled: false, teamManifestUrl: '', team: '' } })
+    const reset = clearTeamBookmarks()
+    await manifestWrite.resolve(undefined)
+    resolveBookmarks(response(200, { items: CHANGED_ITEMS }, 'bookmark-new'))
+    await Promise.all([sync, reset])
+
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team_manifest')
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team_manifest_etag')
+  })
+
+  it('does not resurrect changed bookmarks when a team switch queues behind the deferred write', async () => {
+    seedSelectedTeam()
+    const bookmarkWrite = deferNextStorageSet('dh_team_items')
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(200, { items: CHANGED_ITEMS }, 'bookmark-new')))
+
+    const sync = syncTeamBookmarks(SECRET_URL, 'team-a')
+    await vi.waitFor(() => expect(
+      (chrome.storage.local.set as any).mock.calls.some(
+        ([value]: any[]) => Array.isArray(value?.dh_team_items),
+      ),
+    ).toBe(true))
+    seedStorage({
+      dh_prefs: {
+        teamCatalogEnabled: true,
+        teamManifestUrl: SECRET_URL,
+        team: 'team-b',
+      },
+    })
+    const switched = clearTeamSelection()
+    await bookmarkWrite.resolve(undefined)
+    await Promise.all([sync, switched])
+
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team_items')
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team_etag')
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team_synced')
+  })
+
+  it('does not resurrect a 304 timestamp when a URL switch queues behind the deferred write', async () => {
+    seedSelectedTeam()
+    const timestampWrite = deferNextStorageSet('dh_team_synced')
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(304)))
+
+    const sync = syncTeamBookmarks(SECRET_URL, 'team-a')
+    await vi.waitFor(() => expect(
+      (chrome.storage.local.set as any).mock.calls.some(
+        ([value]: any[]) => typeof value?.dh_team_synced === 'string',
+      ),
+    ).toBe(true))
+    seedStorage({
+      dh_prefs: {
+        teamCatalogEnabled: true,
+        teamManifestUrl: `${SECRET_URL}-new`,
+        team: 'team-a',
+      },
+    })
+    const switched = clearTeamBookmarks()
+    await timestampWrite.resolve(undefined)
+    await Promise.all([sync, switched])
+
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team_synced')
   })
 })

@@ -38,6 +38,20 @@ export function mergeMenus(personal: MenuItem[], team: MenuItem[]): MenuItem[] {
     return [...personal, ...teamFiltered];
 }
 
+export function teamCacheIsCurrent(data: {
+    dh_team_manifest_url?: string;
+    dh_team?: string;
+    dh_prefs?: {
+        teamCatalogEnabled?: boolean;
+        teamManifestUrl?: string;
+        team?: string;
+    };
+}): boolean {
+    return data.dh_prefs?.teamCatalogEnabled === true
+        && data.dh_team_manifest_url === data.dh_prefs.teamManifestUrl
+        && data.dh_team === data.dh_prefs.team;
+}
+
 export function useMenuLogic() {
     const [items, setItems] = useState<MenuItem[]>([]);
     const [navStack, setNavStack] = useState<MenuItem[][]>([]);
@@ -53,7 +67,16 @@ export function useMenuLogic() {
         // Listen for changes
         if (chrome?.storage?.onChanged) {
             const listener = (changes: any, area: string) => {
-                if (area === "local" && (changes.dh_items || changes.dh_team_items)) {
+                if (
+                    area === "local"
+                    && (
+                        changes.dh_items
+                        || changes.dh_team_items
+                        || changes.dh_team_manifest_url
+                        || changes.dh_team
+                        || changes.dh_prefs
+                    )
+                ) {
                     // Reload everything when either personal or team items change
                     loadItems().then(data => {
                         setItems(data);
@@ -137,13 +160,20 @@ async function loadItems(): Promise<MenuItem[]> {
     try {
         if (chrome?.storage?.local) {
             const teamData = await new Promise<any>((resolve) => {
-                chrome.storage.local.get(['dh_team_items', 'dh_prefs'], resolve);
+                chrome.storage.local.get([
+                    'dh_team_items',
+                    'dh_team_manifest_url',
+                    'dh_team',
+                    'dh_prefs',
+                ], resolve);
             });
             // Respect the team-catalog toggle: when disabled, do not surface
             // cached team data in the FAB even if dh_team_items still exists.
             // Spec 2026-05-20-team-catalog-user-config-design.md § 3.7.
-            const enabled = teamData.dh_prefs?.teamCatalogEnabled === true;
-            if (enabled && Array.isArray(teamData.dh_team_items)) {
+            if (
+                teamCacheIsCurrent(teamData)
+                && Array.isArray(teamData.dh_team_items)
+            ) {
                 teamItems = teamData.dh_team_items;
             }
         }

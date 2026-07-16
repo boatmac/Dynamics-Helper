@@ -149,6 +149,8 @@ Prompt resolution is fail-closed. Missing/unreadable Core, unreadable selected D
 
 Analyze errors may carry optional `error_code`. The Service Worker persists raw safe fallback text plus optional `LastAnalysis.errorCode`, preserving an inner Analyze code over an outer wrapper code. Immediate and rehydrated FAB display use the same render-time localization helper for known codes; immediate unknown-code fallbacks may include a safe UI prefix, while rehydrated unknown/legacy codes retain the raw stored fallback. Instruction contents, Custom User Prompt contents, and prompt-source paths are excluded from normal logs and telemetry.
 
+Service Worker persistence has two serialized ownership domains. `teamCatalog.ts` queues every Team Catalog manifest/item/ETag/timestamp commit and cache clear/reset, validates captured enabled/URL/team identity immediately before writes, and stamps cache identity for consumers. `analysisStore.ts` queues pending/result/reset mutations and uses deterministic per-analysis seen keys; hydration derives last, pending, and matching acknowledgment from one batched storage snapshot. Options issues Service Worker messages for both domains and does not mutate their storage keys directly.
+
 ### Product Scope
 
 Repository ONLY selects repository Skills, MCP, and the single Root instruction file while DH Core and Custom User Prompt remain active. This architecture is generic to any absolute Root. It does not implement MyCases detection, Stage 0 coordination, Stage 1 persistence, MyCases file writes, or an Auto/Standalone/Integrated mode.

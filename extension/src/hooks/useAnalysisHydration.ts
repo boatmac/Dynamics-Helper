@@ -12,10 +12,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import {
-    getLastAnalysis,
+    getAnalysisSnapshot,
     getLastAnalysisIdentity,
-    getPendingAnalysis,
-    getSeenAnalysis,
     markSeen,
     matchesLastAnalysisIdentity,
     STALE_WINDOW_MS,
@@ -88,11 +86,7 @@ export function useAnalysisHydration(caseNumber: string): HydrationResult {
                 return
             }
 
-            const [last, pending, seen] = await Promise.all([
-                getLastAnalysis(),
-                getPendingAnalysis(),
-                getSeenAnalysis(),
-            ])
+            const { last, pending, seen } = await getAnalysisSnapshot()
             if (cancelled) return
 
             if (shouldOpen(last, seen, caseNumber)) {
