@@ -503,6 +503,8 @@ const OptionsInner: React.FC = () => {
     // State
     const { t } = useTranslation();
     const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
+    const hasRootPath = Boolean(prefs.rootPath?.trim());
+    const effectiveRepositoryOnly = hasRootPath && prefs.useWorkspaceOnly !== false;
     const [items, setItems] = useState<MenuItem[]>([]);
     // Plan A: bookmark editor mutations (add / edit / delete / drag / toggle
     // collapse) persist instantly via this effect. Guard prevents the initial
@@ -762,10 +764,14 @@ const OptionsInner: React.FC = () => {
                         let changed = false;
                         const touched = userTouchedFieldsRef.current;
 
-                        // 1. Root Path — skip if user edited rootPath during hydration window
-                        if (hostConfig.root_path && hostConfig.root_path !== prev.rootPath && !touched.has('rootPath')) {
-                            newPrefs.rootPath = hostConfig.root_path;
-                            changed = true;
+                        // 1. Root Path — presence-aware so an explicit empty/null
+                        // Host value clears a stale chrome.storage mirror.
+                        if ('root_path' in hostConfig && !touched.has('rootPath')) {
+                            const incomingRoot = typeof hostConfig.root_path === 'string' ? hostConfig.root_path : '';
+                            if (incomingRoot !== prev.rootPath) {
+                                newPrefs.rootPath = incomingRoot;
+                                changed = true;
+                            }
                         }
 
                         // 2. Skill Directories (Array -> CSV String)
@@ -2323,24 +2329,32 @@ const OptionsInner: React.FC = () => {
                                                 </p>
                                                 <input
                                                     type="text"
+                                                    name="rootPath"
+                                                    aria-label={t('rootPath')}
                                                     value={prefs.rootPath || ""}
                                                     onChange={(e) => { userTouchedFieldsRef.current.add('rootPath'); setPrefs(prev => ({ ...prev, rootPath: e.target.value })); }} onBlur={handlePrefBlur}
                                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
-                                                placeholder="C:\MyCases"
-                                            />
-                                        </div>
+                                                    placeholder="C:\MyCases"
+                                                />
+                                            </div>
 
-                                        <div className="mt-2 flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                id="useWorkspaceOnly"
-                                                checked={prefs.useWorkspaceOnly !== false}
-                                                onChange={(e) => updatePref({ useWorkspaceOnly: e.target.checked })}
-                                                className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
-                                            />
-                                            <label htmlFor="useWorkspaceOnly" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
-                                                {t('useWorkspaceOnly') || "Use repository SKILLS and MCP ONLY"}
-                                            </label>
+                                        <div className="mt-2">
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    id="useWorkspaceOnly"
+                                                    checked={prefs.useWorkspaceOnly !== false}
+                                                    disabled={!hasRootPath}
+                                                    onChange={(e) => updatePref({ useWorkspaceOnly: e.target.checked })}
+                                                    className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                                />
+                                                <label htmlFor="useWorkspaceOnly" className={`text-xs font-semibold select-none ${hasRootPath ? 'text-slate-700 cursor-pointer' : 'text-slate-400 cursor-not-allowed'}`}>
+                                                    {t('useWorkspaceOnly')}
+                                                </label>
+                                            </div>
+                                            <p className="text-[10px] text-slate-500 mt-1 ml-6">
+                                                {t('useWorkspaceOnlyDesc')}
+                                            </p>
                                         </div>
 
                                             {/* 3. Skills Directory */}
@@ -2351,10 +2365,12 @@ const OptionsInner: React.FC = () => {
                                                 </p>
                                                 <input
                                                     type="text"
+                                                    name="skillDirectories"
+                                                    aria-label={t('skillDirectories')}
                                                     value={prefs.skillDirectories || ""}
                                                     onChange={(e) => { userTouchedFieldsRef.current.add('skillDirectories'); setPrefs(prev => ({ ...prev, skillDirectories: e.target.value })); }} onBlur={handlePrefBlur}
-                                                    disabled={prefs.useWorkspaceOnly !== false}
-                                                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${prefs.useWorkspaceOnly !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
+                                                    disabled={effectiveRepositoryOnly}
+                                                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/skills"
                                                 />
                                             </div>
@@ -2367,10 +2383,12 @@ const OptionsInner: React.FC = () => {
                                                 </p>
                                                 <input
                                                     type="text"
+                                                    name="mcpConfigPath"
+                                                    aria-label={t('mcpConfigPath')}
                                                     value={prefs.mcpConfigPath || ""}
                                                     onChange={(e) => { userTouchedFieldsRef.current.add('mcpConfigPath'); setPrefs(prev => ({ ...prev, mcpConfigPath: e.target.value })); }} onBlur={handlePrefBlur}
-                                                    disabled={prefs.useWorkspaceOnly !== false}
-                                                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${prefs.useWorkspaceOnly !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
+                                                    disabled={effectiveRepositoryOnly}
+                                                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/mcp-config.json"
                                                 />
                                             </div>
@@ -2406,11 +2424,19 @@ const OptionsInner: React.FC = () => {
                                                     />
                                                 ) : (
                                                     <textarea
+                                                        name="userInstructions"
+                                                        aria-label={t('userInstructions')}
                                                         value={prefs.userInstructions || ""}
                                                         onChange={(e) => { userTouchedFieldsRef.current.add('userInstructions'); setPrefs(prev => ({ ...prev, userInstructions: e.target.value })); }} onBlur={handlePrefBlur}
-                                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
+                                                        disabled={effectiveRepositoryOnly}
+                                                        className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                         placeholder={t('userInstructionsPlaceholder')}
                                                     />
+                                                )}
+                                                {effectiveRepositoryOnly && (
+                                                    <p className="text-[10px] text-amber-700 mt-2">
+                                                        {t('dhSpecificInstructionsInactive')}
+                                                    </p>
                                                 )}
                                             </div>
 
@@ -2445,6 +2471,8 @@ const OptionsInner: React.FC = () => {
                                                     />
                                                 ) : (
                                                     <textarea
+                                                        name="userPrompt"
+                                                        aria-label={t('userPrompt')}
                                                         value={prefs.userPrompt || ""}
                                                         onChange={(e) => { userTouchedFieldsRef.current.add('userPrompt'); setPrefs(prev => ({ ...prev, userPrompt: e.target.value })); }} onBlur={handlePrefBlur}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"

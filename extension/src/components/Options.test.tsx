@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, fireEvent, waitFor, act, screen } from '@testing-library/react'
 import {
   installChromeMock,
   resetChromeMock,
   deferNextResponse,
+  seedStorage,
   chromeMockSpies,
 } from '../test/chromeMock'
+import { DEFAULT_PREFS } from '../utils/prefs'
+import { getTranslation } from '../utils/translations'
 
 // Mock telemetry BEFORE importing Options. telemetry.ts instantiates
 // ApplicationInsights + createBrowserHistory at module-load and would
@@ -82,6 +85,17 @@ const findLanguageSelect = async (): Promise<HTMLSelectElement> => {
     if (!el) throw new Error('language select not yet rendered')
     return el
   })
+}
+
+const openCopilotSection = async () => {
+  const nav = await waitFor(() => {
+    const element = document.querySelector(
+      '[data-section="copilot"]',
+    ) as HTMLButtonElement | null
+    if (!element) throw new Error('copilot nav not rendered')
+    return element
+  })
+  fireEvent.click(nav)
 }
 
 // Pick the latest update_config sendMessage call whose
@@ -377,5 +391,194 @@ describe('Options About & Help tab', () => {
     expect(guideLink).not.toBeNull()
     expect(guideLink!.target).toBe('_blank')
     expect(guideLink!.rel).toContain('noopener')
+  })
+})
+
+// ---------- Prompt source mode matrix (Task 5) ----------
+
+describe('Options prompt source mode matrix', () => {
+  beforeEach(() => {
+    resetChromeMock()
+    installChromeMock()
+  })
+
+  it.each([
+    ['empty', ''],
+    ['null', null],
+  ])('UI-I1: %s Host Root disables Repository ONLY without rewriting stored true', async (_label, hostRoot) => {
+    const deferred = deferNextResponse('get_config')
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        rootPath: 'C:\\StaleChromeRoot',
+        useWorkspaceOnly: true,
+      },
+    })
+    render(<Options />)
+    await act(async () => deferred.resolve({
+      status: 'success',
+      data: {
+        root_path: hostRoot,
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: true },
+      },
+    }))
+    await openCopilotSection()
+    fireEvent.click(screen.getAllByRole('button', { name: /edit/i })[0])
+    const toggle = screen.getByRole('checkbox', {
+      name: /repository SKILLS, MCP, and instructions ONLY/i,
+    }) as HTMLInputElement
+    expect(toggle.disabled).toBe(true)
+    expect(toggle.checked).toBe(true)
+    expect((document.querySelector(
+      'input[name="rootPath"]',
+    ) as HTMLInputElement).value).toBe('')
+    expect((document.querySelector(
+      'input[name="skillDirectories"]',
+    ) as HTMLInputElement).disabled).toBe(false)
+    expect((document.querySelector(
+      'input[name="mcpConfigPath"]',
+    ) as HTMLInputElement).disabled).toBe(false)
+    expect((screen.getByLabelText(
+      /DH-specific Instructions/i,
+    ) as HTMLTextAreaElement).disabled).toBe(false)
+    expect(countUpdateConfigCalls()).toBe(0)
+  })
+
+  it('UI-I2/UI-I3: non-empty Root reapplies stored true and disables only repository-selected inputs', async () => {
+    const deferred = deferNextResponse('get_config')
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        skillDirectories: 'C:\\RetainedSkills',
+        mcpConfigPath: 'C:\\RetainedMcp.json',
+      },
+    })
+    render(<Options />)
+    await act(async () => deferred.resolve({
+      status: 'success',
+      data: {
+        root_path: 'C:\\MyCases',
+        _user_instructions_raw: 'KEEP-ME',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: true,
+          user_prompt: 'USER-PROMPT',
+        },
+      },
+    }))
+    await openCopilotSection()
+    fireEvent.click(screen.getAllByRole('button', { name: /edit/i })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: /edit/i })[1])
+    const toggle = screen.getByRole('checkbox', {
+      name: /repository SKILLS, MCP, and instructions ONLY/i,
+    }) as HTMLInputElement
+    const dhInstructions = screen.getByLabelText(
+      /DH-specific Instructions/i,
+    ) as HTMLTextAreaElement
+    const userPrompt = screen.getByLabelText(
+      /Custom User Prompt/i,
+    ) as HTMLTextAreaElement
+    expect(toggle.disabled).toBe(false)
+    expect(toggle.checked).toBe(true)
+    expect(dhInstructions.disabled).toBe(true)
+    expect(dhInstructions.value).toBe('KEEP-ME')
+    expect(userPrompt.disabled).toBe(false)
+    expect(userPrompt.value).toBe('USER-PROMPT')
+    expect((document.querySelector(
+      'input[name="skillDirectories"]',
+    ) as HTMLInputElement)).toMatchObject({
+      disabled: true,
+      value: 'C:\\RetainedSkills',
+    })
+    expect((document.querySelector(
+      'input[name="mcpConfigPath"]',
+    ) as HTMLInputElement)).toMatchObject({
+      disabled: true,
+      value: 'C:\\RetainedMcp.json',
+    })
+  })
+
+  it('UI-I3: disabling Repository ONLY restores retained DH text', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const update = deferNextResponse('update_config')
+    render(<Options />)
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: 'C:\\MyCases',
+        _user_instructions_raw: 'KEEP-ME',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: true },
+      },
+    }))
+    await openCopilotSection()
+    fireEvent.click(screen.getAllByRole('button', { name: /edit/i })[0])
+    const toggle = screen.getByRole('checkbox', {
+      name: /repository SKILLS, MCP, and instructions ONLY/i,
+    }) as HTMLInputElement
+    fireEvent.click(toggle)
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    const dhInstructions = screen.getByLabelText(
+      /DH-specific Instructions/i,
+    ) as HTMLTextAreaElement
+    expect(dhInstructions.disabled).toBe(false)
+    expect(dhInstructions.value).toBe('KEEP-ME')
+  })
+
+  it('UI-I5: renamed scope copy exists in English and Chinese', () => {
+    expect(getTranslation('userInstructions', 'en')).toBe(
+      'DH-specific Instructions',
+    )
+    expect(getTranslation('userInstructions', 'zh')).toBe('DH 专用指令')
+    expect(getTranslation('useWorkspaceOnly', 'en')).toContain(
+      'instructions ONLY',
+    )
+    expect(getTranslation('useWorkspaceOnly', 'zh')).toContain('指令')
+    expect(getTranslation('useWorkspaceOnlyDesc', 'en')).toContain(
+      '<Root>/.github/copilot-instructions.md',
+    )
+    expect(getTranslation('useWorkspaceOnlyDesc', 'en')).toContain(
+      'Custom User Prompt remain active',
+    )
+    expect(getTranslation('useWorkspaceOnlyDesc', 'zh')).toContain(
+      '<Root>/.github/copilot-instructions.md',
+    )
+    expect(getTranslation('dhSpecificInstructionsInactive', 'en')).toContain(
+      'retained but inactive',
+    )
+    expect(getTranslation('dhSpecificInstructionsInactive', 'zh')).toContain(
+      '保留',
+    )
+  })
+
+  it.each([
+    { root: '', repositoryOnly: true },
+    { root: 'C:\\MyCases', repositoryOnly: false },
+    { root: 'C:\\MyCases', repositoryOnly: true },
+  ])('UI-I4: Custom User Prompt stays enabled for %#', async state => {
+    const deferred = deferNextResponse('get_config')
+    render(<Options />)
+    await act(async () => deferred.resolve({
+      status: 'success',
+      data: {
+        root_path: state.root,
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: state.repositoryOnly,
+          user_prompt: 'USER-PROMPT',
+        },
+      },
+    }))
+    await openCopilotSection()
+    fireEvent.click(screen.getAllByRole('button', { name: /edit/i }).at(-1)!)
+    const prompt = screen.getByLabelText(
+      /Custom User Prompt/i,
+    ) as HTMLTextAreaElement
+    expect(prompt.disabled).toBe(false)
+    expect(prompt.value).toBe('USER-PROMPT')
   })
 })

@@ -14,7 +14,7 @@ export const translations: TranslationDictionary = {
     reset: { en: "Reset", zh: "重置" },
     cancel: { en: "Cancel", zh: "取消" },
     savedSuccess: { en: "Settings saved successfully!", zh: "设置已保存！" },
-    resetConfirm: { en: "Reset everything to default?\n\nThis will permanently clear:\n  • All custom bookmarks (returns to default menu)\n  • Team Catalog config (URL, selected team, cached items)\n  • All preferences (colors, button position, language, log level, paths)\n  • User Instructions (copilot-instructions.md will be wiped)\n  • User Prompt (user_prompt.md will be wiped)\n\nThis action cannot be undone.", zh: "重置所有设置为默认值？\n\n以下内容将被永久清除：\n  • 全部自定义书签（恢复为默认菜单）\n  • 团队目录配置（URL、所选团队、缓存）\n  • 所有偏好设置（颜色、按钮位置、语言、日志级别、路径）\n  • 用户指令（copilot-instructions.md 将被清空）\n  • 用户提示词（user_prompt.md 将被清空）\n\n此操作不可撤销。" },
+    resetConfirm: { en: "Reset everything to default?\n\nThis will permanently clear:\n  • All custom bookmarks (returns to default menu)\n  • Team Catalog config (URL, selected team, cached items)\n  • All preferences (colors, button position, language, log level, paths)\n  • DH-specific Instructions (copilot-instructions.md will be wiped)\n  • Custom User Prompt (user_prompt.md will be wiped)\n\nThis action cannot be undone.", zh: "重置所有设置为默认值？\n\n以下内容将被永久清除：\n  • 全部自定义书签（恢复为默认菜单）\n  • 团队目录配置（URL、所选团队、缓存）\n  • 所有偏好设置（颜色、按钮位置、语言、日志级别、路径）\n  • DH 专用指令（copilot-instructions.md 将被清空）\n  • 自定义用户提示词（user_prompt.md 将被清空）\n\n此操作不可撤销。" },
     
     // --- Options Page ---
     appearance: { en: "Appearance", zh: "外观设置" },
@@ -93,10 +93,10 @@ export const translations: TranslationDictionary = {
         zh: "此文本会自动附加到页面扫描的“案例上下文”描述中。用于为每次分析添加标准问题或指令（例如，“请提供根本原因分析和缓解措施”）。" 
     },
     userPromptPlaceholder: { en: "Add extra context for the AI...", zh: "为 AI 添加额外的上下文..." },
-    userInstructions: { en: "Custom User Instructions", zh: "自定义用户指令" },
+    userInstructions: { en: "DH-specific Instructions", zh: "DH 专用指令" },
     userInstructionsDesc: { 
-        en: "These instructions are appended to the core System Prompt. Use this to add your own rules (e.g., \"Always use bullet points\", \"Focus on technical details\").", 
-        zh: "这些指令会附加到核心系统提示词中。用于添加您自己的规则（例如，“总是使用项目符号”，“关注技术细节”）。" 
+        en: "These DH-wide system instructions are appended to the DH Core System Prompt when Repository ONLY is not active.",
+        zh: "未启用仅仓库模式时，这些 DH 范围的系统指令会附加到 DH 核心系统提示词中。"
     },
     rootPath: { en: "Root Path (Local Repository)", zh: "根路径 (本地仓库)" },
     rootPathDesc: { 
@@ -108,7 +108,15 @@ export const translations: TranslationDictionary = {
         en: "Comma-separated list of directories containing custom skills (e.g., ~/.copilot/skills).", 
         zh: "包含自定义技能的目录列表，以逗号分隔 (例如 ~/.copilot/skills)。" 
     },
-    useWorkspaceOnly: { en: "Use repository SKILLS and MCP ONLY", zh: "仅使用仓库的 SKILLS 和 MCP" },
+    useWorkspaceOnly: { en: "Use repository SKILLS, MCP, and instructions ONLY", zh: "仅使用仓库的 SKILLS、MCP 和指令" },
+    useWorkspaceOnlyDesc: {
+        en: "Uses repository SKILLS and MCP, with <Root>/.github/copilot-instructions.md as the only editable system instructions. DH Core System Prompt and Custom User Prompt remain active.",
+        zh: "使用仓库的 SKILLS 和 MCP，并将 <Root>/.github/copilot-instructions.md 作为唯一的可编辑系统指令。DH 核心系统提示词和自定义用户提示词仍然生效。"
+    },
+    dhSpecificInstructionsInactive: {
+        en: "This content is retained but inactive while Repository ONLY uses <Root>/.github/copilot-instructions.md.",
+        zh: "此内容会保留，但仅仓库模式使用 <Root>/.github/copilot-instructions.md 时不会生效。"
+    },
     mcpConfigPath: { en: "MCP Configuration", zh: "MCP 配置" },
     mcpConfigPathDesc: {
         en: "Path to the global MCP configuration JSON file (Default: ~/.copilot/mcp-config.json).",
@@ -172,7 +180,7 @@ export const translations: TranslationDictionary = {
     addChild: { en: "Add Child", zh: "添加子项" },
     deleteTooltip: { en: "Delete", zh: "删除" },
     teamManagedTooltip: { en: "Team managed", zh: "团队管理" },
-    userInstructionsPlaceholder: { en: "Enter your custom instructions here...", zh: "在此输入你的自定义指令…" },
+    userInstructionsPlaceholder: { en: "Enter DH-specific instructions here...", zh: "在此输入 DH 专用指令…" },
     // FAB (i18n audit)
     settings: { en: "Settings", zh: "设置" },
     refreshContext: { en: "Refresh Context (Re-scan page)", zh: "刷新上下文（重新扫描页面）" },
