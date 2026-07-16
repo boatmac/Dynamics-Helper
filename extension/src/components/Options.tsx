@@ -54,6 +54,11 @@ type PromptSourceIssue = {
     fallback: string;
 };
 
+type PrefsMirrorIntent = {
+    generation: number;
+    prefs: Readonly<Preferences>;
+};
+
 // Helper
 function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -539,6 +544,7 @@ const OptionsInner: React.FC = () => {
     // yet" so the very first storage hydration (which writes prefs back
     // unchanged) does not spuriously count as a URL change.
     const lastFetchedManifestUrlRef = useRef<string>('__unset__');
+    const pendingManifestFetchUrlRef = useRef<string | null>(null);
 
     // Hydration guard: prefs state is fully populated only AFTER the host
     // get_config response merges its fields into state (see mount useEffect
@@ -574,11 +580,15 @@ const OptionsInner: React.FC = () => {
     });
     const userInstructionsAckRevisionRef = useRef(0);
     const configUpdateRequestRevisionRef = useRef(0);
-    const latestConfigUpdateIntentRef = useRef<ConfigUpdateIntent<Preferences> | null>(null);
+    const prefsMirrorGenerationRef = useRef(0);
+    const latestPrefsMirrorIntentRef = useRef<PrefsMirrorIntent | null>(null);
     const prefsRef = useRef<Preferences>(DEFAULT_PREFS);
-    const [catchUpEpoch, setCatchUpEpoch] = useState(0);
-    const catchUpRequestedEpochRef = useRef(0);
-    const catchUpProcessedEpochRef = useRef(0);
+    const userTouchedRevisionRef = useRef(0);
+    const [catchUpRevision, setCatchUpRevision] = useState(0);
+    const catchUpRequestedRevisionRef = useRef(0);
+    const catchUpProcessedRevisionRef = useRef(0);
+    const [hydrationMirrorEpoch, setHydrationMirrorEpoch] = useState(0);
+    const hydrationMirrorRequestedEpochRef = useRef(0);
 
     // Hydration-window edit protection. Tracks which dh_prefs keys the user
     // has edited during this Options session. Used by:
@@ -722,6 +732,11 @@ const OptionsInner: React.FC = () => {
         return nextPrefs;
     };
 
+    const markUserTouched = (keys: Array<keyof Preferences>) => {
+        keys.forEach(key => userTouchedFieldsRef.current.add(key));
+        userTouchedRevisionRef.current += 1;
+    };
+
     const buildHostConfigPayload = (
         nextPrefs: Readonly<Preferences>,
         instruction?: { value: string },
@@ -815,40 +830,118 @@ const OptionsInner: React.FC = () => {
         )
             ? instructionToken
             : undefined;
-        const intent = createConfigUpdateIntent(generation, nextPrefs, instruction);
-        latestConfigUpdateIntentRef.current = intent;
-        return intent;
+        return createConfigUpdateIntent(generation, nextPrefs, instruction);
     };
 
     const requestHydrationCatchUp = () => {
-        if (userTouchedFieldsRef.current.size === 0) return;
-        const epoch = ++catchUpRequestedEpochRef.current;
-        setCatchUpEpoch(epoch);
+        const touchedRevision = userTouchedRevisionRef.current;
+        if (
+            touchedRevision === 0
+            || touchedRevision <= catchUpRequestedRevisionRef.current
+        ) {
+            return;
+        }
+        catchUpRequestedRevisionRef.current = touchedRevision;
+        setCatchUpRevision(touchedRevision);
     };
 
-    const repairPrefsStorage = (intent: ConfigUpdateIntent<Preferences>) => {
-        chrome.storage.local.set({ dh_prefs: intent.prefs }, () => {
-            const latestIntent = latestConfigUpdateIntentRef.current;
-            if (latestIntent && latestIntent.generation !== intent.generation) {
-                repairPrefsStorage(latestIntent);
-            }
+    const createPrefsMirrorIntent = (
+        nextPrefs: Readonly<Preferences>,
+    ): PrefsMirrorIntent => {
+        const intent = Object.freeze({
+            generation: ++prefsMirrorGenerationRef.current,
+            prefs: Object.freeze({ ...nextPrefs }),
         });
+        latestPrefsMirrorIntentRef.current = intent;
+        return intent;
+    };
+
+    const writePrefsMirror = (
+        intent: PrefsMirrorIntent,
+        onLatestCommit?: () => void,
+    ) => {
+        chrome.storage.local.set({ dh_prefs: intent.prefs }, () => {
+            const latestIntent = latestPrefsMirrorIntentRef.current;
+            if (latestIntent && latestIntent.generation !== intent.generation) {
+                writePrefsMirror(latestIntent);
+                return;
+            }
+            onLatestCommit?.();
+        });
+    };
+
+    const flushPendingManifestFetch = (nextPrefs: Readonly<Preferences>) => {
+        const pendingManifestUrl = pendingManifestFetchUrlRef.current;
+        if (
+            pendingManifestUrl
+            && nextPrefs.teamCatalogEnabled
+            && nextPrefs.teamManifestUrl === pendingManifestUrl
+        ) {
+            const previousUrl = lastFetchedManifestUrlRef.current;
+            pendingManifestFetchUrlRef.current = null;
+            if (pendingManifestUrl === previousUrl) return;
+
+            lastFetchedManifestUrlRef.current = pendingManifestUrl;
+            chrome.runtime.sendMessage(
+                { type: "SYNC_TEAM_CATALOG", payload: { manifestOnly: true } },
+                (response) => {
+                    if (chrome.runtime.lastError) {
+                        showError(t('manifestFetchFailed'), 5000);
+                        setTeamFetchError({ kind: 'network' });
+                        return;
+                    }
+                    if (!response || response.status !== "success") {
+                        const kind = (response?.errorKind as any) || 'unknown';
+                        const httpStatus = response?.httpStatus as number | undefined;
+                        setTeamFetchError({ kind, httpStatus });
+                        if (kind === 'auth') {
+                            showError(t('manifestFetchAuthToast'), 6000);
+                        }
+                    } else {
+                        setTeamFetchError(null);
+                    }
+                },
+            );
+        } else if (pendingManifestUrl) {
+            pendingManifestFetchUrlRef.current = null;
+        }
+    };
+
+    const requestHydrationMirror = () => {
+        const epoch = ++hydrationMirrorRequestedEpochRef.current;
+        setHydrationMirrorEpoch(epoch);
     };
 
     useEffect(() => {
         if (
-            catchUpEpoch === 0
-            || catchUpEpoch !== catchUpRequestedEpochRef.current
-            || catchUpProcessedEpochRef.current === catchUpEpoch
+            hydrationMirrorEpoch === 0
+            || hydrationMirrorEpoch !== hydrationMirrorRequestedEpochRef.current
         ) {
             return;
         }
-        catchUpProcessedEpochRef.current = catchUpEpoch;
+        const intent = createPrefsMirrorIntent(prefsRef.current);
+        writePrefsMirror(intent, () => {
+            if (prefsHydratedRef.current) {
+                flushPendingManifestFetch(intent.prefs);
+            }
+        });
+    }, [hydrationMirrorEpoch]);
+
+    useEffect(() => {
+        if (
+            catchUpRevision === 0
+            || catchUpRevision !== catchUpRequestedRevisionRef.current
+            || catchUpProcessedRevisionRef.current >= catchUpRevision
+        ) {
+            return;
+        }
+        catchUpProcessedRevisionRef.current = catchUpRevision;
         console.log('[DH] Hydration catch-up: pushing', userTouchedFieldsRef.current.size, 'user-touched field(s) to host');
-        sendHostConfigUpdate(createIntent(prefsRef.current), {
+        const intent = createIntent(prefsRef.current);
+        sendHostConfigUpdate(intent, {
             suppressTransportWarning: true,
         });
-    }, [catchUpEpoch]);
+    }, [catchUpRevision]);
 
     // Initial Load
     useEffect(() => {
@@ -910,6 +1003,7 @@ const OptionsInner: React.FC = () => {
                      // Host is unreachable so this RPC will almost certainly
                      // also fail, but it's a no-op cost and recovers when
                      // host comes back within the same Options session.
+                     requestHydrationMirror();
                      requestHydrationCatchUp();
                      return;
                 }
@@ -1068,10 +1162,6 @@ const OptionsInner: React.FC = () => {
                         // but host config.json already has language='zh').
                         // Storage-only write (no host update_config) avoids echoing
                         // back the same data we just read.
-                        if (changed) {
-                            chrome.storage.local.set({ dh_prefs: newPrefs });
-                        }
-
                         // Mark prefs as hydrated so subsequent user-triggered
                         // persistPrefs calls proceed. See prefsHydratedRef
                         // declaration for the failure mode this guards against.
@@ -1085,6 +1175,7 @@ const OptionsInner: React.FC = () => {
                         return changed ? newPrefs : prev;
                     });
                     prefsHydratedRef.current = true;
+                    requestHydrationMirror();
                     requestHydrationCatchUp();
                 } else {
                     // Host responded but not with success+data. Same
@@ -1106,6 +1197,7 @@ const OptionsInner: React.FC = () => {
                     // probably also fail (host is broken), but it's a no-op
                     // cost and keeps storage-vs-host eventually consistent
                     // when host recovers within the same Options session.
+                    requestHydrationMirror();
                     requestHydrationCatchUp();
                 }
             });
@@ -1211,7 +1303,7 @@ const OptionsInner: React.FC = () => {
         // ref must be set NOW: if hydration completes mid-typing, the
         // host's stale value would otherwise clobber what the user is
         // currently editing.
-        userTouchedFieldsRef.current.add(name as keyof Preferences);
+        markUserTouched([name as keyof Preferences]);
         const isNumeric = name.startsWith('offset') || name === 'analyzeTimeoutSeconds';
         updateCurrentPrefs({
             [name]: isNumeric ? Number(value) : value,
@@ -1263,12 +1355,15 @@ const OptionsInner: React.FC = () => {
         // hitting it during normal cold start is expected, not exceptional.
         // See docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md
         const intent = createIntent(nextPrefs);
-        chrome.storage.local.set({ dh_prefs: intent.prefs }, () => {
+        if (opts?.fetchManifest && nextPrefs.teamCatalogEnabled && nextPrefs.teamManifestUrl) {
+            pendingManifestFetchUrlRef.current = nextPrefs.teamManifestUrl;
+        }
+        const mirrorIntent = createPrefsMirrorIntent(intent.prefs);
+        writePrefsMirror(mirrorIntent, () => {
+            if (prefsHydratedRef.current) {
+                flushPendingManifestFetch(mirrorIntent.prefs);
+            }
             if (intent.generation !== configUpdateRequestRevisionRef.current) {
-                const latestIntent = latestConfigUpdateIntentRef.current;
-                if (latestIntent) {
-                    repairPrefsStorage(latestIntent);
-                }
                 return;
             }
             if (!prefsHydratedRef.current) {
@@ -1279,47 +1374,6 @@ const OptionsInner: React.FC = () => {
             }
 
             sendHostConfigUpdate(intent);
-
-            // Manifest fetch — only when caller opts in AND URL actually
-            // changed since last fetch. Diff guard prevents a refetch when
-            // the user toggles e.g. teamCatalogEnabled without touching URL.
-            if (opts?.fetchManifest && intent.prefs.teamCatalogEnabled && intent.prefs.teamManifestUrl) {
-                const previousUrl = lastFetchedManifestUrlRef.current;
-                const currentUrl = intent.prefs.teamManifestUrl;
-                if (currentUrl !== previousUrl) {
-                    lastFetchedManifestUrlRef.current = currentUrl;
-                    chrome.runtime.sendMessage(
-                        { type: "SYNC_TEAM_CATALOG", payload: { manifestOnly: true } },
-                        (response) => {
-                            if (chrome.runtime.lastError) {
-                                showError(t('manifestFetchFailed'), 5000);
-                                setTeamFetchError({ kind: 'network' });
-                                return;
-                            }
-                            if (!response || response.status !== "success") {
-                                // Classified failure from SW: response.errorKind /
-                                // response.httpStatus were added 2026-07-03 so the
-                                // UI can show auth-vs-notFound-vs-generic copy
-                                // instead of a single opaque "manifest fetch failed".
-                                const kind = (response?.errorKind as any) || 'unknown';
-                                const httpStatus = response?.httpStatus as number | undefined;
-                                setTeamFetchError({ kind, httpStatus });
-                                // Only surface a toast for auth failures — the
-                                // inline red text under the URL field is enough
-                                // for other cases and prevents duplicate noise.
-                                if (kind === 'auth') {
-                                    showError(t('manifestFetchAuthToast'), 6000);
-                                }
-                            } else {
-                                // Fetch succeeded — clear any stale error banner
-                                // from a prior try (e.g. user pasted a working URL
-                                // after fixing a bad one).
-                                setTeamFetchError(null);
-                            }
-                        }
-                    );
-                }
-            }
         });
     };
 
@@ -1330,7 +1384,7 @@ const OptionsInner: React.FC = () => {
         // Mark every patched key as user-touched so the host hydration merge
         // (if still pending) does not overwrite our value, and so the
         // catch-up RPC knows to push these fields after hydration.
-        (Object.keys(patch) as Array<keyof Preferences>).forEach(k => userTouchedFieldsRef.current.add(k));
+        markUserTouched(Object.keys(patch) as Array<keyof Preferences>);
         const next = updateCurrentPrefs(patch);
         persistPrefs(next, opts);
     };
@@ -1346,9 +1400,7 @@ const OptionsInner: React.FC = () => {
             // explicit choice — protect it from being merged-over. Without
             // this, a reset during the hydration window would be reverted
             // when host get_config returns the pre-reset values.
-            (Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>).forEach(
-                k => userTouchedFieldsRef.current.add(k)
-            );
+            markUserTouched(Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>);
             setCurrentPrefs(DEFAULT_PREFS);
             persistPrefs(DEFAULT_PREFS);
             chrome.storage.local.remove(["dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels", "dh_last_analysis", "dh_pending_analysis"], () => {
@@ -2323,7 +2375,7 @@ const OptionsInner: React.FC = () => {
                                                             // staring at it after they've already started
                                                             // fixing the typo.
                                                             if (manifestUrlInvalid) setManifestUrlInvalid(false);
-                                                            userTouchedFieldsRef.current.add('teamManifestUrl');
+                                                            markUserTouched(['teamManifestUrl']);
                                                             updateCurrentPrefs({ teamManifestUrl: e.target.value });
                                                         }}
                                                         onBlur={() => {
@@ -2463,7 +2515,7 @@ const OptionsInner: React.FC = () => {
                                                     name="rootPath"
                                                     aria-label={t('rootPath')}
                                                     value={prefs.rootPath || ""}
-                                                    onChange={(e) => { userTouchedFieldsRef.current.add('rootPath'); updateCurrentPrefs({ rootPath: e.target.value }); }} onBlur={handlePrefBlur}
+                                                    onChange={(e) => { markUserTouched(['rootPath']); updateCurrentPrefs({ rootPath: e.target.value }); }} onBlur={handlePrefBlur}
                                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
                                                     placeholder="C:\MyCases"
                                                 />
@@ -2499,7 +2551,7 @@ const OptionsInner: React.FC = () => {
                                                     name="skillDirectories"
                                                     aria-label={t('skillDirectories')}
                                                     value={prefs.skillDirectories || ""}
-                                                    onChange={(e) => { userTouchedFieldsRef.current.add('skillDirectories'); updateCurrentPrefs({ skillDirectories: e.target.value }); }} onBlur={handlePrefBlur}
+                                                    onChange={(e) => { markUserTouched(['skillDirectories']); updateCurrentPrefs({ skillDirectories: e.target.value }); }} onBlur={handlePrefBlur}
                                                     disabled={effectiveRepositoryOnly}
                                                     className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/skills"
@@ -2517,7 +2569,7 @@ const OptionsInner: React.FC = () => {
                                                     name="mcpConfigPath"
                                                     aria-label={t('mcpConfigPath')}
                                                     value={prefs.mcpConfigPath || ""}
-                                                    onChange={(e) => { userTouchedFieldsRef.current.add('mcpConfigPath'); updateCurrentPrefs({ mcpConfigPath: e.target.value }); }} onBlur={handlePrefBlur}
+                                                    onChange={(e) => { markUserTouched(['mcpConfigPath']); updateCurrentPrefs({ mcpConfigPath: e.target.value }); }} onBlur={handlePrefBlur}
                                                     disabled={effectiveRepositoryOnly}
                                                     className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/mcp-config.json"
@@ -2558,7 +2610,7 @@ const OptionsInner: React.FC = () => {
                                                         name="userInstructions"
                                                         aria-label={t('userInstructions')}
                                                         value={prefs.userInstructions || ""}
-                                                        onChange={(e) => { userInstructionsEditTokenRef.current = { revision: userInstructionsEditTokenRef.current.revision + 1, value: e.target.value }; userTouchedFieldsRef.current.add('userInstructions'); updateCurrentPrefs({ userInstructions: e.target.value }); }} onBlur={handlePrefBlur}
+                                                        onChange={(e) => { userInstructionsEditTokenRef.current = { revision: userInstructionsEditTokenRef.current.revision + 1, value: e.target.value }; markUserTouched(['userInstructions']); updateCurrentPrefs({ userInstructions: e.target.value }); }} onBlur={handlePrefBlur}
                                                         disabled={effectiveRepositoryOnly}
                                                         className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                         placeholder={t('userInstructionsPlaceholder')}
@@ -2605,7 +2657,7 @@ const OptionsInner: React.FC = () => {
                                                         name="userPrompt"
                                                         aria-label={t('userPrompt')}
                                                         value={prefs.userPrompt || ""}
-                                                        onChange={(e) => { userTouchedFieldsRef.current.add('userPrompt'); updateCurrentPrefs({ userPrompt: e.target.value }); }} onBlur={handlePrefBlur}
+                                                        onChange={(e) => { markUserTouched(['userPrompt']); updateCurrentPrefs({ userPrompt: e.target.value }); }} onBlur={handlePrefBlur}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
                                                         placeholder={t('userPromptPlaceholder')}
                                                     />

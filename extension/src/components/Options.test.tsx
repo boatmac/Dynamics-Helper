@@ -1435,6 +1435,236 @@ describe('Options prompt health and inspected sparse writes', () => {
     }
   })
 
+  it('keeps a newer user mirror when delayed Host hydration storage completes', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const update = deferNextResponse('update_config')
+    render(<Options />)
+    const language = await findLanguageSelect()
+    const hydrationMirror = deferNextStorageSet('dh_prefs')
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          language: 'zh',
+          use_workspace_only: false,
+        },
+      },
+    }))
+    expect(language.value).toBe('zh')
+
+    fireEvent.change(language, { target: { value: 'en' } })
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    await act(async () => hydrationMirror.resolve(undefined))
+
+    expect((getStorageSnapshot().dh_prefs as any).language).toBe('en')
+    const updateCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(updateCalls).toHaveLength(1)
+    expect(
+      updateCalls[0].payload.payload.config.extension_preferences.language,
+    ).toBe('en')
+  })
+
+  it('carries a delayed manifest fetch into the latest persistence intent', async () => {
+    const latestUpdate = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: {
+        language: 'auto',
+        team_catalog_enabled: true,
+        team_manifest_url: 'https://example.com/old-manifest.json',
+        use_workspace_only: false,
+      },
+    })
+    const olderStorage = deferNextStorageSet('dh_prefs')
+    const newerStorage = deferNextStorageSet('dh_prefs')
+    const teamNav = document.querySelector(
+      '[data-section="team"]',
+    ) as HTMLButtonElement
+    fireEvent.click(teamNav)
+    const manifest = screen.getByPlaceholderText(
+      'https://example.com/team-manifest.json',
+    ) as HTMLInputElement
+    fireEvent.change(manifest, {
+      target: { value: 'https://example.com/new-manifest.json' },
+    })
+    fireEvent.blur(manifest)
+
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+
+    await act(async () => newerStorage.resolve(undefined))
+    await act(async () => latestUpdate.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    await act(async () => olderStorage.resolve(undefined))
+
+    const messages = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+    const manifestCalls = messages.filter(message =>
+      message?.type === 'SYNC_TEAM_CATALOG'
+      && message?.payload?.manifestOnly === true,
+    )
+    expect(manifestCalls).toHaveLength(1)
+    expect((getStorageSnapshot().dh_prefs as any).teamManifestUrl).toBe(
+      'https://example.com/new-manifest.json',
+    )
+    const updateCalls = messages.filter(
+      message => message?.payload?.action === 'update_config',
+    )
+    expect(updateCalls).toHaveLength(1)
+    expect(updateCalls[0].payload.payload.config.extension_preferences).toMatchObject({
+      language: 'en',
+      team_manifest_url: 'https://example.com/new-manifest.json',
+    })
+  })
+
+  it('runs a pending manifest fetch after pre-hydration persistence catches up', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const catchUp = deferNextResponse('update_config')
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        teamCatalogEnabled: true,
+        teamManifestUrl: 'https://example.com/old-manifest.json',
+        useWorkspaceOnly: false,
+      },
+    })
+    render(<Options />)
+    const teamNav = await waitFor(() => document.querySelector(
+      '[data-section="team"]',
+    ) as HTMLButtonElement)
+    fireEvent.click(teamNav)
+    const manifest = await waitFor(() => screen.getByPlaceholderText(
+      'https://example.com/team-manifest.json',
+    ) as HTMLInputElement)
+    fireEvent.change(manifest, {
+      target: { value: 'https://example.com/new-manifest.json' },
+    })
+    fireEvent.blur(manifest)
+    expect(countUpdateConfigCalls()).toBe(0)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          team_catalog_enabled: true,
+          team_manifest_url: 'https://example.com/old-manifest.json',
+          use_workspace_only: false,
+        },
+      },
+    }))
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+
+    const manifestCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message =>
+        message?.type === 'SYNC_TEAM_CATALOG'
+        && message?.payload?.manifestOnly === true,
+      )
+    expect(manifestCalls).toHaveLength(1)
+    expect((getStorageSnapshot().dh_prefs as any).teamManifestUrl).toBe(
+      'https://example.com/new-manifest.json',
+    )
+    await act(async () => catchUp.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it('coalesces duplicate StrictMode hydration callbacks for one touched revision', async () => {
+    const firstGetConfig = deferNextResponse('get_config')
+    const secondGetConfig = deferNextResponse('get_config')
+    const catchUp = deferNextResponse('update_config')
+    render(<StrictMode><Options /></StrictMode>)
+    await openCopilotSection()
+    const editor = await openDhInstructionsEditor()
+    fireEvent.change(editor, { target: { value: 'one-revision' } })
+    fireEvent.blur(editor)
+
+    const response = {
+      status: 'success',
+      data: {
+        root_path: '',
+        _user_instructions_raw: 'stale-host-value',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }
+    await act(async () => firstGetConfig.resolve(response))
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+    await act(async () => secondGetConfig.resolve(response))
+    await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+
+    const getConfigCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'get_config')
+    expect(getConfigCalls).toHaveLength(2)
+    const updateCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(updateCalls).toHaveLength(1)
+    expect(updateCalls[0].payload.payload.user_instructions).toBe(
+      'one-revision',
+    )
+    await act(async () => catchUp.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it('allows a later StrictMode hydration callback for a newer touched revision', async () => {
+    const firstGetConfig = deferNextResponse('get_config')
+    const secondGetConfig = deferNextResponse('get_config')
+    const firstCatchUp = deferNextResponse('update_config')
+    const secondCatchUp = deferNextResponse('update_config')
+    render(<StrictMode><Options /></StrictMode>)
+    await openCopilotSection()
+    const editor = await openDhInstructionsEditor()
+    fireEvent.change(editor, { target: { value: 'revision-1' } })
+
+    const response = {
+      status: 'success',
+      data: {
+        root_path: '',
+        _user_instructions_raw: 'stale-host-value',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }
+    await act(async () => firstGetConfig.resolve(response))
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+    await act(async () => firstCatchUp.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+
+    fireEvent.change(editor, { target: { value: 'revision-2' } })
+    await act(async () => secondGetConfig.resolve(response))
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(2))
+    const updateCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(updateCalls.at(-1).payload.payload.user_instructions).toBe(
+      'revision-2',
+    )
+    await act(async () => secondCatchUp.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
   it('does not log raw Host prompt or preference values', async () => {
     const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
     try {
