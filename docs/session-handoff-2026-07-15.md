@@ -11,7 +11,7 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Isolated worktree: `C:\Users\zhaobo\AppData\Local\Temp\opencode\Dynamics-Helper-prompt-scope-spec`
 - Product implementation Tasks 1-6: approved through `0f57f8e`
 - Implementation/documentation Tasks 1-7: approved through `90e6da3` (`docs(persistence): correct result lifecycle semantics`)
-- Task 8 verification head: the commit containing this update, `docs(verification): record prompt scope test evidence`; controller-owned broad code review follows
+- Task 8 evidence: `9127546` is augmented and its Host-run safety claims corrected by current `HEAD` (`docs(verification): isolate prompt scope host evidence`); controller-owned broad code review follows
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
@@ -52,10 +52,11 @@ eacda76 fix(options): preserve skills across mode edits
 ca65519 docs(prompt): document deterministic instruction scopes
 6fdd8f5 docs(prompt): correct Task 7 review findings
 90e6da3 docs(persistence): correct result lifecycle semantics
-HEAD docs(verification): record prompt scope test evidence
+9127546 docs(verification): record prompt scope test evidence
+HEAD docs(verification): isolate prompt scope host evidence
 ```
 
-These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. The approved pre-verification head was `90e6da3a03050ef53526d253ec0cf7989efa8e47`, at which point the branch was 20 commits ahead of and 0 behind `origin/master`. Task 8 evidence is recorded below; the controller's final broad code review remains separate. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming an ahead/behind count from this document.
+These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. The approved pre-verification head was `90e6da3a03050ef53526d253ec0cf7989efa8e47`, at which point the branch was 20 commits ahead of and 0 behind `origin/master`. Current Task 8 evidence consists of `9127546` plus the correcting current `HEAD`; the branch is 22 commits ahead of and 0 behind `origin/master` at that correcting commit. The controller's final broad code review remains separate. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming an ahead/behind count from this document.
 
 ## Remote VM Bootstrap
 
@@ -180,21 +181,52 @@ Durable implementation evidence is the accepted spec `441d0db`, plan `21108d9`, 
 
 Task 8 ran against approved pre-verification head `90e6da3a03050ef53526d253ec0cf7989efa8e47` in the isolated worktree on `docs/prompt-scope-cleanup-design`. The Host environment was Python **3.13.13** with `github-copilot-sdk` **1.0.5**. Native Messaging remained in the provided **PROD** mode; no registry switch was performed.
 
+Safety correction: the Host commands recorded by `9127546` launched without overriding `LOCALAPPDATA`. Host import creates `%LOCALAPPDATA%\DynamicsHelper`, opens `native_host.log`, and conditionally reads startup `config.json`, so those runs could access real VM-local product state at import time. They are superseded and are not relied on as final Host evidence. No product AppData content was intentionally inspected or modified during Task 8, but the earlier claim that AppData was never read or written was too strong.
+
+The correcting run set `LOCALAPPDATA`, `TEMP`, and `TMP` to a new empty scratch root before each Python process started and restored the parent environment afterward. An import probe confirmed `USER_DATA_DIR`, `LOG_FILE`, startup `config.json`, and the emergency log all resolved only beneath:
+
+```text
+C:\Users\zhaobo\AppData\Local\Temp\opencode\Dynamics-Helper-task8-isolated-b9b617e4e295434ab94d89da075ee996
+```
+
+Accepted isolated Host commands:
+
+```powershell
+$env:LOCALAPPDATA = $isolatedRoot
+$env:TEMP = Join-Path $isolatedRoot "Temp"
+$env:TMP = Join-Path $isolatedRoot "Temp"
+& "host\venv\Scripts\python.exe" -m compileall -q host
+$env:PYTHONPATH = "host"
+& "host\venv\Scripts\python.exe" -m unittest host.test_prompt_sources host.test_prompt_session host.test_session_workspace host.test_sdk_compat -v
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+& "host\venv\Scripts\python.exe" -m unittest discover host
+```
+
+Each command was launched inside a `try`/`finally` wrapper that restored or removed all four environment variables after Python exited. The accepted focused gate is the explicit discovery-equivalent four-module command with `PYTHONPATH=host`. The package-style focused command without `PYTHONPATH` remains a diagnosed pre-existing unsupported invocation; it is not a passed gate. This is an execution correction, not a waived failure.
+
 Fresh gate results:
 
-- Python `compileall`: **passed** with exit 0 and no diagnostics.
-- Focused Host: **108/108** passed: `host.test_prompt_sources` 46, `host.test_prompt_session` 22, `host.test_session_workspace` 26, and `host.test_sdk_compat` 14.
-- Full Host discovery: **178/178** passed.
-- Focused Extension: **88/88** passed across 4 files.
-- Full Extension: **118/118** passed across 9 files.
-- Extension production build: **passed**; TypeScript and Vite completed, 2,215 modules were transformed, and 14 output artifacts were listed.
-- Static Git checks: `git diff --check` reported **0** whitespace errors; the pre-evidence worktree had **0** status entries, and the stale-marker scan over the handoff and release draft reported **0** matches.
+- Isolated Python `compileall`: **passed** with exit 0 and no diagnostics.
+- Isolated focused Host: **108/108** passed in 2.933s: `host.test_prompt_sources` 46, `host.test_prompt_session` 22, `host.test_session_workspace` 26, and `host.test_sdk_compat` 14.
+- Isolated full Host discovery: **178/178** passed in 2.097s.
+- Focused Extension: **88/88** passed across 4 files in 11.17s using `--reporter=dot`.
+- Full Extension: **118/118** passed across 9 files in 11.90s using `--reporter=dot`.
+- Extension production build: **passed** in 7.16s; TypeScript and Vite completed, 2,215 modules were transformed, and 14 output artifacts were listed.
+- Pre-commit static Git checks: `git diff --check` reported **0** whitespace errors, only `docs/session-handoff-2026-07-15.md` was modified, the release draft was unchanged, and the stale-marker scan over the handoff and release draft reported **0** matches.
 
-The focused module-form Host commands use `PYTHONPATH=host`, matching discovery's import environment. Without it, the brief's package-style invocation of `host.test_sdk_compat` reaches the Host's pre-existing bare sibling import `from pii_scrubber import PiiScrubber` without `host` on `sys.path`; that exact invocation produced 13 passes and 1 import error. Tasks 1 and 2 already documented this pre-existing import-topology constraint. No product code was changed for Task 8, and the unmodified authoritative full-discovery command passed 178/178.
+The fresh isolated totals are unchanged from `9127546`, but only the isolated reruns are final Host evidence. After the runs, the scratch tree contained only expected import-generated files: `DynamicsHelper/native_host.log` and `Temp/dh_startup.log`. No scratch `config.json`, instruction, prompt, session, or other default artifact existed. The scratch root was then deleted successfully.
+
+Fresh Extension commands recorded verbatim:
+
+```powershell
+npm run test:run --prefix extension -- src/utils/promptSourceErrors.test.ts src/background/analyzeBridge.test.ts src/hooks/useAnalysisHydration.test.ts src/components/Options.test.tsx --reporter=dot
+npm run test:run --prefix extension -- --reporter=dot
+npm run build --prefix extension
+```
 
 Optional authenticated marker smoke: **not run**. Proving all three source modes would require changing the DH-specific AppData instruction file and the CLI-global home instruction file. Task 8 explicitly prohibits modifying those VM-local files, and no verified isolated user-data/root/session arrangement was available that both preserves authentication and guarantees production prompt/session state cannot be read or written. The smoke is optional and is not a completion gate.
 
-The release prose is staged only as `releases/notes-prompt-scope-cleanup-draft.md`. No release version was selected; no version field, tag, package, registry value, AppData prompt file, MyCases canonical file, or publication target was changed. The controller must perform the final broad code review after this evidence commit and before any separately approved integration or release action.
+The release prose exists only as the concise unversioned draft `releases/notes-prompt-scope-cleanup-draft.md`. No release version was selected; no version field, tag, package, registry value, MyCases canonical file, or publication target was changed. The controller must perform the final broad code review after this correcting evidence commit and before any separately approved integration or release action.
 
 ## Session Identity Contract
 
@@ -385,9 +417,9 @@ Blocked until the Contract Primitives spec freezes the adapter boundary:
 
 ## Current Decision State
 
-- Prompt-scope implementation/documentation Tasks 1-7 are approved on `docs/prompt-scope-cleanup-design` through `90e6da3`; Task 8 final gate evidence and its unversioned release draft are recorded in the subsequent verification commit.
+- Prompt-scope implementation/documentation Tasks 1-7 are approved on `docs/prompt-scope-cleanup-design` through `90e6da3`; Task 8 evidence is `9127546` plus the current correcting evidence commit, and its concise unversioned release draft exists.
 - Accepted design and plan are `441d0db` and `21108d9`.
-- Final broad code review remains controller-owned after the Task 8 verification commit.
+- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; final broad code review remains controller-owned after the correcting Task 8 evidence commit.
 - No MyCases integration code, mode preference, workspace detector, coordinator adapter, persistence adapter, or MyCases canonical-file write has been implemented.
 - MyCasesKit response `675006a` accepts Form ③ and the Stage 1 deterministic persistence-gate model.
 - Five shared JSON fixtures and a README exist as examples, but six README items remain tentative; not every interface is frozen.
@@ -427,7 +459,7 @@ Use the following for continuation; update the exact HEAD and status from Git ra
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据，不是 prompt-scope 最终总数。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9，产品 Tasks 1-6 已批准到 0f57f8e，Task 7 文档已完成。Task 8 才负责完整最终验证、真实 smoke 证据和 release draft；不要提前声称最终 totals。
+历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9，产品 Tasks 1-6 已批准到 0f57f8e，Task 7 文档已完成。Task 8 已由 9127546 和当前 correcting evidence HEAD 完成：隔离 LOCALAPPDATA 的 Host focused 108/108、full 178/178，Extension focused 88/88、full 118/118，build 通过；可选 marker smoke 因无法保证 model-backed VM 本地状态完全隔离而跳过；releases/notes-prompt-scope-cleanup-draft.md 已存在且未选择版本。下一步是 controller broad code review，不要重做 Task 8。
 
 已实现行为：所有 DH create/resume 都设置 skip_custom_instructions=True；CLI global、AGENTS、path instructions 等自动发现源全部排除。DH 显式注入 Core + 恰好一个可编辑源：Root 为空或 Repository ONLY 关闭时使用 DH-specific Instructions；Root 非空且 Repository ONLY 开启时只使用 <Root>/.github/copilot-instructions.md。Custom User Prompt 仍是每次 Analyze 的 PII-scrubbed user content。使用严格 UTF-8 immutable byte snapshot、framed fingerprint、same-UUID refresh 和 fail-closed errors。Options 区分 explicit empty（清空文件）与 omitted（不写），检查 update_config/config_saved，并保留可选 errorCode 到持久化和本地化显示。
 
@@ -438,5 +470,5 @@ MyCasesKit response commit 675006a 已接受 Form ③ New-Case coordinator 和 S
 
 2026-07-14 research 中“依赖 CLI 自动 workspace instruction discovery”的建议已被 2026-07-15 accepted spec supersede；不要恢复该方案。在正式 MyCases 契约返回前，不要猜测 MyCases 接口，也不要让 DH 直接写 MyCases canonical 文件。
 
-请先简要总结你读取到的状态与 VM 环境差异，再按当前 Task brief 继续。不要未经明确批准 push 或 publish；任何 release --publish 都必须再次获得我的明确确认。
+请先简要总结你读取到的状态与 VM 环境差异，然后等待或执行 controller 明确指定的 broad code review；不要重做 Task 8。不要未经明确批准 push 或 publish；任何 release --publish 都必须再次获得我的明确确认。
 ```
