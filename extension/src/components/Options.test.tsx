@@ -1472,6 +1472,50 @@ describe('Options prompt health and inspected sparse writes', () => {
     ).toBe('en')
   })
 
+  it('does not let a passive hydration mirror supersede newer user persistence', async () => {
+    deferNextResponse('get_config')
+    const update = deferNextResponse('update_config')
+    render(<Options />)
+    const language = await findLanguageSelect()
+    const userStorage = deferNextStorageSet('dh_prefs')
+    const getConfigCall = chromeMockSpies.sendMessage.mock.calls.find(call =>
+      (call[0] as any)?.payload?.action === 'get_config',
+    )
+    const getConfigCallback = getConfigCall?.[1] as (
+      response: Record<string, unknown>,
+    ) => void
+
+    await act(async () => {
+      getConfigCallback({
+        status: 'success',
+        data: {
+          root_path: '',
+          prompt_source_status: { status: 'ok' },
+          extension_preferences: {
+            language: 'zh',
+            use_workspace_only: false,
+          },
+        },
+      })
+      fireEvent.change(language, { target: { value: 'en' } })
+    })
+    await act(async () => userStorage.resolve(undefined))
+
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    expect((getStorageSnapshot().dh_prefs as any).language).toBe('en')
+    const updateCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(updateCalls).toHaveLength(1)
+    expect(
+      updateCalls[0].payload.payload.config.extension_preferences.language,
+    ).toBe('en')
+  })
+
   it('carries a delayed manifest fetch into the latest persistence intent', async () => {
     const latestUpdate = deferNextResponse('update_config')
     await hydrateOptions({

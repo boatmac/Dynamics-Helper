@@ -59,6 +59,10 @@ type PrefsMirrorIntent = {
     prefs: Readonly<Preferences>;
 };
 
+type PendingHydrationMirror = PrefsMirrorIntent & {
+    userGenerationAtRequest: number;
+};
+
 // Helper
 function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -589,6 +593,7 @@ const OptionsInner: React.FC = () => {
     const catchUpProcessedRevisionRef = useRef(0);
     const [hydrationMirrorEpoch, setHydrationMirrorEpoch] = useState(0);
     const hydrationMirrorRequestedEpochRef = useRef(0);
+    const pendingHydrationMirrorRef = useRef<PendingHydrationMirror | null>(null);
 
     // Hydration-window edit protection. Tracks which dh_prefs keys the user
     // has edited during this Options session. Used by:
@@ -907,19 +912,28 @@ const OptionsInner: React.FC = () => {
         }
     };
 
-    const requestHydrationMirror = () => {
+    const requestHydrationMirror = (nextPrefs: Readonly<Preferences>) => {
         const epoch = ++hydrationMirrorRequestedEpochRef.current;
+        pendingHydrationMirrorRef.current = Object.freeze({
+            generation: epoch,
+            prefs: Object.freeze({ ...nextPrefs }),
+            userGenerationAtRequest: configUpdateRequestRevisionRef.current,
+        });
         setHydrationMirrorEpoch(epoch);
     };
 
     useEffect(() => {
+        const request = pendingHydrationMirrorRef.current;
         if (
-            hydrationMirrorEpoch === 0
-            || hydrationMirrorEpoch !== hydrationMirrorRequestedEpochRef.current
+            !request
+            || hydrationMirrorEpoch === 0
+            || request.generation !== hydrationMirrorEpoch
+            || request.generation !== hydrationMirrorRequestedEpochRef.current
+            || request.userGenerationAtRequest !== configUpdateRequestRevisionRef.current
         ) {
             return;
         }
-        const intent = createPrefsMirrorIntent(prefsRef.current);
+        const intent = createPrefsMirrorIntent(request.prefs);
         writePrefsMirror(intent, () => {
             if (prefsHydratedRef.current) {
                 flushPendingManifestFetch(intent.prefs);
@@ -958,25 +972,22 @@ const OptionsInner: React.FC = () => {
                 // (only an explicit user-driven URL change should trigger fetch).
                 lastFetchedManifestUrlRef.current = loadedPrefs.teamManifestUrl || '';
                 
-                setPrefs(prev => {
-                    // Merge strategy: Default -> Loaded -> User Edits (prev)
-                    // We must be careful not to let 'prev' (which starts as Default) overwrite 'loaded' 
-                    // unless the user actually changed it.
-                    
-                    const base = { ...DEFAULT_PREFS, ...loadedPrefs };
-                    const final: any = { ...base };
+                const prev = prefsRef.current;
+                // Merge strategy: Default -> Loaded -> User Edits (prev)
+                // We must be careful not to let 'prev' (which starts as Default) overwrite 'loaded'
+                // unless the user actually changed it.
+                const final: any = { ...DEFAULT_PREFS, ...loadedPrefs };
 
-                    // Apply only changed fields from prev
-                    (Object.keys(prev) as Array<keyof Preferences>).forEach(k => {
-                        const key = k as keyof Preferences;
-                        if (prev[key] !== DEFAULT_PREFS[key]) {
-                            // User has modified this field, preserve it
-                            final[key] = prev[key];
-                        }
-                    });
-
-                    return final as Preferences;
+                // Apply only changed fields from prev
+                (Object.keys(prev) as Array<keyof Preferences>).forEach(k => {
+                    const key = k as keyof Preferences;
+                    if (prev[key] !== DEFAULT_PREFS[key]) {
+                        // User has modified this field, preserve it
+                        final[key] = prev[key];
+                    }
                 });
+
+                setCurrentPrefs(final as Preferences);
             } else {
                 // No saved prefs yet (first run). The ref defaults to '' so the
                 // first save with a non-empty manifest URL triggers a fetch.
@@ -1003,7 +1014,7 @@ const OptionsInner: React.FC = () => {
                      // Host is unreachable so this RPC will almost certainly
                      // also fail, but it's a no-op cost and recovers when
                      // host comes back within the same Options session.
-                     requestHydrationMirror();
+                     requestHydrationMirror(prefsRef.current);
                      requestHydrationCatchUp();
                      return;
                 }
@@ -1036,7 +1047,8 @@ const OptionsInner: React.FC = () => {
                         setHostVersion(hostConfig.host_version);
                     }
 
-                    setPrefs(prev => {
+                    const prev = prefsRef.current;
+                    {
                         const newPrefs = { ...prev };
                         let changed = false;
                         const touched = userTouchedFieldsRef.current;
@@ -1172,10 +1184,11 @@ const OptionsInner: React.FC = () => {
                         // Keep this updater free of Host side effects. Catch-up
                         // is requested below and runs after this state has
                         // committed, so StrictMode replay cannot duplicate it.
-                        return changed ? newPrefs : prev;
-                    });
-                    prefsHydratedRef.current = true;
-                    requestHydrationMirror();
+                        const merged = changed ? newPrefs : prev;
+                        setCurrentPrefs(merged);
+                        prefsHydratedRef.current = true;
+                        requestHydrationMirror(merged);
+                    }
                     requestHydrationCatchUp();
                 } else {
                     // Host responded but not with success+data. Same
@@ -1197,7 +1210,7 @@ const OptionsInner: React.FC = () => {
                     // probably also fail (host is broken), but it's a no-op
                     // cost and keeps storage-vs-host eventually consistent
                     // when host recovers within the same Options session.
-                    requestHydrationMirror();
+                    requestHydrationMirror(prefsRef.current);
                     requestHydrationCatchUp();
                 }
             });
