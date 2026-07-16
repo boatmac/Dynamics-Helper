@@ -16,12 +16,21 @@ Existing `use_workspace_only=true` values take on the expanded behavior immediat
 
 Core, DH-specific, and Repository instruction read failures retain machine-readable error codes through immediate and rehydrated browser results.
 
+## Review hardening
+
+- Custom User Prompt is applied from its current value exactly once at every Analyze send, including edited/preformatted context.
+- Prompt health refreshes after acknowledged repairs without rehydrating or overwriting Options values.
+- Delayed Chrome hydration, in-flight Team Catalog fetches, and analysis dismissal are generation/identity checked so stale work cannot restore reset data or consume a newer result.
+- Team Catalog diagnostics no longer expose credential-bearing manifest or bookmark URLs.
+
 ## Verification
 
-- The complete Host unittest suite passed.
-- The complete Extension Vitest suite passed.
-- The Extension production build passed.
-- Python compileall and `git diff --check` passed.
+- Reviewed product head: `907acd0`.
+- Isolated Host: **109/109 focused** and **179/179 full** tests passed.
+- Extension: **105/105 focused** and **144/144 full** tests passed.
+- Production build passed with **2,217 modules transformed** and **14 artifacts** listed.
+- Isolated Python compileall, `git diff --check`, and static review checks passed.
+- Optional authenticated marker smoke was not run because safe model-backed user/session isolation was not available; it remains a non-gating check.
 
 ## Upgrade notes
 

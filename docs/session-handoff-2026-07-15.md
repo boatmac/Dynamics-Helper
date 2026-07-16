@@ -11,7 +11,7 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Isolated worktree: `C:\Users\zhaobo\AppData\Local\Temp\opencode\Dynamics-Helper-prompt-scope-spec`
 - Product implementation Tasks 1-6: approved through `0f57f8e`
 - Implementation/documentation Tasks 1-7: approved through `90e6da3` (`docs(persistence): correct result lifecycle semantics`)
-- Task 8 evidence: `9127546` is augmented and its Host-run safety claims corrected by current `HEAD` (`docs(verification): isolate prompt scope host evidence`); controller-owned broad code review follows
+- Task 8 evidence: `9127546` plus `73b8adf`; the final whole-branch review findings are fixed by the commits recorded in the review-fix addendum below
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
@@ -226,7 +226,32 @@ npm run build --prefix extension
 
 Optional authenticated marker smoke: **not run**. Proving all three source modes would require changing the DH-specific AppData instruction file and the CLI-global home instruction file. Task 8 explicitly prohibits modifying those VM-local files, and no verified isolated user-data/root/session arrangement was available that both preserves authentication and guarantees production prompt/session state cannot be read or written. The smoke is optional and is not a completion gate.
 
-The release prose exists only as the concise unversioned draft `releases/notes-prompt-scope-cleanup-draft.md`. No release version was selected; no version field, tag, package, registry value, MyCases canonical file, or publication target was changed. The controller must perform the final broad code review after this correcting evidence commit and before any separately approved integration or release action.
+The release prose exists only as the concise unversioned draft `releases/notes-prompt-scope-cleanup-draft.md`. No release version was selected; no version field, tag, package, registry value, MyCases canonical file, or publication target was changed. The later final whole-branch review and fixes are recorded below.
+
+## Final Review Fix Addendum - 2026-07-17
+
+Starting head: `73b8adfbe013e4f2b0277193d55c1e019b436c6c`. Reviewed product/test/documentation fix head: `907acd0` (`fix(prompt): close review race and secret gaps`). The subsequent evidence-only commit is the branch `HEAD`; inspect `git rev-parse HEAD` for its exact identity. Full commands, totals, and mutation evidence are recorded in `.superpowers/sdd/final-review-fix-report.md`; the release draft carries only concise release-facing behavior.
+
+The coordinated fix wave adds these boundaries without changing version fields, release/tag/package/registry state, `host/system_prompt.md`, UUIDv5 identity, or MyCases scope:
+
+- Team Catalog warnings expose only classified kind/numeric status and fixed diagnostics, never credential-bearing URLs, status text, or thrown values.
+- FAB replaces/removes a trailing `## User Prompt` section using the current value immediately before every send, including preformatted context; Host PII scrubbing remains unchanged.
+- Initial Chrome storage hydration preserves every touched/reset/default-valued field and cannot send stale storage values back to Host.
+- Manifest-only fetch commits re-read current preferences and skip stale Reset/URL-change responses.
+- Latest acknowledged config writes run a generation-gated health-only `get_config` that cannot rehydrate Options or create an update loop.
+- Analysis results persist optional `requestId`; seen acknowledgment re-reads and matches request identity, or exact legacy case/timestamp, before writing.
+
+The optional authenticated marker smoke remains **not run**. Safe model-backed isolation still was not available without risking authenticated user/session state, and the accepted design treats this smoke as non-gating.
+
+Fresh gates run from committed product head `907acd0`:
+
+- Isolated focused Host with `PYTHONPATH=host`: **109/109** passed (the prior four prompt modules plus the debug-script AST isolation test).
+- Isolated full Host discovery: **179/179** passed.
+- Focused Extension review suite: **105/105** passed across 8 files.
+- Full Extension: **144/144** passed across 13 files.
+- Extension production build: **passed**, TypeScript and Vite exit 0, 2,217 modules transformed, 14 artifacts listed.
+- Isolated Python `compileall -q host`: **passed** with no diagnostics.
+- `git diff --check` and review static scans: **passed**.
 
 ## Session Identity Contract
 
