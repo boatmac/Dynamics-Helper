@@ -24,6 +24,7 @@ export interface LastAnalysis {
     seen: boolean;            // false until user dismisses popover
     durationSec?: number;     // success only
     savedTo?: string;         // success only, file path
+    errorCode?: string;       // error only, raw Host machine-readable code
 }
 
 /** Pending-analysis marker. Cleared when result arrives or expires. */
@@ -191,6 +192,7 @@ export async function recordAnalyzeSuccess(
 export async function recordAnalyzeError(
     ctx: AnalyzePersistContext,
     errorMessage: string,
+    errorCode?: string,
 ): Promise<void> {
     await setLastAnalysis({
         caseNumber: ctx.caseNumber,
@@ -199,6 +201,7 @@ export async function recordAnalyzeError(
         content: errorMessage,
         timestamp: Date.now(),
         seen: false,
+        ...(errorCode ? { errorCode } : {}),
     });
     await clearPendingIfMatches(ctx.requestId);
 }

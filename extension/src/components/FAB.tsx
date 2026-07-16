@@ -8,6 +8,10 @@ import { usePrefs, mergeRootPathOverride } from '../utils/prefs';
 import { trackEvent, trackException, hashCaseId } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { useAnalysisHydration } from '../hooks/useAnalysisHydration';
+import {
+    localizePromptSourceError,
+    normalizeErrorCode,
+} from '../utils/promptSourceErrors';
 import { 
     X, 
     Settings, 
@@ -31,15 +35,17 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 }
 
 // Non-blocking Result Popover Component
-const ResultPopover: React.FC<{ 
+export const ResultPopover: React.FC<{
     isOpen: boolean; 
     onClose: () => void; 
     title?: string;
     content: string; 
+    errorCode?: string;
     filePath?: string;
     duration?: string;
-}> = ({ isOpen, onClose, title, content, filePath, duration }) => {
+}> = ({ isOpen, onClose, title, content, errorCode, filePath, duration }) => {
     const { t } = useTranslation();
+    const displayContent = localizePromptSourceError(errorCode, content, t);
     // State for position and dragging
     const [position, setPosition] = useState({ x: Math.max(0, window.innerWidth - 550), y: 100 });
     const [isDragging, setIsDragging] = useState(false);
@@ -151,7 +157,7 @@ const ResultPopover: React.FC<{
                 lineHeight: '1.6', 
                 color: '#334155',
             }}>
-                {content ? (
+                {displayContent ? (
                     <ReactMarkdown 
                         remarkPlugins={[remarkGfm]}
                         components={{
@@ -178,7 +184,7 @@ const ResultPopover: React.FC<{
                             blockquote: ({node, ...props}) => <blockquote style={{ borderLeft: '4px solid #E2E8F0', paddingLeft: '1em', margin: '1em 0', color: '#64748B' }} {...props} />
                         }}
                     >
-                        {content}
+                        {displayContent}
                     </ReactMarkdown>
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94A3B8' }}>
@@ -232,6 +238,7 @@ const FAB: React.FC = () => {
         isOpen: boolean;
         title: string;
         content: string; 
+        errorCode?: string;
         path?: string;
         duration?: string;
     }>({ isOpen: false, title: '', content: '' });
@@ -315,6 +322,7 @@ const FAB: React.FC = () => {
             isOpen: true,
             title: hydration.popover.title,
             content: hydration.popover.content,
+            errorCode: hydration.popover.errorCode,
             path: hydration.popover.savedTo,
         });
         popoverIsAnalyze.current = true;
@@ -458,7 +466,11 @@ const FAB: React.FC = () => {
     // the unrelated case) and instead surface a bubble that names the
     // originating case. The error is still persisted to dh_last_analysis by
     // the SW, so navigating back to caseNumberOfRun re-hydrates the popover.
-    const showAnalysisError = (msg: string, caseNumberOfRun?: string) => {
+    const showAnalysisError = (
+        fallback: string,
+        caseNumberOfRun?: string,
+        errorCode?: string,
+    ) => {
         const isStillOnRunCase =
             !caseNumberOfRun ||
             !currentCaseRef.current ||
@@ -467,7 +479,8 @@ const FAB: React.FC = () => {
             setResultPopover({
                 isOpen: true,
                 title: `❌ ${t('analysisFailed')}`,
-                content: msg,
+                content: fallback,
+                errorCode,
             });
             popoverIsAnalyze.current = true;
             showStatusBubble(t('analysisFailed'), 'error', 4000);
@@ -974,20 +987,39 @@ const FAB: React.FC = () => {
                         }
                     } else {
                         const errMsg = analysisData?.error || t('unknownAnalysisError');
-                        showAnalysisError(`${t('analysisFailed')}: ${errMsg}`, caseNumberOfRun);
-                        trackEvent('Analyze Failed', { error: errMsg });
+                        const errorCode = normalizeErrorCode(analysisData?.error_code);
+                        showAnalysisError(
+                            `${t('analysisFailed')}: ${errMsg}`,
+                            caseNumberOfRun,
+                            errorCode,
+                        );
+                        trackEvent('Analyze Failed', {
+                            errorCode: errorCode ?? 'unclassified',
+                        });
                     }
                 } else {
                     const hostError = nativeResp?.message || nativeResp?.error || t('unknownNativeHostError');
-                    showAnalysisError(`${t('hostErrorLabel')}: ${hostError}`, caseNumberOfRun);
-                    trackEvent('Analyze Host Error', { error: hostError });
+                    const errorCode = normalizeErrorCode(nativeResp?.error_code);
+                    showAnalysisError(
+                        `${t('hostErrorLabel')}: ${hostError}`,
+                        caseNumberOfRun,
+                        errorCode,
+                    );
+                    trackEvent('Analyze Host Error', {
+                        errorCode: errorCode ?? 'unclassified',
+                    });
                 }
             } else {
-                showAnalysisError(`${t('errorLabel')}: ${response.error || response.message || t('unknownError')}`, caseNumberOfRun);
+                const errorCode = normalizeErrorCode(response?.error_code);
+                showAnalysisError(
+                    `${t('errorLabel')}: ${response.error || response.message || t('unknownError')}`,
+                    caseNumberOfRun,
+                    errorCode,
+                );
             }
         } catch (e: any) {
             showAnalysisError(`${t('errorLabel')}: ${e.message}`, caseNumberOfRun);
-            trackEvent('Analyze Exception', { error: e.message });
+            trackEvent('Analyze Exception', { errorCode: 'unclassified' });
         } finally {
             setIsAnalyzing(false);
             isAnalyzingRef.current = false;
@@ -1088,6 +1120,7 @@ const FAB: React.FC = () => {
             }} 
             title={resultPopover.title}
             content={resultPopover.content}
+            errorCode={resultPopover.errorCode}
             filePath={resultPopover.path}
             duration={resultPopover.duration}
         />

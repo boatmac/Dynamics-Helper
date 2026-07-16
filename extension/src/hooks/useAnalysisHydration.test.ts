@@ -179,6 +179,24 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
         })
     })
 
+    it('UI-I6: hydrates coded prompt errors', async () => {
+        seedStorage({
+            dh_last_analysis: makeLast({
+                status: 'error',
+                content: 'safe fallback',
+                errorCode: 'repository_instructions_missing',
+            }),
+        })
+
+        const { result } = renderHook(() => useAnalysisHydration(CASE_A))
+
+        await waitFor(() => expect(result.current.popover).not.toBeNull())
+        expect(result.current.popover).toMatchObject({
+            content: 'safe fallback',
+            errorCode: 'repository_instructions_missing',
+        })
+    })
+
     // Case identity change while hook is mounted: popover re-evaluates
     // against the new caseNumber. R-I3 + spec § 4.3 trigger 2.
     it('caseNumber prop change re-runs hydration check', async () => {

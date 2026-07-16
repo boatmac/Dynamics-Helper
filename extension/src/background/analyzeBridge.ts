@@ -21,10 +21,40 @@ import {
     recordAnalyzeSuccess,
     recordAnalyzeError,
 } from '../utils/analysisStore';
+import { normalizeErrorCode } from '../utils/promptSourceErrors';
 
 export interface AnalyzeForwardDeps {
     /** Native-host RPC. Resolves with the outer host wrapper `{status, data}`. */
     send: (payload: any) => Promise<any>;
+}
+
+export function normalizeNativeHostResponse(msg: any): any {
+    if (msg?.status === 'success') {
+        return { status: 'success', data: msg.data };
+    }
+
+    const errorCode = normalizeErrorCode(msg?.error_code);
+    return {
+        status: 'error',
+        error: msg?.error || msg?.message,
+        ...(errorCode ? { error_code: errorCode } : {}),
+    };
+}
+
+export function summarizeNativeHostMessage(msg: any): {
+    requestId?: string;
+    status?: string;
+    action?: string;
+    errorCode?: string;
+} {
+    return {
+        requestId: typeof msg?.requestId === 'string' ? msg.requestId : undefined,
+        status: typeof msg?.status === 'string' ? msg.status : undefined,
+        action: typeof msg?.action === 'string' ? msg.action : undefined,
+        errorCode: normalizeErrorCode(
+            msg?.error_code ?? msg?.data?.error_code,
+        ),
+    };
 }
 
 /**
@@ -86,7 +116,10 @@ export async function handleAnalyzeForward(
             response?.error ||
             response?.message ||
             'Unknown error';
-        await recordAnalyzeError(ctx, String(msg));
+        const errorCode =
+            normalizeErrorCode(inner?.error_code) ??
+            normalizeErrorCode(response?.error_code);
+        await recordAnalyzeError(ctx, String(msg), errorCode);
     }
 
     return response;

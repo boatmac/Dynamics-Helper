@@ -9,7 +9,11 @@ import { setupContextMenu } from './contextMenu';
 // ServiceWorkerGlobalScope per the HTML spec
 // (https://github.com/w3c/ServiceWorker/issues/1356).
 import { syncTeamBookmarks, clearTeamSelection, fetchManifest } from '../utils/teamCatalog';
-import { handleAnalyzeForward } from './analyzeBridge';
+import {
+    handleAnalyzeForward,
+    normalizeNativeHostResponse,
+    summarizeNativeHostMessage,
+} from './analyzeBridge';
 import type { AnalyzePersistContext } from '../utils/analysisStore';
 
 const NATIVE_HOST_NAME = "com.dynamics.helper.native";
@@ -119,7 +123,7 @@ function connectToNativeHost() {
         nativePort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
         
         nativePort.onMessage.addListener((msg) => {
-            console.log("[DH-SW] Received message from host:", msg);
+            console.log("[DH-SW] Received message from host:", summarizeNativeHostMessage(msg));
             
             // Handle Progress Updates (Streamed)
             if (msg.status === "progress") {
@@ -192,15 +196,12 @@ function connectToNativeHost() {
 
             // Handle Final Responses (Success/Error)
             if (msg.requestId && pendingRequests.has(msg.requestId)) {
-                const { resolve, reject } = pendingRequests.get(msg.requestId)!;
+                const { resolve } = pendingRequests.get(msg.requestId)!;
                 pendingRequests.delete(msg.requestId);
-                
-                if (msg.status === "success") {
-                    resolve({ status: "success", data: msg.data });
-                } else {
-                    // We resolve with error status to let frontend handle it gracefully
-                    resolve({ status: "error", error: msg.error || msg.message });
-                }
+
+                // Resolve errors instead of rejecting so the frontend can surface
+                // Host fallbacks and machine-readable codes gracefully.
+                resolve(normalizeNativeHostResponse(msg));
             }
         });
 

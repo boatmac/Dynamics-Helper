@@ -26,6 +26,7 @@ export interface HydratedPopover {
     title: string
     content: string
     savedTo?: string
+    errorCode?: string
 }
 
 export interface HydrationResult {
@@ -93,6 +94,7 @@ export function useAnalysisHydration(caseNumber: string): HydrationResult {
                     title: l.title,
                     content: l.content,
                     savedTo: l.savedTo,
+                    errorCode: l.errorCode,
                 })
             } else {
                 setPopover(null)

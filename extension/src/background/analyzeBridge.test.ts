@@ -19,7 +19,11 @@ import {
     resetChromeMock,
     chromeMockSpies,
 } from '../test/chromeMock'
-import { handleAnalyzeForward } from './analyzeBridge'
+import {
+    handleAnalyzeForward,
+    normalizeNativeHostResponse,
+    summarizeNativeHostMessage,
+} from './analyzeBridge'
 import type { AnalyzePersistContext } from '../utils/analysisStore'
 
 installChromeMock()
@@ -160,6 +164,136 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
             seen: false,
         })
         expect(await readStorage('dh_pending_analysis')).toBeUndefined()
+    })
+
+    it('UI-I6: persists inner prompt error_code unchanged', async () => {
+        const send = vi.fn(async () => ({
+            status: 'success',
+            error_code: 'dh_core_prompt_missing',
+            data: {
+                status: 'error',
+                error_code: 'repository_instructions_missing',
+                error: 'safe fallback',
+            },
+        }))
+
+        const response = await handleAnalyzeForward(
+            { action: 'analyze_error' },
+            CTX,
+            { send },
+        )
+
+        const stored = await readStorage('dh_last_analysis')
+        expect(stored.errorCode).toBe('repository_instructions_missing')
+        expect(stored.content).toBe('safe fallback')
+        expect(response.data.error_code).toBe('repository_instructions_missing')
+    })
+
+    it('UI-I6: normalizes outer error and preserves error_code', () => {
+        expect(normalizeNativeHostResponse({
+            status: 'error',
+            error_code: 'dh_core_prompt_missing',
+            error: 'safe outer fallback',
+        })).toEqual({
+            status: 'error',
+            error_code: 'dh_core_prompt_missing',
+            error: 'safe outer fallback',
+        })
+    })
+
+    it('UI-I6: preserves inner error_code in a success envelope', () => {
+        const inner = {
+            status: 'error',
+            error_code: 'repository_instructions_missing',
+            error: 'safe inner fallback',
+        }
+
+        expect(normalizeNativeHostResponse({
+            requestId: 'r1',
+            status: 'success',
+            data: inner,
+        })).toEqual({
+            status: 'success',
+            data: inner,
+        })
+    })
+
+    it('UI-I6: persists an outer error_code when no inner code exists', async () => {
+        const send = vi.fn(async () => ({
+            status: 'error',
+            error_code: 'dh_core_prompt_missing',
+            error: 'safe outer fallback',
+        }))
+
+        await handleAnalyzeForward(
+            { action: 'analyze_error' },
+            CTX,
+            { send },
+        )
+
+        const stored = await readStorage('dh_last_analysis')
+        expect(stored.errorCode).toBe('dh_core_prompt_missing')
+        expect(stored.content).toBe('safe outer fallback')
+    })
+
+    it('UI-I6: persists unknown codes unchanged', async () => {
+        const send = vi.fn(async () => ({
+            status: 'success',
+            data: {
+                status: 'error',
+                error_code: 'future_code',
+                error: 'future fallback',
+            },
+        }))
+
+        await handleAnalyzeForward(
+            { action: 'analyze_error' },
+            CTX,
+            { send },
+        )
+
+        const stored = await readStorage('dh_last_analysis')
+        expect(stored.errorCode).toBe('future_code')
+        expect(stored.content).toBe('future fallback')
+    })
+
+    it('send rejection stores no fabricated errorCode', async () => {
+        const send = vi.fn(async () => {
+            throw new Error('disconnected')
+        })
+
+        await expect(handleAnalyzeForward(
+            { action: 'analyze_error' },
+            CTX,
+            { send },
+        )).rejects.toThrow('disconnected')
+
+        const stored = await readStorage('dh_last_analysis')
+        expect(stored).not.toHaveProperty('errorCode')
+    })
+
+    it('safe summary excludes prompt-bearing data', () => {
+        const summary = summarizeNativeHostMessage({
+            requestId: 'r1',
+            status: 'success',
+            data: {
+                error_code: 'repository_instructions_missing',
+                _user_instructions_raw: 'DO-NOT-LOG-INSTRUCTIONS',
+                extension_preferences: {
+                    user_prompt: 'DO-NOT-LOG-USER-PROMPT',
+                },
+            },
+        })
+
+        expect(summary).toEqual({
+            requestId: 'r1',
+            status: 'success',
+            action: undefined,
+            errorCode: 'repository_instructions_missing',
+        })
+        const rendered = JSON.stringify(summary)
+        expect(rendered).not.toContain('DO-NOT-LOG-INSTRUCTIONS')
+        expect(rendered).not.toContain('DO-NOT-LOG-USER-PROMPT')
     })
 
     // Edge case 6.3: A's late response must not wipe B's pending.

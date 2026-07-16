@@ -185,6 +185,26 @@ export const translations: TranslationDictionary = {
     unknownError: { en: "Unknown error", zh: "未知错误" },
     unknownAnalysisError: { en: "Unknown analysis error", zh: "未知分析错误" },
     unknownNativeHostError: { en: "Unknown native host error", zh: "未知的本机宿主错误" },
+    promptErrorDhCoreMissing: {
+        en: "DH Core System Prompt is missing. Repair or reinstall Dynamics Helper.",
+        zh: "DH 核心系统提示词缺失。请修复或重新安装 Dynamics Helper。",
+    },
+    promptErrorDhCoreUnreadable: {
+        en: "DH Core System Prompt cannot be read. Repair the installation or file permissions.",
+        zh: "无法读取 DH 核心系统提示词。请修复安装或文件权限。",
+    },
+    promptErrorDhSpecificUnreadable: {
+        en: "DH-specific Instructions cannot be read. Repair or replace them in Options.",
+        zh: "无法读取 DH 专用指令。请在选项中修复或替换该文件。",
+    },
+    promptErrorRepositoryMissing: {
+        en: "Repository Instructions are missing. Add .github/copilot-instructions.md under Root Path or disable Repository ONLY.",
+        zh: "仓库指令缺失。请在根路径下添加 .github/copilot-instructions.md，或禁用仅仓库模式。",
+    },
+    promptErrorRepositoryUnreadable: {
+        en: "Repository Instructions cannot be read. Repair the file or disable Repository ONLY.",
+        zh: "无法读取仓库指令。请修复该文件，或禁用仅仓库模式。",
+    },
     newItemLabel: { en: "New Item", zh: "新建项目" },
     newLinkLabel: { en: "New Link", zh: "新建链接" },
     // Native confirm()/alert() dialog strings (must go through t() per i18n rule)
