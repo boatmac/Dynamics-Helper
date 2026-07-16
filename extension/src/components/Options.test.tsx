@@ -403,9 +403,10 @@ describe('Options prompt source mode matrix', () => {
   })
 
   it.each([
-    ['empty', ''],
-    ['null', null],
-  ])('UI-I1: %s Host Root disables Repository ONLY without rewriting stored true', async (_label, hostRoot) => {
+    ['empty', '', ''],
+    ['null', null, ''],
+    ['whitespace-only', '   ', '   '],
+  ])('UI-I1: %s Host Root disables Repository ONLY without rewriting stored true', async (_label, hostRoot, expectedRoot) => {
     const deferred = deferNextResponse('get_config')
     seedStorage({
       dh_prefs: {
@@ -432,7 +433,7 @@ describe('Options prompt source mode matrix', () => {
     expect(toggle.checked).toBe(true)
     expect((document.querySelector(
       'input[name="rootPath"]',
-    ) as HTMLInputElement).value).toBe('')
+    ) as HTMLInputElement).value).toBe(expectedRoot)
     expect((document.querySelector(
       'input[name="skillDirectories"]',
     ) as HTMLInputElement).disabled).toBe(false)
@@ -443,6 +444,177 @@ describe('Options prompt source mode matrix', () => {
       /DH-specific Instructions/i,
     ) as HTMLTextAreaElement).disabled).toBe(false)
     expect(countUpdateConfigCalls()).toBe(0)
+  })
+
+  it.each([
+    ['empty', '', ''],
+    ['whitespace-only', '   ', '   '],
+  ])('UI-I2: %s effective Root hydrates canonical Host Skills when stored Repository ONLY is true', async (_label, hostRoot, expectedRoot) => {
+    const deferred = deferNextResponse('get_config')
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        rootPath: 'C:\\StaleChromeRoot',
+        skillDirectories: 'C:\\StaleSkills',
+        mcpConfigPath: 'C:\\StaleMcp.json',
+        userInstructions: 'STALE-DH',
+        useWorkspaceOnly: true,
+      },
+    })
+    render(<Options />)
+    await act(async () => deferred.resolve({
+      status: 'success',
+      data: {
+        root_path: hostRoot,
+        skill_directories: ['C:\\CanonicalSkills'],
+        mcp_config_path: 'C:\\CanonicalMcp.json',
+        _user_instructions_raw: 'CANONICAL-DH',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: true },
+      },
+    }))
+    await openCopilotSection()
+    fireEvent.click(screen.getAllByRole('button', { name: /edit/i })[0])
+
+    const toggle = screen.getByRole('checkbox', {
+      name: /repository SKILLS, MCP, and instructions ONLY/i,
+    }) as HTMLInputElement
+    const root = screen.getByLabelText(/Root Path/i) as HTMLInputElement
+    const skills = screen.getByLabelText(/Skill Directories/i) as HTMLInputElement
+    const mcp = screen.getByLabelText(/MCP Configuration/i) as HTMLInputElement
+    const dhInstructions = screen.getByLabelText(
+      /DH-specific Instructions/i,
+    ) as HTMLTextAreaElement
+
+    expect(root.value).toBe(expectedRoot)
+    expect(toggle.disabled).toBe(true)
+    expect(toggle.checked).toBe(true)
+    expect(skills.disabled).toBe(false)
+    expect(skills.value).toBe('C:\\CanonicalSkills')
+    expect(mcp.disabled).toBe(false)
+    expect(mcp.value).toBe('C:\\CanonicalMcp.json')
+    expect(dhInstructions.disabled).toBe(false)
+    expect(dhInstructions.value).toBe('CANONICAL-DH')
+  })
+
+  it('UI-I2: touched Root controls effective Skill hydration during the hydration window', async () => {
+    const deferred = deferNextResponse('get_config')
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        rootPath: 'C:\\StoredRoot',
+        skillDirectories: 'C:\\StaleSkills',
+        useWorkspaceOnly: true,
+      },
+    })
+    render(<Options />)
+    await openCopilotSection()
+    const root = screen.getByLabelText(/Root Path/i) as HTMLInputElement
+    fireEvent.change(root, { target: { value: '   ' } })
+
+    await act(async () => deferred.resolve({
+      status: 'success',
+      data: {
+        root_path: 'C:\\HostRoot',
+        skill_directories: ['C:\\CanonicalSkills'],
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: true },
+      },
+    }))
+
+    const toggle = screen.getByRole('checkbox', {
+      name: /repository SKILLS, MCP, and instructions ONLY/i,
+    }) as HTMLInputElement
+    const skills = screen.getByLabelText(/Skill Directories/i) as HTMLInputElement
+    expect(root.value).toBe('   ')
+    expect(toggle.disabled).toBe(true)
+    expect(toggle.checked).toBe(true)
+    expect(skills.disabled).toBe(false)
+    expect(skills.value).toBe('C:\\CanonicalSkills')
+  })
+
+  it('UI-I2: touched Repository ONLY controls Skill hydration during the hydration window', async () => {
+    const deferred = deferNextResponse('get_config')
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        rootPath: 'C:\\StoredRoot',
+        skillDirectories: 'C:\\StaleSkills',
+        useWorkspaceOnly: true,
+      },
+    })
+    render(<Options />)
+    await openCopilotSection()
+    const toggle = screen.getByRole('checkbox', {
+      name: /repository SKILLS, MCP, and instructions ONLY/i,
+    }) as HTMLInputElement
+    fireEvent.click(toggle)
+
+    await act(async () => deferred.resolve({
+      status: 'success',
+      data: {
+        root_path: 'C:\\HostRoot',
+        skill_directories: ['C:\\CanonicalSkills'],
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: true },
+      },
+    }))
+
+    const skills = screen.getByLabelText(/Skill Directories/i) as HTMLInputElement
+    expect(toggle.disabled).toBe(false)
+    expect(toggle.checked).toBe(false)
+    expect(skills.disabled).toBe(false)
+    expect(skills.value).toBe('C:\\CanonicalSkills')
+  })
+
+  it('UI-I2: non-empty Root with stored false keeps all DH-specific inputs enabled', async () => {
+    const deferred = deferNextResponse('get_config')
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        skillDirectories: 'C:\\StaleSkills',
+        mcpConfigPath: 'C:\\StaleMcp.json',
+        userInstructions: 'STALE-DH',
+      },
+    })
+    render(<Options />)
+    await act(async () => deferred.resolve({
+      status: 'success',
+      data: {
+        root_path: 'C:\\MyCases',
+        skill_directories: ['C:\\CanonicalSkills'],
+        mcp_config_path: 'C:\\CanonicalMcp.json',
+        _user_instructions_raw: 'CANONICAL-DH',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+    await openCopilotSection()
+    fireEvent.click(screen.getAllByRole('button', { name: /edit/i })[0])
+
+    const toggle = screen.getByRole('checkbox', {
+      name: /repository SKILLS, MCP, and instructions ONLY/i,
+    }) as HTMLInputElement
+    const skills = screen.getByLabelText(/Skill Directories/i) as HTMLInputElement
+    const mcp = screen.getByLabelText(/MCP Configuration/i) as HTMLInputElement
+    const dhInstructions = screen.getByLabelText(
+      /DH-specific Instructions/i,
+    ) as HTMLTextAreaElement
+
+    expect(toggle.disabled).toBe(false)
+    expect(toggle.checked).toBe(false)
+    expect(skills).toMatchObject({
+      disabled: false,
+      value: 'C:\\CanonicalSkills',
+    })
+    expect(mcp).toMatchObject({
+      disabled: false,
+      value: 'C:\\CanonicalMcp.json',
+    })
+    expect(dhInstructions).toMatchObject({
+      disabled: false,
+      value: 'CANONICAL-DH',
+    })
   })
 
   it('UI-I2/UI-I3: non-empty Root reapplies stored true and disables only repository-selected inputs', async () => {

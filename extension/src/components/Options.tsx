@@ -763,11 +763,13 @@ const OptionsInner: React.FC = () => {
                         const newPrefs = { ...prev };
                         let changed = false;
                         const touched = userTouchedFieldsRef.current;
+                        const incomingRoot = touched.has('rootPath') || !('root_path' in hostConfig)
+                            ? (typeof prev.rootPath === 'string' ? prev.rootPath : '')
+                            : (typeof hostConfig.root_path === 'string' ? hostConfig.root_path : '');
 
                         // 1. Root Path — presence-aware so an explicit empty/null
                         // Host value clears a stale chrome.storage mirror.
                         if ('root_path' in hostConfig && !touched.has('rootPath')) {
-                            const incomingRoot = typeof hostConfig.root_path === 'string' ? hostConfig.root_path : '';
                             if (incomingRoot !== prev.rootPath) {
                                 newPrefs.rootPath = incomingRoot;
                                 changed = true;
@@ -777,10 +779,13 @@ const OptionsInner: React.FC = () => {
                         // 2. Skill Directories (Array -> CSV String)
                         if (Array.isArray(hostConfig.skill_directories) && !touched.has('skillDirectories')) {
                             // Check incoming preference first
-                            const incomingWorkspaceOnly = hostConfig.extension_preferences?.use_workspace_only ?? prev.useWorkspaceOnly;
+                            const incomingWorkspaceOnly = touched.has('useWorkspaceOnly')
+                                ? prev.useWorkspaceOnly
+                                : (hostConfig.extension_preferences?.use_workspace_only ?? prev.useWorkspaceOnly);
+                            const incomingEffectiveRepositoryOnly = Boolean(incomingRoot.trim()) && incomingWorkspaceOnly !== false;
 
-                            // Only sync skillDirectories if we are NOT in workspace-only mode
-                            if (incomingWorkspaceOnly !== true) {
+                            // Only sync skillDirectories if Repository ONLY is not effective.
+                            if (!incomingEffectiveRepositoryOnly) {
                                 const skillsStr = hostConfig.skill_directories.join(", ");
                                 if (skillsStr !== prev.skillDirectories) {
                                     newPrefs.skillDirectories = skillsStr;
