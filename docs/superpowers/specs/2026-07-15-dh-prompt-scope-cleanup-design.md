@@ -359,6 +359,19 @@ advances only the revision actually saved, so overlapping responses cannot
 acknowledge or retry a newer value under an older identity. Host omission means
 no write, while an explicit empty string truncates the corresponding file.
 
+`dh_prefs` persistence is single-flight and coalescing. Only one
+`chrome.storage.local.set` may be active; a newer intent becomes the queued
+snapshot. Host updates and compatible carried actions run only after the latest
+intent commits without `chrome.runtime.lastError`. A failed write leaves its
+actions unsettled, surfaces a persistent not-saved issue, and is retained for a
+later user-driven retry. Passive hydration cannot replace newer user intent.
+
+Reset requests and responses carry immutable default team identity, request
+generation, and reset token. Local bookmark cleanup and success UI require a
+matching `committed` response that is still current for the Reset generation.
+Stale, failed, transport, or locally superseded responses preserve current UI
+values, report Reset incomplete, and never claim success.
+
 Saving config is allowed, but an attempted active-session refresh still fails
 closed. When persistent writes succeeded but refresh failed, `update_config`
 returns:
@@ -396,6 +409,8 @@ so a later Analyze cannot silently run under the old source.
 | **PS-I10** | Explicit empty `user_instructions` truncates the file and round-trips as empty. |
 | **PS-I11** | An unreadable selected DH-specific file blocks Analyze and is never represented as empty. |
 | **PS-I12** | One immutable byte snapshot supplies both assembled text and its fingerprint. |
+| **PS-I13** | Session-refresh config does not read Custom User Prompt; `get_config` and each Analyze perform their own single canonical read. |
+| **PS-I14** | Present null/non-string editable prompt fields fail before any write; absent fields perform no file write. |
 
 ### 9.2 Session lifecycle
 
@@ -423,6 +438,9 @@ so a later Analyze cannot silently run under the old source.
 | **UI-I9** | Preference-mirror post-commit actions carry across compatible newer snapshots, execute once after durable commit, and cancel on incompatible team identity. |
 | **UI-I10** | Options and Menu team cache reads apply only for their latest enabled/URL/team generation. |
 | **UI-I11** | FAB spinner and safety timeout ownership is request scoped across local and hydrated pending identities. |
+| **UI-I12** | Preference mirror writes are single-flight; failure runs no Host/action callback, retains unsettled intent for retry, and actions run only after the final successful commit. |
+| **UI-I13** | Reset cleanup/success requires a committed response matching captured default identity, generation, and reset token; stale/failed/transport/superseded responses cannot clear newer edits. |
+| **UI-I14** | FAB keeps request ownership through every awaited response-processing step, including case hashing, so stale requests emit no UI or outcome telemetry. |
 
 New invariant tests must follow the repository's break-and-fail discipline: each
 test is temporarily proven to fail when its corresponding behavior is broken,

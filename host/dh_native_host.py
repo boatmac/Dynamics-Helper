@@ -140,6 +140,7 @@ VERSION = "2.0.74-beta.4"
 # repos. Authoritative spec: MyCasesKit docs/dh-uuid5-change-spec.md.
 _NAMESPACE_MYCASE = uuid.UUID("816bee4e-8eee-4c0b-ae69-70879d032f4d")
 _WORKING_DIRECTORY_UNSET = object()
+_PAYLOAD_FIELD_UNSET = object()
 
 _PROMPT_ERROR_MESSAGES = {
     "dh_core_prompt_missing": (
@@ -654,20 +655,15 @@ class NativeHost:
         except UnicodeDecodeError as error:
             raise PromptSourceError(unreadable_error_code) from error
 
-    @classmethod
-    def _canonicalize_user_prompt(cls, context: str) -> str:
+    def _canonicalize_user_prompt(self, context: str) -> str:
         try:
-            with open(
+            _, current_prompt = self._read_prompt_source(
                 os.path.join(USER_DATA_DIR, "user_prompt.md"),
-                "r",
-                encoding="utf-8",
-                newline="",
-            ) as stream:
-                current_prompt = stream.read()
-        except FileNotFoundError:
-            current_prompt = ""
-        except (OSError, UnicodeError) as error:
-            raise PromptSourceError("user_prompt_unreadable") from error
+                missing_error_code=None,
+                unreadable_error_code="user_prompt_unreadable",
+            )
+        except PromptSourceError:
+            raise
 
         marker = _USER_PROMPT_HEADING.search(context)
         without_prior = (context[: marker.start()] if marker else context).rstrip()
@@ -1427,32 +1423,26 @@ class NativeHost:
         session_config["working_directory"] = working_directory
         logger.info(f"Set working_directory to: {working_directory}")
 
-        # --- User Prompt (New Architecture: user_prompt.md) ---
-        # 1. Path
-        user_prompt_path = os.path.join(USER_DATA_DIR, "user_prompt.md")
-
-        # 2. Migration: Check if config has it but file doesn't
-        # Access raw extension_preferences from final_data (merged config)
+        # Custom User Prompt is an Options/get_config projection only. Session
+        # refreshes read the canonical file once later in handle_analyze_error.
         ext_prefs = final_data.get("extension_preferences", {})
-        legacy_prompt = ext_prefs.get("user_prompt")
-
-        if legacy_prompt and not os.path.exists(user_prompt_path):
-            try:
-                logger.info("Migrating legacy Custom User Prompt.")
-                with open(user_prompt_path, "w", encoding="utf-8") as f:
-                    f.write(legacy_prompt)
-            except Exception as e:
-                logger.error(
-                    "Failed to migrate Custom User Prompt (%s).",
-                    type(e).__name__,
-                )
-
-        # 3. Read from File (Source of Truth). A missing file is valid empty
-        # content. An unreadable file is omitted from get_config rather than
-        # being misrepresented as an explicit empty value.
-        current_prompt_content: str | None = None
-        prompt_health_fields: dict | None = None
+        if "extension_preferences" not in session_config:
+            session_config["extension_preferences"] = {}
+        session_config["extension_preferences"].pop("user_prompt", None)
         if include_prompt_status:
+            user_prompt_path = os.path.join(USER_DATA_DIR, "user_prompt.md")
+            legacy_prompt = ext_prefs.get("user_prompt")
+            if legacy_prompt and not os.path.exists(user_prompt_path):
+                try:
+                    logger.info("Migrating legacy Custom User Prompt.")
+                    with open(user_prompt_path, "w", encoding="utf-8") as f:
+                        f.write(legacy_prompt)
+                except Exception as e:
+                    logger.error(
+                        "Failed to migrate Custom User Prompt (%s).",
+                        type(e).__name__,
+                    )
+
             prompt_health_fields = self._get_prompt_source_config_fields(
                 current_root,
                 bool(use_workspace_only),
@@ -1461,32 +1451,10 @@ class NativeHost:
                 "_user_prompt_raw",
                 None,
             )
-        else:
-            try:
-                _, current_prompt_content = self._read_prompt_source(
-                    user_prompt_path,
-                    missing_error_code=None,
-                    unreadable_error_code="user_prompt_unreadable",
-                )
-            except PromptSourceError as error:
-                logger.error(
-                    "Failed to read Custom User Prompt (%s).",
-                    error.error_code,
-                )
-
-        # 4. Inject into extension_preferences for Frontend Sync
-        if "extension_preferences" not in session_config:
-            session_config["extension_preferences"] = {}
-
-        # Remove any legacy config.json value. Only a successfully read file
-        # value, including an explicit empty string, is authoritative.
-        session_config["extension_preferences"].pop("user_prompt", None)
-        if current_prompt_content is not None:
-            session_config["extension_preferences"][
-                "user_prompt"
-            ] = current_prompt_content
-
-        if prompt_health_fields is not None:
+            if current_prompt_content is not None:
+                session_config["extension_preferences"][
+                    "user_prompt"
+                ] = current_prompt_content
             session_config.update(prompt_health_fields)
 
         return session_config
@@ -1968,14 +1936,13 @@ class NativeHost:
 
     async def handle_update_config(self, payload):
         """Updates configuration files and refreshes the session."""
+        new_instr = _PAYLOAD_FIELD_UNSET
         if "user_instructions" in payload:
             new_instr = payload["user_instructions"]
         elif "system_instructions" in payload:
             new_instr = payload["system_instructions"]
-        else:
-            new_instr = None
 
-        new_prompt = _WORKING_DIRECTORY_UNSET
+        new_prompt = _PAYLOAD_FIELD_UNSET
         if "user_prompt" in payload:
             new_prompt = payload["user_prompt"]
         else:
@@ -1990,10 +1957,7 @@ class NativeHost:
             ("user_prompt", new_prompt),
         ):
             if (
-                value is not _WORKING_DIRECTORY_UNSET
-                and not (
-                    field_name == "user_instructions" and value is None
-                )
+                value is not _PAYLOAD_FIELD_UNSET
                 and not isinstance(value, str)
             ):
                 return {
@@ -2024,13 +1988,13 @@ class NativeHost:
                     60,
                     min(3600, raw_timeout),
                 )
-            if new_instr is not None:
+            if new_instr is not _PAYLOAD_FIELD_UNSET:
                 durable_write_attempted = True
                 self._write_utf8_text(
                     os.path.join(USER_DATA_DIR, "copilot-instructions.md"),
                     new_instr,
                 )
-            if new_prompt is not _WORKING_DIRECTORY_UNSET:
+            if new_prompt is not _PAYLOAD_FIELD_UNSET:
                 durable_write_attempted = True
                 self._write_utf8_text(
                     os.path.join(USER_DATA_DIR, "user_prompt.md"),

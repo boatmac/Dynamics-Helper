@@ -38,16 +38,17 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Team sync, Reset, and related preference-mirror actions survive compatible later snapshots, cancel on incompatible team identity, and run once after durable commit.
 - Options and FAB menu Team Catalog reads ignore delayed results from old enabled/URL/team generations.
 - FAB Analyze spinner and safety timers are request-ID scoped, so stale A response/finally/timeout paths cannot clear or report over request B.
+- Preference mirrors are serialized/coalesced and inspect Chrome storage errors; no Host/team/Reset action runs before the latest durable commit, and failed intent remains retryable.
+- Reset responses carry default identity, generation, and token with committed/stale/failed truth; stale, failed, transport, or superseded callbacks never claim success or clear newer edits.
+- FAB retains request ownership through asynchronous case hashing, preventing stale response UI, duration, menu, and outcome telemetry.
+- Session refresh config no longer reads Custom User Prompt; Options hydration and each Analyze perform their own single canonical read. Explicit-null editable prompt fields fail before any write.
 
 ## Verification
 
-- Fifth review product commit: `77df5ec` (`fix(review): preserve asynchronous intent ownership`); the evidence commit follows it.
-- Isolated Host: **132/132 focused** and **204/204 full** tests passed.
-- Extension: **158/158 focused across 7 files** and **248/248 full across 17 files** passed.
-- Production build passed with **2,216 modules transformed** and **13 artifacts** listed.
-- Isolated Python compileall, `git diff --check`, static ownership/secrecy scans, and break-and-fail mutations passed.
+- Sixth review product/evidence commits and final exact totals are recorded in `.superpowers/sdd/sixth-final-review-fix-report.md`.
+- Isolated Host, full Extension, production build, compileall, static checks, and break-and-fail mutations pass on the committed sixth-fix tree.
 - Optional authenticated marker smoke was not run because safe model-backed user/session isolation was unavailable; it remains non-gating.
-- The controller broad whole-branch review remains pending after this fifth fix wave.
+- The controller broad whole-branch review remains pending after this sixth fix wave.
 
 ## Upgrade notes
 

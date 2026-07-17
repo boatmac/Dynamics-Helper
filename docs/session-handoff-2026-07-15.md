@@ -14,7 +14,8 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Task 8 evidence: `9127546` plus `73b8adf`; first-review fixes/evidence are `907acd0` and `6b9631f`
 - Second whole-branch Important-finding implementation: `cb760a4` plus comment-only follow-up `3e18244`
 - Fifth whole-branch Important-finding product fix: `77df5ec` (`fix(review): preserve asynchronous intent ownership`)
-- Controller broad whole-branch review: **pending rerun after the fifth fix wave**
+- Sixth whole-branch review fix wave: working tree after starting head `0faf649`; final product/evidence commit IDs are recorded in `.superpowers/sdd/sixth-final-review-fix-report.md`
+- Controller broad whole-branch review: **pending rerun after the sixth fix wave**
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
@@ -67,10 +68,11 @@ b39b46a docs(verification): record second review fixes
 e3ba1ca fix(review): harden request-scoped authority
 e1fb39c docs(verification): record fourth review fixes
 77df5ec fix(review): preserve asynchronous intent ownership
-HEAD docs(verification): record fifth review fixes
+0faf649 docs(verification): record fifth review fixes
+HEAD sixth review fixes/evidence (inspect Git for final commit IDs)
 ```
 
-These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Product commit `77df5ec` is 32 commits ahead of `origin/master`; the evidence commit containing this handoff makes the branch 33 ahead and 0 behind if the remote baseline is unchanged. The controller must still rerun its broad whole-branch review. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming the embedded count remains current.
+These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Starting head `0faf649` was 33 commits ahead of `origin/master`; inspect the sixth report and Git directly for final counts. The controller must still rerun its broad whole-branch review. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming the embedded count remains current.
 
 ## Remote VM Bootstrap
 
@@ -339,6 +341,24 @@ operation occurred. The optional authenticated smoke remains safely skipped.
 After the evidence commit, the branch is **33 ahead, 0 behind `origin/master`**;
 the controller broad review remains pending after this fifth wave.
 
+## Sixth Review Fix Addendum - 2026-07-17
+
+Starting head: `0faf6493df81d7aaad70da63ac05eb25e8b57257`. This
+coordinated TDD wave serializes/coalesces Options preference mirrors with Chrome
+storage error handling, makes Reset responses tokenized and truthful, retains
+FAB request ownership through asynchronous hashing, removes Custom User Prompt
+reads from session-refresh config, and rejects explicit-null DH-specific
+Instructions before all writes. Stale/failed/transport/superseded Reset keeps
+current UI values, performs no local cleanup, and shows a persistent incomplete
+warning instead of success.
+
+Exact RED/GREEN, mutation proof, committed-tree verification totals, commit IDs,
+and safety constraints are recorded in
+`.superpowers/sdd/sixth-final-review-fix-report.md`. The optional authenticated
+smoke remains safely skipped. No version, tag, push, package, registry, real
+AppData, or MyCases operation is part of this wave. Controller broad whole-branch
+review remains pending after the sixth fixes.
+
 ## Session Identity Contract
 
 - Case session ID is deterministic UUIDv5 derived from the bare 16-digit case number.
@@ -528,9 +548,9 @@ Blocked until the Contract Primitives spec freezes the adapter boundary:
 
 ## Current Decision State
 
-- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and five review-fix waves are recorded through product commit `77df5ec` and the fifth fix report, and the concise unversioned release draft exists.
+- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and six review-fix waves are recorded through the sixth report, and the concise unversioned release draft exists.
 - Accepted design and plan are `441d0db` and `21108d9`.
-- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the fifth fix wave.
+- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the sixth fix wave.
 - No MyCases integration code, mode preference, workspace detector, coordinator adapter, persistence adapter, or MyCases canonical-file write has been implemented.
 - MyCasesKit response `675006a` accepts Form ③ and the Stage 1 deterministic persistence-gate model.
 - Five shared JSON fixtures and a README exist as examples, but six README items remain tentative; not every interface is frozen.

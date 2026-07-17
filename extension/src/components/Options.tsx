@@ -75,6 +75,7 @@ type PrefsMirrorIntent = {
     generation: number;
     prefs: Readonly<Preferences>;
     actions: readonly PrefsMirrorAction[];
+    onCommit?: () => void;
 };
 
 type PendingHydrationMirror = PrefsMirrorIntent & {
@@ -597,6 +598,8 @@ const OptionsInner: React.FC = () => {
 
     const [promptHealthIssue, setPromptHealthIssue] = useState<PromptSourceIssue | null>(null);
     const [configUpdateIssue, setConfigUpdateIssue] = useState<ConfigUpdateIssue | null>(null);
+    const [prefsMirrorIssue, setPrefsMirrorIssue] = useState<ConfigUpdateIssue | null>(null);
+    const [resetIncomplete, setResetIncomplete] = useState(false);
     const userInstructionsEditTokenRef = useRef<InstructionUpdateToken>({
         revision: 0,
         value: DEFAULT_PREFS.userInstructions ?? '',
@@ -611,9 +614,12 @@ const OptionsInner: React.FC = () => {
     const promptHealthRequestRevisionRef = useRef(0);
     const prefsMirrorGenerationRef = useRef(0);
     const prefsMirrorActionIdRef = useRef(0);
-    const prefsMirrorWritesInFlightRef = useRef(0);
+    const prefsMirrorWriteInFlightRef = useRef(false);
+    const queuedPrefsMirrorIntentRef = useRef<PrefsMirrorIntent | null>(null);
     const settledPrefsMirrorActionsRef = useRef<Set<number>>(new Set());
     const latestPrefsMirrorIntentRef = useRef<PrefsMirrorIntent | null>(null);
+    const resetTokenRef = useRef(0);
+    const pendingResetRetryActionRef = useRef<PrefsMirrorAction | null>(null);
     const prefsRef = useRef<Preferences>(DEFAULT_PREFS);
     const userTouchedRevisionRef = useRef(0);
     const [catchUpRevision, setCatchUpRevision] = useState(0);
@@ -1007,10 +1013,19 @@ const OptionsInner: React.FC = () => {
     const createPrefsMirrorIntent = (
         nextPrefs: Readonly<Preferences>,
         newActions: readonly PrefsMirrorAction[] = [],
+        onCommit?: () => void,
     ): PrefsMirrorIntent => {
-        const previous = latestPrefsMirrorIntentRef.current;
+        const previousIntents = [
+            latestPrefsMirrorIntentRef.current,
+            queuedPrefsMirrorIntentRef.current,
+        ].filter(
+            (intent): intent is PrefsMirrorIntent => intent !== null,
+        );
         const actionMap = new Map<number, PrefsMirrorAction>();
-        for (const action of [...(previous?.actions ?? []), ...newActions]) {
+        for (const action of [
+            ...previousIntents.flatMap(intent => intent.actions),
+            ...newActions,
+        ]) {
             if (settledPrefsMirrorActionsRef.current.has(action.id)) continue;
             if (!mirrorActionMatchesPrefs(action, nextPrefs)) {
                 settledPrefsMirrorActionsRef.current.add(action.id);
@@ -1022,6 +1037,7 @@ const OptionsInner: React.FC = () => {
             generation: ++prefsMirrorGenerationRef.current,
             prefs: Object.freeze({ ...nextPrefs }),
             actions: Object.freeze([...actionMap.values()]),
+            onCommit,
         });
         latestPrefsMirrorIntentRef.current = intent;
         return intent;
@@ -1040,12 +1056,17 @@ const OptionsInner: React.FC = () => {
         run,
     });
 
+    const mirrorIdentityMatchesPrefs = (
+        identity: TeamMirrorIdentity,
+        candidate: Readonly<Preferences>,
+    ) => identity.enabled === (candidate.teamCatalogEnabled === true)
+        && identity.manifestUrl === (candidate.teamManifestUrl || '')
+        && identity.teamId === (candidate.team || '');
+
     const mirrorActionMatchesPrefs = (
         action: PrefsMirrorAction,
         candidate: Readonly<Preferences>,
-    ) => action.identity.enabled === (candidate.teamCatalogEnabled === true)
-        && action.identity.manifestUrl === (candidate.teamManifestUrl || '')
-        && action.identity.teamId === (candidate.team || '');
+    ) => mirrorIdentityMatchesPrefs(action.identity, candidate);
 
     const settlePrefsMirrorActions = (intent: PrefsMirrorIntent) => {
         for (const action of intent.actions) {
@@ -1058,23 +1079,55 @@ const OptionsInner: React.FC = () => {
         }
     };
 
-    const writePrefsMirror = (
-        intent: PrefsMirrorIntent,
-        onLatestCommit?: () => void,
-    ) => {
-        prefsMirrorWritesInFlightRef.current += 1;
+    const drainPrefsMirrorQueue = () => {
+        if (prefsMirrorWriteInFlightRef.current) return;
+        const intent = queuedPrefsMirrorIntentRef.current;
+        if (!intent) return;
+
+        queuedPrefsMirrorIntentRef.current = null;
+        prefsMirrorWriteInFlightRef.current = true;
         chrome.storage.local.set({ dh_prefs: intent.prefs }, () => {
-            prefsMirrorWritesInFlightRef.current -= 1;
-            const latestIntent = latestPrefsMirrorIntentRef.current;
-            if (latestIntent && latestIntent.generation !== intent.generation) {
-                writePrefsMirror(latestIntent);
+            const storageError = chrome.runtime.lastError;
+            prefsMirrorWriteInFlightRef.current = false;
+            const newerIntent = queuedPrefsMirrorIntentRef.current;
+
+            if (storageError) {
+                setPrefsMirrorIssue({
+                    configSaved: false,
+                    fallback: storageError.message || '',
+                });
+                if (!newerIntent) {
+                    // Keep the exact failed intent, including unsettled actions,
+                    // until a later user write retries or supersedes it.
+                    queuedPrefsMirrorIntentRef.current = intent;
+                    return;
+                }
+                drainPrefsMirrorQueue();
                 return;
             }
-            if (prefsMirrorWritesInFlightRef.current === 0) {
-                settlePrefsMirrorActions(intent);
+
+            if (newerIntent) {
+                drainPrefsMirrorQueue();
+                return;
             }
-            onLatestCommit?.();
+            if (latestPrefsMirrorIntentRef.current?.generation !== intent.generation) {
+                const latestIntent = latestPrefsMirrorIntentRef.current;
+                if (latestIntent) {
+                    queuedPrefsMirrorIntentRef.current = latestIntent;
+                    drainPrefsMirrorQueue();
+                }
+                return;
+            }
+
+            setPrefsMirrorIssue(null);
+            settlePrefsMirrorActions(intent);
+            intent.onCommit?.();
         });
+    };
+
+    const writePrefsMirror = (intent: PrefsMirrorIntent) => {
+        queuedPrefsMirrorIntentRef.current = intent;
+        drainPrefsMirrorQueue();
     };
 
     const createManifestFetchAction = (
@@ -1590,29 +1643,33 @@ const OptionsInner: React.FC = () => {
         // The pre-hydration warn that used to live here was removed because
         // hitting it during normal cold start is expected, not exceptional.
         // See docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md
+        const hostUpdateAllowed = prefsHydratedRef.current;
         const intent = createIntent(nextPrefs);
         const manifestAction = opts?.fetchManifest
             ? createManifestFetchAction(intent.prefs)
             : undefined;
+        const resetRetryAction = pendingResetRetryActionRef.current;
+        pendingResetRetryActionRef.current = null;
         const mirrorIntent = createPrefsMirrorIntent(
             intent.prefs,
-            [opts?.mirrorAction, manifestAction].filter(
-                (action): action is PrefsMirrorAction => action !== undefined,
+            [opts?.mirrorAction, manifestAction, resetRetryAction].filter(
+                (action): action is PrefsMirrorAction => action != null,
             ),
-        );
-        writePrefsMirror(mirrorIntent, () => {
-            if (intent.generation !== configUpdateRequestRevisionRef.current) {
-                return;
-            }
-            if (!prefsHydratedRef.current) {
-                // Window edit — touched ref will route it through the
-                // catch-up RPC once hydration completes. Storage is
-                // up-to-date; host will catch up.
-                return;
-            }
+            () => {
+                if (intent.generation !== configUpdateRequestRevisionRef.current) {
+                    return;
+                }
+                if (!hostUpdateAllowed) {
+                    // Window edit — touched ref will route it through the
+                    // catch-up RPC once hydration completes. Storage is
+                    // up-to-date; host will catch up.
+                    return;
+                }
 
-            sendHostConfigUpdate(intent);
-        });
+                sendHostConfigUpdate(intent);
+            },
+        );
+        writePrefsMirror(mirrorIntent);
     };
 
     // Convenience: setPrefs + persist in one call. All instant-persist
@@ -1651,6 +1708,84 @@ const OptionsInner: React.FC = () => {
         requestGeneration: generation,
     });
 
+    const createResetMirrorAction = (
+        resetGeneration: number,
+        identity: TeamMirrorIdentity,
+        resetToken: number,
+    ): PrefsMirrorAction => createPrefsMirrorAction(
+        'reset',
+        identity,
+        () => {
+            const userRevisionAtDispatch = userTouchedRevisionRef.current;
+            const resetTokenIsCurrent = () => resetTokenRef.current === resetToken;
+            const responseIsCurrent = () => (
+                resetTokenIsCurrent()
+                && teamRefreshGenerationRef.current === resetGeneration
+                && userTouchedRevisionRef.current === userRevisionAtDispatch
+                && mirrorIdentityMatchesPrefs(identity, prefsRef.current)
+            );
+            const retainResetForRetry = () => {
+                if (!responseIsCurrent()) return;
+                pendingResetRetryActionRef.current = createResetMirrorAction(
+                    resetGeneration,
+                    identity,
+                    resetToken,
+                );
+                setResetIncomplete(true);
+            };
+
+            chrome.runtime.sendMessage({
+                type: "RESET_EXTENSION_STATE",
+                payload: {
+                    ...teamRequestPayload(resetGeneration, identity),
+                    resetToken,
+                },
+            }, (response) => {
+                if (!resetTokenIsCurrent()) return;
+                if (!responseIsCurrent()) {
+                    setResetIncomplete(true);
+                    return;
+                }
+                const responseIdentity = response?.data?.identity;
+                const responseMatches = response?.data?.resetToken === resetToken
+                    && response?.data?.requestGeneration === resetGeneration
+                    && responseIdentity?.enabled === identity.enabled
+                    && responseIdentity?.manifestUrl === identity.manifestUrl
+                    && responseIdentity?.teamId === identity.teamId;
+                if (
+                    chrome.runtime.lastError
+                    || response?.status !== 'success'
+                    || response?.data?.syncStatus !== 'committed'
+                    || !responseMatches
+                ) {
+                    retainResetForRetry();
+                    return;
+                }
+
+                chrome.storage.local.remove(
+                    ["dh_items", "dh_team_collapsed_labels"],
+                    () => {
+                        if (!responseIsCurrent()) return;
+                        if (chrome.runtime.lastError) {
+                            retainResetForRetry();
+                            return;
+                        }
+                        loadItems().then(loaded => {
+                            if (!responseIsCurrent()) return;
+                            setItems(collapseFolders(loaded));
+                            setTeamItems([]);
+                            setTeamSynced("");
+                            setTeamCollapsedLabels(new Set());
+                            pendingResetRetryActionRef.current = null;
+                            setResetIncomplete(false);
+                            showSuccess(t('resetComplete'), 2000);
+                        });
+                    },
+                );
+            });
+        },
+    );
+
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
             invalidateTeamRefresh();
@@ -1675,30 +1810,15 @@ const OptionsInner: React.FC = () => {
                 manifestUrl: '',
                 teamId: '',
             };
-            persistPrefs(DEFAULT_PREFS, { mirrorAction: createPrefsMirrorAction(
-                'reset',
-                resetIdentity,
-                () => {
-            chrome.runtime.sendMessage({
-                type: "RESET_EXTENSION_STATE",
-                payload: teamRequestPayload(resetGeneration, resetIdentity),
-            }, () => {
-                chrome.storage.local.remove(["dh_items", "dh_team_collapsed_labels"], () => {
-                // Wrap loaded items in collapseFolders so Reset produces the
-                // same folded-by-default tree the mount path produces. Without
-                // this, items.json defaults render fully expanded after Reset
-                // because items.json ships no `collapsed` keys — every folder
-                // resolves to `undefined`, which `effectiveCollapsed` treats
-                // as expanded.
-                loadItems().then(loaded => setItems(collapseFolders(loaded)));
-                setTeamItems([]);
-                setTeamSynced("");
-                setTeamCollapsedLabels(new Set());
-                showSuccess(t('resetComplete'), 2000);
-                });
+            const resetToken = ++resetTokenRef.current;
+            pendingResetRetryActionRef.current = null;
+            persistPrefs(DEFAULT_PREFS, {
+                mirrorAction: createResetMirrorAction(
+                    resetGeneration,
+                    resetIdentity,
+                    resetToken,
+                ),
             });
-                },
-            ) });
         }
     };
 
@@ -2357,7 +2477,7 @@ const OptionsInner: React.FC = () => {
         );
     };
 
-    const activeIssue = configUpdateIssue ?? promptHealthIssue;
+    const activeIssue = prefsMirrorIssue ?? configUpdateIssue ?? promptHealthIssue;
     const issueDetail = activeIssue
         ? localizePromptSourceError(
             activeIssue.errorCode,
@@ -2365,11 +2485,12 @@ const OptionsInner: React.FC = () => {
             t,
         )
         : '';
-    const issuePrefix = configUpdateIssue
-        ? t(configUpdateIssue.configSaved
+    const issuePrefix = prefsMirrorIssue || configUpdateIssue
+        ? t((prefsMirrorIssue ?? configUpdateIssue)!.configSaved
             ? 'configSavedRefreshFailed'
             : 'configNotSaved')
         : '';
+    const resetIssue = resetIncomplete ? t('resetIncomplete') : '';
 
     return (
             <DndProvider backend={HTML5Backend}>
@@ -2415,13 +2536,13 @@ const OptionsInner: React.FC = () => {
                         </div>
                     </div>
 
-                    {activeIssue && (
+                    {(resetIssue || activeIssue) && (
                         <div
                             className="bg-amber-50 text-amber-800 text-center py-3 px-4 font-medium text-sm border-b border-amber-200 flex items-center justify-center gap-2"
                             role="alert"
                         >
                             <div className="w-2 h-2 bg-amber-500 rounded-full shrink-0"></div>
-                            <span>{issuePrefix}{issuePrefix && issueDetail ? ' ' : ''}{issueDetail}</span>
+                            <span>{resetIssue || <>{issuePrefix}{issuePrefix && issueDetail ? ' ' : ''}{issueDetail}</>}</span>
                         </div>
                     )}
 

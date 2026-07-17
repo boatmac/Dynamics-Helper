@@ -329,6 +329,38 @@ class TestPromptConfigApi(
         with open(self.dh_path, "rb") as stream:
             self.assertEqual(stream.read(), b"")
 
+    async def test_explicit_null_user_instructions_is_rejected_before_writes(self):
+        self._write(self.dh_path, b"preserved instructions")
+        self.host._write_user_config = MagicMock()
+        self.host._write_utf8_text = MagicMock()
+
+        result = await self.host.handle_update_config({
+            "user_instructions": None,
+            "config": {"extension_preferences": {"language": "zh"}},
+        })
+
+        self.assertEqual(result, {
+            "success": False,
+            "config_saved": False,
+            "error": "user_instructions must be a string.",
+        })
+        self.host._write_user_config.assert_not_called()
+        self.host._write_utf8_text.assert_not_called()
+        with open(self.dh_path, "rb") as stream:
+            self.assertEqual(stream.read(), b"preserved instructions")
+
+    async def test_absent_user_instructions_does_not_write_instruction_file(self):
+        self._write(self.dh_path, b"preserved instructions")
+        original_write = self.host._write_utf8_text
+        self.host._write_utf8_text = MagicMock(wraps=original_write)
+
+        result = await self.host.handle_update_config({})
+
+        self.assertTrue(result["config_saved"])
+        self.host._write_utf8_text.assert_not_called()
+        with open(self.dh_path, "rb") as stream:
+            self.assertEqual(stream.read(), b"preserved instructions")
+
     async def test_missing_primary_uses_legacy_alias(self):
         await self.host.handle_update_config(
             {"system_instructions": "legacy"}
@@ -474,12 +506,47 @@ class TestPromptConfigApi(
         self.assertEqual(config["_user_instructions_raw"], "")
 
     def test_get_config_without_health_does_not_read_prompt_files(self):
-        with patch.object(
-            self.host,
-            "_get_prompt_source_config_fields",
-        ) as inspect_health:
+        prompt_path = os.path.join(self.user_dir, "user_prompt.md")
+        self._write(prompt_path, b"must not be read")
+        original_read = self.host._read_prompt_source
+        with (
+            patch.object(
+                self.host,
+                "_get_prompt_source_config_fields",
+            ) as inspect_health,
+            patch.object(
+                self.host,
+                "_read_prompt_source",
+                wraps=original_read,
+            ) as read_source,
+        ):
             self.host._get_session_config(include_prompt_status=False)
         inspect_health.assert_not_called()
+        prompt_reads = [
+            call for call in read_source.call_args_list
+            if call.args and call.args[0] == prompt_path
+        ]
+        self.assertEqual(prompt_reads, [])
+
+    def test_get_config_with_health_reads_user_prompt_once(self):
+        prompt_path = os.path.join(self.user_dir, "user_prompt.md")
+        self._write(prompt_path, b"options prompt")
+        original_read = self.host._read_prompt_source
+        with patch.object(
+            self.host,
+            "_read_prompt_source",
+            wraps=original_read,
+        ) as read_source:
+            config = self.host._get_session_config(include_prompt_status=True)
+        prompt_reads = [
+            call for call in read_source.call_args_list
+            if call.args and call.args[0] == prompt_path
+        ]
+        self.assertEqual(len(prompt_reads), 1)
+        self.assertEqual(
+            config["extension_preferences"]["user_prompt"],
+            "options prompt",
+        )
 
     async def test_config_write_failure_reports_not_saved_and_skips_refresh(self):
         self.host._encrypt_secrets_before_write = MagicMock(

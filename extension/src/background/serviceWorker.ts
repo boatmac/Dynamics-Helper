@@ -34,6 +34,7 @@ import {
     resetAnalysisState,
     type AnalyzePersistContext,
 } from '../utils/analysisStore';
+import { handleResetExtensionState } from './resetExtensionState';
 
 const NATIVE_HOST_NAME = "com.dynamics.helper.native";
 
@@ -357,27 +358,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === "RESET_EXTENSION_STATE") {
-        const resetIdentity = message.payload?.identity;
-        const acceptedGeneration = beginTeamSyncGeneration();
-        (async () => {
-            try {
-                if (
-                    !resetIdentity
-                    || !await currentTeamIdentityMatches(resetIdentity, acceptedGeneration)
-                ) {
-                    sendResponse({ status: "success", data: { syncStatus: "stale" } });
-                    return;
-                }
-                await clearTeamBookmarksAtGeneration(acceptedGeneration, resetIdentity);
-                await resetAnalysisState();
-                sendResponse({ status: "success" });
-            } catch {
-                sendResponse({
-                    status: "error",
-                    error: "Extension state reset failed",
-                });
-            }
-        })();
+        handleResetExtensionState(message.payload, {
+            beginGeneration: beginTeamSyncGeneration,
+            identityIsCurrent: currentTeamIdentityMatches,
+            clearTeamState: (identity, generation) =>
+                clearTeamBookmarksAtGeneration(generation, identity),
+            clearAnalysisState: resetAnalysisState,
+        }).then(sendResponse);
         return true;
     }
 });

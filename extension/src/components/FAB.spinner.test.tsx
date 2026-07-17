@@ -9,12 +9,13 @@ const state = vi.hoisted(() => ({
   analyzeTimeoutSeconds: 1200,
   scanForErrors: vi.fn(),
   trackEvent: vi.fn(),
+  hashCaseId: vi.fn(),
 }))
 
 vi.mock('../utils/telemetry', () => ({
   trackEvent: state.trackEvent,
   trackException: vi.fn(),
-  hashCaseId: vi.fn().mockResolvedValue('hash'),
+  hashCaseId: state.hashCaseId,
 }))
 
 vi.mock('../utils/prefs', () => ({
@@ -81,6 +82,7 @@ describe('FAB analyzing source reconciliation', () => {
     state.hydrationRequestId = 'hydrated-A'
     state.analyzeTimeoutSeconds = 1200
     state.trackEvent.mockReset()
+    state.hashCaseId.mockReset().mockResolvedValue('hash')
     state.scanForErrors.mockReset().mockResolvedValue({
       caseNumber: '1234567890123456',
       ticketTitle: 'Fixture',
@@ -254,6 +256,112 @@ describe('FAB analyzing source reconciliation', () => {
     } finally {
       act(() => vi.clearAllTimers())
       vi.useRealTimers()
+      randomUuid.mockRestore()
+    }
+  })
+
+  it('keeps B ownership while stale A awaits its case hash', async () => {
+    state.hydrationPending = false
+    const responseA = deferNextResponse('analyze_error')
+    const responseB = deferNextResponse('analyze_error')
+    let resolveHashA!: (value: string) => void
+    state.hashCaseId
+      .mockImplementationOnce(() => new Promise(resolve => { resolveHashA = resolve }))
+      .mockResolvedValueOnce('hash-b')
+    const randomUuid = vi.spyOn(crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-4000-8000-00000000000a')
+      .mockReturnValueOnce('00000000-0000-4000-8000-00000000000b')
+    try {
+      const { analyze } = await renderOpenFab()
+      fireEvent.click(analyze)
+      await act(async () => responseA.resolve({
+        status: 'success',
+        data: {
+          status: 'success',
+          data: { markdown: 'STALE A HASH RESULT', saved_to: 'a.md' },
+        },
+      }))
+      await waitFor(() => expect(state.hashCaseId).toHaveBeenCalledTimes(1))
+
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dh-trigger-analyze', {
+          detail: { selectionText: 'request B context' },
+        }))
+        await Promise.resolve()
+      })
+      expect(analyze).toBeDisabled()
+
+      await act(async () => resolveHashA('hash-a'))
+      expect(analyze).toBeDisabled()
+      expect(screen.queryByText('STALE A HASH RESULT')).toBeNull()
+      expect(state.trackEvent.mock.calls.some(call => [
+        'Analyze Success',
+        'Case Analyzed',
+        'Analyze Failed',
+        'Analyze Host Error',
+        'Analyze Exception',
+      ].includes(call[0]))).toBe(false)
+
+      await act(async () => responseB.resolve({
+        status: 'success',
+        data: {
+          status: 'success',
+          data: { markdown: 'REQUEST B AFTER HASH', saved_to: 'b.md' },
+        },
+      }))
+      await waitFor(() => expect(screen.getByText('REQUEST B AFTER HASH')).toBeInTheDocument())
+      expect(state.trackEvent.mock.calls.filter(call => call[0] === 'Analyze Success')).toHaveLength(1)
+    } finally {
+      randomUuid.mockRestore()
+    }
+  })
+
+  it('does not emit an A exception when its deferred hash rejects after B starts', async () => {
+    state.hydrationPending = false
+    const responseA = deferNextResponse('analyze_error')
+    const responseB = deferNextResponse('analyze_error')
+    let rejectHashA!: (reason: Error) => void
+    state.hashCaseId
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectHashA = reject }))
+      .mockResolvedValueOnce('hash-b')
+    const randomUuid = vi.spyOn(crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-4000-8000-00000000000a')
+      .mockReturnValueOnce('00000000-0000-4000-8000-00000000000b')
+    try {
+      const { analyze } = await renderOpenFab()
+      fireEvent.click(analyze)
+      await act(async () => responseA.resolve({
+        status: 'success',
+        data: {
+          status: 'success',
+          data: { markdown: 'STALE A HASH ERROR', saved_to: 'a.md' },
+        },
+      }))
+      await waitFor(() => expect(state.hashCaseId).toHaveBeenCalledTimes(1))
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dh-trigger-analyze', {
+          detail: { selectionText: 'request B context' },
+        }))
+        await Promise.resolve()
+      })
+
+      await act(async () => rejectHashA(new Error('hash failed')))
+      expect(analyze).toBeDisabled()
+      expect(screen.queryByText(/hash failed/i)).toBeNull()
+      expect(state.trackEvent).not.toHaveBeenCalledWith(
+        'Analyze Exception',
+        { errorCode: 'unclassified' },
+      )
+
+      await act(async () => responseB.resolve({
+        status: 'success',
+        data: {
+          status: 'success',
+          data: { markdown: 'REQUEST B AFTER HASH ERROR', saved_to: 'b.md' },
+        },
+      }))
+      await waitFor(() => expect(screen.getByText('REQUEST B AFTER HASH ERROR')).toBeInTheDocument())
+    } finally {
       randomUuid.mockRestore()
     }
   })

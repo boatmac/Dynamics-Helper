@@ -148,6 +148,13 @@ In **Settings → Copilot Configuration**, you can customize two Markdown text f
 
 Both fields support Markdown formatting. Click **Preview** above either textarea to see rendered output and **Edit** to return to raw text. Both panes can be resized. Clearing either field is a real saved operation: an explicit empty value truncates its file. Unrelated setting changes omit both prompt-file fields and leave their files unchanged. If Custom User Prompt is unreadable or invalid UTF-8, Options keeps the last browser-mirrored text instead of displaying a false empty value; explicitly edit/clear the field to repair the Host file.
 
+If Chrome cannot save the local preference mirror, Options shows a persistent
+**Settings were not saved** warning and does not apply the Host/team side
+effects yet. Change a setting again to retry. Reset reports success only after
+the matching browser cleanup commits; if Reset is stale, interrupted, or
+superseded by a newer edit, current values remain visible and an incomplete
+Reset warning asks you to retry Reset.
+
 Prompt/configuration errors are actionable and do not mean authentication failed:
 
 | Code | Meaning | Action |

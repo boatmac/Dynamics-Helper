@@ -13,7 +13,7 @@ import { vi } from 'vitest'
 // - resolveNext / rejectNext fire pending deferrals in FIFO order per action.
 // - storage uses an in-memory Map; reset via resetChromeMock() in beforeEach.
 
-type DeferredResponse = {
+export type DeferredResponse = {
   resolve: (value: unknown) => void
   reject: (reason?: unknown) => void
   promise: Promise<unknown>
@@ -146,11 +146,18 @@ const sendMessage = vi.fn((payload: unknown, maybeCallback?: unknown) => {
       // Real chrome.runtime.sendMessage delivers via callback async.
       void next.promise.then(
         (value) => callback(value),
-        () => {
-          // Simulate lastError path: callback fires with undefined response.
-          // Tests can pre-set chrome.runtime.lastError before rejecting if
-          // they want to exercise the error branch.
-          callback(undefined)
+        (reason) => {
+          const runtime = chrome.runtime as typeof chrome.runtime & {
+            lastError?: { message: string }
+          }
+          runtime.lastError = {
+            message: reason instanceof Error ? reason.message : String(reason),
+          }
+          try {
+            callback(undefined)
+          } finally {
+            runtime.lastError = undefined
+          }
         },
       )
       return undefined
@@ -220,8 +227,22 @@ const storageSet = vi.fn((items: Record<string, unknown>, maybeCallback?: unknow
     Object.assign(storageData, items)
     cb?.()
   }
+  const fail = (reason: unknown) => {
+    if (!cb) throw reason
+    const runtime = chrome.runtime as typeof chrome.runtime & {
+      lastError?: { message: string }
+    }
+    runtime.lastError = {
+      message: reason instanceof Error ? reason.message : String(reason),
+    }
+    try {
+      cb()
+    } finally {
+      runtime.lastError = undefined
+    }
+  }
   if (deferred) {
-    const completion = deferred.promise.then(commit)
+    const completion = deferred.promise.then(commit, fail)
     return cb ? undefined : completion
   }
   Object.assign(storageData, items)

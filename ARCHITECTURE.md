@@ -143,9 +143,18 @@ Prompt resolution is fail-closed. Missing/unreadable Core, unreadable selected D
 
 ### Config and Error Boundary
 
-`get_config` uses a soft health projection rather than creating a strict session snapshot. It returns normal configuration plus `prompt_source_status`; Options therefore remains available to repair a bad source. Readable DH-specific text is returned separately as `_user_instructions_raw`, and readable Custom User Prompt as `extension_preferences.user_prompt`, including explicit empty strings. An unreadable/invalid-UTF-8 file omits its content property; Custom User Prompt uses `user_prompt_unreadable`, so neither editor is overwritten with a false empty value.
+`get_config` uses a soft health projection rather than creating a strict session snapshot. It returns normal configuration plus `prompt_source_status`; Options therefore remains available to repair a bad source. Readable DH-specific text is returned separately as `_user_instructions_raw`, and readable Custom User Prompt as `extension_preferences.user_prompt`, including explicit empty strings. An unreadable/invalid-UTF-8 file omits its content property; Custom User Prompt uses `user_prompt_unreadable`, so neither editor is overwritten with a false empty value. Session-refresh `_get_session_config` calls do not read/migrate/hydrate `user_prompt.md`; Analyze reads it once through its separate canonicalization boundary.
 
 `update_config` distinguishes sparse field omission from explicit empty content for both `user_instructions` and top-level `user_prompt`. Omission performs no file write; explicit `""` truncates the selected file. Options carries immutable revision/value tokens only on explicit edit/clear/Reset, acknowledges matching saved revisions, and retries unacknowledged values. Its structured result separates durable persistence (`config_saved`) from session refresh (`success`). The Host does not roll back uncertain partial writes; it invalidates stale active prompt state once a durable writer was attempted.
+
+Options serializes and coalesces `dh_prefs` mirror writes. Host updates and
+typed team/Reset actions are post-commit work of only the latest successful
+snapshot; storage failure retains unsettled intent and exposes a warning. Reset
+is a tokenized Service Worker transaction whose response is
+`committed|stale|failed`; only matching committed truth permits local cleanup.
+FAB similarly owns an Analyze request through all asynchronous response
+processing, including case hashing, so stale requests have no UI or telemetry
+authority.
 
 Analyze errors may carry optional `error_code`. The Service Worker persists raw safe fallback text plus optional `LastAnalysis.errorCode`, preserving an inner Analyze code over an outer wrapper code. Immediate and rehydrated FAB display use the same render-time localization helper for known codes; immediate unknown-code fallbacks may include a safe UI prefix, while rehydrated unknown/legacy codes retain the raw stored fallback. Instruction contents, Custom User Prompt contents, and prompt-source paths are excluded from normal logs and telemetry.
 

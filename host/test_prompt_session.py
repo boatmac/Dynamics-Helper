@@ -786,11 +786,29 @@ class TestPromptFingerprintLifecycle(
         self.host.scrubber.scrub.side_effect = scrub
         with open(prompt_path, "w", encoding="utf-8") as stream:
             stream.write("FIRST user@example.com")
-        with patch.object(dhm, "USER_DATA_DIR", self.root):
+        original_read = self.host._read_prompt_source
+        with (
+            patch.object(dhm, "USER_DATA_DIR", self.root),
+            patch.object(
+                self.host,
+                "_read_prompt_source",
+                wraps=original_read,
+            ) as read_source,
+        ):
             await self.host.handle_analyze_error(self.payload)
+            first_prompt_reads = [
+                call for call in read_source.call_args_list
+                if call.args and call.args[0] == prompt_path
+            ]
+            self.assertEqual(len(first_prompt_reads), 1)
             with open(prompt_path, "w", encoding="utf-8") as stream:
                 stream.write("SECOND user@example.com")
             await self.host.handle_analyze_error(self.payload)
+            all_prompt_reads = [
+                call for call in read_source.call_args_list
+                if call.args and call.args[0] == prompt_path
+            ]
+            self.assertEqual(len(all_prompt_reads), 2)
 
         first_sent = self.active_session.send_and_wait.await_args_list[0].args[0]
         second_sent = self.active_session.send_and_wait.await_args_list[1].args[0]

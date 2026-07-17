@@ -952,15 +952,6 @@ const FAB: React.FC = () => {
                 return;
             }
 
-            if (analyzeSafetyTimerRef.current?.requestId === requestId) {
-                clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
-                analyzeSafetyTimerRef.current = null;
-            }
-
-            // Stop listening to progress updates for this request to prevent race conditions
-            // where a lagging "Processing..." message overwrites the success message.
-            latestRequestId.current = null;
-
             // Format response to be user friendly
             if (response.status === 'success') {
                 const nativeResp = response.data;
@@ -974,6 +965,7 @@ const FAB: React.FC = () => {
                         const duration = (Date.now() - startTime) / 1000;
                         const caseNum = targetData.caseNumber || '';
                         const caseHash = await hashCaseId(caseNum);
+                        if (latestRequestId.current !== requestId) return;
                         const sap = targetData.productCategory || 'Unknown';
                         const severity = targetData.severity || 'Unknown';
 

@@ -162,6 +162,30 @@ const countUpdateConfigCalls = () =>
     return msg?.type === 'NATIVE_MSG' && msg?.payload?.action === 'update_config'
   }).length
 
+const findResetMessage = async () => waitFor(() => {
+  const message = chromeMockSpies.sendMessage.mock.calls
+    .map(call => call[0] as any)
+    .find(candidate => candidate?.type === 'RESET_EXTENSION_STATE')
+  if (!message) throw new Error('Reset message not sent')
+  return message
+})
+
+const resolveCommittedReset = async (
+  deferred: ReturnType<typeof deferNextResponse>,
+) => {
+  const message = await findResetMessage()
+  await act(async () => deferred.resolve({
+    status: 'success',
+    data: {
+      syncStatus: 'committed',
+      identity: message.payload.identity,
+      requestGeneration: message.payload.requestGeneration,
+      resetToken: message.payload.resetToken,
+    },
+  }))
+  return message
+}
+
 // Most recent dh_prefs storage.set carrying the given key.
 const findStorageWrite = (key: string) =>
   chromeMockSpies.storageSet.mock.calls.findLast((c) => {
@@ -372,7 +396,7 @@ describe('Options hydration window — Inv6: Reset during window survives merge'
     if (!resetButton) throw new Error('Reset button not found')
 
     fireEvent.click(resetButton)
-    await act(async () => resetResponse.resolve({ status: 'success' }))
+    await resolveCommittedReset(resetResponse)
 
     // Host responds with a NON-default value that would un-reset us if
     // touched set were empty. We pick language='zh' (DEFAULT_PREFS is
@@ -500,7 +524,7 @@ describe('Options delayed initial chrome hydration', () => {
     try {
       render(<Options />)
       fireEvent.click(await screen.findByRole('button', { name: /^reset$/i }))
-      await act(async () => resetResponse.resolve({ status: 'success' }))
+      await resolveCommittedReset(resetResponse)
 
       await act(async () => {
         outerStorageGet.resolve(undefined)
@@ -728,7 +752,7 @@ describe('Options selected-team refresh generation', () => {
       })
       fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
-      await act(async () => resetResponse.resolve({ status: 'success' }))
+      await resolveCommittedReset(resetResponse)
       await waitFor(() => {
         expect(screen.getByRole('status').textContent).toContain('Reset complete')
       })
@@ -898,7 +922,207 @@ describe('Options selected-team refresh generation', () => {
         teamId: '',
       })
       expect(Number.isInteger(resetMessage.payload.requestGeneration)).toBe(true)
-      await act(async () => resetResponse.resolve({ status: 'success' }))
+      await resolveCommittedReset(resetResponse)
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+
+  it('does not run Host or carried actions after a failed mirror write and retries once', async () => {
+    const syncResponse = deferNextResponse('SYNC_TEAM_CATALOG')
+    const updateResponse = deferNextResponse('update_config')
+    await hydrateTeamOptions()
+    const failedMirror = deferNextStorageSet('dh_prefs')
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'team-b' } })
+    await act(async () => failedMirror.reject(new Error('STORAGE SET FAILED')))
+
+    expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
+    )).toHaveLength(0)
+    expect(countUpdateConfigCalls()).toBe(0)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/not saved/i)
+    expect(screen.getByRole('alert')).toHaveTextContent('STORAGE SET FAILED')
+
+    fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
+    )).toHaveLength(1))
+    expect(countUpdateConfigCalls()).toBe(1)
+    await act(async () => syncResponse.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'skipped',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-b',
+        },
+      },
+    }))
+    await act(async () => updateResponse.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
+    )).toHaveLength(1)
+  })
+
+  it('serializes newer mirror intent and runs no action between commits', async () => {
+    const syncResponse = deferNextResponse('SYNC_TEAM_CATALOG')
+    const updateResponse = deferNextResponse('update_config')
+    await hydrateTeamOptions()
+    const writesBefore = chromeMockSpies.storageSet.mock.calls.filter(
+      call => Object.hasOwn(call[0] as object, 'dh_prefs'),
+    ).length
+    const firstMirror = deferNextStorageSet('dh_prefs')
+    const secondMirror = deferNextStorageSet('dh_prefs')
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'team-b' } })
+    fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+
+    expect(chromeMockSpies.storageSet.mock.calls.filter(
+      call => Object.hasOwn(call[0] as object, 'dh_prefs'),
+    )).toHaveLength(writesBefore + 1)
+    expect(countUpdateConfigCalls()).toBe(0)
+    expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
+    )).toHaveLength(0)
+
+    await act(async () => firstMirror.resolve(undefined))
+    await waitFor(() => expect(chromeMockSpies.storageSet.mock.calls.filter(
+      call => Object.hasOwn(call[0] as object, 'dh_prefs'),
+    )).toHaveLength(writesBefore + 2))
+    expect(countUpdateConfigCalls()).toBe(0)
+    expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
+    )).toHaveLength(0)
+
+    await act(async () => secondMirror.resolve(undefined))
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+    expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
+    )).toHaveLength(1)
+    await act(async () => syncResponse.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'skipped',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-b',
+        },
+      },
+    }))
+    await act(async () => updateResponse.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it.each([
+    ['stale', { status: 'success', syncStatus: 'stale' }],
+    ['failed', { status: 'error', syncStatus: 'failed' }],
+  ])('keeps local defaults but reports a persistent %s Reset response', async (_name, outcome) => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await hydrateTeamOptions()
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      const message = await findResetMessage()
+      await act(async () => resetResponse.resolve({
+        status: outcome.status,
+        error: outcome.status === 'error' ? 'Extension state reset failed' : undefined,
+        data: {
+          syncStatus: outcome.syncStatus,
+          identity: message.payload.identity,
+          requestGeneration: message.payload.requestGeneration,
+          resetToken: message.payload.resetToken,
+        },
+      }))
+
+      expect(chromeMockSpies.storageRemove.mock.calls.some(call => {
+        const keys = call[0] as string[]
+        return Array.isArray(keys) && keys.includes('dh_items')
+      })).toBe(false)
+      expect(screen.queryByText('Reset complete.')).toBeNull()
+      expect(await screen.findByRole('alert')).toHaveTextContent(/reset did not complete/i)
+      expect((getStorageSnapshot().dh_prefs as any).teamCatalogEnabled).toBe(false)
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+
+  it('treats Reset transport failure as non-committed and performs no local cleanup', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await hydrateTeamOptions()
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await findResetMessage()
+      await act(async () => resetResponse.reject(new Error('RESET PORT CLOSED')))
+
+      expect(chromeMockSpies.storageRemove.mock.calls.some(call => {
+        const keys = call[0] as string[]
+        return Array.isArray(keys) && keys.includes('dh_items')
+      })).toBe(false)
+      expect(screen.queryByText('Reset complete.')).toBeNull()
+      expect(await screen.findByRole('alert')).toHaveTextContent(/reset did not complete/i)
+    } finally {
+      ;(chrome.runtime as any).lastError = undefined
+      confirm.mockRestore()
+    }
+  })
+
+  it('does not let a committed Reset response clear a newer post-reset edit', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const resetUpdate = deferNextResponse('update_config')
+    const editUpdate = deferNextResponse('update_config')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await hydrateTeamOptions()
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      const resetMessage = await findResetMessage()
+
+      await openCopilotSection()
+      const editor = await openDhInstructionsEditor()
+      fireEvent.change(editor, { target: { value: 'newer instructions' } })
+      fireEvent.blur(editor)
+      await waitFor(() => expect(countUpdateConfigCalls()).toBe(2))
+
+      await act(async () => resetResponse.resolve({
+        status: 'success',
+        data: {
+          syncStatus: 'committed',
+          identity: resetMessage.payload.identity,
+          requestGeneration: resetMessage.payload.requestGeneration,
+          resetToken: resetMessage.payload.resetToken,
+        },
+      }))
+
+      expect(editor.value).toBe('newer instructions')
+      expect(chromeMockSpies.storageRemove.mock.calls.some(call => {
+        const keys = call[0] as string[]
+        return Array.isArray(keys) && keys.includes('dh_items')
+      })).toBe(false)
+      expect(screen.queryByText('Reset complete.')).toBeNull()
+      expect(await screen.findByRole('alert')).toHaveTextContent(/reset did not complete/i)
+      await act(async () => resetUpdate.resolve({
+        status: 'success',
+        data: { success: true, config_saved: true },
+      }))
+      await act(async () => editUpdate.resolve({
+        status: 'success',
+        data: { success: true, config_saved: true },
+      }))
     } finally {
       confirm.mockRestore()
     }
@@ -987,7 +1211,7 @@ describe('Options selected-team refresh generation', () => {
       expect(chromeMockSpies.sendMessage.mock.calls.filter(
         call => (call[0] as any)?.type === 'RESET_EXTENSION_STATE',
       )).toHaveLength(1)
-      await act(async () => resetResponse.resolve({ status: 'success' }))
+      await resolveCommittedReset(resetResponse)
     } finally {
       confirm.mockRestore()
     }
@@ -1012,7 +1236,7 @@ describe('Options selected-team refresh generation', () => {
       await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(
         call => (call[0] as any)?.type === 'RESET_EXTENSION_STATE',
       )).toHaveLength(1))
-      await act(async () => resetResponse.resolve({ status: 'success' }))
+      await resolveCommittedReset(resetResponse)
     } finally {
       confirm.mockRestore()
     }
@@ -1431,7 +1655,7 @@ describe('Options selected-team refresh generation', () => {
         call => (call[0] as any)?.type === 'RESET_EXTENSION_STATE',
       )).toBe(true))
       await act(async () => delayedA.resolve(undefined))
-      await act(async () => resetResponse.resolve({ status: 'success' }))
+      await resolveCommittedReset(resetResponse)
 
       expect(document.body.textContent).not.toContain('STALE AFTER RESET')
     } finally {
@@ -2186,7 +2410,7 @@ describe('Options prompt health and inspected sparse writes', () => {
         status: 'success',
         data: { success: true, config_saved: true },
       }))
-      await act(async () => resetResponse.resolve({ status: 'success' }))
+      await resolveCommittedReset(resetResponse)
     } finally {
       confirmSpy.mockRestore()
     }
@@ -2348,7 +2572,7 @@ describe('Options prompt health and inspected sparse writes', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     try {
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
-      await act(async () => resetResponse.resolve({ status: 'success' }))
+      await resolveCommittedReset(resetResponse)
       await act(async () => update.resolve({
         status: 'success',
         data: { success: true, config_saved: true },
@@ -2543,9 +2767,7 @@ describe('Options prompt health and inspected sparse writes', () => {
     const language = await findLanguageSelect()
     fireEvent.change(language, { target: { value: 'en' } })
 
-    ;(chrome.runtime as any).lastError = { message: 'host unavailable' }
     await act(async () => getConfig.reject(new Error('host unavailable')))
-    ;(chrome.runtime as any).lastError = undefined
     expect(screen.queryByRole('alert')).toBeNull()
 
     await act(async () => catchUp.resolve({
@@ -2659,9 +2881,7 @@ describe('Options prompt health and inspected sparse writes', () => {
     fireEvent.change(editor, { target: { value: 'retry-me' } })
     fireEvent.blur(editor)
 
-    ;(chrome.runtime as any).lastError = { message: 'PORT CLOSED' }
     await act(async () => failedUpdate.reject(new Error('PORT CLOSED')))
-    ;(chrome.runtime as any).lastError = undefined
     expect(screen.getByRole('alert').textContent).toContain('PORT CLOSED')
 
     const language = await findLanguageSelect()
@@ -2866,7 +3086,7 @@ describe('Options prompt health and inspected sparse writes', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     try {
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
-      await act(async () => resetResponse.resolve({ status: 'success' }))
+      await resolveCommittedReset(resetResponse)
       const editor = await openDhInstructionsEditor()
       fireEvent.change(editor, { target: { value: 'after-reset' } })
       fireEvent.blur(editor)

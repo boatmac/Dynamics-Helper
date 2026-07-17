@@ -288,6 +288,10 @@ export const translations: TranslationDictionary = {
     updateInstalled: { en: "Update installed! Reloading extension...", zh: "更新已安装！正在重新加载扩展..." },
     updateFailed: { en: "Update failed", zh: "更新失败" },
     resetComplete: { en: "Reset complete.", zh: "重置完成。" },
+    resetIncomplete: {
+        en: "Reset did not complete. Current values were kept; retry Reset to finish cleanup.",
+        zh: "重置未完成。当前值已保留；请再次重置以完成清理。",
+    },
     importSuccess: { en: "Imported successfully!", zh: "导入成功！" },
     availableForUpdate: { en: "available for update", zh: "可更新" },
     checkFailed: { en: "Check failed", zh: "检查失败" },

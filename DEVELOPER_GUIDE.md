@@ -126,7 +126,7 @@ Strict Analyze/session resolution fails closed:
 * An existing empty Repository Instructions file is valid; a missing or unreadable/invalid-UTF-8 selected Repository file blocks Analyze.
 * The Host never falls back to the unselected DH-specific, Repository, or CLI-global source, and no user turn is sent on failure.
 
-`get_config` is intentionally softer. `_get_session_config(include_prompt_status=True)` returns normal configuration plus `prompt_source_status` without creating or committing a session snapshot. It returns readable `_user_instructions_raw` and `extension_preferences.user_prompt`, including explicit empty content. If either file exists but cannot be read as strict UTF-8, its content property is omitted so Options retains its Chrome mirror and shows the safe health warning; unreadable Custom User Prompt reports `user_prompt_unreadable`. Legacy hydration is used only when `prompt_source_status` is absent.
+`get_config` is intentionally softer. `_get_session_config(include_prompt_status=True)` returns normal configuration plus `prompt_source_status` without creating or committing a session snapshot. It returns readable `_user_instructions_raw` and `extension_preferences.user_prompt`, including explicit empty content. If either file exists but cannot be read as strict UTF-8, its content property is omitted so Options retains its Chrome mirror and shows the safe health warning; unreadable Custom User Prompt reports `user_prompt_unreadable`. Legacy hydration is used only when `prompt_source_status` is absent. Calls without `include_prompt_status=True` never read, migrate, or hydrate `user_prompt.md`; Analyze owns one separate canonical read per request.
 
 After the latest `update_config` intent is durably acknowledged, Options sends one additional health-only `get_config`. This callback changes only `promptHealthIssue`; it never re-enters the full hydration merge. Both config and health generations must still match before applying a response, so an older health result cannot replace newer state. Transport/non-success responses leave the existing health issue unchanged.
 
@@ -150,11 +150,16 @@ revisioned writes. Their edit/clear/Reset handlers capture immutable
 acknowledges only its captured revision, while transport/unsaved failures leave
 that revision pending for a later intent.
 
-The ordered `dh_prefs` mirror owns typed post-commit actions. Each action has a
+The ordered `dh_prefs` mirror is a single-flight coalescing queue and owns typed post-commit actions. Each action has a
 stable ID and captured Team Catalog identity. Compatible newer snapshots carry
 unsettled actions forward; incompatible enabled/URL/team snapshots cancel team
-actions. The latest durable callback settles before dispatch, preventing repair
-recursion from running an action twice. Reset carries through unrelated edits.
+actions. The latest successful durable callback, with no queued newer intent,
+settles before dispatch and runs the matching Host update. Storage
+`chrome.runtime.lastError` runs neither, leaves actions unsettled, and exposes a
+persistent retryable issue. Reset carries immutable default identity/generation/
+token through the Service Worker; only matching `committed` truth clears local
+UI and shows success. Stale/failed/transport/superseded responses keep current
+values and show incomplete Reset.
 
 Options team cache hydration and storage follow-up reads use one UI generation
 plus captured enabled/URL/team identity before applying list/items/synced state.
@@ -163,6 +168,9 @@ all results after unmount. FAB Analyze state is the union of a local request ID
 and the current hydrated pending identity. The one active safety timer is tagged
 with its request ID; a new request cancels it, and stale response/finally/timeout
 paths cannot clear or report against the replacement request.
+Ownership remains live through all response-processing awaits, including case
+hashing; every post-await continuation rechecks request ID before UI, duration,
+menu, or outcome-telemetry changes.
 
 Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe diagnostics and logs only failure kind plus numeric status. Every Options request captures enabled/URL/team plus a request generation. The Service Worker synchronously allocates a storage generation before any asynchronous pref/cache read, rejects stale identity before clear/fetch, rechecks generation after awaited reads, and queues identity validation together with awaited mutation. Deferred storage writes therefore finish before a later clear runs. Options sends messages only and clears rendered team items/timestamp immediately on identity change.
 
@@ -376,6 +384,10 @@ The persistence path is ordered and inspected:
 4. Flush a requested team-manifest fetch only after the latest matching mirror commits and only for the still-active URL.
 
 `user_instructions` is sparse. It is included only while an instruction edit revision remains unacknowledged. An explicit empty string from editor clear or Reset is a real write and truncates `copilot-instructions.md`; omission means no instruction-file write. The Host retains `system_instructions` only as a legacy fallback when the primary field is absent, never when `user_instructions` is present and empty.
+
+The Host uses a sentinel for both editable file fields. Present null or any
+non-string value returns `config_saved: false` before config or file writes;
+absence performs no file write.
 
 Host update outcomes separate persistence from active-session refresh:
 
