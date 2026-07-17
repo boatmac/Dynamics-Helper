@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   acknowledgePromptRevision,
   acknowledgeInstructionRevision,
@@ -80,6 +80,61 @@ describe('config update results', () => {
     )
     expect(ackRevision).toBe(1)
     expect(shouldIncludeUserInstructions(editRevision, ackRevision)).toBe(true)
+  })
+
+  it('does not coerce malformed inner or outer update errors', () => {
+    const secret = 'SECRET-CONFIG-UPDATE'
+    const toString = vi.fn(() => {
+      throw new Error(secret)
+    })
+    const unsafe = { secret, toString }
+
+    expect(classifyConfigUpdateResponse({
+      status: 'success',
+      data: {
+        success: false,
+        config_saved: false,
+        error: unsafe,
+        message: [unsafe],
+      },
+    })).toEqual({
+      acknowledged: false,
+      issue: {
+        configSaved: false,
+        errorCode: undefined,
+        fallback: '',
+      },
+    })
+    expect(classifyConfigUpdateResponse({
+      status: 'error',
+      error: unsafe,
+      message: [unsafe],
+    })).toEqual({
+      acknowledged: false,
+      issue: {
+        configSaved: false,
+        errorCode: undefined,
+        fallback: '',
+      },
+    })
+    expect(toString).not.toHaveBeenCalled()
+  })
+
+  it('preserves valid inner and outer string message fallbacks', () => {
+    expect(classifyConfigUpdateResponse({
+      status: 'success',
+      data: {
+        success: false,
+        config_saved: false,
+        error: { unsafe: true },
+        message: 'safe inner message',
+      },
+    }).issue?.fallback).toBe('safe inner message')
+    expect(classifyConfigUpdateResponse({
+      status: 'error',
+      error: [],
+      message: 'safe outer message',
+    }).issue?.fallback).toBe('safe outer message')
   })
 
   it('does not acknowledge transport or unsaved failures', () => {

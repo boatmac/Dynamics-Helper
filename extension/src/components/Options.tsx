@@ -39,6 +39,7 @@ import MarkdownPreview from './MarkdownPreview';
 import { trackEvent } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { localizePromptSourceError } from '../utils/promptSourceErrors';
+import { safeErrorText } from '../utils/safeErrorText';
 import {
     acknowledgePromptRevision,
     acknowledgeInstructionRevision,
@@ -608,7 +609,10 @@ const OptionsInner: React.FC = () => {
             const callback = () => {
                 const storageError = chrome.runtime.lastError;
                 if (storageError) {
-                    reject(new Error(storageError.message || 'Bookmark storage mutation failed'));
+                    reject(new Error(safeErrorText(
+                        [storageError.message],
+                        'Bookmark storage mutation failed',
+                    )));
                     return;
                 }
                 resolve();
@@ -1023,7 +1027,10 @@ const OptionsInner: React.FC = () => {
                     errorCode: typeof promptSourceStatus.error_code === 'string'
                         ? promptSourceStatus.error_code
                         : undefined,
-                    fallback: String(promptSourceStatus.error || ''),
+                    fallback: safeErrorText([
+                        promptSourceStatus.error,
+                        promptSourceStatus.message,
+                    ], ''),
                 });
             }
         });
@@ -1056,7 +1063,7 @@ const OptionsInner: React.FC = () => {
                 const decision = {
                     acknowledged: false,
                     issue: {
-                        fallback: transportError.message || '',
+                        fallback: safeErrorText([transportError.message], ''),
                         configSaved: false,
                     },
                 };
@@ -1266,7 +1273,7 @@ const OptionsInner: React.FC = () => {
             if (storageError) {
                 setPrefsMirrorIssue({
                     configSaved: false,
-                    fallback: storageError.message || '',
+                    fallback: safeErrorText([storageError.message], ''),
                 });
                 if (!newerIntent) {
                     // Keep the exact failed intent, including unsettled actions,
@@ -1521,7 +1528,10 @@ const OptionsInner: React.FC = () => {
                             errorCode: typeof promptSourceStatus.error_code === 'string'
                                 ? promptSourceStatus.error_code
                                 : undefined,
-                            fallback: String(promptSourceStatus.error || ''),
+                            fallback: safeErrorText([
+                                promptSourceStatus.error,
+                                promptSourceStatus.message,
+                            ], ''),
                         });
                     } else if (
                         initialPromptHealthGeneration === promptHealthRequestRevisionRef.current
@@ -2181,7 +2191,10 @@ const OptionsInner: React.FC = () => {
                         setTeamSynced(response.data.syncedAt || new Date().toISOString());
                     }
                 } else {
-                    showError(`${t('teamSyncFailed')}: ${response?.error || t('unknownError')}`, 3000);
+                    showError(`${t('teamSyncFailed')}: ${safeErrorText(
+                        [response?.error, response?.message],
+                        t('unknownError'),
+                    )}`, 3000);
                 }
             });
         };
@@ -2447,7 +2460,10 @@ const OptionsInner: React.FC = () => {
                     chrome.runtime.reload();
                 }, 1000);
             } else {
-                showError(`${t('updateFailed')}: ` + (response?.error || t('unknownError')));
+                showError(`${t('updateFailed')}: ${safeErrorText(
+                    [response?.error, response?.message],
+                    t('unknownError'),
+                )}`);
             }
         });
     };
@@ -2791,7 +2807,7 @@ const OptionsInner: React.FC = () => {
     const issueDetail = activeIssue
         ? localizePromptSourceError(
             activeIssue.errorCode,
-            activeIssue.fallback || t('configNotSaved'),
+            safeErrorText([activeIssue.fallback], t('configNotSaved')),
             t,
         )
         : '';

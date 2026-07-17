@@ -146,6 +146,38 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
         expect(await readStorage(pendingAnalysisKey(CTX.requestId))).toBeUndefined()
     })
 
+    it('stores a fixed fallback without coercing malformed inner Analyze errors', async () => {
+        const secret = 'SECRET-INNER-ANALYZE'
+        const errorToString = vi.fn(() => {
+            throw new Error(secret)
+        })
+        const messageToString = vi.fn(() => {
+            throw new Error(secret)
+        })
+        const unsafeMessage = [{ secret }] as any[]
+        unsafeMessage.toString = messageToString
+        const send = vi.fn(async () => ({
+            status: 'success',
+            data: {
+                status: 'error',
+                error: { secret, toString: errorToString },
+                message: unsafeMessage,
+            },
+        }))
+
+        await handleAnalyzeForward(
+            { action: 'analyze_error' },
+            CTX,
+            { send },
+        )
+
+        const stored = await readStorage('dh_last_analysis')
+        expect(stored.content).toBe('Unknown error')
+        expect(JSON.stringify(stored)).not.toContain(secret)
+        expect(errorToString).not.toHaveBeenCalled()
+        expect(messageToString).not.toHaveBeenCalled()
+    })
+
     // P-I4: send() rejection (e.g., native port disconnected) recorded as
     // error with content === exception message; pending cleared; throw
     // re-propagated so SW can still sendResponse the failure to FAB.
@@ -167,6 +199,27 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
             seen: false,
         })
         expect(await readStorage(pendingAnalysisKey(CTX.requestId))).toBeUndefined()
+    })
+
+    it('records a fixed fallback without coercing a non-Error rejection', async () => {
+        const secret = 'SECRET-ANALYZE-REJECTION'
+        const toString = vi.fn(() => {
+            throw new Error(secret)
+        })
+        const rejection = { secret, toString }
+        const send = vi.fn(async () => {
+            throw rejection
+        })
+
+        await expect(handleAnalyzeForward(
+            { action: 'analyze_error' },
+            CTX,
+            { send },
+        )).rejects.toBe(rejection)
+
+        const stored = await readStorage('dh_last_analysis')
+        expect(stored.content).toBe('Unknown error')
+        expect(toString).not.toHaveBeenCalled()
     })
 
     it('UI-I6: persists inner prompt error_code unchanged', async () => {

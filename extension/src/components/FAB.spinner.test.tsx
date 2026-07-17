@@ -202,6 +202,64 @@ describe('FAB analyzing source reconciliation', () => {
     }
   })
 
+  it.each([
+    [
+      'analysis result',
+      (unsafe: unknown) => ({
+        status: 'success',
+        data: { status: 'success', data: { error: unsafe } },
+      }),
+      /Analysis failed: Unknown analysis error/i,
+    ],
+    [
+      'native wrapper',
+      (unsafe: unknown) => ({
+        status: 'success',
+        data: { status: 'error', error: unsafe },
+      }),
+      /Host Error: Unknown native host error/i,
+    ],
+    [
+      'outer response',
+      (unsafe: unknown) => ({ status: 'error', error: unsafe }),
+      /Error: Unknown error/i,
+    ],
+  ])('uses a safe fallback for a malformed %s error', async (_name, responseFor, expected) => {
+    state.hydrationPending = false
+    const response = deferNextResponse('analyze_error')
+    const secret = 'SECRET-FAB-NESTED-ERROR'
+    const toString = vi.fn(() => {
+      throw new Error(secret)
+    })
+    const { analyze } = await renderOpenFab()
+    fireEvent.click(analyze)
+
+    await act(async () => response.resolve(responseFor({ secret, toString })))
+
+    expect(await screen.findByText(expected)).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain(secret)
+    expect(toString).not.toHaveBeenCalled()
+  })
+
+  it('preserves a valid nested analysis error string', async () => {
+    state.hydrationPending = false
+    const response = deferNextResponse('analyze_error')
+    const { analyze } = await renderOpenFab()
+    fireEvent.click(analyze)
+
+    await act(async () => response.resolve({
+      status: 'success',
+      data: {
+        status: 'success',
+        data: { error: 'VALID ANALYSIS ERROR' },
+      },
+    }))
+
+    expect(await screen.findByText(
+      /Analysis failed: VALID ANALYSIS ERROR/i,
+    )).toBeInTheDocument()
+  })
+
   it('keeps request B active when request A resolves and reaches its old timeout', async () => {
     state.hydrationPending = false
     state.analyzeTimeoutSeconds = 60

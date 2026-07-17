@@ -14,6 +14,7 @@ import {
     normalizeErrorCode,
 } from '../utils/promptSourceErrors';
 import { applyCurrentUserPrompt } from '../utils/analysisPrompt';
+import { safeErrorText } from '../utils/safeErrorText';
 import { 
     X, 
     Settings, 
@@ -1023,7 +1024,10 @@ const FAB: React.FC = () => {
                             );
                         }
                     } else {
-                        const errMsg = analysisData?.error || t('unknownAnalysisError');
+                        const errMsg = safeErrorText(
+                            [analysisData?.error, analysisData?.message],
+                            t('unknownAnalysisError'),
+                        );
                         const errorCode = normalizeErrorCode(analysisData?.error_code);
                         showAnalysisError(
                             `${t('analysisFailed')}: ${errMsg}`,
@@ -1036,7 +1040,10 @@ const FAB: React.FC = () => {
                         });
                     }
                 } else {
-                    const hostError = nativeResp?.message || nativeResp?.error || t('unknownNativeHostError');
+                    const hostError = safeErrorText(
+                        [nativeResp?.message, nativeResp?.error],
+                        t('unknownNativeHostError'),
+                    );
                     const errorCode = normalizeErrorCode(nativeResp?.error_code);
                     showAnalysisError(
                         `${t('hostErrorLabel')}: ${hostError}`,
@@ -1050,8 +1057,12 @@ const FAB: React.FC = () => {
                 }
             } else {
                 const errorCode = normalizeErrorCode(response?.error_code);
+                const responseError = safeErrorText(
+                    [response?.error, response?.message],
+                    t('unknownError'),
+                );
                 showAnalysisError(
-                    `${t('errorLabel')}: ${response.error || response.message || t('unknownError')}`,
+                    `${t('errorLabel')}: ${responseError}`,
                     caseNumberOfRun,
                     errorCode,
                     requestId
@@ -1062,7 +1073,10 @@ const FAB: React.FC = () => {
         } catch (e: any) {
             if (latestRequestId.current === requestId) {
                 showAnalysisError(
-                    `${t('errorLabel')}: ${e.message}`,
+                    `${t('errorLabel')}: ${safeErrorText(
+                        [e?.message, e],
+                        t('unknownError'),
+                    )}`,
                     caseNumberOfRun,
                     undefined,
                     { requestId, caseNumber: caseNumberOfRun },
@@ -1123,7 +1137,10 @@ const FAB: React.FC = () => {
                     chrome.runtime.reload();
                 }, 1500);
             } else {
-                const errMsg = response?.error || t('unknownError');
+                const errMsg = safeErrorText(
+                    [response?.error, response?.message],
+                    t('unknownError'),
+                );
                 showStatusBubble(`${t('updateFailed')}: ` + errMsg, 'error');
                 trackEvent('FAB Update Failed', { version: updateAvailable.version, error: errMsg });
             }

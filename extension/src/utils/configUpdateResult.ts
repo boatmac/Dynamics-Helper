@@ -1,4 +1,5 @@
 import { normalizeErrorCode } from './promptSourceErrors'
+import { safeErrorText } from './safeErrorText'
 
 export interface ConfigUpdateIssue {
   configSaved: boolean
@@ -89,7 +90,7 @@ export function classifyConfigUpdateResponse(
       issue: {
         configSaved: false,
         errorCode: normalizeErrorCode(response?.error_code),
-        fallback: String(response?.error || response?.message || ''),
+        fallback: safeErrorText([response?.error, response?.message], ''),
       },
     }
   }
@@ -98,14 +99,18 @@ export function classifyConfigUpdateResponse(
   if (result?.success === true) {
     return { acknowledged: true, issue: null }
   }
-  if (result?.success === false || result?.error) {
+  if (
+    result?.success === false
+    || result?.error != null
+    || result?.message != null
+  ) {
     const configSaved = result?.config_saved === true
     return {
       acknowledged: configSaved,
       issue: {
         configSaved,
         errorCode: normalizeErrorCode(result?.error_code),
-        fallback: String(result?.error || ''),
+        fallback: safeErrorText([result?.error, result?.message], ''),
       },
     }
   }

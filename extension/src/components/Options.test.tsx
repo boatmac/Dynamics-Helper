@@ -3958,6 +3958,59 @@ describe('Options prompt health and inspected sparse writes', () => {
     )
   })
 
+  it('shows a localized safe warning without coercing an inner update error', async () => {
+    const update = deferNextResponse('update_config')
+    const secret = 'SECRET-INNER-UPDATE-WARNING'
+    const toString = vi.fn(() => {
+      throw new Error(secret)
+    })
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+
+    fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+    await act(async () => update.resolve({
+      status: 'success',
+      data: {
+        success: false,
+        config_saved: false,
+        error: { secret, toString },
+        message: [{ secret }],
+      },
+    }))
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/settings were not saved/i)
+    expect(alert.textContent).not.toContain(secret)
+    expect(toString).not.toHaveBeenCalled()
+  })
+
+  it('shows a localized safe prompt-health warning without coercion', async () => {
+    const secret = 'SECRET-PROMPT-HEALTH'
+    const toString = vi.fn(() => {
+      throw new Error(secret)
+    })
+
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: '',
+      prompt_source_status: {
+        status: 'error',
+        error: { secret, toString },
+        message: [{ secret }],
+      },
+      extension_preferences: { use_workspace_only: false },
+    })
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/settings were not saved/i)
+    expect(alert.textContent).not.toContain(secret)
+    expect(toString).not.toHaveBeenCalled()
+  })
+
   it('renders a known update issue in the current language', async () => {
     const update = deferNextResponse('update_config')
     seedStorage({

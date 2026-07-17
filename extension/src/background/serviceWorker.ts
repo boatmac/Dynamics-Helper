@@ -35,6 +35,7 @@ import {
     type AnalyzePersistContext,
 } from '../utils/analysisStore';
 import { handleResetExtensionState } from './resetExtensionState';
+import { safeErrorText } from '../utils/safeErrorText';
 
 const NATIVE_HOST_NAME = "com.dynamics.helper.native";
 
@@ -284,10 +285,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         let ctx: AnalyzePersistContext | null = null;
         if (isAnalyze && persistMeta && typeof persistMeta === 'object') {
             ctx = {
-                caseNumber: String(persistMeta.caseNumber || ''),
-                requestId: String(inner.requestId || persistMeta.requestId || ''),
-                successTitle: String(persistMeta.successTitle || 'Analysis Result'),
-                errorTitle: String(persistMeta.errorTitle || 'Analysis Failed'),
+                caseNumber: safeErrorText([persistMeta.caseNumber], ''),
+                requestId: safeErrorText([
+                    inner.requestId,
+                    persistMeta.requestId,
+                ], ''),
+                successTitle: safeErrorText([
+                    persistMeta.successTitle,
+                ], 'Analysis Result'),
+                errorTitle: safeErrorText([
+                    persistMeta.errorTitle,
+                ], 'Analysis Failed'),
             };
         }
         // Strip _persist before forwarding so the native host never sees
@@ -297,7 +305,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         handleAnalyzeForward(forwarded, ctx, { send: sendNativeMessage })
             .then(response => sendResponse(response))
-            .catch(error => sendResponse({ status: "error", error: error.message }));
+            .catch(error => sendResponse({
+                status: "error",
+                error: safeErrorText(
+                    [error?.message, error],
+                    'Native Host error',
+                ),
+            }));
         return true; // Keep channel open for async response
     }
     

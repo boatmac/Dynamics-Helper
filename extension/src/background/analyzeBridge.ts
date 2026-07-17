@@ -22,6 +22,7 @@ import {
     recordAnalyzeError,
 } from '../utils/analysisStore';
 import { normalizeErrorCode } from '../utils/promptSourceErrors';
+import { safeErrorText } from '../utils/safeErrorText';
 
 export interface AnalyzeForwardDeps {
     /** Native-host RPC. Resolves with the outer host wrapper `{status, data}`. */
@@ -34,11 +35,10 @@ export function normalizeNativeHostResponse(msg: any): any {
     }
 
     const errorCode = normalizeErrorCode(msg?.error_code);
-    const error = typeof msg?.error === 'string'
-        ? msg.error
-        : typeof msg?.message === 'string'
-            ? msg.message
-            : 'Native Host error';
+    const error = safeErrorText(
+        [msg?.error, msg?.message],
+        'Native Host error',
+    );
     const errorKind = typeof msg?.errorKind === 'string'
         ? msg.errorKind
         : undefined;
@@ -109,10 +109,7 @@ export async function handleAnalyzeForward(
     try {
         response = await deps.send(payload);
     } catch (err: any) {
-        const msg =
-            err && typeof err === 'object' && 'message' in err
-                ? String(err.message)
-                : String(err);
+        const msg = safeErrorText([err?.message, err], 'Unknown error');
         await recordAnalyzeError(ctx, msg);
         throw err;
     }
@@ -124,16 +121,16 @@ export async function handleAnalyzeForward(
     if (outerOk && innerOk) {
         await recordAnalyzeSuccess(ctx, inner.data ?? {});
     } else {
-        const msg =
-            inner?.error ||
-            inner?.message ||
-            response?.error ||
-            response?.message ||
-            'Unknown error';
+        const msg = safeErrorText([
+            inner?.error,
+            inner?.message,
+            response?.error,
+            response?.message,
+        ], 'Unknown error');
         const errorCode =
             normalizeErrorCode(inner?.error_code) ??
             normalizeErrorCode(response?.error_code);
-        await recordAnalyzeError(ctx, String(msg), errorCode);
+        await recordAnalyzeError(ctx, msg, errorCode);
     }
 
     return response;
