@@ -1366,7 +1366,7 @@ const OptionsInner: React.FC = () => {
                             response?.data?.requestGeneration === generation
                             && responseIdentity?.enabled === identity.enabled
                             && responseIdentity?.manifestUrl === identity.manifestUrl
-                            && responseIdentity?.teamId === identity.teamId;
+                            && (responseIdentity?.teamId || '') === identity.teamId;
                         const hasResponseIdentity =
                             response?.data?.requestGeneration !== undefined
                             || responseIdentity !== undefined;
@@ -1889,7 +1889,7 @@ const OptionsInner: React.FC = () => {
     ) => generation === teamRefreshGenerationRef.current
         && prefsRef.current.teamCatalogEnabled === true
         && prefsRef.current.teamManifestUrl === manifestUrl
-        && prefsRef.current.team === teamId;
+        && (prefsRef.current.team || '') === (teamId || '');
 
     const teamRequestPayload = (
         generation: number,
@@ -1956,7 +1956,7 @@ const OptionsInner: React.FC = () => {
                     && response?.data?.requestGeneration === resetGeneration
                     && responseIdentity?.enabled === identity.enabled
                     && responseIdentity?.manifestUrl === identity.manifestUrl
-                    && responseIdentity?.teamId === identity.teamId;
+                    && (responseIdentity?.teamId || '') === identity.teamId;
                 if (
                     chrome.runtime.lastError
                     || response?.status !== 'success'
@@ -2119,7 +2119,7 @@ const OptionsInner: React.FC = () => {
                     || (responseIdentity !== undefined && (
                         responseIdentity?.enabled !== true
                         || responseIdentity?.manifestUrl !== manifestUrl
-                        || responseIdentity?.teamId !== teamId
+                        || (responseIdentity?.teamId || '') !== (teamId || '')
                     ))
                 ) return;
                 if (response?.status === "success") {
@@ -2137,7 +2137,7 @@ const OptionsInner: React.FC = () => {
                 generation !== teamRefreshGenerationRef.current
                 || prefsRef.current.teamCatalogEnabled !== true
                 || prefsRef.current.teamManifestUrl !== manifestUrl
-                || prefsRef.current.team
+                || (prefsRef.current.team || '') !== ''
             ) return;
             chrome.runtime.sendMessage({
                 type: "SYNC_TEAM_CATALOG",
@@ -2227,7 +2227,7 @@ const OptionsInner: React.FC = () => {
 
     const handleTeamRefresh = async () => {
         const manifestUrl = prefsRef.current.teamManifestUrl;
-        const teamId = prefsRef.current.team;
+        const teamId = prefsRef.current.team || '';
         if (!manifestUrl || !teamId) return;
         const generation = ++teamRefreshGenerationRef.current;
         const refreshIsCurrent = () => teamSyncIsCurrent(
@@ -2259,7 +2259,7 @@ const OptionsInner: React.FC = () => {
                 || (responseIdentity !== undefined && (
                     responseIdentity?.enabled !== true
                     || responseIdentity?.manifestUrl !== manifestUrl
-                    || responseIdentity?.teamId !== teamId
+                    || (responseIdentity?.teamId || '') !== teamId
                 ))
             ) {
                 setIsSyncingTeam(false);

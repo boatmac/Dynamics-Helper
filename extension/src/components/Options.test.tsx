@@ -217,6 +217,23 @@ const manifestSyncResponse = (
   },
 })
 
+const noTeamManifestSyncResponse = (
+  message: any,
+  syncStatus: 'committed' | 'unchanged' | 'stale' | 'skipped' | 'failed',
+) => {
+  const response = manifestSyncResponse(message, syncStatus)
+  return {
+    ...response,
+    data: {
+      ...response.data,
+      identity: {
+        enabled: response.data.identity.enabled,
+        manifestUrl: response.data.identity.manifestUrl,
+      },
+    },
+  }
+}
+
 const findResetMessage = async () => waitFor(() => {
   const message = extensionResetMessages().at(-1)
   if (!message) throw new Error('Reset message not sent')
@@ -2697,6 +2714,112 @@ describe('Options manifest blur retry state', () => {
     await waitFor(() => expect(manifestSyncMessages()).toHaveLength(2))
     await act(async () => second.resolve(
       manifestSyncResponse(manifestSyncMessages()[1], 'unchanged'),
+    ))
+  })
+
+  it.each(['committed', 'unchanged'] as const)(
+    'deduplicates a no-team URL after a current %s response',
+    async syncStatus => {
+      const first = deferNextResponse('SYNC_TEAM_CATALOG')
+      const input = await renderManifestOptions()
+      const url = `https://example.com/no-team-${syncStatus}.json`
+
+      await blurUrl(input, url)
+      await act(async () => first.resolve(noTeamManifestSyncResponse(
+        manifestSyncMessages()[0],
+        syncStatus,
+      )))
+      fireEvent.blur(input)
+      await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+
+      expect(manifestSyncMessages()).toHaveLength(1)
+      expect(document.body.textContent).not.toContain('Could not fetch manifest')
+    },
+  )
+
+  it('shows a current no-team failure and retries the same URL', async () => {
+    const first = deferNextResponse('SYNC_TEAM_CATALOG')
+    const retry = deferNextResponse('SYNC_TEAM_CATALOG')
+    const input = await renderManifestOptions()
+    const url = 'https://example.com/no-team-failure.json'
+
+    await blurUrl(input, url)
+    const failed = {
+      ...noTeamManifestSyncResponse(manifestSyncMessages()[0], 'failed'),
+      errorKind: 'auth',
+      httpStatus: 403,
+    }
+    await act(async () => first.resolve(failed))
+
+    expect(document.body.textContent).toContain('Manifest URL rejected authentication')
+    expect(document.body.textContent).toContain('HTTP 403')
+    fireEvent.blur(input)
+    await waitFor(() => expect(manifestSyncMessages()).toHaveLength(2))
+    await act(async () => retry.resolve(
+      manifestSyncResponse(manifestSyncMessages()[1], 'committed'),
+    ))
+  })
+
+  it.each(['stale', 'skipped'] as const)(
+    'retries a no-team URL after a current %s response',
+    async syncStatus => {
+      const first = deferNextResponse('SYNC_TEAM_CATALOG')
+      const retry = deferNextResponse('SYNC_TEAM_CATALOG')
+      const input = await renderManifestOptions()
+      const url = `https://example.com/no-team-${syncStatus}.json`
+
+      await blurUrl(input, url)
+      await act(async () => first.resolve(noTeamManifestSyncResponse(
+        manifestSyncMessages()[0],
+        syncStatus,
+      )))
+      fireEvent.blur(input)
+
+      await waitFor(() => expect(manifestSyncMessages()).toHaveLength(2))
+      await act(async () => retry.resolve(
+        manifestSyncResponse(manifestSyncMessages()[1], 'committed'),
+      ))
+    },
+  )
+
+  it('ignores a no-team callback after a team is selected', async () => {
+    const noTeam = deferNextResponse('SYNC_TEAM_CATALOG')
+    const input = await renderManifestOptions()
+    const url = 'https://example.com/no-team-stale-after-select.json'
+
+    await blurUrl(input, url)
+    const noTeamMessage = manifestSyncMessages()[0]
+    await act(async () => {
+      emitStorageChanges({
+        dh_team_manifest_url: { newValue: url },
+        dh_team_manifest: {
+          newValue: {
+            version: 1,
+            teams: [{
+              id: 'team-a',
+              label: 'Team A',
+              url: 'https://example.com/team-a.json',
+            }],
+          },
+        },
+      })
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    const teamSelect = await screen.findByRole('combobox')
+    await waitFor(() => expect(teamSelect).toHaveTextContent('Team A'))
+    fireEvent.change(teamSelect, { target: { value: 'team-a' } })
+
+    const selectedTeamFetch = deferNextResponse('SYNC_TEAM_CATALOG')
+    await act(async () => noTeam.resolve(noTeamManifestSyncResponse(
+      noTeamMessage,
+      'committed',
+    )))
+    fireEvent.blur(input)
+
+    await waitFor(() => expect(manifestSyncMessages()).toHaveLength(2))
+    expect(manifestSyncMessages()[1].payload.identity.teamId).toBe('team-a')
+    await act(async () => selectedTeamFetch.resolve(
+      manifestSyncResponse(manifestSyncMessages()[1], 'committed'),
     ))
   })
 
