@@ -4,6 +4,7 @@ export type KnownPromptSourceErrorCode =
     | 'dh_specific_instructions_unreadable'
     | 'repository_instructions_missing'
     | 'repository_instructions_unreadable'
+    | 'user_prompt_unreadable'
 
 export type Translate = (key: string) => string
 
@@ -13,6 +14,7 @@ const TRANSLATION_KEYS: Record<KnownPromptSourceErrorCode, string> = {
     dh_specific_instructions_unreadable: 'promptErrorDhSpecificUnreadable',
     repository_instructions_missing: 'promptErrorRepositoryMissing',
     repository_instructions_unreadable: 'promptErrorRepositoryUnreadable',
+    user_prompt_unreadable: 'promptErrorUserPromptUnreadable',
 }
 
 export function normalizeErrorCode(value: unknown): string | undefined {

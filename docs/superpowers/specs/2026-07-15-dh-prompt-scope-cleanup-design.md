@@ -379,7 +379,7 @@ so a later Analyze cannot silently run under the old source.
 | **PS-I6** | Missing or unreadable Core blocks Analyze before a model message is sent. |
 | **PS-I7** | Missing or unreadable selected Root instructions blocks Analyze without fallback. |
 | **PS-I8** | An existing empty Root instruction file is valid and yields Core + Session Info. |
-| **PS-I9** | Custom User Prompt remains user-role content on every Analyze and is never added to system content. |
+| **PS-I9** | `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md` is reread and canonicalized by the Host on every Analyze, exactly once in PII-scrubbed user-role content and never in system content; stale payload sections are replaced/removed and unreadable content fails closed. |
 | **PS-I10** | Explicit empty `user_instructions` truncates the file and round-trips as empty. |
 | **PS-I11** | An unreadable selected DH-specific file blocks Analyze and is never represented as empty. |
 | **PS-I12** | One immutable byte snapshot supplies both assembled text and its fingerprint. |

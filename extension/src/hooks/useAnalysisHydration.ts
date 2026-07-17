@@ -39,6 +39,8 @@ export interface HydrationResult {
     popover: HydratedPopover | null
     /** True when a fresh, case-matching pending marker exists. */
     isAnalyzing: boolean
+    /** Fresh pending request selected for this case, newest first. */
+    pending: import('../utils/analysisStore').PendingAnalysis | null
     /** Mark the current result as seen and close the popover. */
     dismissPopover: (identity: LastAnalysisIdentity) => Promise<void>
 }
@@ -73,21 +75,26 @@ function shouldOpen(
 export function useAnalysisHydration(caseNumber: string): HydrationResult {
     const [popover, setPopover] = useState<HydratedPopover | null>(null)
     const [isAnalyzing, setIsAnalyzing] = useState(false)
+    const [hydratedPending, setHydratedPending] = useState<import('../utils/analysisStore').PendingAnalysis | null>(null)
 
     useEffect(() => {
         let cancelled = false
+        let hydrationGeneration = 0
+        let pendingExpiryTimer: ReturnType<typeof setTimeout> | null = null
 
         async function hydrate() {
+            const generation = ++hydrationGeneration
             if (!caseNumber) {
                 if (!cancelled) {
                     setPopover(null)
                     setIsAnalyzing(false)
+                    setHydratedPending(null)
                 }
                 return
             }
 
-            const { last, pending, seen } = await getAnalysisSnapshot()
-            if (cancelled) return
+            const { last, pending, seen } = await getAnalysisSnapshot(caseNumber)
+            if (cancelled || generation !== hydrationGeneration) return
 
             if (shouldOpen(last, seen, caseNumber)) {
                 // Non-null per shouldOpen.
@@ -110,12 +117,37 @@ export function useAnalysisHydration(caseNumber: string): HydrationResult {
                 pending.caseNumber === caseNumber &&
                 Date.now() - pending.startTime <= MAX_PENDING_DISPLAY_AGE_MS
             setIsAnalyzing(pendingFresh)
+            setHydratedPending(pendingFresh ? pending : null)
+            if (pendingExpiryTimer) clearTimeout(pendingExpiryTimer)
+            if (pendingFresh && pending) {
+                const remaining = Math.max(
+                    0,
+                    MAX_PENDING_DISPLAY_AGE_MS - (Date.now() - pending.startTime),
+                )
+                pendingExpiryTimer = setTimeout(() => {
+                    if (cancelled) return
+                    setIsAnalyzing(false)
+                    setHydratedPending(null)
+                }, remaining + 1)
+            }
         }
 
         void hydrate()
+        const onStorageChanged = (
+            changes: { [key: string]: chrome.storage.StorageChange },
+            areaName: string,
+        ) => {
+            if (areaName !== 'local') return
+            if (Object.keys(changes).some(key => key.startsWith('dh_pending_analysis'))) {
+                void hydrate()
+            }
+        }
+        chrome.storage.onChanged.addListener(onStorageChanged)
 
         return () => {
             cancelled = true
+            if (pendingExpiryTimer) clearTimeout(pendingExpiryTimer)
+            chrome.storage.onChanged.removeListener(onStorageChanged)
         }
     }, [caseNumber])
 
@@ -124,5 +156,5 @@ export function useAnalysisHydration(caseNumber: string): HydrationResult {
         setPopover(null)
     }, [])
 
-    return { popover, isAnalyzing, dismissPopover }
+    return { popover, isAnalyzing, pending: hydratedPending, dismissPopover }
 }

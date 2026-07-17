@@ -9,18 +9,21 @@ import { setupContextMenu } from './contextMenu';
 // ServiceWorkerGlobalScope per the HTML spec
 // (https://github.com/w3c/ServiceWorker/issues/1356).
 import {
-    clearTeamBookmarks,
-    clearTeamSelection,
+    beginTeamSyncGeneration,
+    clearTeamBookmarksAtGeneration,
+    clearTeamSelectionAtGeneration,
+    clearTeamSelectionIfChanged,
+    currentTeamIdentityMatches,
     fetchManifest,
     readTeamManifestState,
     syncTeamBookmarks,
     writeTeamManifestForUrl,
 } from '../utils/teamCatalog';
 import {
-    shouldClearSelectedTeamCache,
+    handleTeamCatalogSyncRequest,
     shouldReportTeamSyncFailure,
     syncManifestOnly,
-    toSelectedTeamSyncResponse,
+    type TeamCatalogSyncRequest,
 } from './teamManifestSync';
 import {
     handleAnalyzeForward,
@@ -315,99 +318,57 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // Team Bookmark Catalog: manual sync from Options page
     if (message.type === "SYNC_TEAM_CATALOG") {
-        (async () => {
-            try {
-                const teamId = message.payload?.teamId;
-                const manifestOnly = message.payload?.manifestOnly === true;
-                if (manifestOnly) {
-                    if (message.payload?.resetCache === true) {
-                        await clearTeamBookmarks();
-                    }
-                    const response = await syncManifestOnly({
-                        readInitialState: readTeamManifestState,
-                        readCurrentPrefs: async () => {
-                            const data = await chrome.storage.local.get('dh_prefs');
-                            return data.dh_prefs || {};
-                        },
-                        fetchManifest,
-                        writeManifest: (manifest, etag, manifestUrl, generation) =>
-                            writeTeamManifestForUrl(
-                                manifestUrl,
-                                manifest,
-                                etag,
-                                generation ?? -1,
-                            ),
-                    });
-                    sendResponse(response);
-                } else if (!teamId) {
-                    await clearTeamSelection();
-                    sendResponse({
-                        status: "success",
-                        data: {
-                            syncStatus: "skipped",
-                            identity: {
-                                enabled: true,
-                                manifestUrl: "",
-                                teamId: "",
-                            },
-                        },
-                    });
-                } else {
-                    const prefsData = await new Promise<any>((resolve) => {
-                        chrome.storage.local.get(['dh_prefs', 'dh_team'], resolve);
-                    });
-                    const manifestUrl = prefsData.dh_prefs?.teamManifestUrl || '';
-                    if (!manifestUrl) {
-                        sendResponse({
-                            status: "error",
-                            error: "Manifest URL not configured",
-                            data: {
-                                syncStatus: "failed",
-                                identity: {
-                                    enabled: true,
-                                    manifestUrl,
-                                    teamId,
-                                },
-                            },
-                        });
-                    } else {
-                        if (shouldClearSelectedTeamCache(
-                            prefsData.dh_team as string | undefined,
-                            teamId,
-                        )) {
-                            await clearTeamSelection();
-                        }
-                        const result = await syncTeamBookmarks(manifestUrl, teamId);
-                        // Forward classified failure so a caller (currently
-                        // hypothetical — no non-Options code uses this
-                        // response payload) can distinguish silent degradation
-                        // from a real sync. Ordinary failures carry the cache;
-                        // stale responses expose no items to callers.
-                        sendResponse(toSelectedTeamSyncResponse(result));
-                    }
-                }
-            } catch {
+        const request = message.payload as TeamCatalogSyncRequest;
+        if (!request?.identity || !Number.isInteger(request.requestGeneration)) {
+            sendResponse({ status: "error", error: "Invalid team catalog request" });
+            return false;
+        }
+        handleTeamCatalogSyncRequest(request, {
+            beginGeneration: beginTeamSyncGeneration,
+            identityIsCurrent: currentTeamIdentityMatches,
+            clearAll: (identity, generation) => clearTeamBookmarksAtGeneration(generation, identity),
+            clearSelection: (identity, generation) => clearTeamSelectionAtGeneration(generation, identity),
+            clearSelectionIfChanged: clearTeamSelectionIfChanged,
+            syncManifest: (captured, generation) => syncManifestOnly(captured, {
+                readInitialState: () => readTeamManifestState(captured.identity, generation),
+                identityIsCurrent: () => currentTeamIdentityMatches(captured.identity, generation),
+                fetchManifest,
+                writeManifest: (manifest, etag) => writeTeamManifestForUrl(
+                    captured.identity,
+                    manifest,
+                    etag,
+                    generation,
+                ),
+            }),
+            syncSelected: (identity, generation) =>
+                syncTeamBookmarks(identity, generation),
+        })
+            .then(sendResponse)
+            .catch(() => {
                 console.error('[DH-SW] Team catalog sync failed unexpectedly.');
                 sendResponse({ status: "error", error: "Team catalog sync failed" });
-            }
-        })();
+            });
         return true; // Keep channel open for async response
     }
 
     if (message.type === "CLEAR_TEAM_CATALOG") {
-        clearTeamBookmarks()
-            .then(() => sendResponse({ status: "success" }))
-            .catch(() => sendResponse({
-                status: "error",
-                error: "Team catalog clear failed",
-            }));
-        return true;
+        sendResponse({ status: "error", error: "Captured team identity required" });
+        return false;
     }
 
     if (message.type === "RESET_EXTENSION_STATE") {
+        const resetIdentity = message.payload?.identity;
+        const acceptedGeneration = beginTeamSyncGeneration();
         (async () => {
             try {
-                await clearTeamBookmarks();
+                if (
+                    !resetIdentity
+                    || !await currentTeamIdentityMatches(resetIdentity, acceptedGeneration)
+                ) {
+                    sendResponse({ status: "success", data: { syncStatus: "stale" } });
+                    return;
+                }
+                await clearTeamBookmarksAtGeneration(acceptedGeneration, resetIdentity);
                 await resetAnalysisState();
                 sendResponse({ status: "success" });
             } catch {
@@ -425,6 +386,7 @@ console.log("[DH] Background Service Worker Loaded");
 
 // --- Team Bookmark Catalog: Background Sync ---
 async function syncTeamCatalogOnStartup() {
+    const startupGeneration = beginTeamSyncGeneration();
     try {
         const data = await new Promise<any>((resolve) => {
             chrome.storage.local.get(['dh_prefs'], resolve);
@@ -442,28 +404,36 @@ async function syncTeamCatalogOnStartup() {
             // Toggle on but URL not yet configured - no-op.
             return;
         }
+        const startupIdentity = {
+            enabled: true,
+            manifestUrl,
+            teamId: teamId || '',
+        };
+        if (!await currentTeamIdentityMatches(startupIdentity, startupGeneration)) return;
         if (!teamId) {
             // Use the same post-fetch preference gate as the Options-triggered
             // path so Reset cannot resurrect a stale manifest.
             await syncManifestOnly({
-                readInitialState: readTeamManifestState,
-                readCurrentPrefs: async () => {
-                    const current = await chrome.storage.local.get('dh_prefs');
-                    return current.dh_prefs || {};
-                },
+                identity: startupIdentity,
+                requestGeneration: 0,
+                manifestOnly: true,
+                storageGeneration: startupGeneration,
+            }, {
+                readInitialState: () => readTeamManifestState(startupIdentity, startupGeneration),
+                identityIsCurrent: () => currentTeamIdentityMatches(startupIdentity, startupGeneration),
                 fetchManifest,
-                writeManifest: (nextManifest, etag, capturedUrl, generation) =>
+                writeManifest: (nextManifest, etag) =>
                     writeTeamManifestForUrl(
-                        capturedUrl,
+                        startupIdentity,
                         nextManifest,
                         etag,
-                        generation ?? -1,
+                        startupGeneration,
                     ),
             });
             return;
         }
 
-        const result = await syncTeamBookmarks(manifestUrl, teamId);
+        const result = await syncTeamBookmarks(startupIdentity, startupGeneration);
         // Startup hook has no UI to notify — log the outcome including any
         // classified failure. Cached items still get returned so the popup
         // has something to render.

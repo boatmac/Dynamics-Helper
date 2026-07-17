@@ -11,6 +11,7 @@ const copy: Record<string, string> = {
     promptErrorDhSpecificUnreadable: 'DH instructions unreadable',
     promptErrorRepositoryMissing: 'repository instructions missing',
     promptErrorRepositoryUnreadable: 'repository instructions unreadable',
+    promptErrorUserPromptUnreadable: 'user prompt unreadable',
 }
 const t = (key: string) => copy[key] ?? key
 

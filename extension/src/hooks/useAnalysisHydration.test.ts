@@ -9,12 +9,13 @@
 // tests brittle. Task 4 wires the hook into FAB; that wiring is a
 // 3-line consumption, code-reviewed not unit-tested.
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
 import {
     chromeMockSpies,
     deferNextStorageGet,
     deferNextStorageSet,
+    emitStorageChanges,
     getStorageSnapshot,
     installChromeMock,
     resetChromeMock,
@@ -28,6 +29,7 @@ import {
     seenAnalysisKey,
     STALE_WINDOW_MS,
     MAX_PENDING_DISPLAY_AGE_MS,
+    pendingAnalysisKey,
 } from '../utils/analysisStore'
 import type { LastAnalysis, PendingAnalysis } from '../utils/analysisStore'
 import { useAnalysisHydration } from './useAnalysisHydration'
@@ -152,8 +154,9 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
     })
 
     // R-I5: matching pending marker → isAnalyzing=true.
-    it('R-I5: matching dh_pending_analysis sets isAnalyzing=true', async () => {
-        seedStorage({ dh_pending_analysis: makePending() })
+    it('R-I5: matching request-scoped pending sets isAnalyzing=true', async () => {
+        const pending = makePending()
+        seedStorage({ [pendingAnalysisKey(pending.requestId)]: pending })
 
         const { result } = renderHook(() => useAnalysisHydration(CASE_A))
 
@@ -210,6 +213,67 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
             title: '❌ Analysis Failed',
             content: 'Copilot request timed out after 600.0 seconds.',
         })
+    })
+
+    it('selects the newest fresh matching pending among multiple requests', async () => {
+        const older = makePending({ requestId: 'req-old', startTime: Date.now() - 1000 })
+        const newer = makePending({ requestId: 'req-new', startTime: Date.now() })
+        const otherCase = makePending({
+            caseNumber: CASE_B,
+            requestId: 'req-other',
+            startTime: Date.now() + 1000,
+        })
+        seedStorage({
+            [pendingAnalysisKey(older.requestId)]: older,
+            [pendingAnalysisKey(newer.requestId)]: newer,
+            [pendingAnalysisKey(otherCase.requestId)]: otherCase,
+        })
+
+        const { result } = renderHook(() => useAnalysisHydration(CASE_A))
+        await waitFor(() => expect(result.current.isAnalyzing).toBe(true))
+        expect(result.current.pending?.requestId).toBe('req-new')
+    })
+
+    it('keeps legacy singleton pending read compatibility', async () => {
+        seedStorage({ dh_pending_analysis: makePending() })
+        const { result } = renderHook(() => useAnalysisHydration(CASE_A))
+        await waitFor(() => expect(result.current.isAnalyzing).toBe(true))
+        expect(result.current.pending?.requestId).toBe('req-A')
+    })
+
+    it('mirrors a request-scoped pending removal to isAnalyzing=false', async () => {
+        const pending = makePending()
+        const key = pendingAnalysisKey(pending.requestId)
+        seedStorage({ [key]: pending })
+        const hook = renderHook(() => useAnalysisHydration(CASE_A))
+        await waitFor(() => expect(hook.result.current.isAnalyzing).toBe(true))
+
+        act(() => emitStorageChanges({
+            [key]: { oldValue: pending, newValue: undefined },
+        }))
+
+        await waitFor(() => expect(hook.result.current.isAnalyzing).toBe(false))
+        expect(hook.result.current.pending).toBeNull()
+    })
+
+    it('expires a hydrated pending marker while the hook remains mounted', async () => {
+        vi.useFakeTimers()
+        const now = new Date('2026-07-17T00:00:00.000Z')
+        vi.setSystemTime(now)
+        const pending = makePending({
+            startTime: now.getTime() - MAX_PENDING_DISPLAY_AGE_MS + 10,
+        })
+        seedStorage({ [pendingAnalysisKey(pending.requestId)]: pending })
+        const hook = renderHook(() => useAnalysisHydration(CASE_A))
+        await act(async () => { await Promise.resolve() })
+        expect(hook.result.current.isAnalyzing).toBe(true)
+
+        act(() => vi.advanceTimersByTime(12))
+
+        expect(hook.result.current.isAnalyzing).toBe(false)
+        expect(hook.result.current.pending).toBeNull()
+        hook.unmount()
+        vi.useRealTimers()
     })
 
     it('an A acknowledgement ordered after newer B cannot rewrite B or its error code', async () => {
@@ -311,10 +375,70 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
         await act(async () => delayedRead.resolve(undefined))
         await Promise.all([clearA, startB])
 
-        expect(getStorageSnapshot().dh_pending_analysis).toMatchObject({
+        expect(getStorageSnapshot()[pendingAnalysisKey('req-B')]).toMatchObject({
             caseNumber: CASE_B,
             requestId: 'req-B',
         })
+    })
+
+    it('A completion removes only A after a simulated worker queue restart', async () => {
+        const startA = recordAnalyzeStart({
+            caseNumber: CASE_A,
+            requestId: 'req-A',
+            successTitle: 'success',
+            errorTitle: 'error',
+        })
+        const startB = recordAnalyzeStart({
+            caseNumber: CASE_B,
+            requestId: 'req-B',
+            successTitle: 'success',
+            errorTitle: 'error',
+        })
+        await Promise.all([startA, startB])
+
+        await clearPendingIfMatches('req-A')
+
+        const snapshot = getStorageSnapshot()
+        expect(snapshot).not.toHaveProperty(pendingAnalysisKey('req-A'))
+        expect(snapshot[pendingAnalysisKey('req-B')]).toMatchObject({
+            caseNumber: CASE_B,
+            requestId: 'req-B',
+        })
+    })
+
+    it('request-scoped keys survive A/B interleaving across module reloads', async () => {
+        vi.resetModules()
+        const workerA = await import('../utils/analysisStore')
+        await workerA.recordAnalyzeStart({
+            caseNumber: CASE_A,
+            requestId: 'req-A-reload',
+            successTitle: 'success',
+            errorTitle: 'error',
+        })
+        vi.resetModules()
+        const workerB = await import('../utils/analysisStore')
+        await workerB.recordAnalyzeStart({
+            caseNumber: CASE_B,
+            requestId: 'req-B-reload',
+            successTitle: 'success',
+            errorTitle: 'error',
+        })
+        vi.resetModules()
+        const workerAResponse = await import('../utils/analysisStore')
+        await workerAResponse.clearPendingIfMatches('req-A-reload')
+
+        const snapshot = getStorageSnapshot()
+        expect(snapshot).not.toHaveProperty(pendingAnalysisKey('req-A-reload'))
+        expect(snapshot[pendingAnalysisKey('req-B-reload')]).toMatchObject({
+            caseNumber: CASE_B,
+            requestId: 'req-B-reload',
+        })
+    })
+
+    it('encodes request IDs without seen-key collisions', () => {
+        const one = seenAnalysisKey({ caseNumber: CASE_A, requestId: 'req:a/b' })
+        const two = seenAnalysisKey({ caseNumber: CASE_A, requestId: 'req%3Aa%2Fb' })
+        expect(one).not.toBe(two)
     })
 
     it('normally clears a matching pending marker', async () => {
@@ -329,6 +453,7 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
         seedStorage({
             dh_last_analysis: makeLast(),
             dh_pending_analysis: makePending(),
+            [pendingAnalysisKey('req-B')]: makePending({ requestId: 'req-B' }),
             dh_seen_analysis: { caseNumber: CASE_A, requestId: 'old-singleton' },
             [requestKey]: { caseNumber: CASE_A, requestId: 'req-A' },
             [legacyKey]: { caseNumber: CASE_B, timestamp: 42 },
@@ -338,6 +463,7 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
         const snapshot = getStorageSnapshot()
         expect(snapshot).not.toHaveProperty('dh_last_analysis')
         expect(snapshot).not.toHaveProperty('dh_pending_analysis')
+        expect(snapshot).not.toHaveProperty(pendingAnalysisKey('req-B'))
         expect(snapshot).not.toHaveProperty('dh_seen_analysis')
         expect(snapshot).not.toHaveProperty(requestKey)
         expect(snapshot).not.toHaveProperty(legacyKey)

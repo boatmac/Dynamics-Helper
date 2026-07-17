@@ -922,16 +922,32 @@ const OptionsInner: React.FC = () => {
 
             lastFetchedManifestUrlRef.current = pendingManifestUrl;
             const generation = ++teamRefreshGenerationRef.current;
+            const teamId = nextPrefs.team || '';
             chrome.runtime.sendMessage(
                 {
                     type: "SYNC_TEAM_CATALOG",
-                    payload: { manifestOnly: true, resetCache: true },
+                    payload: teamRequestPayload(generation, {
+                        enabled: true,
+                        manifestUrl: pendingManifestUrl,
+                        teamId,
+                    }, { manifestOnly: true, resetCache: true }),
                 },
                 (response) => {
                     if (
                         generation !== teamRefreshGenerationRef.current
                         || prefsRef.current.teamCatalogEnabled !== true
                         || prefsRef.current.teamManifestUrl !== pendingManifestUrl
+                        || (prefsRef.current.team || '') !== teamId
+                    ) return;
+                    const responseIdentity = response?.data?.identity;
+                    if (
+                        (response?.data?.requestGeneration !== undefined
+                            && response.data.requestGeneration !== generation)
+                        || (responseIdentity !== undefined && (
+                            responseIdentity.enabled !== true
+                            || responseIdentity.manifestUrl !== pendingManifestUrl
+                            || responseIdentity.teamId !== teamId
+                        ))
                     ) return;
                     if (chrome.runtime.lastError) {
                         showError(t('manifestFetchFailed'), 5000);
@@ -1336,6 +1352,9 @@ const OptionsInner: React.FC = () => {
         ) {
             return;
         }
+        setTeamItems([]);
+        setTeamSynced('');
+        setTeamFetchError(null);
         let cancelled = false;
         chrome.storage.local.get([
             'dh_team_synced',
@@ -1562,6 +1581,16 @@ const OptionsInner: React.FC = () => {
         && prefsRef.current.teamManifestUrl === manifestUrl
         && prefsRef.current.team === teamId;
 
+    const teamRequestPayload = (
+        generation: number,
+        identity: { enabled: boolean; manifestUrl: string; teamId: string },
+        extra: Record<string, unknown> = {},
+    ) => ({
+        ...extra,
+        identity: Object.freeze({ ...identity }),
+        requestGeneration: generation,
+    });
+
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
             invalidateTeamRefresh();
@@ -1576,8 +1605,16 @@ const OptionsInner: React.FC = () => {
             // when host get_config returns the pre-reset values.
             markUserTouched(Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>);
             setCurrentPrefs(DEFAULT_PREFS);
-            persistPrefs(DEFAULT_PREFS);
-            chrome.runtime.sendMessage({ type: "RESET_EXTENSION_STATE" }, () => {
+            const resetGeneration = teamRefreshGenerationRef.current;
+            persistPrefs(DEFAULT_PREFS, { onMirrorCommitted: () => {
+            chrome.runtime.sendMessage({
+                type: "RESET_EXTENSION_STATE",
+                payload: teamRequestPayload(resetGeneration, {
+                    enabled: false,
+                    manifestUrl: '',
+                    teamId: '',
+                }),
+            }, () => {
                 chrome.storage.local.remove(["dh_items", "dh_team_collapsed_labels"], () => {
                 // Wrap loaded items in collapseFolders so Reset produces the
                 // same folded-by-default tree the mount path produces. Without
@@ -1592,6 +1629,7 @@ const OptionsInner: React.FC = () => {
                 showSuccess(t('resetComplete'), 2000);
                 });
             });
+            }});
         }
     };
 
@@ -1601,6 +1639,9 @@ const OptionsInner: React.FC = () => {
         const generation = teamRefreshGenerationRef.current;
         const manifestUrl = prefsRef.current.teamManifestUrl || '';
         const selectedTeam = teamList.find(t => t.id === teamId);
+        setTeamItems([]);
+        setTeamSynced("");
+        setTeamFetchError(null);
         // Plan A: team selection is "instant persist". Symptom 3 fix —
         // previously this only called setPrefs (React state), so refreshing
         // the page would show the dropdown reverted to the old team while
@@ -1612,7 +1653,11 @@ const OptionsInner: React.FC = () => {
             setIsSyncingTeam(true);
             chrome.runtime.sendMessage({
                 type: "SYNC_TEAM_CATALOG",
-                payload: { teamId }
+                payload: teamRequestPayload(generation, {
+                    enabled: true,
+                    manifestUrl,
+                    teamId,
+                }),
             }, (response) => {
                 if (!teamSyncIsCurrent(generation, manifestUrl, teamId)) return;
                 setIsSyncingTeam(false);
@@ -1622,14 +1667,14 @@ const OptionsInner: React.FC = () => {
                 }
                 const syncStatus = response?.data?.syncStatus;
                 const responseIdentity = response?.data?.identity;
-                const hasResponseIdentity = responseIdentity !== undefined;
                 if (
-                    hasResponseIdentity
-                    && (
+                    (response?.data?.requestGeneration !== undefined
+                        && response.data.requestGeneration !== generation)
+                    || (responseIdentity !== undefined && (
                         responseIdentity?.enabled !== true
                         || responseIdentity?.manifestUrl !== manifestUrl
                         || responseIdentity?.teamId !== teamId
-                    )
+                    ))
                 ) return;
                 if (response?.status === "success") {
                     if (syncStatus === 'committed' || syncStatus === 'unchanged') {
@@ -1650,7 +1695,11 @@ const OptionsInner: React.FC = () => {
             ) return;
             chrome.runtime.sendMessage({
                 type: "SYNC_TEAM_CATALOG",
-                payload: { teamId: null }
+                payload: teamRequestPayload(generation, {
+                    enabled: true,
+                    manifestUrl,
+                    teamId: '',
+                }),
             });
         };
         const next = updateCurrentPrefs({
@@ -1662,12 +1711,7 @@ const OptionsInner: React.FC = () => {
             onMirrorCommitted: teamId ? dispatchTeamSync : dispatchTeamClear,
         });
 
-        if (!teamId) {
-            // Clear team data
-            setTeamItems([]);
-            setTeamSynced("");
-            return;
-        }
+        if (!teamId) return;
 
         // Sync starts only after the matching dh_prefs mirror is committed.
     };
@@ -1741,7 +1785,11 @@ const OptionsInner: React.FC = () => {
         setTeamFetchError(null);
         chrome.runtime.sendMessage({
             type: "SYNC_TEAM_CATALOG",
-            payload: { teamId },
+            payload: teamRequestPayload(generation, {
+                enabled: true,
+                manifestUrl,
+                teamId,
+            }),
         }, async (response) => {
             if (!refreshIsCurrent()) return;
             if (chrome.runtime.lastError) {
@@ -1751,21 +1799,21 @@ const OptionsInner: React.FC = () => {
             }
             const syncStatus = response?.data?.syncStatus;
             const responseIdentity = response?.data?.identity;
-            const hasResponseIdentity = responseIdentity !== undefined;
             if (
-                hasResponseIdentity
-                && (
+                (response?.data?.requestGeneration !== undefined
+                    && response.data.requestGeneration !== generation)
+                || (responseIdentity !== undefined && (
                     responseIdentity?.enabled !== true
                     || responseIdentity?.manifestUrl !== manifestUrl
                     || responseIdentity?.teamId !== teamId
-                )
+                ))
             ) {
                 setIsSyncingTeam(false);
                 return;
             }
             if (response?.status !== 'success') {
-                // Render the selected team's cache on an ordinary failure.
-                setTeamItems(response?.data?.items || []);
+                setTeamItems([]);
+                setTeamSynced('');
                 // Refresh actually failed. Show the classified error and
                 // — crucially — do NOT bump the synced-at timestamp. The
                 // pre-fix behaviour of setTeamSynced(now) on a silently-
@@ -2573,10 +2621,13 @@ const OptionsInner: React.FC = () => {
                                                     type="checkbox"
                                                     id="teamCatalogEnabled"
                                                     checked={prefs.teamCatalogEnabled === true}
-                                                    onChange={(e) => {
-                                                        const enabled = e.target.checked;
-                                                        invalidateTeamRefresh();
-                                                        updatePref({ teamCatalogEnabled: enabled });
+                                                            onChange={(e) => {
+                                                                const enabled = e.target.checked;
+                                                                invalidateTeamRefresh();
+                                                                setTeamItems([]);
+                                                                setTeamSynced('');
+                                                                setTeamFetchError(null);
+                                                                updatePref({ teamCatalogEnabled: enabled });
                                                         try {
                                                             trackEvent('Team Catalog Toggled', { enabled });
                                                         } catch { /* telemetry never blocks UX */ }
@@ -2635,14 +2686,25 @@ const OptionsInner: React.FC = () => {
                                                                 // (a) clear-out
                                                                 setManifestUrlInvalid(false);
                                                                 (async () => {
-                                                                    await chrome.runtime.sendMessage({ type: 'CLEAR_TEAM_CATALOG' });
+                                                                    const generation = teamRefreshGenerationRef.current;
+                                                                    const next = updateCurrentPrefs({ teamManifestUrl: '', team: undefined, teamLabel: undefined });
+                                                                    markUserTouched(['teamManifestUrl', 'team', 'teamLabel']);
+                                                                    persistPrefs(next, { onMirrorCommitted: async () => {
+                                                                    await chrome.runtime.sendMessage({
+                                                                        type: 'SYNC_TEAM_CATALOG',
+                                                                        payload: teamRequestPayload(generation, {
+                                                                            enabled: true,
+                                                                            manifestUrl: '',
+                                                                            teamId: '',
+                                                                        }, { resetCache: true }),
+                                                                    });
                                                                     setTeamList([]);
                                                                     setTeamItems([]);
                                                                     setTeamCollapsedLabels(new Set());
                                                                     setTeamSynced('');
                                                                     setTeamFetchError(null);
                                                                     lastFetchedManifestUrlRef.current = '';
-                                                                    updatePref({ teamManifestUrl: '', team: '', teamLabel: '' });
+                                                                    }});
                                                                 })();
                                                                 return;
                                                             }
@@ -3088,7 +3150,7 @@ const OptionsInner: React.FC = () => {
                                 
                                 {/* Scrollable List */}
                                 <div className="flex-1 overflow-y-auto p-4 bg-slate-50/30">
-                                    {items.length === 0 ? (
+                                    {mergedItems.length === 0 ? (
                                         <div className="h-full flex flex-col items-center justify-center text-slate-400">
                                             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
                                                 <Folder size={32} className="opacity-50" />

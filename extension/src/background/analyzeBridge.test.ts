@@ -24,6 +24,7 @@ import {
     normalizeNativeHostResponse,
     summarizeNativeHostMessage,
 } from './analyzeBridge'
+import { pendingAnalysisKey } from '../utils/analysisStore'
 import type { AnalyzePersistContext } from '../utils/analysisStore'
 
 installChromeMock()
@@ -73,7 +74,7 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
     })
 
     // P-I1: pending marker is written BEFORE the host RPC fires.
-    it('P-I1: writes dh_pending_analysis before invoking send()', async () => {
+    it('P-I1: writes request-scoped pending before invoking send()', async () => {
         const orderLog: string[] = []
         const send = vi.fn(async (_payload) => {
             orderLog.push('send')
@@ -83,7 +84,7 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
         // Wrap storageSet to log when the pending key lands.
         const originalSet = chromeMockSpies.storageSet.getMockImplementation()!
         chromeMockSpies.storageSet.mockImplementation((items: any, cb?: any) => {
-            if (items && 'dh_pending_analysis' in items) {
+            if (items && pendingAnalysisKey(CTX.requestId) in items) {
                 orderLog.push('pending_set')
             }
             if (items && 'dh_last_analysis' in items) {
@@ -101,15 +102,15 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
         expect(pendingIdx).toBeLessThan(sendIdx)
     })
 
-    // P-I2: on success, dh_last_analysis is written AND dh_pending_analysis
+    // P-I2: on success, dh_last_analysis is written AND request pending
     // is removed (because clearPendingIfMatches sees a matching requestId).
-    it('P-I2: success writes dh_last_analysis and clears dh_pending_analysis', async () => {
+    it('P-I2: success writes dh_last_analysis and clears request pending', async () => {
         const send = vi.fn(async () => makeHostSuccess())
 
         await handleAnalyzeForward({ action: 'analyze_error' }, CTX, { send })
 
         const last = await readStorage('dh_last_analysis')
-        const pending = await readStorage('dh_pending_analysis')
+        const pending = await readStorage(pendingAnalysisKey(CTX.requestId))
 
         expect(last).toMatchObject({
             caseNumber: CTX.caseNumber,
@@ -142,7 +143,7 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
             content: 'Copilot request timed out after 600.0 seconds.',
             seen: false,
         })
-        expect(await readStorage('dh_pending_analysis')).toBeUndefined()
+        expect(await readStorage(pendingAnalysisKey(CTX.requestId))).toBeUndefined()
     })
 
     // P-I4: send() rejection (e.g., native port disconnected) recorded as
@@ -165,7 +166,7 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
             content: 'Native Host disconnected unexpectedly',
             seen: false,
         })
-        expect(await readStorage('dh_pending_analysis')).toBeUndefined()
+        expect(await readStorage(pendingAnalysisKey(CTX.requestId))).toBeUndefined()
     })
 
     it('UI-I6: persists inner prompt error_code unchanged', async () => {
@@ -306,7 +307,7 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
         // B's pending arrives first (simulating user navigated to case B
         // and started a new analysis while A was still in flight).
         await chrome.storage.local.set({
-            dh_pending_analysis: {
+            [pendingAnalysisKey('req-B')]: {
                 caseNumber: '9999999999999999',
                 requestId: 'req-B',
                 startTime: Date.now(),
@@ -341,7 +342,7 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
         // resolves.
         const sendWithReinjection = vi.fn(async () => {
             await chrome.storage.local.set({
-                dh_pending_analysis: {
+                [pendingAnalysisKey('req-B')]: {
                     caseNumber: '9999999999999999',
                     requestId: 'req-B',
                     startTime: Date.now(),
@@ -360,7 +361,7 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
         // is still B's marker (clearPendingIfMatches saw 'req-B' !==
         // 'req-A' and left it alone).
         const last = await readStorage('dh_last_analysis')
-        const pending = await readStorage('dh_pending_analysis')
+        const pending = await readStorage(pendingAnalysisKey('req-B'))
         expect(last.caseNumber).toBe(CTX.caseNumber)
         expect(pending).toMatchObject({
             caseNumber: '9999999999999999',
@@ -368,6 +369,34 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
         })
         // Silence unused-mock warnings.
         void send
+    })
+
+    it('parallel A and B completions clear only their request-scoped pending keys', async () => {
+        let resolveA!: (value: any) => void
+        let resolveB!: (value: any) => void
+        const runA = handleAnalyzeForward(
+            { action: 'analyze_error' },
+            CTX,
+            { send: () => new Promise(resolve => { resolveA = resolve }) },
+        )
+        const ctxB = { ...CTX, caseNumber: '9999999999999999', requestId: 'req-B' }
+        const runB = handleAnalyzeForward(
+            { action: 'analyze_error' },
+            ctxB,
+            { send: () => new Promise(resolve => { resolveB = resolve }) },
+        )
+
+        await vi.waitFor(async () => {
+            expect(await readStorage(pendingAnalysisKey('req-A'))).toBeDefined()
+            expect(await readStorage(pendingAnalysisKey('req-B'))).toBeDefined()
+        })
+        resolveA(makeHostSuccess())
+        await runA
+        expect(await readStorage(pendingAnalysisKey('req-A'))).toBeUndefined()
+        expect(await readStorage(pendingAnalysisKey('req-B'))).toBeDefined()
+        resolveB(makeHostSuccess())
+        await runB
+        expect(await readStorage(pendingAnalysisKey('req-B'))).toBeUndefined()
     })
 
     // Smoke: non-analyze actions bypass persistence entirely.
@@ -381,7 +410,7 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
         )
 
         expect(out).toEqual({ status: 'success', data: 'ok' })
-        expect(await readStorage('dh_pending_analysis')).toBeUndefined()
+        expect(await readStorage(pendingAnalysisKey(CTX.requestId))).toBeUndefined()
         expect(await readStorage('dh_last_analysis')).toBeUndefined()
     })
 })

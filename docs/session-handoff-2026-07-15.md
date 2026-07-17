@@ -13,7 +13,7 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Implementation/documentation Tasks 1-7: approved through `90e6da3` (`docs(persistence): correct result lifecycle semantics`)
 - Task 8 evidence: `9127546` plus `73b8adf`; first-review fixes/evidence are `907acd0` and `6b9631f`
 - Second whole-branch Important-finding implementation: `cb760a4` plus comment-only follow-up `3e18244`
-- Controller broad whole-branch review: **pending rerun after the third fix wave**
+- Controller broad whole-branch review: **pending rerun after the fourth fix wave**
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
@@ -299,6 +299,12 @@ Fresh gates from committed product head `67fb4bb`, with every Host process using
 
 The optional authenticated marker smoke remains skipped unless safe authenticated isolation can be guaranteed. The controller broad whole-branch review remains pending after this wave; no focused/self-review result substitutes for it.
 
+## Fourth Review Fix Addendum - 2026-07-17
+
+Starting head: `927d92497d59aeea44ff2346fc7db976574d4d95`. The fourth coordinated TDD wave adds captured Team Catalog request identity/generation before every clear/fetch, synchronous generation invalidation, request-scoped analysis pending keys, independent hydrated/local spinner ownership, Host-authoritative per-Analyze `user_prompt.md` canonicalization before PII scrubbing, permission-log redaction, and one safe SDK exception boundary. It also corrects the Options post-render immutable-intent documentation. Exact implementation/evidence commit IDs, final totals, mutation proof, and concerns are recorded in `.superpowers/sdd/fourth-final-review-fix-report.md`.
+
+The branch remains unversioned and unpublished. No push, tag, package, registry, real `%LOCALAPPDATA%\DynamicsHelper`, or MyCases operation was performed. The controller broad review remains pending after this wave.
+
 ## Session Identity Contract
 
 - Case session ID is deterministic UUIDv5 derived from the bare 16-digit case number.
@@ -488,9 +494,9 @@ Blocked until the Contract Primitives spec freezes the adapter boundary:
 
 ## Current Decision State
 
-- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and three review-fix waves are recorded through product commit `67fb4bb` and the current evidence commit, and the concise unversioned release draft exists.
+- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and four review-fix waves are recorded through the commits listed in the fourth fix report, and the concise unversioned release draft exists.
 - Accepted design and plan are `441d0db` and `21108d9`.
-- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the third fix wave.
+- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the fourth fix wave.
 - No MyCases integration code, mode preference, workspace detector, coordinator adapter, persistence adapter, or MyCases canonical-file write has been implemented.
 - MyCasesKit response `675006a` accepts Form ③ and the Stage 1 deterministic persistence-gate model.
 - Five shared JSON fixtures and a README exist as examples, but six README items remain tentative; not every interface is frozen.

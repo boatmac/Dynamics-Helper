@@ -3,7 +3,7 @@
 // Wraps the native-host RPC for `action === 'analyze_error'` with
 // chrome.storage.local writes so the result survives content-script
 // teardown (tab close, navigation, FAB unmount). The FAB content
-// script reads dh_last_analysis / dh_pending_analysis on mount to
+// script reads dh_last_analysis / request-scoped pending state on mount to
 // re-hydrate the UI.
 //
 // See:

@@ -213,6 +213,10 @@ export const translations: TranslationDictionary = {
         en: "Repository Instructions cannot be read. Repair the file or disable Repository ONLY.",
         zh: "无法读取仓库指令。请修复该文件，或禁用仅仓库模式。",
     },
+    promptErrorUserPromptUnreadable: {
+        en: "Custom User Prompt cannot be read. Repair or replace it in Options.",
+        zh: "无法读取自定义用户提示词。请在选项中修复或替换该文件。",
+    },
     configSavedRefreshFailed: {
         en: "Settings were saved, but the active prompt could not be refreshed.",
         zh: "设置已保存，但无法刷新当前提示源。",

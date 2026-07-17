@@ -59,7 +59,7 @@ type LastAnalysis = {
   errorCode?: string;       // error only, raw Host machine-readable code
 };
 
-// Pending-analysis marker. Cleared when result arrives or expires.
+// Request-scoped pending marker. Cleared only by its request or reset.
 type PendingAnalysis = {
   caseNumber: string;
   requestId: string;        // matches FAB's latestRequestId
@@ -74,7 +74,7 @@ type LastAnalysisIdentity = {
 };
 ```
 
-Storage keys: `dh_last_analysis`, `dh_pending_analysis`, and one deterministic acknowledgment key per identity: `dh_seen_analysis:request:<encoded-case>:<encoded-requestId>` or `dh_seen_analysis:legacy:<encoded-case>:<timestamp>`. The historical singleton `dh_seen_analysis` remains a read-only compatibility fallback until Reset removes it.
+Storage keys: `dh_last_analysis`, one `dh_pending_analysis:<encoded-requestId>` per request, and one deterministic acknowledgment key per identity: `dh_seen_analysis:request:<encoded-case>:<encoded-requestId>` or `dh_seen_analysis:legacy:<encoded-case>:<timestamp>`. Historical singleton pending/seen keys remain read-only compatibility until Reset removes them.
 
 ### 4.2 Write paths (Service Worker owns writes)
 
@@ -86,9 +86,9 @@ The Service Worker is the right owner because:
 The implemented Service Worker bridge wraps `NATIVE_MSG` requests whose action
 is `analyze_error` with these storage operations:
 
-1. **Before forwarding to host:** write `dh_pending_analysis` with `caseNumber`, `requestId`, `startTime`.
-2. **After host responds (success path):** write `dh_last_analysis` with status `success` and the request-scoped `requestId`, then delete `dh_pending_analysis`.
-3. **After Host responds (Host returned `{status: 'error', error: '...', error_code?: '...'}`):** write `dh_last_analysis` with status `error`, the request-scoped `requestId`, `content` equal to the raw safe Host fallback, and optional `errorCode` equal to a non-empty raw `error_code`; then delete `dh_pending_analysis`. For double-wrapped responses, an inner Analyze code takes precedence over an outer wrapper code.
+1. **Before forwarding to host:** write request-scoped pending with `caseNumber`, `requestId`, `startTime`.
+2. **After host responds (success path):** write `dh_last_analysis` with status `success` and the request-scoped `requestId`, then delete that request's pending key.
+3. **After Host responds (Host returned `{status: 'error', error, error_code?}`):** write the error result and delete only that request's pending key. For double-wrapped responses, an inner Analyze code takes precedence.
 4. **SW-side rejection** (`sendNativeMessage` Promise rejects, e.g., disconnected pipe): write `dh_last_analysis` with status `error`, `content` equal to the exception message, and no fabricated `errorCode`.
 
 ### 4.3 Read paths (FAB)
@@ -96,11 +96,11 @@ is `analyze_error` with these storage operations:
 `useAnalysisHydration(caseNumber)` reads storage on mount and whenever the case
 identity changes:
 
-1. **FAB mount** — perform one `chrome.storage.local.get(null)` and derive `dh_last_analysis`, `dh_pending_analysis`, and the current result's per-identity acknowledgment from the same returned generation. If the result matches the current page case, is inside `STALE_WINDOW_MS`, has no legacy `seen=true`, and has no matching acknowledgment, return an open hydrated popover together with its identity.
+1. **FAB mount** — perform one `chrome.storage.local.get(null)` and derive the latest result, newest matching request-scoped pending, and current result acknowledgment from one generation.
 2. **Case identity change** — rerun the same checks when `caseNumber` changes.
-3. **Pending check** — on mount, read `dh_pending_analysis`. If matches current case, set the local `isAnalyzing` state so the FAB shows the "analyzing" spinner.
+3. **Pending check** — from the batched snapshot select the newest fresh request-scoped pending matching the current case; observe pending removal/expiry while mounted.
 4. **Consumption/dismissal** — write only the displayed identity to its deterministic key. Never read-modify-write `dh_last_analysis`; acknowledgments for A and B coexist and neither can overwrite a result.
-5. **Mutation serialization** — all pending/result/reset storage mutations use one module-level Promise queue. Host RPC runs outside this queue. Result completion enters the queue only for the short last-result write plus matching pending check/remove.
+5. **Request isolation** — starts/completions use distinct keys, so no in-memory queue is required for A/B correctness across Service Worker restarts. The queue still orders writes within one worker; Host RPC remains outside it.
 
 ### 4.4 Constants
 
@@ -133,7 +133,7 @@ records without a code display the fallback supplied by their own path.
 On FAB unmount: no cleanup. The next mount handles expiry on read.
 
 On every successful write of `dh_last_analysis`, `setLastAnalysis()` also removes
-a `dh_pending_analysis` marker older than `MAX_PENDING_AGE_MS` (2 hours). This
+request-scoped pending markers older than `MAX_PENDING_AGE_MS` (2 hours). This
 prevents an orphaned marker, such as one left by a Service Worker failure, from
 blocking later pending-state behavior indefinitely. This GC does not inspect or
 delete `dh_last_analysis`; stale results remain until overwritten by a later
@@ -145,15 +145,15 @@ These are testable assertions the implementation must satisfy.
 
 | ID | Invariant |
 |---|---|
-| **P-I1** | When SW forwards `analyze_error` to host, `dh_pending_analysis` is written before `postMessage`. |
-| **P-I2** | When host responds successfully, `dh_last_analysis` is written with `status='success'` AND `dh_pending_analysis` is deleted. |
+| **P-I1** | When SW forwards `analyze_error`, its request-scoped pending key is written before `postMessage`. |
+| **P-I2** | Host success writes `dh_last_analysis` and deletes only that request's pending key. |
 | **P-I3** | When Host responds with `{status: 'error', error, error_code?}`, `dh_last_analysis` is written with `status='error'`, `content === error`, and the optional raw code; an inner Analyze code wins over an outer code. |
-| **P-I4** | When `sendNativeMessage` Promise rejects, `dh_last_analysis` is written with `status='error'`, no fabricated code, AND `dh_pending_analysis` is deleted. |
+| **P-I4** | Transport rejection writes a code-free error result and deletes only that request's pending key. |
 | **R-I1** | FAB mount with matching unseen result inside stale window opens the popover automatically. |
 | **R-I2** | Immediate dismissal or hydrated-result consumption writes only the displayed identity's deterministic key. Hydration suppresses legacy `last.seen=true`, the legacy singleton match, or an exact prefixed-key match. A/B acknowledgments remain independently seen. |
 | **R-I3** | FAB mount with non-matching `caseNumber` does NOT open the popover. |
 | **R-I4** | FAB mount with result older than `STALE_WINDOW_MS` does NOT open the popover. |
-| **R-I5** | FAB mount with matching `dh_pending_analysis` from the same batched snapshot sets `isAnalyzing = true`; serialized A clear cannot remove newer B pending. |
+| **R-I5** | Hydration selects the newest fresh request-scoped pending for the current case; A/B starts/completions remain independent across worker restarts; removal/expiry clears only the hydrated mirror, never active local Analyze. |
 | **R-I6** | Immediate and rehydrated prompt-source errors localize a known `errorCode` at display time; unknown/absent codes retain the immediate path's safe fallback or the rehydrated raw stored fallback respectively. |
 
 ## 6. Edge cases
@@ -171,14 +171,14 @@ same-case updates become a product requirement.
 
 ### 6.2 User starts analysis, immediately navigates away to non-case page
 
-`dh_pending_analysis` lingers. When the result arrives, SW writes `dh_last_analysis` for that case but user is not viewing it. Next time user opens that case, popover appears. ✅ correct behavior.
+The request-scoped pending key lingers. When the result arrives, SW writes `dh_last_analysis`; returning to that case rehydrates the result.
 
 ### 6.3 User starts analysis on case A, before it completes navigates to case B and starts another analysis
 
-- Pending for case A is overwritten by pending for case B.
-- When A's response arrives: SW writes `dh_last_analysis` with case A's content. But `dh_pending_analysis.caseNumber === 'B'` — does the SW still clear it?
+- Pending for A and B coexist under separate request-scoped keys.
+- When A's response arrives, it writes A's result and removes only A's pending key.
 
-**Decision:** SW clears `dh_pending_analysis` only if `dh_pending_analysis.requestId === responseRequestId`. This prevents B's pending from being wiped by A's late response.
+**Decision:** each response removes only `dh_pending_analysis:<its requestId>`. B is independent of A even after Service Worker restart.
 
 - When B's response arrives: writes `dh_last_analysis` for B (overwrites A's result). User loses A's result.
 
@@ -186,7 +186,7 @@ same-case updates become a product requirement.
 
 ### 6.4 Spinner shown for stale pending
 
-If user closes tab mid-analysis and SW process is unloaded before response arrives, the response is never received and `dh_pending_analysis` is never cleared. Next FAB mount sees the marker and shows "analyzing" forever.
+If user closes tab mid-analysis and SW never receives a response, that request's pending key remains. Hydration stops displaying it after 15 minutes and GC removes it after 2 hours on a later result.
 
 **Implemented mitigation:** garbage collection deletes pending markers older than
 2 hours on a later result write. Independently,

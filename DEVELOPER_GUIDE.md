@@ -130,13 +130,13 @@ Strict Analyze/session resolution fails closed:
 
 After the latest `update_config` intent is durably acknowledged, Options sends one additional health-only `get_config`. This callback changes only `promptHealthIssue`; it never re-enters the full hydration merge. Both config and health generations must still match before applying a response, so an older health result cannot replace newer state. Transport/non-success responses leave the existing health issue unchanged.
 
-Prompt-source errors carry a stable `error_code` and safe English fallback. Options/FAB preserve unknown non-empty codes, localize the five known codes only at render time, and never tell users to re-authenticate for a source/configuration error. Logs may include safe source mode, classified code, or a short fingerprint prefix, but never instruction contents, Custom User Prompt contents, or prompt-source paths. SDK response-event diagnostics are likewise metadata-only: event type, data type, content presence, and content length. No-content fallback reports use that safe summary and never serialize the event, its data, or model content.
+Prompt-source errors carry a stable `error_code` and safe English fallback. Options/FAB preserve unknown non-empty codes, localize known codes only at render time, and never tell users to re-authenticate for a source/configuration error. Logs may include safe source mode, classified code, or a short fingerprint prefix, but never instruction contents, Custom User Prompt contents, or prompt-source paths. SDK response-event diagnostics are likewise metadata-only: event type, data type, content presence, and content length. No-content fallback reports use that safe summary and never serialize the event, its data, or model content.
 
-FAB applies Custom User Prompt immediately before every send. It truncates from the first authoritative line-level `## User Prompt` marker in either preformatted or freshly assembled context, then appends the current non-empty value once; an empty current value leaves all stale/duplicate sections removed. The resulting complete text still enters the Host's existing PII scrub path unchanged.
+FAB applies Custom User Prompt immediately before every send for an accurate editor/template preview. The Host remains authoritative: it rereads `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md` on each Analyze, truncates payload text from the first authoritative line-level marker, appends current non-empty file content exactly once, and then PII-scrubs the canonicalized text. Empty file content removes stale payload sections; an unreadable or invalid UTF-8 file blocks Analyze as `user_prompt_unreadable` without logging content or path.
 
-Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe parse/network messages and logs only failure kind plus numeric HTTP status. It must not log URL/status-text/exception values. The Service Worker owns all Team Catalog cache mutations. `teamCatalog.ts` serializes manifest/item/ETag/timestamp commits and clear/reset operations in one module-level queue, checks captured generation and enabled/URL/team identity inside the queued critical section, and stamps cache data with `dh_team_manifest_url`. Options sends messages only; FAB and Options reject cache data whose URL/team stamp does not match current prefs.
+Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe diagnostics and logs only failure kind plus numeric status. Every Options request captures enabled/URL/team plus a request generation. The Service Worker synchronously allocates a storage generation before any asynchronous pref/cache read, rejects stale identity before clear/fetch, rechecks generation after awaited reads, and queues identity validation together with awaited mutation. Deferred storage writes therefore finish before a later clear runs. Options sends messages only and clears rendered team items/timestamp immediately on identity change.
 
-Analysis result dismissal uses per-identity acknowledgment keys. New `LastAnalysis` records carry their Analyze `requestId`; legacy records are identified by exact `caseNumber + timestamp`. `seenAnalysisKey()` produces deterministic `dh_seen_analysis:*` keys, so A/B acknowledgments coexist. Hydration performs one `chrome.storage.local.get(null)` and derives last/pending/matching seen from that coherent snapshot; the singleton `dh_seen_analysis` remains a read-only legacy fallback. A module-level mutation queue serializes pending/result/reset writes, and result completion atomically writes `dh_last_analysis` plus conditionally removes only the matching pending request.
+Analysis pending and dismissal state is request scoped. Starts write `dh_pending_analysis:<encoded-requestId>`; completion removes only that key. The legacy singleton pending key remains readable. `seenAnalysisKey()` produces collision-safe request or exact legacy case/timestamp keys, so A/B acknowledgments coexist. Hydration performs one `get(null)`, selects the newest fresh pending matching the current case, observes pending storage changes/expiry, and derives matching seen state from the same snapshot. Reset removes both prefixes and legacy singletons.
 
 The standalone `host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` files are historical pre-1.0.5 probes. They retain `skip_custom_instructions=True` on session creation, but other imports, constructor arguments, and message shapes are obsolete; they are explicitly outside supported diagnostics until separately migrated. Use `host/venv` tests or the SDK 1.0.5 wire-drift probe documented in `AGENTS.md` instead.
 
@@ -210,7 +210,7 @@ Analyze runs are long (often 60-300 s). The user can navigate away from the case
 
 **Storage schema** (`extension/src/utils/analysisStore.ts`):
 
-* `dh_pending_analysis` — `{caseNumber, requestId, startTime}` written by SW before forwarding the host RPC, cleared on success/error/timeout/edge-6.3.
+* `dh_pending_analysis:<encoded-requestId>` — one `{caseNumber, requestId, startTime}` per in-flight request, written before Host RPC and removed only by that request's completion. `dh_pending_analysis` is legacy read compatibility.
 * `dh_last_analysis` — `{status: 'success'|'error', caseNumber, requestId?, title, content, timestamp, seen, durationSec?, savedTo?, errorCode?}` written by SW on Host response. New records use `requestId` as result identity; legacy records use exact `caseNumber + timestamp`. The legacy `seen` field remains readable for compatibility but is no longer rewritten for acknowledgment. `errorCode` is an optional raw machine-readable Host code; legacy records may omit optional fields.
 * `dh_seen_analysis:request:<case>:<requestId>` / `dh_seen_analysis:legacy:<case>:<timestamp>` — one identity-only acknowledgment per consumed result. The old singleton `dh_seen_analysis` is accepted only for backward compatibility.
 
@@ -229,8 +229,8 @@ For errors, persistence stores the raw safe Host fallback in `content` and prese
 **Pure-helper boundary:**
 
 * `extension/src/background/analyzeBridge.ts` exposes `handleAnalyzeForward(payload, ctx, deps)` with DI'd `send`. Its focused suite covers P-I1..P-I4, error-code transport, and edge 6.3 without spinning up a real Chrome port; the test count is not a contract.
-* `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, isAnalyzing, dismissPopover(identity)}`. Its focused suite covers result/pending/seen hydration, identity-safe one-shot dismissal, write-order races, and optional `errorCode` using only a mocked `chrome.storage.local`; the test count is not a contract.
-* FAB calls `useAnalysisHydration(scrapedData?.caseNumber || '')` once at the top of the component, then mirrors `popover`/`isAnalyzing` into local state in two `useEffect` hooks. The mirror is one-way (storage → local); user dismissal passes the displayed identity through `hydration.dismissPopover(identity)`, which writes only that identity's `dh_seen_analysis:*` key.
+* `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, pending, isAnalyzing, dismissPopover(identity)}`. It uses a batched snapshot, newest matching pending selection, storage-change refresh, and expiry timer.
+* FAB keeps local Analyze in-flight state separate from the hydrated mirror. Hydration true/false is mirrored when no local request owns the spinner; hydration false cannot stop an active local request. Completion clears local ownership and retains only a different hydrated request if present.
 
 **popoverIsAnalyze ref discriminator:**
 
@@ -239,10 +239,10 @@ For errors, persistence stores the raw safe Host fallback in `content` and prese
 **Edge cases handled:**
 
 * **Start-before-send ordering:** `handleAnalyzeForward` awaits `recordAnalyzeStart(ctx)` before calling `deps.send(payload)`. The Host request is not dispatched until the pending marker write completes.
-* **Late response versus newer pending (edge 6.3):** Analysis A can remain in flight while analysis B starts and replaces the single-slot pending marker with B's request ID. When A's response arrives, A's result is persisted, but `clearPendingIfMatches(A.requestId)` rereads the pending marker and leaves B's marker intact because the request IDs differ. A late response therefore cannot clear a newer analysis's pending state.
+* **A/B isolation:** Analyses A and B have distinct pending keys. Starting B never overwrites A, and either completion removes only its own key, including after a Service Worker restart.
 * **Stale pending on mount:** `useAnalysisHydration` checks `Date.now() - startTime > MAX_PENDING_DISPLAY_AGE_MS` and ignores pending markers older than 15 min. The marker stays on disk until GC; this is intentional (the user might still want to know if the run eventually completes).
 * **Case mismatch on pending:** if the on-disk pending marker is for case A but the FAB is mounted on case B, the hook ignores the pending row entirely (no false "Analyzing…").
-* **Options Reset:** sends `RESET_EXTENSION_STATE` to the Service Worker. The serialized reset removes `dh_last_analysis`, `dh_pending_analysis`, legacy `dh_seen_analysis`, and every `dh_seen_analysis:*` key together with queued Team Catalog cache state.
+* **Options Reset:** dispatches `RESET_EXTENSION_STATE` only after the default `dh_prefs` mirror callback, with captured identity/generation. Reset removes result, both legacy singletons, and every pending/seen prefixed key together with queued Team Catalog cache state.
 
 ---
 
@@ -300,9 +300,7 @@ The Options page hydration window has 6 distinct invariants documented in `docs/
 
 Inv4 specifically guards commit `0265a74`. The pre-fix bug: the post-hydration catch-up RPC was reading `mergedPrefs` from an outer-scope variable assigned **inside** a `setPrefs(prev => ...)` updater. React 19 sometimes schedules the updater on a later microtask tick, so the catch-up RPC ran before the assignment and silently sent stale state. Production "worked" because chrome IPC latency masked the race in the common case.
 
-The fix relocates the catch-up RPC + `prefsHydratedRef.current = true` flip **inside** the success-branch `setPrefs` updater closure, reading `merged = changed ? newPrefs : prev` directly. Inv4 verifies this by deferring `get_config`, simulating a `language` edit during the window, then asserting the catch-up payload carries the user's new value.
-
-If a future refactor moves the catch-up RPC back outside the updater closure (because "it looks cleaner") Inv4 will fail and tell you not to.
+The current fix computes the merged snapshot, updates refs/state, and schedules a generation-tagged hydration mirror plus catch-up intent. A post-render effect sends only the latest immutable intent after React commits. No Host or storage side effect runs inside a React state-updater closure; StrictMode replay therefore cannot duplicate an RPC. Inv4 defers `get_config`, edits `language`, and verifies the post-render intent carries the committed user value.
 
 ### Test File Conventions
 

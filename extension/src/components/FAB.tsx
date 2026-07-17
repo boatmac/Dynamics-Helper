@@ -286,6 +286,7 @@ const FAB: React.FC = () => {
     // scrollIntoView in legacyFeatures.ts::highlight) is unaffected — only
     // the redundant bubble notification is suppressed.
     const isAnalyzingRef = React.useRef(false);
+    const localAnalyzeInFlightRef = React.useRef(false);
     const analyzeFlowEndedAtRef = React.useRef(0);
     const ANALYZE_BUBBLE_PROTECTION_MS = 6000;
     
@@ -308,6 +309,7 @@ const FAB: React.FC = () => {
     // (matching unseen result inside STALE_WINDOW_MS) or show the spinner
     // (matching pending marker inside MAX_PENDING_DISPLAY_AGE_MS).
     const hydration = useAnalysisHydration(scrapedData?.caseNumber || '');
+    const hydratedPendingRef = React.useRef(hydration.pending);
 
     // C2a+: keep currentCaseRef in sync with the latest scrapedData.caseNumber
     // so async closures inside handleAnalyze (await response, setTimeout) can
@@ -336,13 +338,14 @@ const FAB: React.FC = () => {
         void hydration.dismissPopover(hydration.popover.identity);
     }, [hydration.popover, resultPopover.isOpen, hydration]);
 
-    // Mirror hook's isAnalyzing into local state so the FAB shows the
-    // spinner when a pending marker exists from a previous session.
+    // Hydrated pending is a mirror, while a locally-started request owns its
+    // own in-flight flag. A disappearing/expired pending marker can clear the
+    // hydrated spinner but must never clear an active local Analyze.
     useEffect(() => {
-        if (hydration.isAnalyzing) {
-            setIsAnalyzing(true);
-        isAnalyzingRef.current = true;
-        }
+        hydratedPendingRef.current = hydration.pending;
+        const next = localAnalyzeInFlightRef.current || hydration.isAnalyzing;
+        setIsAnalyzing(next);
+        isAnalyzingRef.current = next;
     }, [hydration.isAnalyzing]);
 
     // Initial Health Check to wake up Host and check for updates
@@ -754,6 +757,7 @@ const FAB: React.FC = () => {
                     setHasAutoAnalyzed(true); // Mark as handled immediately to prevent double-fire
                     // Immediate feedback: Set analyzing state so UI reflects it instantly
                     setIsAnalyzing(true);
+                    localAnalyzeInFlightRef.current = true;
         isAnalyzingRef.current = true;
                     showStatusBubble(t('analyzing'), 'default', 0); // Show analyzing status persistently until done
                     setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
@@ -772,6 +776,7 @@ const FAB: React.FC = () => {
                 setHasAutoAnalyzed(true);
                 // Immediate feedback: Set analyzing state so UI reflects it instantly
                 setIsAnalyzing(true);
+                localAnalyzeInFlightRef.current = true;
         isAnalyzingRef.current = true;
                 showStatusBubble(t('analyzing'), 'default', 0);
                 setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
@@ -786,6 +791,7 @@ const FAB: React.FC = () => {
              if (isInitialPending && hasValidIdentifier && rawContent.length > 20) {
                  setHasAutoAnalyzed(true);
                  setIsAnalyzing(true);
+                 localAnalyzeInFlightRef.current = true;
         isAnalyzingRef.current = true;
                  showStatusBubble(t('analyzing'), 'default', 0);
                  setTimeout(() => handleAnalyze(scrapedData), 100);
@@ -844,6 +850,7 @@ const FAB: React.FC = () => {
         });
 
         setIsAnalyzing(true);
+        localAnalyzeInFlightRef.current = true;
         isAnalyzingRef.current = true;
         const startTime = Date.now();
         // Snapshot the case this run was launched on. Used to detect mid-flight
@@ -1052,8 +1059,13 @@ const FAB: React.FC = () => {
             );
             trackEvent('Analyze Exception', { errorCode: 'unclassified' });
         } finally {
-            setIsAnalyzing(false);
-            isAnalyzingRef.current = false;
+            localAnalyzeInFlightRef.current = false;
+            const hydratedRequestStillActive = Boolean(
+                hydratedPendingRef.current
+                && hydratedPendingRef.current.requestId !== requestId,
+            );
+            setIsAnalyzing(hydratedRequestStillActive);
+            isAnalyzingRef.current = hydratedRequestStillActive;
             analyzeFlowEndedAtRef.current = Date.now();
             // Don't clear bubble here immediately if success/error, let the timeout handle it. 
             // If manual cancel or something else, we might need to check.

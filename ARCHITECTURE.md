@@ -131,7 +131,7 @@ DH explicitly assembles system content from:
    * true: `<Root>/.github/copilot-instructions.md` (Repository Instructions).
 3. Deterministic Session Info containing the UUIDv5 session name.
 
-Custom User Prompt (`%LOCALAPPDATA%\DynamicsHelper\user_prompt.md`) never enters system content. It remains PII-scrubbed user content on every Analyze. The only supported repository instruction path is the Root-level `.github/copilot-instructions.md`; DH does not reproduce the CLI's parent, agent-file, or path-specific discovery rules.
+Custom User Prompt (`%LOCALAPPDATA%\DynamicsHelper\user_prompt.md`) never enters system content. The Host rereads this canonical source for each Analyze, replaces/removes any Extension-provided `## User Prompt` section, and then PII-scrubs the final user content. The only supported repository instruction path is the Root-level `.github/copilot-instructions.md`; DH does not reproduce the CLI's parent, agent-file, or path-specific discovery rules.
 
 ### Snapshot and Refresh Boundary
 
@@ -149,7 +149,7 @@ Prompt resolution is fail-closed. Missing/unreadable Core, unreadable selected D
 
 Analyze errors may carry optional `error_code`. The Service Worker persists raw safe fallback text plus optional `LastAnalysis.errorCode`, preserving an inner Analyze code over an outer wrapper code. Immediate and rehydrated FAB display use the same render-time localization helper for known codes; immediate unknown-code fallbacks may include a safe UI prefix, while rehydrated unknown/legacy codes retain the raw stored fallback. Instruction contents, Custom User Prompt contents, and prompt-source paths are excluded from normal logs and telemetry.
 
-Service Worker persistence has two serialized ownership domains. `teamCatalog.ts` queues every Team Catalog manifest/item/ETag/timestamp commit and cache clear/reset, validates captured enabled/URL/team identity immediately before writes, and stamps cache identity for consumers. `analysisStore.ts` queues pending/result/reset mutations and uses deterministic per-analysis seen keys; hydration derives last, pending, and matching acknowledgment from one batched storage snapshot. Options issues Service Worker messages for both domains and does not mutate their storage keys directly.
+Service Worker persistence has two ownership domains. Team requests carry captured enabled/URL/team identity plus request generation; `teamCatalog.ts` synchronously invalidates older generations and queues validation with awaited manifest/item/ETag/timestamp/clear mutations. `analysisStore.ts` uses request-scoped pending and identity-scoped seen keys, so A/B remain independent across worker restarts; hydration derives last, newest matching pending, and acknowledgment from one snapshot. Options issues Service Worker messages and does not mutate owned keys directly.
 
 ### Product Scope
 

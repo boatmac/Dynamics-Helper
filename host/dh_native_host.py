@@ -161,7 +161,12 @@ _PROMPT_ERROR_MESSAGES = {
         "Repository Instructions cannot be read as UTF-8. "
         "Repair the file or disable Repository ONLY."
     ),
+    "user_prompt_unreadable": (
+        "Custom User Prompt cannot be read as UTF-8. Repair or replace it in Options."
+    ),
 }
+
+_USER_PROMPT_HEADING = re.compile(r"^## User Prompt[\t ]*\r?$", re.MULTILINE)
 
 
 @dataclass(frozen=True)
@@ -295,9 +300,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
-    logger.critical(
-        "Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback)
-    )
+    logger.critical("Uncaught host exception (%s).", exc_type.__name__)
 
 
 sys.excepthook = handle_exception
@@ -339,13 +342,13 @@ try:
     logger.info("Successfully imported copilot SDK.")
     log_emergency("Successfully imported copilot SDK.")
 except ImportError as e:
-    msg = f"Failed to import copilot SDK: {e}\n{traceback.format_exc()}"
+    msg = f"Failed to import Copilot SDK ({type(e).__name__})."
     logger.critical(msg)
     log_emergency(msg)
     # We exit here because the app cannot function without it
     sys.exit(1)
 except Exception as e:
-    msg = f"Unexpected error importing copilot SDK: {e}\n{traceback.format_exc()}"
+    msg = f"Unexpected Copilot SDK import failure ({type(e).__name__})."
     logger.critical(msg)
     log_emergency(msg)
     sys.exit(1)
@@ -368,7 +371,7 @@ try:
     logger.info("Successfully imported PiiScrubber and Updater.")
     log_emergency("Successfully imported PiiScrubber and Updater.")
 except ImportError as e:
-    msg = f"Failed to import PiiScrubber or Updater: {e}\n{traceback.format_exc()}"
+    msg = f"Failed to import Host dependency ({type(e).__name__})."
     logger.critical(msg)
     log_emergency(msg)
     sys.exit(1)
@@ -650,6 +653,28 @@ class NativeHost:
             return raw, raw.decode("utf-8")
         except UnicodeDecodeError as error:
             raise PromptSourceError(unreadable_error_code) from error
+
+    @classmethod
+    def _canonicalize_user_prompt(cls, context: str) -> str:
+        try:
+            with open(
+                os.path.join(USER_DATA_DIR, "user_prompt.md"),
+                "r",
+                encoding="utf-8",
+                newline="",
+            ) as stream:
+                current_prompt = stream.read()
+        except FileNotFoundError:
+            current_prompt = ""
+        except (OSError, UnicodeError) as error:
+            raise PromptSourceError("user_prompt_unreadable") from error
+
+        marker = _USER_PROMPT_HEADING.search(context)
+        without_prior = (context[: marker.start()] if marker else context).rstrip()
+        if not current_prompt.strip():
+            return without_prior
+        prefix = f"{without_prior}\n\n" if without_prior else ""
+        return f"{prefix}## User Prompt\n\n{current_prompt}"
 
     @staticmethod
     def _compute_prompt_fingerprint(
@@ -964,10 +989,7 @@ class NativeHost:
         try:
             await self.client.stop()
         except Exception as error:
-            logger.warning(
-                "Failed to stop old Copilot client cleanly (%s).",
-                type(error).__name__,
-            )
+            self._safe_sdk_error("stop old Copilot client", error)
         self._invalidate_active_session(clear_client=True)
 
     async def initialize_sdk(self):
@@ -1000,10 +1022,7 @@ class NativeHost:
             logger.info("Copilot Client started.")
 
         except Exception as error:
-            logger.error(
-                "Failed to initialize SDK client (%s).",
-                type(error).__name__,
-            )
+            self._safe_sdk_error("initialize Copilot client", error)
             self._invalidate_active_session(clear_client=True)
 
     # ------------------------------------------------------------------
@@ -1404,12 +1423,12 @@ class NativeHost:
 
         if legacy_prompt and not os.path.exists(user_prompt_path):
             try:
-                logger.info("Migrating legacy user_prompt to user_prompt.md")
+                logger.info("Migrating legacy Custom User Prompt.")
                 with open(user_prompt_path, "w", encoding="utf-8") as f:
                     f.write(legacy_prompt)
             except Exception as e:
                 logger.error(
-                    "Failed to migrate user_prompt: %s",
+                    "Failed to migrate Custom User Prompt (%s).",
                     type(e).__name__,
                 )
 
@@ -1421,7 +1440,7 @@ class NativeHost:
                     current_prompt_content = f.read()
             except Exception as e:
                 logger.error(
-                    "Failed to read user_prompt.md: %s",
+                    "Failed to read Custom User Prompt (%s).",
                     type(e).__name__,
                 )
 
@@ -1448,8 +1467,7 @@ class NativeHost:
         Auto-approves permissions to prevent headless hangs.
         Fallback safety net — if pre_tool_use hook doesn't catch it.
         """
-        logger.info(f"Permission requested (fallback handler): {request}")
-        logger.info("Auto-approving permission request to prevent headless hang.")
+        logger.info("Permission requested (fallback handler); auto-approving.")
         # SDK 1.0.5: PermissionRequestResult is a Union (annotation-only);
         # the concrete approval variant is PermissionDecisionApproveOnce().
         # (0.3.0 used PermissionRequestResult(kind="approve-once"), removed
@@ -1463,8 +1481,7 @@ class NativeHost:
         This eliminates the permission request overhead entirely, improving speed.
         The _permission_handler above serves as a fallback safety net.
         """
-        tool_name = hook_input.get("toolName", "unknown")
-        logger.info(f"Pre-tool-use hook: auto-allowing '{tool_name}'")
+        logger.info("Pre-tool-use hook: auto-allowing tool request.")
         return PreToolUseHookOutput(permissionDecision="allow")
 
     @staticmethod
@@ -1584,8 +1601,10 @@ class NativeHost:
 
     @staticmethod
     def _safe_sdk_error(operation: str, error: BaseException) -> str:
-        """Return an operation/type summary without serializing SDK text."""
-        return f"{operation} failed ({type(error).__name__})."
+        """Log and return one SDK error summary without serializing its text."""
+        summary = f"{operation} failed ({type(error).__name__})."
+        logger.error(summary)
+        return summary
 
     async def _refresh_session(
         self,
@@ -1631,10 +1650,6 @@ class NativeHost:
             self._invalidate_active_session()
             return False
         except Exception as error:
-            logger.error(
-                "Failed to build session config (%s).",
-                type(error).__name__,
-            )
             self.last_session_error = self._safe_sdk_error(
                 "build session config", error
             )
@@ -1666,10 +1681,6 @@ class NativeHost:
                 await self.client.start()
                 logger.info("Client re-initialized successfully.")
             except Exception as error:
-                logger.error(
-                    "Client re-initialization failed (%s).",
-                    type(error).__name__,
-                )
                 self.last_session_error = self._safe_sdk_error(
                     "start Copilot client", error
                 )
@@ -1734,16 +1745,9 @@ class NativeHost:
                 )
             except (OSError, ProcessExitedError) as error:
                 transport_error = error
-                logger.warning(
-                    "Session transport failed while resuming (%s). "
-                    "Re-initializing client.",
-                    type(error).__name__,
-                )
+                self._safe_sdk_error("resume Copilot session transport", error)
             except Exception as error:
-                logger.info(
-                    "Existing session could not be resumed (%s). Creating it.",
-                    type(error).__name__,
-                )
+                self._safe_sdk_error("resume Copilot session", error)
 
         try:
             if session_id:
@@ -1783,19 +1787,13 @@ class NativeHost:
             self._log_session_observability(self.session, "created")
             return True
         except (OSError, ProcessExitedError) as error:
-            logger.warning(
-                "Session transport failed (%s). Re-initializing client and retrying...",
-                type(error).__name__,
-            )
+            self._safe_sdk_error("create Copilot session transport", error)
             broken_client = self.client
             if broken_client:
                 try:
                     await broken_client.stop()
                 except Exception as stop_error:
-                    logger.warning(
-                        "Failed to stop broken Copilot client cleanly (%s).",
-                        type(stop_error).__name__,
-                    )
+                    self._safe_sdk_error("stop broken Copilot client", stop_error)
             self._invalidate_active_session(clear_client=True)
             try:
                 cli_path = self.find_copilot_cli()
@@ -1816,10 +1814,6 @@ class NativeHost:
                 await self.client.start()
                 logger.info("Client re-initialized after transport failure.")
             except Exception as retry_err:
-                logger.error(
-                    "Client re-initialization failed after transport error (%s).",
-                    type(retry_err).__name__,
-                )
                 self.last_session_error = self._safe_sdk_error(
                     "restart Copilot client", retry_err
                 )
@@ -1842,10 +1836,6 @@ class NativeHost:
                 self._log_session_observability(self.session, "created-after-retry")
                 return True
             except (OSError, ProcessExitedError) as retry_err:
-                logger.error(
-                    "Session retry transport failed (%s).",
-                    type(retry_err).__name__,
-                )
                 self.last_session_error = self._safe_sdk_error(
                     "retry Copilot session", retry_err
                 )
@@ -1854,27 +1844,16 @@ class NativeHost:
                     try:
                         await retry_client.stop()
                     except Exception as stop_error:
-                        logger.warning(
-                            "Failed to stop retry Copilot client cleanly (%s).",
-                            type(stop_error).__name__,
-                        )
+                        self._safe_sdk_error("stop retry Copilot client", stop_error)
                 self._invalidate_active_session(clear_client=True)
                 return False
             except Exception as retry_err:
-                logger.error(
-                    "Session retry after client restart failed (%s).",
-                    type(retry_err).__name__,
-                )
                 self.last_session_error = self._safe_sdk_error(
                     "retry Copilot session", retry_err
                 )
                 self._invalidate_active_session()
                 return False
         except Exception as error:
-            logger.error(
-                "Failed to create or refresh Copilot session (%s).",
-                type(error).__name__,
-            )
             self.last_session_error = self._safe_sdk_error(
                 "create Copilot session", error
             )
@@ -2110,7 +2089,7 @@ class NativeHost:
                 self.loop.call_soon_threadsafe(self.input_queue.put_nowait, message)
 
             except Exception as e:
-                logger.error(f"Error in input thread: {e}")
+                logger.error("Error in input thread (%s).", type(e).__name__)
                 self.running = False
                 break
 
@@ -2133,7 +2112,7 @@ class NativeHost:
             NATIVE_STDOUT.write(encoded_content)
             NATIVE_STDOUT.flush()
         except Exception as e:
-            logger.error(f"Error sending message: {e}")
+            logger.error("Error sending Native Messaging response (%s).", type(e).__name__)
 
     def send_progress(self, message):
         """Sends a progress update to the client."""
@@ -2204,14 +2183,10 @@ class NativeHost:
             return {"status": "success", "data": {"models": out}}
         except Exception as e:
             kind = self._classify_list_models_error(e)
-            logger.warning(
-                "list_models failed (%s, %s).",
-                kind,
-                type(e).__name__,
-            )
+            safe_error = self._safe_sdk_error("list Copilot models", e)
             return {
                 "status": "error",
-                "error": f"Copilot model listing failed ({type(e).__name__}).",
+                "error": safe_error,
                 "errorKind": kind,
             }
 
@@ -2223,6 +2198,9 @@ class NativeHost:
         case_number = payload.get("caseNumber", "Unspecified")
         payload_root_value = payload.get("rootPath")
         try:
+            text = self._canonicalize_user_prompt(
+                text if isinstance(text, str) else ""
+            )
             if isinstance(payload_root_value, str) and payload_root_value.strip():
                 payload_root_path = self._normalize_root_path(payload_root_value)
                 full_config = self._get_session_config(
@@ -2240,6 +2218,10 @@ class NativeHost:
                 bool(full_config.get("_use_workspace_only")),
             )
         except PromptSourceError as error:
+            logger.error(
+                "Failed to prepare Analyze prompt (%s).",
+                error.error_code,
+            )
             self._invalidate_active_session()
             return error.to_result()
         except ValueError as error:
@@ -2624,10 +2606,7 @@ class NativeHost:
             }
 
         except Exception as error:
-            logger.error(
-                "Copilot request failed during send (%s).",
-                type(error).__name__,
-            )
+            safe_error = self._safe_sdk_error("Copilot request", error)
             # Invalidate session on pipe/subprocess errors so next request reconnects
             error_text = str(error).lower()
             if (
@@ -2641,14 +2620,11 @@ class NativeHost:
                     try:
                         await dead_client.stop()
                     except Exception as stop_error:
-                        logger.warning(
-                            "Failed to stop dead Copilot client cleanly (%s).",
-                            type(stop_error).__name__,
-                        )
+                        self._safe_sdk_error("stop dead Copilot client", stop_error)
                 self._invalidate_active_session(clear_client=True)
             return {
                 "status": "error",
-                "error": f"Copilot request failed ({type(error).__name__}).",
+                "error": safe_error,
             }
 
     async def process_message(self, message):
@@ -2733,9 +2709,9 @@ class NativeHost:
                             response["status"] = "error"
                             response["error"] = "Event loop not available"
                     except Exception as e:
-                        logger.error(f"Update failed: {e}")
+                        logger.error("Update failed (%s).", type(e).__name__)
                         response["status"] = "error"
-                        response["error"] = str(e)
+                        response["error"] = "Update failed."
 
             elif action == "get_config":
                 # Return the effective configuration (merging defaults + user + workspace)
@@ -2764,6 +2740,7 @@ class NativeHost:
                 response["message"] = f"Unknown action: {action}"
 
         except Exception as e:
+            self._safe_sdk_error("process Host action", e)
             response["status"] = "error"
             response["error"] = "internal_error"
             response["message"] = (
@@ -2813,7 +2790,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        msg = f"Fatal error in main loop: {e}\n{traceback.format_exc()}"
+        msg = f"Fatal error in main loop ({type(e).__name__})."
         logger.critical(msg)
         log_emergency(msg)
         sys.exit(1)

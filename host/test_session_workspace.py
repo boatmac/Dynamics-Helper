@@ -195,6 +195,26 @@ class TestClientWorkspaceInitialization(unittest.IsolatedAsyncioTestCase):
             working_directory=root_path,
         )
 
+    async def test_workspace_change_stop_exception_never_exposes_raw_text(self):
+        marker = "WORKSPACE-STOP-SECRET-MARKER /private/prompt"
+        host = self._host_shell(r"C:\NewRoot", mock_refresh=False)
+        old_client = MagicMock()
+        old_client.stop = AsyncMock(side_effect=RuntimeError(marker))
+        host.client = old_client
+        host.client_working_directory = r"C:\OldRoot"
+        host.session = object()
+        host.current_session_id = "old-session"
+        host.current_case_id = "2601190030003106"
+        host.current_session_root_path = r"C:\OldRoot"
+
+        with self.assertLogs("dh", level="ERROR") as captured:
+            await host._discard_client_if_workspace_changed(r"C:\NewRoot")
+
+        observed = "\n".join(captured.output) + str(host.__dict__)
+        self.assertNotIn(marker, observed)
+        self.assertIsNone(host.client)
+        self.assertIsNone(host.session)
+
     async def test_oserror_retry_failure_clears_replacement_client_state(self):
         root_path = r"C:\MyWorkbench\MyCases"
         host = self._host_shell(root_path, mock_refresh=False)

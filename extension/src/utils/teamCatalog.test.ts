@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  beginTeamSyncGeneration,
   clearTeamBookmarks,
   clearTeamSelection,
   fetchManifest,
   fetchTeamBookmarks,
+  readTeamManifestState,
   syncTeamBookmarks,
+  writeTeamManifestForUrl,
 } from './teamCatalog'
 import {
   deferNextStorageSet,
+  deferNextStorageGet,
   getStorageSnapshot,
   installChromeMock,
   resetChromeMock,
@@ -131,6 +135,44 @@ describe('team catalog sync preference commit gate', () => {
     await sync
     expect(getStorageSnapshot()).not.toHaveProperty('dh_team_manifest')
     expect(getStorageSnapshot()).not.toHaveProperty('dh_team_manifest_etag')
+  })
+
+  it('rechecks generation after a deferred cache read before any fetch starts', async () => {
+    seedSelectedTeam()
+    const cacheRead = deferNextStorageGet('dh_team_items')
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+
+    const sync = syncTeamBookmarks({
+      enabled: true,
+      manifestUrl: SECRET_URL,
+      teamId: 'team-a',
+    })
+    beginTeamSyncGeneration()
+    await cacheRead.resolve(undefined)
+
+    await expect(sync).resolves.toMatchObject({ status: 'stale', items: [] })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('validates current preferences before a selected-team network fetch', async () => {
+    seedSelectedTeam()
+    seedStorage({
+      dh_prefs: {
+        teamCatalogEnabled: true,
+        teamManifestUrl: SECRET_URL,
+        team: 'team-b',
+      },
+    })
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(syncTeamBookmarks({
+      enabled: true,
+      manifestUrl: SECRET_URL,
+      teamId: 'team-a',
+    })).resolves.toMatchObject({ status: 'stale', items: [] })
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   const BOOKMARK_URL = 'https://catalog.example/team-a.json?sig=BOOKMARK-SECRET'
@@ -308,6 +350,57 @@ describe('team catalog sync preference commit gate', () => {
 
     expect(getStorageSnapshot()).not.toHaveProperty('dh_team_manifest')
     expect(getStorageSnapshot()).not.toHaveProperty('dh_team_manifest_etag')
+  })
+
+  it('serializes a deferred manifest-only set before a queued reset clear', async () => {
+    seedSelectedTeam()
+    const generation = beginTeamSyncGeneration()
+    const manifestWrite = deferNextStorageSet('dh_team_manifest')
+    const identity = {
+      enabled: true,
+      manifestUrl: SECRET_URL,
+      teamId: 'team-a',
+    }
+    const write = writeTeamManifestForUrl(
+      identity,
+      { version: 2, teams: [] },
+      'manifest-new',
+      generation,
+    )
+    await vi.waitFor(() => expect(
+      (chrome.storage.local.set as any).mock.calls.some(
+        ([value]: any[]) => value?.dh_team_manifest?.version === 2,
+      ),
+    ).toBe(true))
+    seedStorage({ dh_prefs: { teamCatalogEnabled: false, teamManifestUrl: '', team: '' } })
+    const reset = clearTeamBookmarks()
+    await manifestWrite.resolve(undefined)
+    await Promise.all([write, reset])
+
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team_manifest')
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team_manifest_etag')
+  })
+
+  it('marks a manifest pre-read stale when preferences change before it resolves', async () => {
+    seedSelectedTeam()
+    const generation = beginTeamSyncGeneration()
+    const delayedRead = deferNextStorageGet('dh_team_manifest_etag')
+    const identity = {
+      enabled: true,
+      manifestUrl: SECRET_URL,
+      teamId: 'team-a',
+    }
+    const read = readTeamManifestState(identity, generation)
+    seedStorage({
+      dh_prefs: {
+        teamCatalogEnabled: true,
+        teamManifestUrl: SECRET_URL,
+        team: 'team-b',
+      },
+    })
+    await delayedRead.resolve(undefined)
+
+    await expect(read).resolves.toEqual({ current: false, etag: undefined })
   })
 
   it('does not resurrect changed bookmarks when a team switch queues behind the deferred write', async () => {

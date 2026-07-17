@@ -62,7 +62,8 @@ export const MAX_PENDING_AGE_MS = 2 * 60 * 60 * 1000;
 export const MAX_PENDING_DISPLAY_AGE_MS = 15 * 60 * 1000;
 
 const KEY_LAST = 'dh_last_analysis';
-const KEY_PENDING = 'dh_pending_analysis';
+const LEGACY_KEY_PENDING = 'dh_pending_analysis';
+export const PENDING_ANALYSIS_KEY_PREFIX = 'dh_pending_analysis:';
 const LEGACY_KEY_SEEN = 'dh_seen_analysis';
 export const SEEN_ANALYSIS_KEY_PREFIX = 'dh_seen_analysis:';
 
@@ -82,6 +83,10 @@ export function seenAnalysisKey(identity: LastAnalysisIdentity): string {
     return `${SEEN_ANALYSIS_KEY_PREFIX}legacy:${encodedCase}:${String(identity.timestamp ?? '')}`;
 }
 
+export function pendingAnalysisKey(requestId: string): string {
+    return `${PENDING_ANALYSIS_KEY_PREFIX}${encodeURIComponent(requestId)}`;
+}
+
 export interface AnalysisSnapshot {
     last: LastAnalysis | null;
     pending: PendingAnalysis | null;
@@ -89,10 +94,26 @@ export interface AnalysisSnapshot {
 }
 
 /** One storage generation for result, pending, and the current result's ack. */
-export async function getAnalysisSnapshot(): Promise<AnalysisSnapshot> {
+export async function getAnalysisSnapshot(caseNumber?: string): Promise<AnalysisSnapshot> {
     const stored = await chrome.storage.local.get(null);
     const last = (stored[KEY_LAST] as LastAnalysis | undefined) ?? null;
-    const pending = (stored[KEY_PENDING] as PendingAnalysis | undefined) ?? null;
+    const pendingCandidates = Object.entries(stored)
+        .filter(([key]) => key.startsWith(PENDING_ANALYSIS_KEY_PREFIX))
+        .map(([, value]) => value as PendingAnalysis)
+        .filter(value => value
+            && typeof value.requestId === 'string'
+            && (!caseNumber || value.caseNumber === caseNumber));
+    const legacyPending = stored[LEGACY_KEY_PENDING] as PendingAnalysis | undefined;
+    if (
+        legacyPending?.requestId
+        && (!caseNumber || legacyPending.caseNumber === caseNumber)
+    ) pendingCandidates.push(legacyPending);
+    const pending = pendingCandidates.reduce<PendingAnalysis | null>(
+        (newest, candidate) => (
+            !newest || candidate.startTime > newest.startTime ? candidate : newest
+        ),
+        null,
+    );
     const identity = last ? getLastAnalysisIdentity(last) : null;
     const seen = identity
         ? (
@@ -177,21 +198,24 @@ export async function getSeenAnalysis(
 
 /** Read the current dh_pending_analysis, or null if absent. */
 export async function getPendingAnalysis(): Promise<PendingAnalysis | null> {
-    const result = await chrome.storage.local.get(KEY_PENDING);
-    return (result[KEY_PENDING] as PendingAnalysis | undefined) ?? null;
+    return (await getAnalysisSnapshot()).pending;
 }
 
-/** Write dh_pending_analysis. */
+/** Write one request-scoped pending marker. */
 export async function setPendingAnalysis(value: PendingAnalysis): Promise<void> {
     await queueAnalysisMutation(async () => {
-        await chrome.storage.local.set({ [KEY_PENDING]: value });
+        await chrome.storage.local.set({ [pendingAnalysisKey(value.requestId)]: value });
     });
 }
 
-/** Unconditionally clear dh_pending_analysis. */
+/** Clear all pending markers, including the legacy singleton. */
 export async function clearPendingAnalysis(): Promise<void> {
     await queueAnalysisMutation(async () => {
-        await chrome.storage.local.remove(KEY_PENDING);
+        const stored = await chrome.storage.local.get(null);
+        const keys = Object.keys(stored).filter(key =>
+            key === LEGACY_KEY_PENDING || key.startsWith(PENDING_ANALYSIS_KEY_PREFIX),
+        );
+        if (keys.length > 0) await chrome.storage.local.remove(keys);
     });
 }
 
@@ -293,26 +317,38 @@ export async function recordAnalyzeError(
 }
 
 async function setLastAnalysisInMutation(value: LastAnalysis): Promise<void> {
-    const stored = await chrome.storage.local.get(KEY_PENDING);
-    const pending = (stored[KEY_PENDING] as PendingAnalysis | undefined) ?? null;
+    const requestKey = value.requestId ? pendingAnalysisKey(value.requestId) : null;
+    const stored = await chrome.storage.local.get(null);
     await chrome.storage.local.set({ [KEY_LAST]: value });
+    const expiredKeys = Object.entries(stored)
+        .filter(([key, candidate]) => (
+            key.startsWith(PENDING_ANALYSIS_KEY_PREFIX)
+            && candidate
+            && (Date.now() - (candidate as PendingAnalysis).startTime) > MAX_PENDING_AGE_MS
+        ))
+        .map(([key]) => key);
+    if (requestKey && Object.hasOwn(stored, requestKey)) expiredKeys.push(requestKey);
+    const legacy = stored[LEGACY_KEY_PENDING] as PendingAnalysis | undefined;
     if (
-        pending
+        legacy
         && (
-            pending.requestId === value.requestId
-            || (Date.now() - pending.startTime) > MAX_PENDING_AGE_MS
+            legacy.requestId === value.requestId
+            || (Date.now() - legacy.startTime) > MAX_PENDING_AGE_MS
         )
-    ) {
-        await chrome.storage.local.remove(KEY_PENDING);
+    ) expiredKeys.push(LEGACY_KEY_PENDING);
+    if (expiredKeys.length > 0) {
+        await chrome.storage.local.remove([...new Set(expiredKeys)]);
     }
 }
 
 async function clearPendingIfMatchesInMutation(requestId: string): Promise<void> {
-    const stored = await chrome.storage.local.get(KEY_PENDING);
-    const current = (stored[KEY_PENDING] as PendingAnalysis | undefined) ?? null;
-    if (current?.requestId === requestId) {
-        await chrome.storage.local.remove(KEY_PENDING);
-    }
+    const requestKey = pendingAnalysisKey(requestId);
+    const stored = await chrome.storage.local.get([requestKey, LEGACY_KEY_PENDING]);
+    const keys: string[] = [];
+    if (Object.hasOwn(stored, requestKey)) keys.push(requestKey);
+    const legacy = stored[LEGACY_KEY_PENDING] as PendingAnalysis | undefined;
+    if (legacy?.requestId === requestId) keys.push(LEGACY_KEY_PENDING);
+    if (keys.length > 0) await chrome.storage.local.remove(keys);
 }
 
 /**
@@ -334,7 +370,8 @@ export async function resetAnalysisState(): Promise<void> {
         const stored = await chrome.storage.local.get(null);
         const keys = Object.keys(stored).filter(key =>
             key === KEY_LAST
-            || key === KEY_PENDING
+            || key === LEGACY_KEY_PENDING
+            || key.startsWith(PENDING_ANALYSIS_KEY_PREFIX)
             || key === LEGACY_KEY_SEEN
             || key.startsWith(SEEN_ANALYSIS_KEY_PREFIX),
         );

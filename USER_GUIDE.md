@@ -88,7 +88,7 @@ The extension uses configuration files stored in your User directory. This ensur
 
 * **`config.json`**: Controls MCP servers, skills, and model settings.
 * **`copilot-instructions.md`**: Your **DH-specific Instructions**. They apply only to DH sessions when Repository ONLY is not effective.
-* **`user_prompt.md`**: The Host backup for the **Custom User Prompt** included with every Analyze request.
+* **`user_prompt.md`**: The canonical Host source for the **Custom User Prompt**. The Host rereads it for every Analyze.
 * **`native_host.log`**: The log file for troubleshooting. Log files rotate automatically at 5 MB (up to 3 backups: `.log.1`, `.log.2`, `.log.3`), keeping total disk usage under ~20 MB.
 
 ### The Options Page
@@ -144,7 +144,7 @@ If the model list can't be fetched (e.g. your GitHub login expired), DH shows an
 In **Settings → Copilot Configuration**, you can customize two Markdown text fields with different scopes:
 
 * **DH-specific Instructions**: System-role rules used across DH analyses when Repository ONLY is not effective. Use this for DH-only preferences such as response style or analysis emphasis. The canonical file is `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`.
-* **Custom User Prompt**: User-role content appended to every Analyze request and PII-scrubbed with the case payload. Use it for recurring questions such as "Provide a root cause analysis and mitigation steps." The Host backup is `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md`.
+* **Custom User Prompt**: User-role content appended once and PII-scrubbed with the case payload. Use it for recurring questions such as "Provide a root cause analysis and mitigation steps." Options previews the text, while `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md` is authoritative: the Host rereads it on every Analyze and replaces any stale prompt section in the browser payload.
 
 Both fields support Markdown formatting. Click **Preview** above either textarea to see rendered output and **Edit** to return to raw text. Both panes can be resized. Clearing DH-specific Instructions is a real saved operation: an explicit empty value truncates its file. Unrelated setting changes omit that field and leave the file unchanged.
 

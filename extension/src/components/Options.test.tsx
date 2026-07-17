@@ -638,10 +638,70 @@ describe('Options selected-team refresh generation', () => {
     expect(document.body.textContent).not.toContain('Stale Team')
     expect(document.body.textContent).not.toContain('STALE ONE')
     expect(document.body.textContent).not.toContain('OLD TEAM FAILURE')
+    expect(document.body.textContent).toContain('0 items')
+    expect(document.body.textContent).toContain('Never synced')
+  })
+
+  it.each(['failed', 'skipped', 'stale'] as const)(
+    'clears team A immediately and never restores it when team B returns %s',
+    async syncStatus => {
+      const response = deferNextResponse('SYNC_TEAM_CATALOG')
+      await hydrateTeamOptions()
+      const teamSelect = screen.getByRole('combobox') as HTMLSelectElement
+
+      fireEvent.change(teamSelect, { target: { value: 'team-b' } })
+
+      expect(document.body.textContent).toContain('0 items')
+      expect(document.body.textContent).toContain('Never synced')
+      expect(document.body.textContent).not.toContain('Cached')
+      await act(async () => response.resolve({
+        status: syncStatus === 'failed' ? 'error' : 'success',
+        error: syncStatus === 'failed' ? 'CURRENT B FAILURE' : undefined,
+        errorKind: syncStatus === 'failed' ? 'network' : undefined,
+        data: {
+          syncStatus,
+          identity: {
+            enabled: true,
+            manifestUrl: 'https://example.com/manifest.json',
+            teamId: 'team-b',
+          },
+          requestGeneration: expect.anything(),
+        },
+      }))
+
+      expect(document.body.textContent).toContain('0 items')
+      expect(document.body.textContent).toContain('Never synced')
+      expect(document.body.textContent).not.toContain('Cached')
+    },
+  )
+
+  it('renders valid team B items only after a current committed response', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'team-b' } })
+    const syncMessage = await waitFor(() => {
+      const message = chromeMockSpies.sendMessage.mock.calls
+        .map(call => call[0] as any)
+        .find(value => value?.type === 'SYNC_TEAM_CATALOG'
+          && value.payload?.identity?.teamId === 'team-b')
+      if (!message) throw new Error('team B sync not dispatched yet')
+      return message
+    })
+
+    await act(async () => response.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'committed',
+        identity: syncMessage.payload.identity,
+        requestGeneration: syncMessage.payload.requestGeneration,
+        items: [{ type: 'link', label: 'TEAM B CURRENT' }],
+        syncedAt: '2026-07-17T02:00:00.000Z',
+      },
+    }))
+
     expect(document.body.textContent).toContain('1 items')
-    expect(document.body.textContent).toContain(
-      new Date('2026-01-01T00:00:00.000Z').toLocaleString(),
-    )
+    fireEvent.click(document.querySelector('[data-section="bookmarks"]') as HTMLButtonElement)
+    expect(document.body.textContent).toContain('TEAM B CURRENT')
   })
 
   it('ignores a stale refresh result after Reset without restoring UI state', async () => {
@@ -754,7 +814,10 @@ describe('Options selected-team refresh generation', () => {
 
     await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.some(
       call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
-        && (call[0] as any)?.payload?.teamId === 'team-a',
+        && (call[0] as any)?.payload?.identity?.enabled === true
+        && (call[0] as any)?.payload?.identity?.manifestUrl === 'https://example.com/manifest.json'
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-a'
+        && Number.isInteger((call[0] as any)?.payload?.requestGeneration),
     )).toBe(true))
     expect(teamCatalogMock.syncTeamBookmarks).not.toHaveBeenCalled()
     await act(async () => response.resolve({
@@ -789,7 +852,7 @@ describe('Options selected-team refresh generation', () => {
     await act(async () => mirror.resolve(undefined))
     await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.some(
       call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
-        && (call[0] as any)?.payload?.teamId === 'team-b',
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
     )).toBe(true))
     await act(async () => response.resolve({
       status: 'success',
@@ -802,6 +865,34 @@ describe('Options selected-team refresh generation', () => {
         },
       },
     }))
+  })
+
+  it('dispatches Reset only after the default dh_prefs mirror callback commits', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await hydrateTeamOptions()
+      const mirror = deferNextStorageSet('dh_prefs')
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+      expect(chromeMockSpies.sendMessage.mock.calls.some(
+        call => (call[0] as any)?.type === 'RESET_EXTENSION_STATE',
+      )).toBe(false)
+
+      await act(async () => mirror.resolve(undefined))
+      const resetMessage = await waitFor(() => chromeMockSpies.sendMessage.mock.calls
+        .map(call => call[0] as any)
+        .find(message => message?.type === 'RESET_EXTENSION_STATE'))
+      expect(resetMessage.payload.identity).toEqual({
+        enabled: false,
+        manifestUrl: '',
+        teamId: '',
+      })
+      expect(Number.isInteger(resetMessage.payload.requestGeneration)).toBe(true)
+      await act(async () => resetResponse.resolve({ status: 'success' }))
+    } finally {
+      confirm.mockRestore()
+    }
   })
 
   it('does not timestamp a current skipped response', async () => {
@@ -845,7 +936,7 @@ describe('Options selected-team refresh generation', () => {
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'team-b' } })
     await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.some(
       call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
-        && (call[0] as any)?.payload?.teamId === 'team-b',
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
     )).toBe(true))
     await act(async () => response.resolve({
       status: 'error',
@@ -912,7 +1003,7 @@ describe('Options selected-team refresh generation', () => {
     fireEvent.change(teamSelect, { target: { value: 'team-b' } })
     await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.some(
       call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
-        && (call[0] as any)?.payload?.teamId === 'team-b',
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
     )).toBe(true))
     fireEvent.change(teamSelect, { target: { value: 'team-a' } })
     await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(
@@ -955,7 +1046,7 @@ describe('Options selected-team refresh generation', () => {
     fireEvent.change(teamSelect, { target: { value: 'team-b' } })
     await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.some(
       call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
-        && (call[0] as any)?.payload?.teamId === 'team-b',
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
     )).toBe(true))
     fireEvent.change(teamSelect, { target: { value: 'team-a' } })
     await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(

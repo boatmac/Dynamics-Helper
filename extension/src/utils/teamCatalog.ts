@@ -234,7 +234,7 @@ export async function fetchTeamBookmarks(
 export type SyncStatus = 'committed' | 'unchanged' | 'failed' | 'skipped' | 'stale';
 
 export interface TeamSyncIdentity {
-    enabled: true;
+    enabled: boolean;
     manifestUrl: string;
     teamId: string;
 }
@@ -266,6 +266,10 @@ export function beginTeamSyncGeneration(): number {
     return teamSyncGeneration;
 }
 
+export function teamSyncGenerationIsCurrent(expectedGeneration: number): boolean {
+    return expectedGeneration === teamSyncGeneration;
+}
+
 function queueTeamMutation<T>(mutation: () => Promise<T>): Promise<T> {
     const run = teamMutationQueue.then(mutation, mutation);
     teamMutationQueue = run.then(() => undefined, () => undefined);
@@ -284,16 +288,31 @@ function removeStorage(keys: readonly string[]): Promise<void> {
     return new Promise(resolve => chrome.storage.local.remove([...keys], resolve));
 }
 
-async function currentIdentityMatches(identity: TeamSyncIdentity): Promise<boolean> {
+function storedIdentityMatches(
+    prefs: {
+        teamCatalogEnabled?: boolean;
+        teamManifestUrl?: string;
+        team?: string;
+    } | undefined,
+    identity: TeamSyncIdentity,
+): boolean {
+    return prefs?.teamCatalogEnabled === identity.enabled
+        && (prefs.teamManifestUrl || '') === identity.manifestUrl
+        && (prefs.team || '') === identity.teamId;
+}
+
+export async function currentTeamIdentityMatches(
+    identity: TeamSyncIdentity,
+    expectedGeneration: number,
+): Promise<boolean> {
     const current = await readStorage('dh_prefs');
+    if (!teamSyncGenerationIsCurrent(expectedGeneration)) return false;
     const prefs = current.dh_prefs as {
         teamCatalogEnabled?: boolean;
         teamManifestUrl?: string;
         team?: string;
     } | undefined;
-    return prefs?.teamCatalogEnabled === identity.enabled
-        && prefs.teamManifestUrl === identity.manifestUrl
-        && prefs.team === identity.teamId;
+    return storedIdentityMatches(prefs, identity);
 }
 
 async function commitForIdentity(
@@ -302,64 +321,47 @@ async function commitForIdentity(
     values: Record<string, unknown>,
 ): Promise<boolean> {
     return queueTeamMutation(async () => {
-        if (expectedGeneration !== teamSyncGeneration) return false;
-        if (!await currentIdentityMatches(identity)) return false;
+        if (!teamSyncGenerationIsCurrent(expectedGeneration)) return false;
+        if (!await currentTeamIdentityMatches(identity, expectedGeneration)) return false;
+        if (!teamSyncGenerationIsCurrent(expectedGeneration)) return false;
         await setStorage(values);
         return true;
     });
 }
 
 export async function writeTeamManifestForUrl(
-    manifestUrl: string,
+    identity: TeamSyncIdentity,
     manifest: TeamManifest,
     etag: string,
     expectedGeneration: number,
 ): Promise<boolean> {
-    return queueTeamMutation(async () => {
-        if (expectedGeneration !== teamSyncGeneration) return false;
-        const current = await readStorage('dh_prefs');
-        const prefs = current.dh_prefs as {
-            teamCatalogEnabled?: boolean;
-            teamManifestUrl?: string;
-        } | undefined;
-        if (
-            prefs?.teamCatalogEnabled !== true
-            || prefs.teamManifestUrl !== manifestUrl
-        ) {
-            return false;
-        }
-        await setStorage({
-            dh_team_manifest: manifest,
-            dh_team_manifest_etag: etag,
-            dh_team_manifest_url: manifestUrl,
-        });
-        return true;
+    return commitForIdentity(identity, expectedGeneration, {
+        dh_team_manifest: manifest,
+        dh_team_manifest_etag: etag,
+        dh_team_manifest_url: identity.manifestUrl,
     });
 }
 
-export async function readTeamManifestState(): Promise<{
-    prefs: {
-        teamCatalogEnabled?: boolean;
-        teamManifestUrl?: string;
-    };
+export async function readTeamManifestState(
+    identity: TeamSyncIdentity,
+    expectedGeneration: number,
+): Promise<{
     etag?: string;
-    generation: number;
+    current: boolean;
 }> {
-    return queueTeamMutation(async () => {
-        const data = await readStorage([
-            'dh_prefs',
-            'dh_team_manifest_etag',
-            'dh_team_manifest_url',
-        ]);
-        const prefs = data.dh_prefs || {};
-        return {
-            prefs,
-            etag: data.dh_team_manifest_url === prefs.teamManifestUrl
-                ? data.dh_team_manifest_etag as string | undefined
-                : undefined,
-            generation: beginTeamSyncGeneration(),
-        };
-    });
+    const data = await readStorage([
+        'dh_team_manifest_etag',
+        'dh_team_manifest_url',
+    ]);
+    const current = teamSyncGenerationIsCurrent(expectedGeneration);
+    if (!current) return { current: false };
+    const identityCurrent = await currentTeamIdentityMatches(identity, expectedGeneration);
+    return {
+        etag: identityCurrent && data.dh_team_manifest_url === identity.manifestUrl
+            ? data.dh_team_manifest_etag as string | undefined
+            : undefined,
+        current: identityCurrent,
+    };
 }
 
 /**
@@ -379,15 +381,20 @@ export async function readTeamManifestState(): Promise<{
  * SAS token without warning the user.
  */
 export async function syncTeamBookmarks(
-    manifestUrl: string,
-    teamId: string,
+    identityOrUrl: TeamSyncIdentity | string,
+    teamIdOrGeneration?: string | number,
+    capturedGeneration?: number,
 ): Promise<SyncResult> {
-    const generation = beginTeamSyncGeneration();
-    const identity: TeamSyncIdentity = {
-        enabled: true,
-        manifestUrl,
-        teamId,
-    };
+    const identity: TeamSyncIdentity = typeof identityOrUrl === 'string'
+        ? {
+            enabled: true,
+            manifestUrl: identityOrUrl,
+            teamId: typeof teamIdOrGeneration === 'string' ? teamIdOrGeneration : '',
+        }
+        : identityOrUrl;
+    const generation = capturedGeneration
+        ?? (typeof teamIdOrGeneration === 'number' ? teamIdOrGeneration : beginTeamSyncGeneration());
+    const { manifestUrl, teamId } = identity;
     if (!manifestUrl || !teamId) return { status: 'skipped', identity, items: [] };
 
     const cache = await new Promise<any>((resolve) => {
@@ -402,6 +409,12 @@ export async function syncTeamBookmarks(
             resolve,
         );
     });
+    if (!teamSyncGenerationIsCurrent(generation)) {
+        return { status: 'stale', identity, items: [] };
+    }
+    if (!await currentTeamIdentityMatches(identity, generation)) {
+        return { status: 'stale', identity, items: [] };
+    }
     const cacheMatchesUrl = cache.dh_team_manifest_url === manifestUrl;
 
     const cachedItemsForTeam = (): any[] =>
@@ -409,7 +422,7 @@ export async function syncTeamBookmarks(
             ? cache.dh_team_items
             : [];
     const staleResult = (): SyncResult => ({ status: 'stale', identity, items: [] });
-    const preferencesStillMatch = () => currentIdentityMatches(identity);
+    const preferencesStillMatch = () => currentTeamIdentityMatches(identity, generation);
 
     // Step 1: refresh the manifest
     const manifestResult = await fetchManifest(
@@ -547,9 +560,20 @@ export async function syncTeamBookmarks(
  * Use this when the user picks "No team" from the dropdown.
  */
 export async function clearTeamSelection(): Promise<void> {
-    beginTeamSyncGeneration();
-    await queueTeamMutation(async () => {
+    const generation = beginTeamSyncGeneration();
+    await clearTeamSelectionAtGeneration(generation);
+}
+
+export async function clearTeamSelectionAtGeneration(
+    generation: number,
+    identity?: TeamSyncIdentity,
+): Promise<boolean> {
+    return queueTeamMutation(async () => {
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
+        if (identity && !await currentTeamIdentityMatches(identity, generation)) return false;
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
         await removeStorage(['dh_team', 'dh_team_items', 'dh_team_etag', 'dh_team_synced']);
+        return true;
     });
 }
 
@@ -560,8 +584,36 @@ export async function clearTeamSelection(): Promise<void> {
  * - the manifest survives and the dropdown remains populated.
  */
 export async function clearTeamBookmarks(): Promise<void> {
-    beginTeamSyncGeneration();
-    await queueTeamMutation(async () => {
+    const generation = beginTeamSyncGeneration();
+    await clearTeamBookmarksAtGeneration(generation);
+}
+
+export async function clearTeamBookmarksAtGeneration(
+    generation: number,
+    identity?: TeamSyncIdentity,
+): Promise<boolean> {
+    return queueTeamMutation(async () => {
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
+        if (identity && !await currentTeamIdentityMatches(identity, generation)) return false;
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
         await removeStorage(TEAM_CACHE_KEYS);
+        return true;
+    });
+}
+
+export async function clearTeamSelectionIfChanged(
+    identity: TeamSyncIdentity,
+    generation: number,
+): Promise<boolean> {
+    return queueTeamMutation(async () => {
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
+        if (!await currentTeamIdentityMatches(identity, generation)) return false;
+        const cached = await readStorage('dh_team');
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
+        if (cached.dh_team && cached.dh_team !== identity.teamId) {
+            if (!await currentTeamIdentityMatches(identity, generation)) return false;
+            await removeStorage(['dh_team', 'dh_team_items', 'dh_team_etag', 'dh_team_synced']);
+        }
+        return true;
     });
 }

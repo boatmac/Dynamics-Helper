@@ -28,14 +28,15 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Service Worker queues now serialize Team Catalog cache/reset commits and analysis pending/result/reset mutations; stale cache identities are rejected by consumers.
 - Analysis acknowledgments use independent per-result keys, and hydration reads one coherent storage snapshot.
 - SDK session/model failures expose safe operation and exception type only; raw SDK/CLI exception text is not logged, returned, or persisted.
+- Every Team Catalog request carries captured enabled/URL/team identity and a token; stale Reset, no-team, manifest-only, and selected-team requests perform no network or cache mutation.
+- Custom User Prompt is canonicalized again by the Host from `user_prompt.md` on every Analyze before PII scrubbing; stale payload sections are replaced or removed.
+- Pending analyses use request-scoped storage keys, so concurrent cases and acknowledgments no longer compete across Service Worker restarts.
+- Hydrated pending and local in-flight Analyze state are reconciled independently, preventing stuck or prematurely-cleared spinners.
+- Permission and pre-tool approval logs omit request representations, tool names, paths, commands, URLs, and contents.
 
 ## Verification
 
-- Third review fix implementation: `67fb4bb` (`fix(review): serialize shared storage ownership`); the evidence-only commit follows it.
-- Isolated Host: **123/123 focused** and **187/187 full** tests passed.
-- Extension: **143/143 focused across 6 files** and **198/198 full across 16 files** passed.
-- Production build passed with **2,216 modules transformed** and **13 artifacts** listed.
-- Isolated Python compileall, `git diff --check`, static ownership/secrecy scans, and break-and-fail mutations passed.
+- Fourth review implementation/evidence commits and exact final totals are recorded in `.superpowers/sdd/fourth-final-review-fix-report.md`.
 - Optional authenticated marker smoke was not run because safe model-backed user/session isolation was not available; it remains a non-gating check.
 - The controller's broad whole-branch review remains pending after this fix wave.
 

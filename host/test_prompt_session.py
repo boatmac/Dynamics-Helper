@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from copilot._jsonrpc import ProcessExitedError
 
+import host.dh_native_host as dhm
 from host.dh_native_host import NativeHost, PromptSnapshot, PromptSourceError
 
 
@@ -264,6 +265,29 @@ class TestPromptSessionKwargs(
         self.assertFalse(success)
         observed = "\n".join(captured.output) + (self.host.last_session_error or "")
         self.assertNotIn(marker, observed)
+
+    def test_permission_handler_never_logs_request_repr_or_secret_fields(self):
+        marker = "PERMISSION-SECRET-MARKER /private/path command=https://secret"
+
+        class SecretRequest:
+            kind = marker
+            tool_name = marker
+
+            def __repr__(self):
+                return f"SecretRequest({marker})"
+
+        with self.assertLogs("dh", level="INFO") as captured:
+            approval = self.host._permission_handler(SecretRequest(), object())
+
+        self.assertIsNotNone(approval)
+        self.assertNotIn(marker, "\n".join(captured.output))
+
+    def test_pre_tool_hook_never_logs_arbitrary_tool_name(self):
+        marker = "TOOL-NAME-SECRET-MARKER /private/path --token=secret"
+        with self.assertLogs("dh", level="INFO") as captured:
+            result = self.host._pre_tool_use_hook({"toolName": marker}, object())
+        self.assertEqual(result["permissionDecision"], "allow")
+        self.assertNotIn(marker, "\n".join(captured.output))
 
     async def test_retry_exception_never_exposes_raw_text(self):
         marker = "RETRY-SECRET-MARKER /private/prompt"
@@ -535,6 +559,29 @@ class TestPromptFingerprintLifecycle(
         self.active_session.send_and_wait.assert_awaited_once()
         self.replacement_session.send_and_wait.assert_awaited_once()
 
+    async def test_session_not_found_marker_is_inspected_but_never_observed(self):
+        marker = "SESSION-NOT-FOUND-SECRET-MARKER /private/prompt"
+        response = SimpleNamespace(
+            type="assistant.message",
+            data=SimpleNamespace(content="analysis complete"),
+        )
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        self.active_session.send_and_wait.side_effect = Exception(
+            f"Session not found -32603 {marker}"
+        )
+        self.replacement_session.send_and_wait.return_value = response
+
+        with self.assertLogs("dh", level="INFO") as captured:
+            result = await self.host.handle_analyze_error(self.payload)
+
+        observed = str(result) + "\n".join(captured.output) + (self.host.last_session_error or "")
+        for root, _dirs, files in os.walk(self.root):
+            for filename in files:
+                with open(os.path.join(root, filename), "r", encoding="utf-8") as stream:
+                    observed += stream.read()
+        self.assertNotIn(marker, observed)
+        self.assertEqual(result["status"], "success")
+
     async def test_process_exit_clears_client_and_next_analyze_reinitializes(self):
         self.host._refresh_session = NativeHost._refresh_session.__get__(
             self.host,
@@ -675,6 +722,102 @@ class TestPromptFingerprintLifecycle(
         )["content"]
         self.assertIn("CUSTOM-USER-PROMPT", sent_prompt)
         self.assertNotIn("CUSTOM-USER-PROMPT", system_message)
+
+    async def test_PS_I9_host_appends_canonical_file_prompt_when_payload_has_none(self):
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        self.payload["text"] = "CASE BODY"
+        prompt_path = os.path.join(self.root, "user_prompt.md")
+        with open(prompt_path, "w", encoding="utf-8", newline="") as stream:
+            stream.write("HOST FILE PROMPT")
+        with patch.object(dhm, "USER_DATA_DIR", self.root):
+            await self.host.handle_analyze_error(self.payload)
+        sent_prompt = self.host.session.send_and_wait.await_args.args[0]
+        self.assertIn("CASE BODY\n\n## User Prompt\n\nHOST FILE PROMPT", sent_prompt)
+        self.assertEqual(sent_prompt.count("HOST FILE PROMPT"), 1)
+
+    async def test_PS_I9_file_prompt_is_the_user_turn_when_payload_text_is_empty(self):
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        self.payload["text"] = None
+        with open(os.path.join(self.root, "user_prompt.md"), "w", encoding="utf-8") as stream:
+            stream.write("FILE-ONLY PROMPT")
+        with patch.object(dhm, "USER_DATA_DIR", self.root):
+            result = await self.host.handle_analyze_error(self.payload)
+        self.assertEqual(result["status"], "success")
+        sent_prompt = self.host.session.send_and_wait.await_args.args[0]
+        self.assertTrue(sent_prompt.startswith("## User Prompt\n\nFILE-ONLY PROMPT"))
+        self.assertEqual(sent_prompt.count("FILE-ONLY PROMPT"), 1)
+
+    async def test_PS_I9_host_replaces_stale_and_duplicate_payload_sections(self):
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        self.payload["text"] = (
+            "CASE BODY\n\n## User Prompt\n\nSTALE ONE\n\n"
+            "## User Prompt\n\nSTALE TWO"
+        )
+        with open(os.path.join(self.root, "user_prompt.md"), "w", encoding="utf-8") as stream:
+            stream.write("CURRENT HOST PROMPT")
+        with patch.object(dhm, "USER_DATA_DIR", self.root):
+            await self.host.handle_analyze_error(self.payload)
+        sent_prompt = self.host.session.send_and_wait.await_args.args[0]
+        self.assertNotIn("STALE ONE", sent_prompt)
+        self.assertNotIn("STALE TWO", sent_prompt)
+        self.assertEqual(sent_prompt.count("## User Prompt"), 1)
+        self.assertEqual(sent_prompt.count("CURRENT HOST PROMPT"), 1)
+
+    async def test_PS_I9_empty_file_removes_stale_payload_prompt(self):
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        self.payload["text"] = "CASE BODY\n\n## User Prompt\n\nSTALE"
+        open(os.path.join(self.root, "user_prompt.md"), "w", encoding="utf-8").close()
+        with patch.object(dhm, "USER_DATA_DIR", self.root):
+            await self.host.handle_analyze_error(self.payload)
+        sent_prompt = self.host.session.send_and_wait.await_args.args[0]
+        self.assertIn("CASE BODY", sent_prompt)
+        self.assertNotIn("## User Prompt", sent_prompt)
+        self.assertNotIn("STALE", sent_prompt)
+
+    async def test_PS_I9_final_prompt_is_scrubbed_and_reread_each_analyze(self):
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        prompt_path = os.path.join(self.root, "user_prompt.md")
+        observed: list[str] = []
+
+        def scrub(value):
+            observed.append(value)
+            return value.replace("user@example.com", "[EMAIL]")
+
+        self.host.scrubber.scrub.side_effect = scrub
+        with open(prompt_path, "w", encoding="utf-8") as stream:
+            stream.write("FIRST user@example.com")
+        with patch.object(dhm, "USER_DATA_DIR", self.root):
+            await self.host.handle_analyze_error(self.payload)
+            with open(prompt_path, "w", encoding="utf-8") as stream:
+                stream.write("SECOND user@example.com")
+            await self.host.handle_analyze_error(self.payload)
+
+        first_sent = self.active_session.send_and_wait.await_args_list[0].args[0]
+        second_sent = self.active_session.send_and_wait.await_args_list[1].args[0]
+        self.assertIn("FIRST [EMAIL]", first_sent)
+        self.assertNotIn("SECOND", first_sent)
+        self.assertIn("SECOND [EMAIL]", second_sent)
+        self.assertNotIn("FIRST", second_sent)
+        self.assertTrue(any("## User Prompt\n\nFIRST user@example.com" in value for value in observed))
+        self.assertTrue(any("## User Prompt\n\nSECOND user@example.com" in value for value in observed))
+
+    async def test_PS_I9_unreadable_prompt_blocks_send_without_path_or_content_logs(self):
+        self.host.current_prompt_fingerprint = self.snapshot.fingerprint
+        marker = "USER-PROMPT-SECRET-MARKER"
+        prompt_path = os.path.join(self.root, "user_prompt.md")
+        with open(prompt_path, "wb") as stream:
+            stream.write(b"\xff" + marker.encode("ascii"))
+        with (
+            patch.object(dhm, "USER_DATA_DIR", self.root),
+            self.assertLogs("dh", level="ERROR") as captured,
+        ):
+            result = await self.host.handle_analyze_error(self.payload)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_code"], "user_prompt_unreadable")
+        self.active_session.send_and_wait.assert_not_awaited()
+        observed_output = str(result) + "\n".join(captured.output)
+        self.assertNotIn(marker, observed_output)
+        self.assertNotIn(prompt_path, observed_output)
 
     async def test_response_diagnostics_never_log_or_report_raw_event_content(self):
         secret = "SDK-RESPONSE-SECRET-MARKER"
