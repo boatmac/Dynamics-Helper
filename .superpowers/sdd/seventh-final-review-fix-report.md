@@ -4,8 +4,9 @@
 **Branch:** `docs/prompt-scope-cleanup-design`
 **Required starting head:** `540283edcd03b64189a64368fe8fe984622e2033`
 **Product/test/docs commit:** `85355f81ec01c75a1c26e49b391ba1d4911b768d` (`fix(review): harden storage commit truth`)
-**Tracked evidence commit:** this report's `docs(verification): record seventh review fixes` commit
-**Expected final ahead/behind:** 37 ahead, 0 behind `origin/master`
+**Tracked evidence commit:** `a7513e5698d14120711be359300cc092be832602` (`docs(verification): record seventh review fixes`)
+**Metadata correction commit:** follows this report update
+**Expected final ahead/behind:** 38 ahead, 0 behind `origin/master`
 
 ## Status
 
@@ -75,8 +76,9 @@ the approved OpenCode temp parent. Focused Host also set `PYTHONPATH=host`.
 - Isolated source-only `compileall` excluding `host/venv`: exit 0 with no
   diagnostics.
 - TypeScript static checking ran through `npm run build` and passed.
-- `git diff --check`, version checks (`2.0.74-beta.4` unchanged), direct
-  catch-up/storage-wrapper scans, and generated-dist status passed.
+- `git diff --check`, version checks (package/Host `2.0.74-beta.4`, Chrome
+  manifest `2.0.74`, all unchanged), direct catch-up/storage-wrapper scans, and
+  generated-dist status passed.
 
 The Host product code did not change, but both focused and full Host gates were
 rerun as required.

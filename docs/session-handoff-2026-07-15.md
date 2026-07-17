@@ -15,7 +15,7 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Second whole-branch Important-finding implementation: `cb760a4` plus comment-only follow-up `3e18244`
 - Fifth whole-branch Important-finding product fix: `77df5ec` (`fix(review): preserve asynchronous intent ownership`)
 - Sixth whole-branch review product fix: `adeb9ef` (`fix(review): make async commit truth durable`); evidence follows in `.superpowers/sdd/sixth-final-review-fix-report.md`
-- Seventh whole-branch Important-finding product fix: `85355f8` (`fix(review): harden storage commit truth`); evidence follows in `.superpowers/sdd/seventh-final-review-fix-report.md`
+- Seventh whole-branch Important-finding product fix: `85355f8` (`fix(review): harden storage commit truth`); evidence is `a7513e5` plus the following metadata correction in `.superpowers/sdd/seventh-final-review-fix-report.md`
 - Controller broad whole-branch review: **pending rerun after the seventh fix wave**
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
@@ -73,10 +73,11 @@ e1fb39c docs(verification): record fourth review fixes
 adeb9ef fix(review): make async commit truth durable
 540283e docs(verification): record sixth review fixes
 85355f8 fix(review): harden storage commit truth
-HEAD docs(verification): record seventh review fixes
+a7513e5 docs(verification): record seventh review fixes
+HEAD docs(review): correct seventh verification metadata
 ```
 
-These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Seventh-wave starting head `540283e` was 35 commits ahead of `origin/master`; after its product and evidence commits the branch is expected to be 37 ahead and 0 behind. The controller must still rerun its broad whole-branch review. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming the embedded count remains current.
+These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Seventh-wave starting head `540283e` was 35 commits ahead of `origin/master`; after its product, evidence, and metadata-correction commits the branch is expected to be 38 ahead and 0 behind. The controller must still rerun its broad whole-branch review. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming the embedded count remains current.
 
 ## Remote VM Bootstrap
 
@@ -394,7 +395,8 @@ Production build passed with **2,217 modules transformed** and **13 artifacts
 listed**. Isolated source-only compileall, TypeScript/static, diff/version, and
 restored-mutation checks passed. Optional authenticated smoke remains skipped;
 controller broad whole-branch review remains pending. No push, tag, publish,
-version, package, registry, real AppData, or MyCases operation occurred.
+version, package, registry, real AppData, or MyCases operation occurred. Version
+fields remain package/Host `2.0.74-beta.4` and Chrome manifest `2.0.74`.
 
 ## Session Identity Contract
 
