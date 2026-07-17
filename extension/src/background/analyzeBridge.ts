@@ -34,6 +34,11 @@ export function normalizeNativeHostResponse(msg: any): any {
     }
 
     const errorCode = normalizeErrorCode(msg?.error_code);
+    const error = typeof msg?.error === 'string'
+        ? msg.error
+        : typeof msg?.message === 'string'
+            ? msg.message
+            : 'Native Host error';
     const errorKind = typeof msg?.errorKind === 'string'
         ? msg.errorKind
         : undefined;
@@ -43,7 +48,7 @@ export function normalizeNativeHostResponse(msg: any): any {
         : undefined;
     return {
         status: 'error',
-        error: msg?.error || msg?.message,
+        error,
         ...(errorCode ? { error_code: errorCode } : {}),
         ...(errorKind ? { errorKind } : {}),
         ...(httpStatus === undefined ? {} : { httpStatus }),

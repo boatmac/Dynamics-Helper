@@ -237,6 +237,66 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
         })
     })
 
+    it.each([
+        ['object', { secret: 'SECRET-NATIVE-ERROR' }],
+        ['array', ['SECRET-NATIVE-ERROR']],
+        ['function', () => 'SECRET-NATIVE-ERROR'],
+        ['null', null],
+    ])('uses a fixed fallback for a non-string %s error', (_name, error) => {
+        expect(normalizeNativeHostResponse({
+            status: 'error',
+            error,
+        })).toEqual({
+            status: 'error',
+            error: 'Native Host error',
+        })
+    })
+
+    it('does not forward, stringify, or log a secret-bearing error object', () => {
+        const secret = 'SECRET-NATIVE-ERROR-OBJECT'
+        const toString = vi.fn(() => secret)
+        const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
+        const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+        try {
+            const result = normalizeNativeHostResponse({
+                status: 'error',
+                error: { secret, toString },
+                message: ['also unsafe', secret],
+                errorKind: 'unknown',
+                httpStatus: Number.POSITIVE_INFINITY,
+            })
+
+            expect(result).toEqual({
+                status: 'error',
+                error: 'Native Host error',
+                errorKind: 'unknown',
+            })
+            expect(toString).not.toHaveBeenCalled()
+            expect(JSON.stringify(result)).not.toContain(secret)
+            expect(JSON.stringify([
+                ...consoleLog.mock.calls,
+                ...consoleWarn.mock.calls,
+                ...consoleError.mock.calls,
+            ])).not.toContain(secret)
+        } finally {
+            consoleLog.mockRestore()
+            consoleWarn.mockRestore()
+            consoleError.mockRestore()
+        }
+    })
+
+    it('uses a valid string message when error is not a string', () => {
+        expect(normalizeNativeHostResponse({
+            status: 'error',
+            error: { unsafe: true },
+            message: 'safe message fallback',
+        })).toEqual({
+            status: 'error',
+            error: 'safe message fallback',
+        })
+    })
+
     it('UI-I6: preserves inner error_code in a success envelope', () => {
         const inner = {
             status: 'error',

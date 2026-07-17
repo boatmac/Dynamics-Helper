@@ -3825,6 +3825,42 @@ describe('Options prompt health and inspected sparse writes', () => {
     expect(alert).toContain('OUTER-FALLBACK')
   })
 
+  it('shows a safe fallback for a non-string Native Host error', async () => {
+    const update = deferNextResponse('update_config')
+    const secret = 'SECRET-OBJECT-ERROR'
+    const toString = vi.fn(() => secret)
+    const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await hydrateOptions({
+        root_path: '',
+        _user_instructions_raw: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      })
+      fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+      await act(async () => update.resolve(normalizeNativeHostResponse({
+        status: 'error',
+        error: { secret, toString },
+      })))
+
+      const alert = screen.getByRole('alert').textContent || ''
+      expect(alert).toContain('Native Host error')
+      expect(alert).not.toContain(secret)
+      expect(toString).not.toHaveBeenCalled()
+      expect(JSON.stringify([
+        ...consoleLog.mock.calls,
+        ...consoleWarn.mock.calls,
+        ...consoleError.mock.calls,
+      ])).not.toContain(secret)
+    } finally {
+      consoleLog.mockRestore()
+      consoleWarn.mockRestore()
+      consoleError.mockRestore()
+    }
+  })
+
   it('unknown config error code uses Host fallback', async () => {
     const update = deferNextResponse('update_config')
     await hydrateOptions({
