@@ -1977,6 +1977,55 @@ describe('Options personal bookmark Reset generation', () => {
     }
   })
 
+  it('clears an earlier success toast when a later Reset is only partial', async () => {
+    const firstReset = deferNextResponse('RESET_EXTENSION_STATE')
+    const secondReset = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify([
+        { type: 'link', label: 'Packaged default', url: 'https://default.test' },
+      ]),
+    } as Response)
+    try {
+      await hydrateBookmarkOptions([
+        { type: 'link', label: 'Personal', url: 'https://personal.test' },
+      ])
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(firstReset)
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+        'Reset complete',
+      ))
+
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      const message = await waitFor(() => {
+        const messages = chromeMockSpies.sendMessage.mock.calls
+          .map(call => call[0] as any)
+          .filter(candidate => candidate?.type === 'RESET_EXTENSION_STATE')
+        expect(messages).toHaveLength(2)
+        return messages.at(-1)
+      })
+      fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
+      await act(async () => secondReset.resolve({
+        status: 'success',
+        data: {
+          syncStatus: 'committed',
+          identity: message.payload.identity,
+          requestGeneration: message.payload.requestGeneration,
+          resetToken: message.payload.resetToken,
+        },
+      }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        /some state may already be cleared/i,
+      )
+      expect(screen.queryByText('Reset complete.')).toBeNull()
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
   it('treats a stored empty personal menu as authoritative on reload', async () => {
     seedStorage({ dh_items: [] })
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
@@ -2222,6 +2271,31 @@ describe('Options manifest blur retry state', () => {
     fireEvent.blur(input)
     await waitFor(() => expect(manifestSyncMessages()).toHaveLength(3))
     await act(async () => retryB.resolve(
+      manifestSyncResponse(manifestSyncMessages()[2], 'committed'),
+    ))
+  })
+
+  it('refetches URL A after failed URL B cleared the prior A cache', async () => {
+    const responseA = deferNextResponse('SYNC_TEAM_CATALOG')
+    const responseB = deferNextResponse('SYNC_TEAM_CATALOG')
+    const retryA = deferNextResponse('SYNC_TEAM_CATALOG')
+    const input = await renderManifestOptions('team-a')
+    const urlA = 'https://example.com/a-return.json'
+    const urlB = 'https://example.com/b-failed.json'
+
+    await blurUrl(input, urlA)
+    await act(async () => responseA.resolve(
+      manifestSyncResponse(manifestSyncMessages()[0], 'committed'),
+    ))
+    await blurUrl(input, urlB)
+    await act(async () => responseB.resolve(
+      manifestSyncResponse(manifestSyncMessages()[1], 'failed'),
+    ))
+
+    fireEvent.change(input, { target: { value: urlA } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(manifestSyncMessages()).toHaveLength(3))
+    await act(async () => retryA.resolve(
       manifestSyncResponse(manifestSyncMessages()[2], 'committed'),
     ))
   })

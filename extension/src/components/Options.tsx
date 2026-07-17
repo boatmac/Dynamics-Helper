@@ -1201,6 +1201,10 @@ const OptionsInner: React.FC = () => {
                     manifestFetchInFlightRef.current?.manifestUrl
                     === identity.manifestUrl
                 ) return;
+                // Every URL-change request uses resetCache, so once a
+                // different URL starts the prior successful cache is no longer
+                // authoritative even if this new request later fails.
+                lastSuccessfulManifestUrlRef.current = '';
                 const request = Object.freeze({
                     token: ++manifestFetchTokenRef.current,
                     manifestUrl: identity.manifestUrl,
@@ -1893,6 +1897,7 @@ const OptionsInner: React.FC = () => {
 
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
+            clearStatus();
             invalidateTeamRefresh();
             userInstructionsEditTokenRef.current = {
                 revision: userInstructionsEditTokenRef.current.revision + 1,
