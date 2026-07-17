@@ -41,13 +41,13 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 
 ## Verification
 
-- Fourth review product commit: `e3ba1ca` (`fix(review): harden request-scoped authority`); the evidence commit follows it.
-- Isolated Host: **134/134 focused** and **198/198 full** tests passed.
-- Extension: **180/180 focused across 7 files** and **224/224 full across 17 files** passed.
+- Fifth review product commit: `77df5ec` (`fix(review): preserve asynchronous intent ownership`); the evidence commit follows it.
+- Isolated Host: **132/132 focused** and **204/204 full** tests passed.
+- Extension: **158/158 focused across 7 files** and **248/248 full across 17 files** passed.
 - Production build passed with **2,216 modules transformed** and **13 artifacts** listed.
 - Isolated Python compileall, `git diff --check`, static ownership/secrecy scans, and break-and-fail mutations passed.
 - Optional authenticated marker smoke was not run because safe model-backed user/session isolation was unavailable; it remains non-gating.
-- The controller broad whole-branch review remains pending after this fourth fix wave.
+- The controller broad whole-branch review remains pending after this fifth fix wave.
 
 ## Upgrade notes
 
