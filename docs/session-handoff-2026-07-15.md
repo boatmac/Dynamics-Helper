@@ -15,7 +15,8 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Second whole-branch Important-finding implementation: `cb760a4` plus comment-only follow-up `3e18244`
 - Fifth whole-branch Important-finding product fix: `77df5ec` (`fix(review): preserve asynchronous intent ownership`)
 - Sixth whole-branch review product fix: `adeb9ef` (`fix(review): make async commit truth durable`); evidence follows in `.superpowers/sdd/sixth-final-review-fix-report.md`
-- Controller broad whole-branch review: **pending rerun after the sixth fix wave**
+- Seventh whole-branch Important-finding product fix: `85355f8` (`fix(review): harden storage commit truth`); evidence follows in `.superpowers/sdd/seventh-final-review-fix-report.md`
+- Controller broad whole-branch review: **pending rerun after the seventh fix wave**
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
@@ -70,10 +71,12 @@ e1fb39c docs(verification): record fourth review fixes
 77df5ec fix(review): preserve asynchronous intent ownership
 0faf649 docs(verification): record fifth review fixes
 adeb9ef fix(review): make async commit truth durable
-HEAD docs(verification): record sixth review fixes
+540283e docs(verification): record sixth review fixes
+85355f8 fix(review): harden storage commit truth
+HEAD docs(verification): record seventh review fixes
 ```
 
-These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Starting head `0faf649` was 33 commits ahead of `origin/master`; inspect the sixth report and Git directly for final counts. The controller must still rerun its broad whole-branch review. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming the embedded count remains current.
+These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Seventh-wave starting head `540283e` was 35 commits ahead of `origin/master`; after its product and evidence commits the branch is expected to be 37 ahead and 0 behind. The controller must still rerun its broad whole-branch review. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming the embedded count remains current.
 
 ## Remote VM Bootstrap
 
@@ -368,6 +371,31 @@ version, stale-mutation, and generated-dist checks passed. Including the
 evidence commit, the branch is expected to be **35 ahead, 0 behind
 `origin/master`**.
 
+## Seventh Review Important-Fix Addendum - 2026-07-17
+
+Starting head: `540283edcd03b64189a64368fe8fe984622e2033`.
+Product/test/documentation commit: `85355f81ec01c75a1c26e49b391ba1d4911b768d`
+(`fix(review): harden storage commit truth`). Hydration catch-up now captures an
+immutable preference/config intent and enters the same single-flight mirror
+queue as ordinary saves. Its suppressed-warning Host update runs only from the
+successful latest-commit callback; failed storage retains the intent and sends
+nothing, while a newer successful edit sends only its latest payload.
+
+Team Catalog callback-style set/remove wrappers now reject on callback-scoped
+`chrome.runtime.lastError`. Manifest, changed bookmark, 304 timestamp, clear,
+and Reset failures return failed truth, never committed; failed selected-sync
+responses expose no items or timestamp. The mutation queue remains recoverable
+for later operations. Exact RED/GREEN and restored break proof is in
+`.superpowers/sdd/seventh-final-review-fix-report.md`.
+
+Fresh gates: **135/135 focused Host**, **207/207 full Host**, **159/159 focused
+Extension across 4 files**, and **272/272 full Extension across 18 files**.
+Production build passed with **2,217 modules transformed** and **13 artifacts
+listed**. Isolated source-only compileall, TypeScript/static, diff/version, and
+restored-mutation checks passed. Optional authenticated smoke remains skipped;
+controller broad whole-branch review remains pending. No push, tag, publish,
+version, package, registry, real AppData, or MyCases operation occurred.
+
 ## Session Identity Contract
 
 - Case session ID is deterministic UUIDv5 derived from the bare 16-digit case number.
@@ -557,9 +585,9 @@ Blocked until the Contract Primitives spec freezes the adapter boundary:
 
 ## Current Decision State
 
-- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and six review-fix waves are recorded through the sixth report, and the concise unversioned release draft exists.
+- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and seven review-fix waves are recorded through the seventh report, and the concise unversioned release draft exists.
 - Accepted design and plan are `441d0db` and `21108d9`.
-- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the sixth fix wave.
+- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the seventh fix wave.
 - No MyCases integration code, mode preference, workspace detector, coordinator adapter, persistence adapter, or MyCases canonical-file write has been implemented.
 - MyCasesKit response `675006a` accepts Form ③ and the Stage 1 deterministic persistence-gate model.
 - Five shared JSON fixtures and a README exist as examples, but six README items remain tentative; not every interface is frozen.
@@ -595,13 +623,14 @@ Use the following for continuation; update the exact HEAD and status from Git ra
    - docs/superpowers/specs/2026-07-15-dh-prompt-scope-cleanup-design.md
    - docs/superpowers/plans/2026-07-15-dh-prompt-scope-cleanup.md
    - docs/superpowers/plans/2026-07-17-fifth-review-important-fixes.md
-   - .superpowers/sdd/sixth-final-review-fix-report.md
+   - docs/superpowers/plans/2026-07-17-seventh-review-important-fixes.md
+   - .superpowers/sdd/seventh-final-review-fix-report.md
    - docs/superpowers/research/2026-07-14-dh-mycaseskit-stage0-instructions-brief.md
    - docs/superpowers/research/2026-07-14-dh-extension-stage0-integration-plan.md
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9。第六轮修复产品提交是 adeb9ef：隔离 LOCALAPPDATA 的 Host focused 135/135、full 207/207，Extension focused 114/114（3 files）、full 261/261（18 files），build 2,217 modules / 13 artifacts 通过，修正后的 source-only compileall/static/mutation 通过；证据见 sixth-final-review-fix-report.md。可选 marker smoke 因无法保证 authenticated model-backed user/session state 完全隔离而跳过；release draft 未选择版本。下一步仍是 controller 重新运行 broad whole-branch review；不要把本轮 focused/self-review 当作 broad review 已通过。
+历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9。第七轮修复产品提交是 85355f8：hydration catch-up 进入同一个 single-flight mirror queue，Team Catalog set/remove 检查 callback-scoped lastError 并返回 failed truth；隔离 LOCALAPPDATA 的 Host focused 135/135、full 207/207，Extension focused 159/159（4 files）、full 272/272（18 files），build 2,217 modules / 13 artifacts 通过，source-only compileall/static/mutation 通过；证据见 seventh-final-review-fix-report.md。可选 marker smoke 因无法保证 authenticated model-backed user/session state 完全隔离而跳过；release draft 未选择版本。下一步仍是 controller 重新运行 broad whole-branch review；不要把本轮 focused/self-review 当作 broad review 已通过。
 
 已实现行为：所有 DH create/resume 都设置 skip_custom_instructions=True；CLI global、AGENTS、path instructions 等自动发现源全部排除。DH 显式注入 Core + 恰好一个可编辑源：Root 为空或 Repository ONLY 关闭时使用 DH-specific Instructions；Root 非空且 Repository ONLY 开启时只使用 <Root>/.github/copilot-instructions.md。Custom User Prompt 仍是每次 Analyze 的 PII-scrubbed user content。使用严格 UTF-8 immutable byte snapshot、framed fingerprint、same-UUID refresh 和 fail-closed errors。Options 区分 explicit empty（清空文件）与 omitted（不写），检查 update_config/config_saved，并保留可选 errorCode 到持久化和本地化显示。
 

@@ -42,16 +42,18 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Reset responses carry default identity, generation, and token with committed/stale/failed truth; stale, failed, transport, or superseded callbacks never claim success or clear newer edits.
 - FAB retains request ownership through asynchronous case hashing, preventing stale response UI, duration, menu, and outcome telemetry.
 - Session refresh config no longer reads Custom User Prompt; Options hydration and each Analyze perform their own single canonical read. Explicit-null editable prompt fields fail before any write.
+- Hydration catch-up now enters the same immutable single-flight preference-mirror queue as normal edits; a failed mirror sends no Host update, and delayed older work cannot send over a newer edit.
+- Team Catalog set/remove callbacks inspect scoped Chrome storage errors. Failed manifest, bookmark, 304 timestamp, clear, and Reset mutations never report committed or expose success items/timestamps, and later queued work can recover.
 
 ## Verification
 
-- Sixth review product commit: `adeb9ef` (`fix(review): make async commit truth durable`); the evidence commit follows it.
+- Seventh review product commit: `85355f8` (`fix(review): harden storage commit truth`); the evidence commit follows it.
 - Isolated Host: **135/135 focused** and **207/207 full** tests passed.
-- Extension: **114/114 focused across 3 files** and **261/261 full across 18 files** passed.
+- Extension: **159/159 focused across 4 files** and **272/272 full across 18 files** passed.
 - Production build passed with **2,217 modules transformed** and **13 artifacts** listed.
-- Corrected isolated source-only compileall, `git diff --check`, static/version scans, and break-and-fail mutations passed.
+- Isolated source-only compileall, `git diff --check`, static/version scans, and restored break-and-fail mutations passed.
 - Optional authenticated marker smoke was not run because safe model-backed user/session isolation was unavailable; it remains non-gating.
-- The controller broad whole-branch review remains pending after this sixth fix wave.
+- The controller broad whole-branch review remains pending after this seventh fix wave.
 
 ## Upgrade notes
 
