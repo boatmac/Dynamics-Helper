@@ -553,7 +553,23 @@ const OptionsInner: React.FC = () => {
     const [items, setItemsState] = useState<MenuItem[]>([]);
     const itemsRef = useRef<MenuItem[]>([]);
     const bookmarkGenerationRef = useRef(0);
+    const bookmarkStorageIntentRef = useRef(0);
     const bookmarkStorageQueueRef = useRef<Promise<void>>(Promise.resolve());
+    const latestBookmarkStorageIntentRef = useRef<Readonly<{
+        id: number;
+        operation: Readonly<
+            | { kind: 'write'; items: MenuItem[] }
+            | { kind: 'remove' }
+        >;
+    }> | null>(null);
+    const [bookmarkPersistenceIssue, setBookmarkPersistenceIssue] = useState(false);
+    const bookmarkPersistenceIssueRef = useRef(false);
+
+    const setBookmarkPersistenceFailed = (failed: boolean) => {
+        if (bookmarkPersistenceIssueRef.current === failed) return;
+        bookmarkPersistenceIssueRef.current = failed;
+        setBookmarkPersistenceIssue(failed);
+    };
 
     const applyItemsSnapshot = (nextItems: MenuItem[]) => {
         itemsRef.current = nextItems;
@@ -566,6 +582,11 @@ const OptionsInner: React.FC = () => {
             | { kind: 'remove' }
         >,
     ): Promise<void> => {
+        const intent = Object.freeze({
+            id: ++bookmarkStorageIntentRef.current,
+            operation,
+        });
+        latestBookmarkStorageIntentRef.current = intent;
         const run = () => new Promise<void>((resolve, reject) => {
             const callback = () => {
                 const storageError = chrome.runtime.lastError;
@@ -575,15 +596,31 @@ const OptionsInner: React.FC = () => {
                 }
                 resolve();
             };
-            if (operation.kind === 'remove') {
+            if (intent.operation.kind === 'remove') {
                 chrome.storage.local.remove('dh_items', callback);
             } else {
-                chrome.storage.local.set({ dh_items: operation.items }, callback);
+                chrome.storage.local.set({
+                    dh_items: intent.operation.items,
+                }, callback);
             }
         });
         const queued = bookmarkStorageQueueRef.current.then(run, run);
         bookmarkStorageQueueRef.current = queued.catch(() => undefined);
-        return queued;
+        return queued.then(
+            () => {
+                if (latestBookmarkStorageIntentRef.current?.id === intent.id) {
+                    latestBookmarkStorageIntentRef.current = null;
+                    setBookmarkPersistenceFailed(false);
+                }
+            },
+            error => {
+                // Keep the newest full snapshot/removal intent available for
+                // the next mutation or Reset retry. Older failures never
+                // replace a newer queued intent.
+                setBookmarkPersistenceFailed(true);
+                throw error;
+            },
+        );
     };
 
     // The only entry point for personal bookmark edits and Reset intent.
@@ -2711,6 +2748,15 @@ const OptionsInner: React.FC = () => {
             : 'configNotSaved')
         : '';
     const resetIssue = resetIncomplete ? t('resetIncomplete') : '';
+    const bookmarkIssue = bookmarkPersistenceIssue
+        ? t('bookmarkPersistenceWarning')
+        : '';
+    const configIssue = activeIssue
+        ? `${issuePrefix}${issuePrefix && issueDetail ? ' ' : ''}${issueDetail}`
+        : '';
+    const persistenceWarning = [resetIssue, bookmarkIssue, configIssue]
+        .filter(Boolean)
+        .join(' ');
 
     return (
             <DndProvider backend={HTML5Backend}>
@@ -2756,13 +2802,13 @@ const OptionsInner: React.FC = () => {
                         </div>
                     </div>
 
-                    {(resetIssue || activeIssue) && (
+                    {persistenceWarning && (
                         <div
                             className="bg-amber-50 text-amber-800 text-center py-3 px-4 font-medium text-sm border-b border-amber-200 flex items-center justify-center gap-2"
                             role="alert"
                         >
                             <div className="w-2 h-2 bg-amber-500 rounded-full shrink-0"></div>
-                            <span>{resetIssue || <>{issuePrefix}{issuePrefix && issueDetail ? ' ' : ''}{issueDetail}</>}</span>
+                            <span>{persistenceWarning}</span>
                         </div>
                     )}
 

@@ -292,6 +292,10 @@ export const translations: TranslationDictionary = {
         en: "Reset did not complete. Some state may already be cleared; current values were kept. Retry Reset to finish cleanup.",
         zh: "重置未完成。部分状态可能已清除；当前值已保留。请再次重置以完成清理。",
     },
+    bookmarkPersistenceWarning: {
+        en: "Bookmark changes are not saved. Make another bookmark change to retry.",
+        zh: "书签更改尚未保存。请再次更改书签以重试。",
+    },
     importSuccess: { en: "Imported successfully!", zh: "导入成功！" },
     availableForUpdate: { en: "available for update", zh: "可更新" },
     checkFailed: { en: "Check failed", zh: "检查失败" },

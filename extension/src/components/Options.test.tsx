@@ -2265,6 +2265,148 @@ describe('Options personal bookmark Reset generation', () => {
     }
   })
 
+  it('keeps the failed latest bookmark snapshot visible and retries the next mutation', async () => {
+    await hydrateBookmarkOptions([
+      { type: 'link', label: 'Stored before failure', url: 'https://stored.test' },
+    ])
+    const failedWrite = deferNextStorageSet('dh_items')
+
+    fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
+    await waitFor(() => expect(document.body.textContent).toContain('New Item'))
+    await act(async () => {
+      failedWrite.reject(new Error('BOOKMARK SET FAILED'))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+
+    expect(document.body.textContent).toContain('New Item')
+    expect(personalItems()?.map(item => item.label)).toEqual([
+      'Stored before failure',
+    ])
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /bookmark changes are not saved/i,
+    )
+    expect(screen.getByRole('alert')).not.toHaveTextContent('BOOKMARK SET FAILED')
+
+    const retryWrite = deferNextStorageSet('dh_items')
+    fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
+    await act(async () => {
+      retryWrite.resolve(undefined)
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+
+    await waitFor(() => expect(personalItems()?.map(item => item.label)).toEqual([
+      'Stored before failure',
+      'New Item',
+      'New Item',
+    ]))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('recovers the newest write after deferred Reset removal and write failure', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const delayedRemove = deferNextStorageRemove('dh_items')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await hydrateBookmarkOptions([
+        { type: 'link', label: 'Before reset', url: 'https://before.test' },
+      ])
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+      await waitFor(() => expect(chromeMockSpies.storageRemove.mock.calls.some(
+        call => call[0] === 'dh_items',
+      )).toBe(true))
+
+      const failedWrite = deferNextStorageSet('dh_items')
+      fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
+      await waitFor(() => expect(document.body.textContent).toContain('New Item'))
+      await act(async () => {
+        delayedRemove.resolve(undefined)
+        await new Promise(resolve => setTimeout(resolve, 0))
+      })
+      await act(async () => {
+        failedWrite.reject(new Error('NEWEST WRITE FAILED'))
+        await new Promise(resolve => setTimeout(resolve, 0))
+      })
+
+      expect(document.body.textContent).toContain('New Item')
+      expect(personalItems()).toBeUndefined()
+      expect(screen.queryByText('Reset complete.')).toBeNull()
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        /bookmark changes are not saved/i,
+      )
+      expect(screen.getByRole('alert')).toHaveTextContent(/reset did not complete/i)
+
+      const retryWrite = deferNextStorageSet('dh_items')
+      fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
+      await act(async () => {
+        retryWrite.resolve(undefined)
+        await new Promise(resolve => setTimeout(resolve, 0))
+      })
+
+      await waitFor(() => expect(personalItems()?.map(item => item.label)).toEqual([
+        'Before reset',
+        'New Item',
+        'New Item',
+      ]))
+      expect(screen.getByRole('alert')).not.toHaveTextContent(
+        /bookmark changes are not saved/i,
+      )
+      expect(screen.getByRole('alert')).toHaveTextContent(/reset did not complete/i)
+    } finally {
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('surfaces failed Reset bookmark removal and recovers on Reset retry', async () => {
+    const firstReset = deferNextResponse('RESET_EXTENSION_STATE')
+    const failedRemove = deferNextStorageRemove('dh_items')
+    const retryReset = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify([
+        { type: 'link', label: 'Packaged retry', url: 'https://default.test' },
+      ]),
+    } as Response)
+    try {
+      await hydrateBookmarkOptions([
+        { type: 'link', label: 'Before failed remove', url: 'https://before.test' },
+      ])
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(firstReset)
+      await act(async () => {
+        failedRemove.reject(new Error('BOOKMARK REMOVE FAILED'))
+        await new Promise(resolve => setTimeout(resolve, 0))
+      })
+
+      expect(screen.queryByText('Reset complete.')).toBeNull()
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        /bookmark changes are not saved/i,
+      )
+      expect(screen.getByRole('alert')).toHaveTextContent(/reset did not complete/i)
+      expect(personalItems()?.[0]?.label).toBe('Before failed remove')
+
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(retryReset)
+
+      await waitFor(() => expect(personalItems()?.[0]?.label).toBe('Packaged retry'))
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(screen.getByRole('status')).toHaveTextContent('Reset complete')
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('provides bookmark persistence warning copy in both supported languages', () => {
+    expect(getTranslation('bookmarkPersistenceWarning', 'en')).toMatch(
+      /bookmark changes are not saved/i,
+    )
+    expect(getTranslation('bookmarkPersistenceWarning', 'zh')).not.toBe(
+      'bookmarkPersistenceWarning',
+    )
+  })
+
   it('treats a stored empty personal menu as authoritative on reload', async () => {
     seedStorage({ dh_items: [] })
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
