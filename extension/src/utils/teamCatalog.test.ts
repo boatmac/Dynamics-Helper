@@ -12,6 +12,7 @@ import {
 import {
   deferNextStorageSet,
   deferNextStorageGet,
+  deferNextStorageRemove,
   getStorageSnapshot,
   installChromeMock,
   resetChromeMock,
@@ -290,6 +291,163 @@ describe('team catalog sync preference commit gate', () => {
       dh_team_etag: 'bookmark-new',
       dh_team_synced: expect.any(String),
     })
+  })
+
+  it('reports a failed manifest mutation and lets the next queued sync recover', async () => {
+    seedSelectedTeam()
+    const manifestWrite = deferNextStorageSet('dh_team_manifest')
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response(200, {
+        version: 2,
+        teams: [{ id: 'team-a', label: 'Team A', url: BOOKMARK_URL }],
+      }, 'manifest-new'))
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(304)))
+
+    const failedSync = syncTeamBookmarks(SECRET_URL, 'team-a')
+    await vi.waitFor(() => expect(
+      (chrome.storage.local.set as any).mock.calls.some(
+        ([value]: any[]) => value?.dh_team_manifest_etag === 'manifest-new',
+      ),
+    ).toBe(true))
+    await manifestWrite.reject(new Error('MANIFEST STORAGE FAILED'))
+
+    await expect(failedSync).resolves.toMatchObject({
+      status: 'failed',
+      identity: {
+        enabled: true,
+        manifestUrl: SECRET_URL,
+        teamId: 'team-a',
+      },
+      items: [],
+      failure: {
+        kind: 'storage',
+        message: 'Team catalog storage mutation failed',
+      },
+      failureStage: 'manifest',
+    })
+    expect(getStorageSnapshot()).toMatchObject({
+      dh_team_manifest_etag: 'manifest-old',
+      dh_team_items: CACHED_ITEMS,
+      dh_team_synced: '2026-01-01T00:00:00.000Z',
+    })
+
+    await expect(syncTeamBookmarks(SECRET_URL, 'team-a')).resolves.toMatchObject({
+      status: 'unchanged',
+      items: CACHED_ITEMS,
+    })
+  })
+
+  it('reports a failed bookmark mutation without exposing new items and recovers', async () => {
+    seedSelectedTeam()
+    const bookmarkWrite = deferNextStorageSet('dh_team_items')
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(
+        200,
+        { version: 1, team: 'team-a', items: CHANGED_ITEMS },
+        'bookmark-new',
+      ))
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(304)))
+
+    const failedSync = syncTeamBookmarks(SECRET_URL, 'team-a')
+    await vi.waitFor(() => expect(
+      (chrome.storage.local.set as any).mock.calls.some(
+        ([value]: any[]) => value?.dh_team_etag === 'bookmark-new',
+      ),
+    ).toBe(true))
+    await bookmarkWrite.reject(new Error('BOOKMARK STORAGE FAILED'))
+
+    await expect(failedSync).resolves.toMatchObject({
+      status: 'failed',
+      items: [],
+      failure: {
+        kind: 'storage',
+        message: 'Team catalog storage mutation failed',
+      },
+      failureStage: 'bookmarks',
+    })
+    await expect(failedSync).resolves.not.toHaveProperty('syncedAt')
+    expect(getStorageSnapshot()).toMatchObject({
+      dh_team_items: CACHED_ITEMS,
+      dh_team_etag: 'bookmark-old',
+      dh_team_synced: '2026-01-01T00:00:00.000Z',
+    })
+
+    await expect(syncTeamBookmarks(SECRET_URL, 'team-a')).resolves.toMatchObject({
+      status: 'unchanged',
+      items: CACHED_ITEMS,
+    })
+  })
+
+  it('reports a failed 304 timestamp mutation and lets a later timestamp commit', async () => {
+    seedSelectedTeam()
+    const timestampWrite = deferNextStorageSet('dh_team_synced')
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(304)))
+
+    const failedSync = syncTeamBookmarks(SECRET_URL, 'team-a')
+    await vi.waitFor(() => expect(
+      (chrome.storage.local.set as any).mock.calls.some(
+        ([value]: any[]) => typeof value?.dh_team_synced === 'string',
+      ),
+    ).toBe(true))
+    await timestampWrite.reject(new Error('TIMESTAMP STORAGE FAILED'))
+
+    await expect(failedSync).resolves.toMatchObject({
+      status: 'failed',
+      items: [],
+      failure: { kind: 'storage' },
+      failureStage: 'bookmarks',
+    })
+    await expect(failedSync).resolves.not.toHaveProperty('syncedAt')
+    expect(getStorageSnapshot().dh_team_synced).toBe('2026-01-01T00:00:00.000Z')
+
+    const recovered = await syncTeamBookmarks(SECRET_URL, 'team-a')
+    expect(recovered).toMatchObject({ status: 'unchanged', items: CACHED_ITEMS })
+    expect(getStorageSnapshot().dh_team_synced).not.toBe('2026-01-01T00:00:00.000Z')
+  })
+
+  it('rejects a failed selection clear and does not poison the next clear', async () => {
+    seedSelectedTeam()
+    const failedRemove = deferNextStorageRemove('dh_team')
+    const failedClear = clearTeamSelection()
+    await vi.waitFor(() => expect(
+      (chrome.storage.local.remove as any).mock.calls.some(
+        ([keys]: any[]) => keys.includes('dh_team'),
+      ),
+    ).toBe(true))
+    await failedRemove.reject(new Error('SELECTION REMOVE FAILED'))
+
+    await expect(failedClear).rejects.toThrow('Team catalog storage removal failed')
+    expect(getStorageSnapshot()).toHaveProperty('dh_team', 'team-a')
+
+    await expect(clearTeamSelection()).resolves.toBeUndefined()
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team')
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team_items')
+  })
+
+  it('rejects a failed full clear and does not poison the next clear', async () => {
+    seedSelectedTeam()
+    const failedRemove = deferNextStorageRemove('dh_team_manifest')
+    const failedClear = clearTeamBookmarks()
+    await vi.waitFor(() => expect(
+      (chrome.storage.local.remove as any).mock.calls.some(
+        ([keys]: any[]) => keys.includes('dh_team_manifest'),
+      ),
+    ).toBe(true))
+    await failedRemove.reject(new Error('FULL REMOVE FAILED'))
+
+    await expect(failedClear).rejects.toThrow('Team catalog storage removal failed')
+    expect(getStorageSnapshot()).toHaveProperty('dh_team_manifest')
+
+    await expect(clearTeamBookmarks()).resolves.toBeUndefined()
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team_manifest')
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team_items')
   })
 
   it('updates only the timestamp on a valid bookmark 304', async () => {

@@ -150,11 +150,12 @@ revisioned writes. Their edit/clear/Reset handlers capture immutable
 acknowledges only its captured revision, while transport/unsaved failures leave
 that revision pending for a later intent.
 
-The ordered `dh_prefs` mirror is a single-flight coalescing queue and owns typed post-commit actions. Each action has a
+The ordered `dh_prefs` mirror is a single-flight coalescing queue and owns typed post-commit actions. Normal saves and hydration catch-up both enter it as immutable snapshots. Each action has a
 stable ID and captured Team Catalog identity. Compatible newer snapshots carry
 unsettled actions forward; incompatible enabled/URL/team snapshots cancel team
 actions. The latest successful durable callback, with no queued newer intent,
-settles before dispatch and runs the matching Host update. Storage
+settles before dispatch and runs the matching Host update from
+`onLatestCommit`. Storage
 `chrome.runtime.lastError` runs neither, leaves actions unsettled, and exposes a
 persistent retryable issue. Reset carries immutable default identity/generation/
 token through the Service Worker; only matching `committed` truth clears local
@@ -172,7 +173,7 @@ Ownership remains live through all response-processing awaits, including case
 hashing; every post-await continuation rechecks request ID before UI, duration,
 menu, or outcome-telemetry changes.
 
-Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe diagnostics and logs only failure kind plus numeric status. Every Options request captures enabled/URL/team plus a request generation. The Service Worker synchronously allocates a storage generation before any asynchronous pref/cache read, rejects stale identity before clear/fetch, rechecks generation after awaited reads, and queues identity validation together with awaited mutation. Deferred storage writes therefore finish before a later clear runs. Options sends messages only and clears rendered team items/timestamp immediately on identity change.
+Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe diagnostics and logs only failure kind plus numeric status. Every Options request captures enabled/URL/team plus a request generation. The Service Worker synchronously allocates a storage generation before any asynchronous pref/cache read, rejects stale identity before clear/fetch, rechecks generation after awaited reads, and queues identity validation together with awaited mutation. `setStorage` and `removeStorage` inspect `chrome.runtime.lastError` inside their callbacks and reject with fixed safe errors. Manifest/bookmark/304 writes and clear/Reset removes therefore cannot report committed after a rejected mutation; selected failed responses omit items and timestamps. The queue's rejection continuation keeps later operations usable. Options sends messages only and clears rendered team items/timestamp immediately on identity change.
 
 Analysis pending and dismissal state is request scoped. Starts write `dh_pending_analysis:<encoded-requestId>`; completion removes only that key. The legacy singleton pending key remains readable. `seenAnalysisKey()` produces collision-safe request or exact legacy case/timestamp keys, so A/B acknowledgments coexist. Hydration performs one `get(null)`, selects the newest fresh pending matching the current case, observes pending storage changes/expiry, and derives matching seen state from the same snapshot. Reset removes both prefixes and legacy singletons.
 
@@ -307,9 +308,10 @@ Standalone config — **does NOT extend `vite.config.ts`**. The CRXJS plugin use
 Provides a complete mock of the chrome.runtime + chrome.storage surfaces used by the extension. Public API:
 
 * `installChromeMock()` — call in `beforeEach`. Wires `globalThis.chrome` to the mock.
-* `resetChromeMock()` — clears storage, pending responses, message log, **and spy call counts**.
+* `resetChromeMock()` — clears storage, pending responses, scoped `lastError`, message log, **and spy call counts**.
 * `seedStorage({ ... })` — pre-populate `chrome.storage.local` before render.
 * `deferNextResponse(action)` — pause the next outgoing message with the given `action`. Returns a controller with `.resolve(response)` / `.reject(error)`. Used to hold `get_config` open while the test simulates user edits inside the hydration window.
+* `deferNextStorageSet(key?)` / `deferNextStorageRemove(key?)` — pause a matching mutation. Rejection invokes its callback while `chrome.runtime.lastError` is scoped, then clears the error immediately afterward.
 * `emitStorageChanges(changes, areaName?)` — explicitly updates mock storage and invokes registered `chrome.storage.onChanged` listeners. Normal mock `set`/`remove` calls remain non-emitting for backward-compatible deterministic tests.
 * `chromeMockSpies` — runtime/storage operation spies plus storage-listener registration spies, each a `vi.fn()`. Used for ordering, call-count, and payload assertions.
 
@@ -326,7 +328,7 @@ The Options page hydration window has 6 distinct invariants documented in `docs/
 | Inv1 | storage.set succeeds during hydration window (segment 1 ungated) | Adding a hydration gate to segment 1 breaks fast local persistence |
 | Inv2 | host RPC is gated during hydration window (segment 2 gated) | Removing the gate clobbers `config.json` with DEFAULT_PREFS values |
 | Inv3 | hydration merge skips user-touched fields | Removing `!touched.has('X')` overwrites user edits |
-| Inv4 | catch-up RPC at hydration COMPLETE sends user value | Reading stale outer-closure `prefs` instead of `merged` (the React 19 race fixed in `0265a74`) |
+| Inv4 | catch-up at hydration COMPLETE mirrors and then sends the user value | Reading stale outer-closure `prefs`, bypassing mirror durability, or sending before latest commit |
 | Inv5 | no catch-up RPC fires when nothing touched during window | Catch-up running unconditionally spams the host every Options open |
 | Inv6 | Reset during window survives the late hydration merge | `handleReset` not marking DEFAULT_PREFS keys as touched lets late host response un-reset the user |
 
@@ -338,7 +340,7 @@ The Options page hydration window has 6 distinct invariants documented in `docs/
 
 Inv4 specifically guards commit `0265a74`. The pre-fix bug: the post-hydration catch-up RPC was reading `mergedPrefs` from an outer-scope variable assigned **inside** a `setPrefs(prev => ...)` updater. React 19 sometimes schedules the updater on a later microtask tick, so the catch-up RPC ran before the assignment and silently sent stale state. Production "worked" because chrome IPC latency masked the race in the common case.
 
-The current fix computes the merged snapshot, updates refs/state, and schedules a generation-tagged hydration mirror plus catch-up intent. A post-render effect sends only the latest immutable intent after React commits. No Host or storage side effect runs inside a React state-updater closure; StrictMode replay therefore cannot duplicate an RPC. Inv4 defers `get_config`, edits `language`, and verifies the post-render intent carries the committed user value.
+The current fix computes the merged snapshot, updates refs/state, and schedules a generation-tagged hydration mirror plus catch-up intent. A post-render effect creates an immutable catch-up mirror and enters the shared `writePrefsMirror` queue. Only its successful `onLatestCommit` sends the captured Host update; storage failure sends nothing and a newer queued edit supersedes it. No Host or storage side effect runs inside a React state-updater closure; StrictMode replay therefore cannot duplicate an RPC. Inv4 defers `get_config`, edits `language`, and verifies the post-render intent carries the committed user value.
 
 ### Test File Conventions
 
@@ -379,7 +381,7 @@ Only `Options.tsx::persistPrefs(nextPrefs, opts?)` writes user preference change
 The persistence path is ordered and inspected:
 
 1. Write the captured preference snapshot to the `dh_prefs` Chrome mirror. Generation checks converge delayed/out-of-order callbacks back to the newest snapshot.
-2. After Host hydration, send one `update_config` payload built only from that captured intent. Stale storage callbacks do not dispatch older Host updates.
+2. After Host hydration, send one `update_config` payload built only from that captured intent in the successful latest mirror callback. Hydration catch-up follows the same rule; stale or failed storage callbacks dispatch no Host update.
 3. Inspect the outer Native Messaging envelope and the inner Host result with `classifyConfigUpdateResponse()`; this RPC is not universally fire-and-forget.
 4. Flush a requested team-manifest fetch only after the latest matching mirror commits and only for the still-active URL.
 
@@ -399,11 +401,11 @@ Get-config health and update warnings are separate state. The newest update warn
 
 #### Hydration guard (v2.0.70-beta.4+)
 
-`prefsHydratedRef` starts `false` and flips to `true` after the Host's `get_config` response is merged, or on host-unreachable/non-success fallback so the user is not deadlocked. While it is false, `persistPrefs` still records the captured user state in the ordered `dh_prefs` mirror, but it gates the Host RPC and manifest fetch. Once hydration settles, an epoch-driven post-render catch-up sends committed user-touched values through the same inspected update path. It does not perform Host side effects inside the React state-updater closure, which is important under React StrictMode replay.
+`prefsHydratedRef` starts `false` and flips to `true` after the Host's `get_config` response is merged, or on host-unreachable/non-success fallback so the user is not deadlocked. While it is false, `persistPrefs` still records the captured user state in the ordered `dh_prefs` mirror, but it gates the Host RPC and manifest fetch. Once hydration settles, an epoch-driven post-render catch-up captures user-touched values, writes that immutable snapshot through the same queue, and performs its inspected Host send only from `onLatestCommit`. It does not perform Host side effects inside the React state-updater closure, which is important under React StrictMode replay.
 
 Why: between OptionsInner mount and the host's `get_config` response (≈100ms typical, multi-second if host is cold-starting or crashed), `prefs` holds `DEFAULT_PREFS` merged with `chrome.storage.local.dh_prefs`. If both are empty (fresh install, Remove+Load Unpacked, or any cache clear), fields like `rootPath` / `teamManifestUrl` / `team` / `userPrompt` are empty strings. A fast user click on a Language dropdown / toggle in that window would call `persistPrefs(DEFAULT_PREFS-merged)` and shallow-merge those empty values into `config.json` + truncate `user_prompt.md` (because the host's `handle_update_config` does `current_data.update(payload["config"])` and writes `user_prompt.md` whenever `user_prompt is not None` — empty string is not None).
 
-If you add a new path that writes before hydration finishes, route it through `updatePref`/`persistPrefs` and mark its keys touched. Do not call the Host directly, bypass immutable intent creation, or move catch-up into a React updater. Passive Host-hydration mirrors capture their own snapshot and user-generation value; they must skip when newer user persistence has started so they cannot suppress the user's Host update.
+If you add a new path that writes before hydration finishes, route it through `updatePref`/`persistPrefs` and mark its keys touched. Do not call the Host directly, bypass immutable intent creation or `writePrefsMirror`, or move catch-up into a React updater. Passive Host-hydration mirrors capture their own snapshot and user-generation value; they must skip when newer user persistence has started so they cannot suppress the user's Host update.
 
 ### Documented exception — runtime overrides
 

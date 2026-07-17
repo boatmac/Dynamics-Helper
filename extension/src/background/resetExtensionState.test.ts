@@ -1,5 +1,24 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleResetExtensionState } from './resetExtensionState'
+import {
+  beginTeamSyncGeneration,
+  clearTeamBookmarksAtGeneration,
+  currentTeamIdentityMatches,
+} from '../utils/teamCatalog'
+import {
+  deferNextStorageRemove,
+  getStorageSnapshot,
+  installChromeMock,
+  resetChromeMock,
+  seedStorage,
+} from '../test/chromeMock'
+
+installChromeMock()
+
+beforeEach(() => {
+  resetChromeMock()
+  installChromeMock()
+})
 
 const identity = {
   enabled: false,
@@ -100,6 +119,61 @@ describe('RESET_EXTENSION_STATE response truth', () => {
       },
     })
     expect(dependencies.clearAnalysisState).not.toHaveBeenCalled()
+  })
+
+  it('returns failed on scoped remove lastError and a later queued Reset recovers', async () => {
+    seedStorage({
+      dh_prefs: {
+        teamCatalogEnabled: false,
+        teamManifestUrl: '',
+        team: '',
+      },
+      dh_team: 'team-a',
+      dh_team_items: [{ label: 'cached' }],
+    })
+    const remove = deferNextStorageRemove('dh_team')
+    const clearAnalysisState = vi.fn().mockResolvedValue(undefined)
+    const actualDeps = {
+      beginGeneration: beginTeamSyncGeneration,
+      identityIsCurrent: currentTeamIdentityMatches,
+      clearTeamState: (
+        expectedIdentity: typeof identity,
+        generation: number,
+      ) => clearTeamBookmarksAtGeneration(generation, expectedIdentity),
+      clearAnalysisState,
+    }
+    const request = { identity, requestGeneration: 12, resetToken: 22 }
+
+    const failedReset = handleResetExtensionState(request, actualDeps)
+    await vi.waitFor(() => expect(
+      (chrome.storage.local.remove as any).mock.calls.some(
+        ([keys]: any[]) => keys.includes('dh_team'),
+      ),
+    ).toBe(true))
+    await remove.reject(new Error('RESET REMOVE FAILED'))
+
+    await expect(failedReset).resolves.toEqual({
+      status: 'error',
+      error: 'Extension state reset failed',
+      data: {
+        syncStatus: 'failed',
+        identity,
+        requestGeneration: 12,
+        resetToken: 22,
+      },
+    })
+    expect(clearAnalysisState).not.toHaveBeenCalled()
+    expect(getStorageSnapshot()).toHaveProperty('dh_team', 'team-a')
+
+    await expect(handleResetExtensionState(
+      { ...request, requestGeneration: 13, resetToken: 23 },
+      actualDeps,
+    )).resolves.toMatchObject({
+      status: 'success',
+      data: { syncStatus: 'committed', requestGeneration: 13, resetToken: 23 },
+    })
+    expect(clearAnalysisState).toHaveBeenCalledOnce()
+    expect(getStorageSnapshot()).not.toHaveProperty('dh_team')
   })
 
   it('rejects a request without a reset token before clearing state', async () => {

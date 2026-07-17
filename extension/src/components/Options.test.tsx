@@ -337,6 +337,93 @@ describe('Options hydration window — Inv4: catch-up RPC at hydration COMPLETE'
       expect(findCatchUpCall('language', 'en')).toBeDefined()
     })
   })
+
+  it('does not send catch-up until its mirror succeeds and retries with the latest payload', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const retryUpdate = deferNextResponse('update_config')
+    render(<Options />)
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await waitFor(() => expect(findStorageWrite('language')).toBeDefined())
+    const prefsWriteCount = () => chromeMockSpies.storageSet.mock.calls.filter(
+      call => Object.hasOwn(call[0] as object, 'dh_prefs'),
+    ).length
+    const writesBeforeHydration = prefsWriteCount()
+    const hydrationMirror = deferNextStorageSet('dh_prefs')
+    const catchUpMirror = deferNextStorageSet('dh_prefs')
+
+    await resolveHostConfig(getConfig, { language: 'zh' })
+    await waitFor(() => expect(prefsWriteCount()).toBe(writesBeforeHydration + 1))
+    expect(countUpdateConfigCalls()).toBe(0)
+
+    await act(async () => hydrationMirror.resolve(undefined))
+    await waitFor(() => expect(prefsWriteCount()).toBe(writesBeforeHydration + 2))
+    expect(countUpdateConfigCalls()).toBe(0)
+    await act(async () => catchUpMirror.reject(new Error('CATCH-UP MIRROR FAILED')))
+
+    expect(countUpdateConfigCalls()).toBe(0)
+    expect(await screen.findByRole('alert')).toHaveTextContent('CATCH-UP MIRROR FAILED')
+
+    const retryMirror = deferNextStorageSet('dh_prefs')
+    fireEvent.change(language, { target: { value: 'zh' } })
+    await waitFor(() => expect(prefsWriteCount()).toBe(writesBeforeHydration + 3))
+    expect(countUpdateConfigCalls()).toBe(0)
+    await act(async () => retryMirror.resolve(undefined))
+
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+    const updateCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(
+      updateCalls[0].payload.payload.config.extension_preferences.language,
+    ).toBe('zh')
+    await act(async () => retryUpdate.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it('suppresses a delayed catch-up Host send when a newer edit is queued', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const latestUpdate = deferNextResponse('update_config')
+    render(<Options />)
+    const language = await findLanguageSelect()
+    fireEvent.change(language, { target: { value: 'en' } })
+    await waitFor(() => expect(findStorageWrite('language')).toBeDefined())
+    const prefsWriteCount = () => chromeMockSpies.storageSet.mock.calls.filter(
+      call => Object.hasOwn(call[0] as object, 'dh_prefs'),
+    ).length
+    const writesBeforeHydration = prefsWriteCount()
+    const hydrationMirror = deferNextStorageSet('dh_prefs')
+    const catchUpMirror = deferNextStorageSet('dh_prefs')
+
+    await resolveHostConfig(getConfig, { language: 'zh' })
+    await waitFor(() => expect(prefsWriteCount()).toBe(writesBeforeHydration + 1))
+    expect(countUpdateConfigCalls()).toBe(0)
+    await act(async () => hydrationMirror.resolve(undefined))
+    await waitFor(() => expect(prefsWriteCount()).toBe(writesBeforeHydration + 2))
+    expect(countUpdateConfigCalls()).toBe(0)
+
+    const latestMirror = deferNextStorageSet('dh_prefs')
+    fireEvent.change(language, { target: { value: 'zh' } })
+    expect(prefsWriteCount()).toBe(writesBeforeHydration + 2)
+    await act(async () => catchUpMirror.resolve(undefined))
+    await waitFor(() => expect(prefsWriteCount()).toBe(writesBeforeHydration + 3))
+    expect(countUpdateConfigCalls()).toBe(0)
+    await act(async () => latestMirror.resolve(undefined))
+
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+    const updateCalls = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(
+      updateCalls[0].payload.payload.config.extension_preferences.language,
+    ).toBe('zh')
+    await act(async () => latestUpdate.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
 })
 
 // ---------- T-Inv5 ----------

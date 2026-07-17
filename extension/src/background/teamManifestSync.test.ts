@@ -142,6 +142,23 @@ describe('syncManifestOnly preference commit gate', () => {
     )
   })
 
+  it('returns failed rather than committed when the manifest write rejects', async () => {
+    await expect(syncManifestOnly(MANIFEST_REQUEST, manifestDeps({
+      writeManifest: vi.fn().mockRejectedValue(new Error('storage set failed')),
+    }) as any)).resolves.toEqual({
+      status: 'error',
+      error: 'Team catalog storage mutation failed',
+      errorKind: 'storage',
+      data: {
+        manifestOnly: true,
+        changed: false,
+        syncStatus: 'failed',
+        identity: MANIFEST_REQUEST.identity,
+        requestGeneration: 7,
+      },
+    })
+  })
+
   it.each([
     ['failure', { ok: false, failure: { kind: 'auth', message: 'safe failure' } }],
     ['null', null],
@@ -250,6 +267,43 @@ describe('Service Worker team request identity boundary', () => {
       requestGeneration: 99,
     })
   })
+
+  it.each([
+    ['reset-cache clear', {
+      request: {
+        identity: { ...selectedIdentity, teamId: '' },
+        requestGeneration: 51,
+        manifestOnly: true,
+        resetCache: true,
+      },
+      dep: 'clearAll',
+    }],
+    ['no-team clear', {
+      request: {
+        identity: { ...selectedIdentity, teamId: '' },
+        requestGeneration: 52,
+      },
+      dep: 'clearSelection',
+    }],
+  ])('returns failed when a %s storage remove rejects', async (_name, scenario) => {
+    const deps = requestDeps()
+    ;(deps[scenario.dep as 'clearAll' | 'clearSelection'] as any)
+      .mockRejectedValue(new Error('storage remove failed'))
+
+    await expect(handleTeamCatalogSyncRequest(
+      scenario.request,
+      deps,
+    )).resolves.toMatchObject({
+      status: 'error',
+      error: 'Team catalog storage mutation failed',
+      errorKind: 'storage',
+      data: {
+        syncStatus: 'failed',
+        identity: scenario.request.identity,
+        requestGeneration: scenario.request.requestGeneration,
+      },
+    })
+  })
 })
 
 describe('selected-team sync response boundary', () => {
@@ -301,6 +355,7 @@ describe('selected-team sync response boundary', () => {
       items: [{ label: 'Cached item' }],
       failure: { kind: 'auth', message: 'safe failure' },
       failureStage: 'bookmarks',
+      syncedAt: 'MUST NOT ESCAPE',
     })).toEqual({
       status: 'error',
       error: 'safe failure',
@@ -310,7 +365,6 @@ describe('selected-team sync response boundary', () => {
       data: {
         syncStatus: 'failed',
         identity,
-        items: [{ label: 'Cached item' }],
       },
     })
   })

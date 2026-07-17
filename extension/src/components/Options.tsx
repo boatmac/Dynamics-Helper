@@ -75,7 +75,7 @@ type PrefsMirrorIntent = {
     generation: number;
     prefs: Readonly<Preferences>;
     actions: readonly PrefsMirrorAction[];
-    onCommit?: () => void;
+    onLatestCommit?: () => void;
 };
 
 type PendingHydrationMirror = PrefsMirrorIntent & {
@@ -698,7 +698,7 @@ const OptionsInner: React.FC = () => {
     const [isSyncingTeam, setIsSyncingTeam] = useState(false);
     const [teamItems, setTeamItems] = useState<MenuItem[]>([]);
     const [teamFetchError, setTeamFetchError] = useState<null | {
-        kind: 'auth' | 'notFound' | 'http' | 'network' | 'parse' | 'unknown';
+        kind: 'auth' | 'notFound' | 'http' | 'network' | 'parse' | 'storage' | 'unknown';
         httpStatus?: number;
     }>(null);
     // Plan A onBlur validation feedback for the manifest URL field. True
@@ -1013,7 +1013,7 @@ const OptionsInner: React.FC = () => {
     const createPrefsMirrorIntent = (
         nextPrefs: Readonly<Preferences>,
         newActions: readonly PrefsMirrorAction[] = [],
-        onCommit?: () => void,
+        onLatestCommit?: () => void,
     ): PrefsMirrorIntent => {
         const previousIntents = [
             latestPrefsMirrorIntentRef.current,
@@ -1037,7 +1037,7 @@ const OptionsInner: React.FC = () => {
             generation: ++prefsMirrorGenerationRef.current,
             prefs: Object.freeze({ ...nextPrefs }),
             actions: Object.freeze([...actionMap.values()]),
-            onCommit,
+            onLatestCommit,
         });
         latestPrefsMirrorIntentRef.current = intent;
         return intent;
@@ -1121,7 +1121,7 @@ const OptionsInner: React.FC = () => {
 
             setPrefsMirrorIssue(null);
             settlePrefsMirrorActions(intent);
-            intent.onCommit?.();
+            intent.onLatestCommit?.();
         });
     };
 
@@ -1236,10 +1236,20 @@ const OptionsInner: React.FC = () => {
         }
         catchUpProcessedRevisionRef.current = catchUpRevision;
         console.log('[DH] Hydration catch-up: pushing', userTouchedFieldsRef.current.size, 'user-touched field(s) to host');
-        const intent = createIntent(prefsRef.current);
-        sendHostConfigUpdate(intent, {
-            suppressTransportWarning: true,
-        });
+        const configIntent = createIntent(prefsRef.current);
+        const mirrorIntent = createPrefsMirrorIntent(
+            configIntent.prefs,
+            [],
+            () => {
+                if (configIntent.generation !== configUpdateRequestRevisionRef.current) {
+                    return;
+                }
+                sendHostConfigUpdate(configIntent, {
+                    suppressTransportWarning: true,
+                });
+            },
+        );
+        writePrefsMirror(mirrorIntent);
     }, [catchUpRevision]);
 
     // Initial Load

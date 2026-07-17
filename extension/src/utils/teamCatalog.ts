@@ -37,8 +37,9 @@ export interface TeamCatalogFile {
  *   - `http`     — Any other non-ok HTTP status (5xx server, 4xx other)
  *   - `network`  — fetch() threw (DNS failure, CORS, offline, TLS)
  *   - `parse`    — Response body was not valid JSON
+ *   - `storage`  — Chrome rejected a local cache mutation
  */
-export type FetchFailureKind = 'auth' | 'notFound' | 'http' | 'network' | 'parse';
+export type FetchFailureKind = 'auth' | 'notFound' | 'http' | 'network' | 'parse' | 'storage';
 
 export interface FetchFailure {
     kind: FetchFailureKind;
@@ -281,11 +282,39 @@ function readStorage(keys: string | string[]): Promise<any> {
 }
 
 function setStorage(values: Record<string, unknown>): Promise<void> {
-    return new Promise(resolve => chrome.storage.local.set(values, resolve));
+    return new Promise((resolve, reject) => chrome.storage.local.set(values, () => {
+        if (chrome.runtime.lastError) {
+            reject(new Error('Team catalog storage mutation failed'));
+            return;
+        }
+        resolve();
+    }));
 }
 
 function removeStorage(keys: readonly string[]): Promise<void> {
-    return new Promise(resolve => chrome.storage.local.remove([...keys], resolve));
+    return new Promise((resolve, reject) => chrome.storage.local.remove([...keys], () => {
+        if (chrome.runtime.lastError) {
+            reject(new Error('Team catalog storage removal failed'));
+            return;
+        }
+        resolve();
+    }));
+}
+
+function storageFailureResult(
+    identity: TeamSyncIdentity,
+    failureStage: 'manifest' | 'bookmarks',
+): SyncResult {
+    return {
+        status: 'failed',
+        identity,
+        items: [],
+        failure: {
+            kind: 'storage',
+            message: 'Team catalog storage mutation failed',
+        },
+        failureStage,
+    };
 }
 
 function storedIdentityMatches(
@@ -454,11 +483,15 @@ export async function syncTeamBookmarks(
     if (manifestResult.changed) {
         manifest = manifestResult.manifest;
         // Persist the new manifest + its ETag
-        if (!await commitForIdentity(identity, generation, {
-            dh_team_manifest: manifest,
-            dh_team_manifest_etag: manifestResult.etag,
-            dh_team_manifest_url: manifestUrl,
-        })) return staleResult();
+        try {
+            if (!await commitForIdentity(identity, generation, {
+                dh_team_manifest: manifest,
+                dh_team_manifest_etag: manifestResult.etag,
+                dh_team_manifest_url: manifestUrl,
+            })) return staleResult();
+        } catch {
+            return storageFailureResult(identity, 'manifest');
+        }
     } else {
         // 304 — reuse cached manifest
         const cached = await new Promise<any>((resolve) => {
@@ -521,8 +554,12 @@ export async function syncTeamBookmarks(
     if (!bookmarksResult.changed) {
         // 304 — refresh sync timestamp only
         const syncedAt = new Date().toISOString();
-        if (!await commitForIdentity(identity, generation, { dh_team_synced: syncedAt })) {
-            return staleResult();
+        try {
+            if (!await commitForIdentity(identity, generation, { dh_team_synced: syncedAt })) {
+                return staleResult();
+            }
+        } catch {
+            return storageFailureResult(identity, 'bookmarks');
         }
         return {
             status: 'unchanged',
@@ -536,12 +573,16 @@ export async function syncTeamBookmarks(
 
     // New bookmarks — persist
     const syncedAt = new Date().toISOString();
-    if (!await commitForIdentity(identity, generation, {
-        dh_team: teamId,
-        dh_team_items: bookmarksResult.items,
-        dh_team_etag: bookmarksResult.etag,
-        dh_team_synced: syncedAt,
-    })) return staleResult();
+    try {
+        if (!await commitForIdentity(identity, generation, {
+            dh_team: teamId,
+            dh_team_items: bookmarksResult.items,
+            dh_team_etag: bookmarksResult.etag,
+            dh_team_synced: syncedAt,
+        })) return staleResult();
+    } catch {
+        return storageFailureResult(identity, 'bookmarks');
+    }
 
     return {
         status: 'committed',

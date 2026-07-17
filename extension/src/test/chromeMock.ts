@@ -66,6 +66,11 @@ export function resetChromeMock(): void {
   storageRemove.mockClear()
   storageOnChangedAddListener.mockClear()
   storageOnChangedRemoveListener.mockClear()
+  if (typeof chrome !== 'undefined' && chrome.runtime) {
+    ;(chrome.runtime as typeof chrome.runtime & {
+      lastError?: { message: string }
+    }).lastError = undefined
+  }
 }
 
 /**
@@ -264,8 +269,22 @@ const storageRemove = vi.fn((keys: string | string[], maybeCallback?: unknown) =
     for (const k of arr) delete storageData[k]
     cb?.()
   }
+  const fail = (reason: unknown) => {
+    if (!cb) throw reason
+    const runtime = chrome.runtime as typeof chrome.runtime & {
+      lastError?: { message: string }
+    }
+    runtime.lastError = {
+      message: reason instanceof Error ? reason.message : String(reason),
+    }
+    try {
+      cb()
+    } finally {
+      runtime.lastError = undefined
+    }
+  }
   if (deferred) {
-    const completion = deferred.promise.then(commit)
+    const completion = deferred.promise.then(commit, fail)
     return cb ? undefined : completion
   }
   for (const k of arr) delete storageData[k]

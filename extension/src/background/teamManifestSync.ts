@@ -44,6 +44,24 @@ function staleResponse(request: TeamCatalogSyncRequest): any {
     }
 }
 
+function storageFailureResponse(
+    request: TeamCatalogSyncRequest,
+    manifestOnly = request.manifestOnly === true,
+): any {
+    return {
+        status: 'error',
+        error: 'Team catalog storage mutation failed',
+        errorKind: 'storage',
+        data: {
+            manifestOnly,
+            changed: false,
+            syncStatus: 'failed',
+            identity: request.identity,
+            requestGeneration: request.requestGeneration,
+        },
+    }
+}
+
 export async function syncManifestOnly(
     request: TeamCatalogSyncRequest,
     deps: ManifestOnlyDeps,
@@ -80,8 +98,12 @@ export async function syncManifestOnly(
     }
 
     if (result.changed) {
-        const committed = await deps.writeManifest(result.manifest, result.etag)
-        if (committed === false) return staleResponse(request)
+        try {
+            const committed = await deps.writeManifest(result.manifest, result.etag)
+            if (committed === false) return staleResponse(request)
+        } catch {
+            return storageFailureResponse(request, true)
+        }
     }
     return {
         status: 'success',
@@ -104,11 +126,15 @@ export function toSelectedTeamSyncResponse(
         identity: result.identity,
         ...(requestGeneration === undefined ? {} : { requestGeneration }),
         ...(
-            result.status === 'skipped' || result.status === 'stale'
+            result.status === 'skipped'
+                || result.status === 'stale'
+                || result.status === 'failed'
                 ? {}
                 : { items: result.items }
         ),
-        ...(result.syncedAt ? { syncedAt: result.syncedAt } : {}),
+        ...(result.status !== 'failed' && result.syncedAt
+            ? { syncedAt: result.syncedAt }
+            : {}),
     }
     if (result.status === 'skipped' || result.status === 'stale') {
         return { status: 'success', data }
@@ -173,8 +199,12 @@ export function handleTeamCatalogSyncRequest(
         }
 
         if (captured.resetCache || captured.identity.enabled === false) {
-            if (!await deps.clearAll(captured.identity, generation)) {
-                return staleResponse(captured)
+            try {
+                if (!await deps.clearAll(captured.identity, generation)) {
+                    return staleResponse(captured)
+                }
+            } catch {
+                return storageFailureResponse(captured)
             }
             if (!captured.identity.manifestUrl || captured.identity.enabled === false) {
                 return {
@@ -195,8 +225,12 @@ export function handleTeamCatalogSyncRequest(
         }
 
         if (!captured.identity.teamId) {
-            if (!await deps.clearSelection(captured.identity, generation)) {
-                return staleResponse(captured)
+            try {
+                if (!await deps.clearSelection(captured.identity, generation)) {
+                    return staleResponse(captured)
+                }
+            } catch {
+                return storageFailureResponse(captured)
             }
             return {
                 status: 'success',
@@ -208,8 +242,12 @@ export function handleTeamCatalogSyncRequest(
             }
         }
 
-        if (!await deps.clearSelectionIfChanged(captured.identity, generation)) {
-            return staleResponse(captured)
+        try {
+            if (!await deps.clearSelectionIfChanged(captured.identity, generation)) {
+                return staleResponse(captured)
+            }
+        } catch {
+            return storageFailureResponse(captured)
         }
         const result = await deps.syncSelected(captured.identity, generation)
         return toSelectedTeamSyncResponse(result, captured.requestGeneration)

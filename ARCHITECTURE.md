@@ -147,9 +147,11 @@ Prompt resolution is fail-closed. Missing/unreadable Core, unreadable selected D
 
 `update_config` distinguishes sparse field omission from explicit empty content for both `user_instructions` and top-level `user_prompt`. Omission performs no file write; explicit `""` truncates the selected file. Options carries immutable revision/value tokens only on explicit edit/clear/Reset, acknowledges matching saved revisions, and retries unacknowledged values. Its structured result separates durable persistence (`config_saved`) from session refresh (`success`). The Host does not roll back uncertain partial writes; it invalidates stale active prompt state once a durable writer was attempted.
 
-Options serializes and coalesces `dh_prefs` mirror writes. Host updates and
-typed team/Reset actions are post-commit work of only the latest successful
-snapshot; storage failure retains unsettled intent and exposes a warning. Reset
+Options serializes and coalesces `dh_prefs` mirror writes. Normal persistence
+and post-hydration catch-up both capture immutable intents and route through the
+same queue. Host updates and typed team/Reset actions are latest-commit work of
+only the newest successful snapshot; storage failure retains unsettled intent
+and exposes a warning. Reset
 is a tokenized Service Worker transaction whose response is
 `committed|stale|failed`; only matching committed truth permits local cleanup.
 FAB similarly owns an Analyze request through all asynchronous response
@@ -158,7 +160,7 @@ authority.
 
 Analyze errors may carry optional `error_code`. The Service Worker persists raw safe fallback text plus optional `LastAnalysis.errorCode`, preserving an inner Analyze code over an outer wrapper code. Immediate and rehydrated FAB display use the same render-time localization helper for known codes; immediate unknown-code fallbacks may include a safe UI prefix, while rehydrated unknown/legacy codes retain the raw stored fallback. Instruction contents, Custom User Prompt contents, and prompt-source paths are excluded from normal logs and telemetry.
 
-Service Worker persistence has two ownership domains. Team requests carry captured enabled/URL/team identity plus request generation; `teamCatalog.ts` synchronously invalidates older generations and queues validation with awaited manifest/item/ETag/timestamp/clear mutations. `analysisStore.ts` uses request-scoped pending and identity-scoped seen keys, so A/B remain independent across worker restarts; hydration derives last, newest matching pending, and acknowledgment from one snapshot. Options issues Service Worker messages and does not mutate owned keys directly.
+Service Worker persistence has two ownership domains. Team requests carry captured enabled/URL/team identity plus request generation; `teamCatalog.ts` synchronously invalidates older generations and queues validation with awaited manifest/item/ETag/timestamp/clear mutations. Its callback-style set/remove wrappers reject on callback-scoped Chrome storage errors. Mutation rejection becomes identity-safe `failed` truth with no items/timestamp success payload, while generation/identity mismatch remains `stale` and the queue accepts later work. `analysisStore.ts` uses request-scoped pending and identity-scoped seen keys, so A/B remain independent across worker restarts; hydration derives last, newest matching pending, and acknowledgment from one snapshot. Options issues Service Worker messages and does not mutate owned keys directly.
 
 Options' ordered preference mirror attaches stable post-commit action IDs to
 user intents. Compatible newer snapshots inherit unsettled actions, incompatible
