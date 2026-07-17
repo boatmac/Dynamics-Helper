@@ -78,10 +78,11 @@ a7513e5 docs(verification): record seventh review fixes
 87278d5 docs(review): correct seventh verification metadata
 0a23315 fix(review): preserve personal reset and retry truth
 fcc6467 fix(review): align reset cache status truth
-HEAD docs(verification): record eighth review fixes
+c7daa9d docs(verification): record eighth review fixes
+HEAD docs(review): correct eighth verification metadata
 ```
 
-These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Eighth-wave starting head `87278d5` was 38 commits ahead of `origin/master`; its two product commits make the clean product head `fcc6467`, 40 ahead and 0 behind. The evidence commit containing this handoff is expected to make the branch 41 ahead and 0 behind. The controller must still rerun its broad whole-branch review.
+These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Eighth-wave starting head `87278d5` was 38 commits ahead of `origin/master`; its two product commits make the clean product head `fcc6467`, 40 ahead and 0 behind. Evidence commit `c7daa9d` and the following metadata correction make the branch 42 ahead and 0 behind. The controller must still rerun its broad whole-branch review.
 
 ## Remote VM Bootstrap
 

@@ -6,8 +6,9 @@
 **Product/test/docs commits:**
 - `0a23315fd9dcc3893e14c5343383722214b23b01` (`fix(review): preserve personal reset and retry truth`)
 - `fcc6467b5788ccb896a448b4ce58f5146b1311c8` (`fix(review): align reset cache status truth`)
-**Tracked evidence commit:** the commit containing this report
-**Expected final ahead/behind:** 41 ahead, 0 behind `origin/master`
+**Tracked evidence commit:** `c7daa9df40a248dfff8df16c8cb0401ef0b87797` (`docs(verification): record eighth review fixes`)
+**Metadata correction commit:** follows this report update
+**Expected final ahead/behind:** 42 ahead, 0 behind `origin/master`
 
 ## Status
 
