@@ -150,10 +150,14 @@ Both fields support Markdown formatting. Click **Preview** above either textarea
 
 If Chrome cannot save the local preference mirror, Options shows a persistent
 **Settings were not saved** warning and does not apply the Host/team side
-effects yet. Change a setting again to retry. Reset reports success only after
-the matching browser cleanup commits; if Reset is stale, interrupted, or
-superseded by a newer edit, current values remain visible and an incomplete
-Reset warning asks you to retry Reset.
+effects yet. Change a setting again to retry. A failed personal bookmark write
+or removal keeps the current menu visible and shows **Bookmark changes are not
+saved**; make another bookmark change to retry the newest menu snapshot. Reset
+reports success only after both the Native Host defaults and matching browser
+cleanup commit. Host save failure performs no browser cleanup; if only session
+refresh fails, Reset can finish while that separate warning remains. A stale,
+interrupted, or superseded Reset keeps newer values visible and asks you to
+retry; after the Host phase has committed, retry repeats only browser cleanup.
 
 Prompt/configuration errors are actionable and do not mean authentication failed:
 

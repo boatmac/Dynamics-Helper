@@ -158,9 +158,13 @@ settles before dispatch and runs the matching Host update from
 `onLatestCommit`. Storage
 `chrome.runtime.lastError` runs neither, leaves actions unsettled, and exposes a
 persistent retryable issue. Reset carries immutable default identity/generation/
-token through the Service Worker; only matching `committed` truth clears local
-UI and shows success. Stale/failed/transport/superseded responses keep current
-values and show incomplete Reset.
+token through both phases. The matching preference mirror must commit and its
+tokenized Host `update_config` must return `success: true` or
+`config_saved: true` before Options dispatches `RESET_EXTENSION_STATE`.
+Completion additionally requires matching SW `syncStatus: 'committed'`.
+Unsaved/transport Host failure performs no SW cleanup; a saved refresh failure
+continues while retaining its separate warning. A post-Host SW failure retries
+only the idempotent SW phase with the same token and preserves newer edits.
 
 Personal bookmarks have a separate generation boundary. Every add/edit/delete/
 move/import/collapse and Reset intent calls `mutatePersonalItems`; all `dh_items`
@@ -168,7 +172,11 @@ writes/removes use one Promise queue. Reset captures that generation and checks
 it before remove, after remove, after default loading, and after the default
 write. A newer mutation cancels only personal cleanup, is written after any
 already-started remove, stays visible, and reports that shared state may already
-have been cleared rather than claiming complete success.
+have been cleared rather than claiming complete success. Callback-scoped set or
+remove failure retains the newest complete snapshot/removal intent, displays a
+persistent localized bookmark warning, and leaves the queue usable. The next
+bookmark mutation coalesces to the newest UI snapshot; only its successful
+storage callback clears the warning.
 
 Options team cache hydration and storage follow-up reads use one UI generation
 plus captured enabled/URL/team identity before applying list/items/synced state.
@@ -188,11 +196,15 @@ Manifest URL blur deduplication uses two refs, not one optimistic marker.
 `committed` or `unchanged` response. `manifestFetchInFlightRef` stores a token
 and URL, suppresses only a duplicate concurrent URL, and is cleared only by its
 own callback. Auth/network/transport/failed/stale/skipped outcomes can retry on
-the next same-URL blur; URL A cannot clear or complete URL B.
+the next same-URL blur; URL A cannot clear or complete URL B. Every Options
+current/response team check normalizes an omitted team to `''`, so no-team
+committed/unchanged results deduplicate while failed/stale/skipped results retry.
 
 `normalizeNativeHostResponse` is the Service Worker allowlist for Host errors.
-It leaves success `data` unchanged and forwards only fallback text, normalized
-`error_code`, string `errorKind`, and finite numeric `httpStatus` on error. The
+It leaves success `data` unchanged and forwards only a string `error` or
+`message` fallback, normalized `error_code`, string `errorKind`, and finite
+numeric `httpStatus` on error. Objects, arrays, functions, and null are ignored
+without coercion and become the fixed `Native Host error` string. The
 `list_models` Options handler therefore receives `auth`, `unavailable`, or
 `unknown` classification without exposing arbitrary Host fields.
 

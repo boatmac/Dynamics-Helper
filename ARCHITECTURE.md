@@ -151,13 +151,19 @@ Options serializes and coalesces `dh_prefs` mirror writes. Normal persistence
 and post-hydration catch-up both capture immutable intents and route through the
 same queue. Host updates and typed team/Reset actions are latest-commit work of
 only the newest successful snapshot; storage failure retains unsettled intent
-and exposes a warning. Reset
-is a tokenized Service Worker transaction whose response is
-`committed|stale|failed`; only matching committed truth permits local cleanup.
+and exposes a warning. Reset is one tokenized two-phase transaction. The default
+mirror and matching Host `update_config` must durably acknowledge before the
+Service Worker receives `RESET_EXTENSION_STATE`; only a matching SW
+`committed` result permits local cleanup and completion UI. Host failure causes
+no SW destruction, `config_saved: true` refresh failure continues with a
+separate warning, and post-Host SW failure retries only that idempotent phase.
 Personal `dh_items` mutations additionally share one generation counter and
 serialized write/remove queue. A committed shared reset cannot remove or reload
 personal bookmarks after a newer personal generation; that outcome is partial,
 keeps the newer UI/storage snapshot, and never displays complete success.
+Set/remove failure retains the newest full bookmark intent, keeps a localized
+persistence warning visible, and clears it only after a later successful
+coalesced mutation.
 FAB similarly owns an Analyze request through all asynchronous response
 processing, including case hashing, so stale requests have no UI or telemetry
 authority.
@@ -165,8 +171,10 @@ authority.
 Analyze errors may carry optional `error_code`. The Service Worker persists raw safe fallback text plus optional `LastAnalysis.errorCode`, preserving an inner Analyze code over an outer wrapper code. Immediate and rehydrated FAB display use the same render-time localization helper for known codes; immediate unknown-code fallbacks may include a safe UI prefix, while rehydrated unknown/legacy codes retain the raw stored fallback. Instruction contents, Custom User Prompt contents, and prompt-source paths are excluded from normal logs and telemetry.
 
 Native Host error normalization is an allowlist boundary. Success `data` remains
-unchanged; error envelopes retain only fallback text, normalized `error_code`,
-string `errorKind`, and finite numeric `httpStatus`. This preserves model-list
+unchanged; error envelopes retain only string `error`/`message` fallback text,
+normalized `error_code`, string `errorKind`, and finite numeric `httpStatus`.
+Non-string fallback values are never coerced or forwarded and become the fixed
+`Native Host error` string. This preserves model-list
 auth/unavailable classification through `NATIVE_MSG` without forwarding
 arbitrary Host fields.
 
@@ -177,7 +185,9 @@ in-flight `{token, manifestUrl}`. Duplicate concurrent blurs for the same URL
 coalesce. Only the current identity-matching `committed` or `unchanged` response
 promotes success; failed, transport, stale, and skipped outcomes release only
 their own token and remain retryable. An older URL callback cannot clear or
-complete a newer request.
+complete a newer request. Options normalizes every optional team value to `''`
+for current and response checks, making no-team results follow the same terminal
+truth as selected-team results.
 
 Options' ordered preference mirror attaches stable post-commit action IDs to
 user intents. Compatible newer snapshots inherit unsettled actions, incompatible

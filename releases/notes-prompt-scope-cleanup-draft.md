@@ -47,16 +47,20 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Personal bookmark mutations and Reset now share a generation counter and serialized `dh_items` queue. Newer add/edit/delete/move/import/collapse changes survive delayed Reset response/removal, while normal Reset still reloads packaged defaults and partial cleanup is reported truthfully.
 - Native Host error normalization preserves allowlisted `errorKind` and `httpStatus`, so model-list authentication failures select re-auth guidance without forwarding arbitrary Host fields.
 - Manifest blur retries distinguish last successful from in-flight URLs. Failed, transport, stale, skipped, and first-time no-team requests can retry; committed/unchanged requests deduplicate, and old URL callbacks cannot disturb newer work.
+- Reset now uses one token across a Host-before-Service-Worker two-phase commit. Unsaved Host failures perform no destructive browser cleanup; saved refresh failures keep a separate warning; post-Host SW failures retry only the SW phase; completion requires both durable phases.
+- Personal bookmark set/remove failures retain the newest snapshot/removal intent, keep a localized persistence warning visible, suppress false Reset completion, and recover on the next coalesced mutation.
+- Options normalizes omitted team identity to the empty string for every manifest current/response check, so no-team committed/unchanged requests deduplicate while failed/stale/skipped requests remain retryable and old callbacks are ignored after team selection.
+- Native Host error fallbacks now accept strings only. Object, array, function, and null values are neither coerced nor forwarded and render the fixed safe fallback instead.
 
 ## Verification
 
-- Eighth review product commits: `0a23315` and `fcc6467`; the evidence commit follows them.
+- Ninth review product commits: `5596afa`, `9763b2e`, `d88c206`, and `f5d4acc`; the evidence commit follows them.
 - Isolated Host: **143/143 focused** and **207/207 full** tests passed.
-- Extension: **207/207 focused across 6 files** and **303/303 full across 18 files** passed.
+- Extension: **231/231 focused across 6 files** and **327/327 full across 18 files** passed.
 - Production build passed with **2,217 modules transformed** and **13 artifacts** listed.
 - Isolated source-only compileall, `git diff --check`, static/version scans, and restored break-and-fail mutations passed.
 - Optional authenticated marker smoke was not run because safe model-backed user/session isolation was unavailable; it remains non-gating.
-- The controller broad whole-branch review remains pending after this eighth fix wave.
+- The controller broad whole-branch review remains pending after this ninth fix wave.
 
 ## Upgrade notes
 
