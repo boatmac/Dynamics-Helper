@@ -45,8 +45,11 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 
 ## Verification
 
-- Sixth review product/evidence commits and final exact totals are recorded in `.superpowers/sdd/sixth-final-review-fix-report.md`.
-- Isolated Host, full Extension, production build, compileall, static checks, and break-and-fail mutations pass on the committed sixth-fix tree.
+- Sixth review product commit: `adeb9ef` (`fix(review): make async commit truth durable`); the evidence commit follows it.
+- Isolated Host: **135/135 focused** and **207/207 full** tests passed.
+- Extension: **114/114 focused across 3 files** and **261/261 full across 18 files** passed.
+- Production build passed with **2,217 modules transformed** and **13 artifacts** listed.
+- Corrected isolated source-only compileall, `git diff --check`, static/version scans, and break-and-fail mutations passed.
 - Optional authenticated marker smoke was not run because safe model-backed user/session isolation was unavailable; it remains non-gating.
 - The controller broad whole-branch review remains pending after this sixth fix wave.
 

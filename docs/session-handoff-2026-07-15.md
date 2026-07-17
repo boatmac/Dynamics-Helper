@@ -14,7 +14,7 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Task 8 evidence: `9127546` plus `73b8adf`; first-review fixes/evidence are `907acd0` and `6b9631f`
 - Second whole-branch Important-finding implementation: `cb760a4` plus comment-only follow-up `3e18244`
 - Fifth whole-branch Important-finding product fix: `77df5ec` (`fix(review): preserve asynchronous intent ownership`)
-- Sixth whole-branch review fix wave: working tree after starting head `0faf649`; final product/evidence commit IDs are recorded in `.superpowers/sdd/sixth-final-review-fix-report.md`
+- Sixth whole-branch review product fix: `adeb9ef` (`fix(review): make async commit truth durable`); evidence follows in `.superpowers/sdd/sixth-final-review-fix-report.md`
 - Controller broad whole-branch review: **pending rerun after the sixth fix wave**
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
@@ -69,7 +69,8 @@ e3ba1ca fix(review): harden request-scoped authority
 e1fb39c docs(verification): record fourth review fixes
 77df5ec fix(review): preserve asynchronous intent ownership
 0faf649 docs(verification): record fifth review fixes
-HEAD sixth review fixes/evidence (inspect Git for final commit IDs)
+adeb9ef fix(review): make async commit truth durable
+HEAD docs(verification): record sixth review fixes
 ```
 
 These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Starting head `0faf649` was 33 commits ahead of `origin/master`; inspect the sixth report and Git directly for final counts. The controller must still rerun its broad whole-branch review. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming the embedded count remains current.
@@ -359,6 +360,14 @@ smoke remains safely skipped. No version, tag, push, package, registry, real
 AppData, or MyCases operation is part of this wave. Controller broad whole-branch
 review remains pending after the sixth fixes.
 
+Fresh committed-product gates: **135/135 focused Host**, **207/207 full Host**,
+**114/114 focused Extension across 3 files**, and **261/261 full Extension
+across 18 files**. Production build passed with **2,217 modules transformed**
+and **13 artifacts listed**. Corrected isolated source-only compileall, diff,
+version, stale-mutation, and generated-dist checks passed. Including the
+evidence commit, the branch is expected to be **35 ahead, 0 behind
+`origin/master`**.
+
 ## Session Identity Contract
 
 - Case session ID is deterministic UUIDv5 derived from the bare 16-digit case number.
@@ -586,13 +595,13 @@ Use the following for continuation; update the exact HEAD and status from Git ra
    - docs/superpowers/specs/2026-07-15-dh-prompt-scope-cleanup-design.md
    - docs/superpowers/plans/2026-07-15-dh-prompt-scope-cleanup.md
    - docs/superpowers/plans/2026-07-17-fifth-review-important-fixes.md
-   - .superpowers/sdd/fifth-final-review-fix-report.md
+   - .superpowers/sdd/sixth-final-review-fix-report.md
    - docs/superpowers/research/2026-07-14-dh-mycaseskit-stage0-instructions-brief.md
    - docs/superpowers/research/2026-07-14-dh-extension-stage0-integration-plan.md
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9。第五轮 Important 修复产品提交是 77df5ec：隔离 LOCALAPPDATA 的 Host focused 132/132、full 204/204，Extension focused 158/158（7 files）、full 248/248（17 files），build 2,216 modules / 13 artifacts 通过，compileall/static/mutation 通过；证据见 fifth-final-review-fix-report.md。可选 marker smoke 因无法保证 authenticated model-backed user/session state 完全隔离而跳过；release draft 未选择版本。下一步仍是 controller 重新运行 broad whole-branch review；不要把本轮 focused/self-review 当作 broad review 已通过。
+历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9。第六轮修复产品提交是 adeb9ef：隔离 LOCALAPPDATA 的 Host focused 135/135、full 207/207，Extension focused 114/114（3 files）、full 261/261（18 files），build 2,217 modules / 13 artifacts 通过，修正后的 source-only compileall/static/mutation 通过；证据见 sixth-final-review-fix-report.md。可选 marker smoke 因无法保证 authenticated model-backed user/session state 完全隔离而跳过；release draft 未选择版本。下一步仍是 controller 重新运行 broad whole-branch review；不要把本轮 focused/self-review 当作 broad review 已通过。
 
 已实现行为：所有 DH create/resume 都设置 skip_custom_instructions=True；CLI global、AGENTS、path instructions 等自动发现源全部排除。DH 显式注入 Core + 恰好一个可编辑源：Root 为空或 Repository ONLY 关闭时使用 DH-specific Instructions；Root 非空且 Repository ONLY 开启时只使用 <Root>/.github/copilot-instructions.md。Custom User Prompt 仍是每次 Analyze 的 PII-scrubbed user content。使用严格 UTF-8 immutable byte snapshot、framed fingerprint、same-UUID refresh 和 fail-closed errors。Options 区分 explicit empty（清空文件）与 omitted（不写），检查 update_config/config_saved，并保留可选 errorCode 到持久化和本地化显示。
 
