@@ -67,6 +67,8 @@ type PrefsMirrorAction = Readonly<{
     id: number;
     kind: 'team-sync' | 'team-clear' | 'manifest-fetch' | 'reset';
     identity: TeamMirrorIdentity;
+    resetToken?: number;
+    hostCommitted?: boolean;
     canRun?: () => boolean;
     run: () => void;
 }>;
@@ -898,6 +900,7 @@ const OptionsInner: React.FC = () => {
         nextPrefs: Readonly<Preferences>,
         instruction?: { value: string },
         prompt?: { value: string },
+        resetToken?: number,
     ) => {
         const payload: Record<string, unknown> = {
             config: {
@@ -937,6 +940,9 @@ const OptionsInner: React.FC = () => {
         if (prompt) {
             payload.user_prompt = prompt.value;
         }
+        if (resetToken !== undefined) {
+            payload.reset_token = resetToken;
+        }
         return { action: 'update_config', payload };
     };
 
@@ -973,6 +979,10 @@ const OptionsInner: React.FC = () => {
         intent: ConfigUpdateIntent<Preferences>,
         options: {
             suppressTransportWarning?: boolean;
+            resetToken?: number;
+            onResult?: (
+                decision: ReturnType<typeof classifyConfigUpdateResponse>,
+            ) => void;
         } = {},
     ) => {
         const instruction = intent.instruction;
@@ -980,19 +990,29 @@ const OptionsInner: React.FC = () => {
 
         chrome.runtime.sendMessage({
             type: 'NATIVE_MSG',
-            payload: buildHostConfigPayload(intent.prefs, instruction, prompt),
+            payload: buildHostConfigPayload(
+                intent.prefs,
+                instruction,
+                prompt,
+                options.resetToken,
+            ),
         }, (response) => {
             const transportError = chrome.runtime.lastError;
             if (transportError) {
+                const decision = {
+                    acknowledged: false,
+                    issue: {
+                        fallback: transportError.message || '',
+                        configSaved: false,
+                    },
+                };
                 if (
                     !options.suppressTransportWarning
                     && intent.generation === configUpdateRequestRevisionRef.current
                 ) {
-                    setConfigUpdateIssue({
-                        fallback: transportError.message || '',
-                        configSaved: false,
-                    });
+                    setConfigUpdateIssue(decision.issue);
                 }
+                options.onResult?.(decision);
                 return;
             }
 
@@ -1017,6 +1037,7 @@ const OptionsInner: React.FC = () => {
                     refreshPromptHealth(intent.generation);
                 }
             }
+            options.onResult?.(decision);
         });
     };
 
@@ -1094,10 +1115,16 @@ const OptionsInner: React.FC = () => {
         identity: TeamMirrorIdentity,
         run: () => void,
         canRun?: () => boolean,
+        reset?: Readonly<{
+            token: number;
+            hostCommitted: boolean;
+        }>,
     ): PrefsMirrorAction => Object.freeze({
         id: ++prefsMirrorActionIdRef.current,
         kind,
         identity: Object.freeze({ ...identity }),
+        resetToken: reset?.token,
+        hostCommitted: reset?.hostCommitted,
         canRun,
         run,
     });
@@ -1112,17 +1139,73 @@ const OptionsInner: React.FC = () => {
     const mirrorActionMatchesPrefs = (
         action: PrefsMirrorAction,
         candidate: Readonly<Preferences>,
-    ) => mirrorIdentityMatchesPrefs(action.identity, candidate);
+    ) => mirrorIdentityMatchesPrefs(action.identity, candidate)
+        && (
+            action.kind !== 'reset'
+            || action.resetToken === resetTokenRef.current
+        );
 
     const settlePrefsMirrorActions = (intent: PrefsMirrorIntent) => {
         for (const action of intent.actions) {
             if (settledPrefsMirrorActionsRef.current.has(action.id)) continue;
+            if (action.kind === 'reset' && action.hostCommitted !== true) continue;
             if (action.canRun && !action.canRun()) continue;
             settledPrefsMirrorActionsRef.current.add(action.id);
             if (mirrorActionMatchesPrefs(action, intent.prefs)) {
                 action.run();
             }
         }
+    };
+
+    const settleHostAcknowledgedResetActions = (intent: PrefsMirrorIntent) => {
+        for (const action of intent.actions) {
+            if (
+                action.kind !== 'reset'
+                || action.hostCommitted === true
+                || settledPrefsMirrorActionsRef.current.has(action.id)
+            ) continue;
+            if (action.canRun && !action.canRun()) continue;
+            settledPrefsMirrorActionsRef.current.add(action.id);
+            if (mirrorActionMatchesPrefs(action, intent.prefs)) {
+                action.run();
+            }
+        }
+    };
+
+    const sendCommittedHostConfigUpdate = (
+        configIntent: ConfigUpdateIntent<Preferences>,
+        mirrorIntent: PrefsMirrorIntent,
+        options: { suppressTransportWarning?: boolean } = {},
+    ) => {
+        const resetAction = mirrorIntent.actions.find(action =>
+            action.kind === 'reset'
+            && action.hostCommitted !== true
+            && !settledPrefsMirrorActionsRef.current.has(action.id)
+            && mirrorActionMatchesPrefs(action, mirrorIntent.prefs),
+        );
+        sendHostConfigUpdate(configIntent, {
+            ...options,
+            resetToken: resetAction?.resetToken,
+            onResult: decision => {
+                if (
+                    !resetAction
+                    || settledPrefsMirrorActionsRef.current.has(resetAction.id)
+                    || resetAction.resetToken !== resetTokenRef.current
+                ) return;
+                if (
+                    configIntent.generation !== configUpdateRequestRevisionRef.current
+                    || !mirrorActionMatchesPrefs(resetAction, prefsRef.current)
+                ) {
+                    setResetIncomplete(true);
+                    return;
+                }
+                if (!decision.acknowledged) {
+                    setResetIncomplete(true);
+                    return;
+                }
+                settleHostAcknowledgedResetActions(mirrorIntent);
+            },
+        });
     };
 
     const drainPrefsMirrorQueue = () => {
@@ -1318,7 +1401,7 @@ const OptionsInner: React.FC = () => {
                 if (configIntent.generation !== configUpdateRequestRevisionRef.current) {
                     return;
                 }
-                sendHostConfigUpdate(configIntent, {
+                sendCommittedHostConfigUpdate(configIntent, mirrorIntent, {
                     suppressTransportWarning: true,
                 });
             },
@@ -1738,7 +1821,7 @@ const OptionsInner: React.FC = () => {
                     return;
                 }
 
-                sendHostConfigUpdate(intent);
+                sendCommittedHostConfigUpdate(intent, mirrorIntent);
             },
         );
         writePrefsMirror(mirrorIntent);
@@ -1786,25 +1869,28 @@ const OptionsInner: React.FC = () => {
         identity: TeamMirrorIdentity,
         resetToken: number,
         bookmarkResetGeneration: number,
+        hostCommitted = false,
     ): PrefsMirrorAction => createPrefsMirrorAction(
         'reset',
         identity,
         () => {
             const userRevisionAtDispatch = userTouchedRevisionRef.current;
             const resetTokenIsCurrent = () => resetTokenRef.current === resetToken;
-            const responseIsCurrent = () => (
+            const resetScopeIsCurrent = () => (
                 resetTokenIsCurrent()
                 && teamRefreshGenerationRef.current === resetGeneration
-                && userTouchedRevisionRef.current === userRevisionAtDispatch
                 && mirrorIdentityMatchesPrefs(identity, prefsRef.current)
             );
+            const responseIsCurrent = () => resetScopeIsCurrent()
+                && userTouchedRevisionRef.current === userRevisionAtDispatch;
             const retainResetForRetry = () => {
-                if (!responseIsCurrent()) return;
+                if (!resetScopeIsCurrent()) return;
                 pendingResetRetryActionRef.current = createResetMirrorAction(
                     resetGeneration,
                     identity,
                     resetToken,
                     bookmarkResetGeneration,
+                    true,
                 );
                 setResetIncomplete(true);
             };
@@ -1818,6 +1904,13 @@ const OptionsInner: React.FC = () => {
             }, (response) => {
                 if (!resetTokenIsCurrent()) return;
                 if (!responseIsCurrent()) {
+                    if (
+                        chrome.runtime.lastError
+                        || response?.status !== 'success'
+                        || response?.data?.syncStatus !== 'committed'
+                    ) {
+                        retainResetForRetry();
+                    }
                     setResetIncomplete(true);
                     return;
                 }
@@ -1893,11 +1986,25 @@ const OptionsInner: React.FC = () => {
                 });
             });
         },
+        undefined,
+        { token: resetToken, hostCommitted },
     );
 
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
             clearStatus();
+            const pendingSwRetry = pendingResetRetryActionRef.current;
+            if (
+                pendingSwRetry?.hostCommitted === true
+                && mirrorActionMatchesPrefs(pendingSwRetry, prefsRef.current)
+            ) {
+                pendingResetRetryActionRef.current = null;
+                writePrefsMirror(createPrefsMirrorIntent(
+                    prefsRef.current,
+                    [pendingSwRetry],
+                ));
+                return;
+            }
             invalidateTeamRefresh();
             userInstructionsEditTokenRef.current = {
                 revision: userInstructionsEditTokenRef.current.revision + 1,

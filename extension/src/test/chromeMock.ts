@@ -174,6 +174,18 @@ const sendMessage = vi.fn((payload: unknown, maybeCallback?: unknown) => {
   // No deferred response queued — never resolve so forgotten mocks surface
   // as timeouts, not silent passes.
   if (callback) {
+    const resetToken = payload && typeof payload === 'object'
+      && 'payload' in payload
+      && (payload as { payload?: unknown }).payload
+      && typeof (payload as { payload: { payload?: unknown } }).payload.payload === 'object'
+      && (payload as { payload: { payload: { reset_token?: unknown } } }).payload.payload.reset_token
+    if (action === 'update_config' && Number.isInteger(resetToken)) {
+      queueMicrotask(() => callback({
+        status: 'success',
+        data: { success: true, config_saved: true },
+      }))
+      return undefined
+    }
     // Callback simply never fires.
     return undefined
   }
