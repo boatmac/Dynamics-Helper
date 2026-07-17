@@ -44,16 +44,19 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Session refresh config no longer reads Custom User Prompt; Options hydration and each Analyze perform their own single canonical read. Explicit-null editable prompt fields fail before any write.
 - Hydration catch-up now enters the same immutable single-flight preference-mirror queue as normal edits; a failed mirror sends no Host update, and delayed older work cannot send over a newer edit.
 - Team Catalog set/remove callbacks inspect scoped Chrome storage errors. Failed manifest, bookmark, 304 timestamp, clear, and Reset mutations never report committed or expose success items/timestamps, and later queued work can recover.
+- Personal bookmark mutations and Reset now share a generation counter and serialized `dh_items` queue. Newer add/edit/delete/move/import/collapse changes survive delayed Reset response/removal, while normal Reset still reloads packaged defaults and partial cleanup is reported truthfully.
+- Native Host error normalization preserves allowlisted `errorKind` and `httpStatus`, so model-list authentication failures select re-auth guidance without forwarding arbitrary Host fields.
+- Manifest blur retries distinguish last successful from in-flight URLs. Failed, transport, stale, skipped, and first-time no-team requests can retry; committed/unchanged requests deduplicate, and old URL callbacks cannot disturb newer work.
 
 ## Verification
 
-- Seventh review product commit: `85355f8` (`fix(review): harden storage commit truth`); the evidence commit follows it.
-- Isolated Host: **135/135 focused** and **207/207 full** tests passed.
-- Extension: **159/159 focused across 4 files** and **272/272 full across 18 files** passed.
+- Eighth review product commits: `0a23315` and `fcc6467`; the evidence commit follows them.
+- Isolated Host: **143/143 focused** and **207/207 full** tests passed.
+- Extension: **207/207 focused across 6 files** and **303/303 full across 18 files** passed.
 - Production build passed with **2,217 modules transformed** and **13 artifacts** listed.
 - Isolated source-only compileall, `git diff --check`, static/version scans, and restored break-and-fail mutations passed.
 - Optional authenticated marker smoke was not run because safe model-backed user/session isolation was unavailable; it remains non-gating.
-- The controller broad whole-branch review remains pending after this seventh fix wave.
+- The controller broad whole-branch review remains pending after this eighth fix wave.
 
 ## Upgrade notes
 

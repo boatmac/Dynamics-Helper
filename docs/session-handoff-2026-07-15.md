@@ -16,7 +16,8 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Fifth whole-branch Important-finding product fix: `77df5ec` (`fix(review): preserve asynchronous intent ownership`)
 - Sixth whole-branch review product fix: `adeb9ef` (`fix(review): make async commit truth durable`); evidence follows in `.superpowers/sdd/sixth-final-review-fix-report.md`
 - Seventh whole-branch Important-finding product fix: `85355f8` (`fix(review): harden storage commit truth`); evidence is `a7513e5` plus the following metadata correction in `.superpowers/sdd/seventh-final-review-fix-report.md`
-- Controller broad whole-branch review: **pending rerun after the seventh fix wave**
+- Eighth whole-branch Important-finding product fixes: `0a23315` (`fix(review): preserve personal reset and retry truth`) and `fcc6467` (`fix(review): align reset cache status truth`); evidence follows in `.superpowers/sdd/eighth-final-review-fix-report.md`
+- Controller broad whole-branch review: **pending rerun after the eighth fix wave**
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
@@ -74,10 +75,13 @@ adeb9ef fix(review): make async commit truth durable
 540283e docs(verification): record sixth review fixes
 85355f8 fix(review): harden storage commit truth
 a7513e5 docs(verification): record seventh review fixes
-HEAD docs(review): correct seventh verification metadata
+87278d5 docs(review): correct seventh verification metadata
+0a23315 fix(review): preserve personal reset and retry truth
+fcc6467 fix(review): align reset cache status truth
+HEAD docs(verification): record eighth review fixes
 ```
 
-These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Seventh-wave starting head `540283e` was 35 commits ahead of `origin/master`; after its product, evidence, and metadata-correction commits the branch is expected to be 38 ahead and 0 behind. The controller must still rerun its broad whole-branch review. Inspect `git status --short --branch`, `git rev-parse HEAD`, and `git log --oneline` rather than assuming the embedded count remains current.
+These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Eighth-wave starting head `87278d5` was 38 commits ahead of `origin/master`; its two product commits make the clean product head `fcc6467`, 40 ahead and 0 behind. The evidence commit containing this handoff is expected to make the branch 41 ahead and 0 behind. The controller must still rerun its broad whole-branch review.
 
 ## Remote VM Bootstrap
 
@@ -398,6 +402,47 @@ controller broad whole-branch review remains pending. No push, tag, publish,
 version, package, registry, real AppData, or MyCases operation occurred. Version
 fields remain package/Host `2.0.74-beta.4` and Chrome manifest `2.0.74`.
 
+## Eighth Review Important-Fix Addendum - 2026-07-17
+
+Starting head: `87278d54bc4f75a24250e011e2a5322f8b805c46`.
+Product/test/documentation commits: `0a23315fd9dcc3893e14c5343383722214b23b01`
+(`fix(review): preserve personal reset and retry truth`) and
+`fcc6467b5788ccb896a448b4ce58f5146b1311c8` (`fix(review): align reset
+cache status truth`).
+
+Every personal bookmark add/edit/delete/move/import/collapse and Reset intent now
+increments one generation through `mutatePersonalItems`; all `dh_items`
+writes/removes share one queue. A newer mutation cancels personal Reset cleanup
+without undoing committed shared Service Worker cleanup, survives delayed
+response/removal in storage and UI, and shows a partial-reset warning. Stored
+empty menus remain authoritative in Options and FAB; normal Reset reloads
+collapsed packaged defaults.
+
+Native Host error normalization now allowlists string `errorKind` and finite
+numeric `httpStatus` while preserving success `data` unchanged and dropping
+arbitrary fields. Host-shaped auth/unavailable/unknown model-list failures reach
+Options with their classification, and auth selects re-auth guidance.
+
+Manifest blur state now separates last successful URL from a tokenized in-flight
+URL. Same-URL concurrent requests coalesce; only current identity-matching
+`committed`/`unchanged` responses mark success. Auth/network/transport/failed/
+stale/skipped and first-time no-team paths retry. Old A callbacks cannot release
+or complete B, Reset invalidates success after cache clear, and a failed B after
+resetting A's cache permits A to refetch.
+
+Fresh clean-product-head gates: **143/143 focused Host**, **207/207 full Host**,
+**207/207 focused Extension across 6 files**, and **303/303 full Extension
+across 18 files**. Production build passed with **2,217 modules transformed**
+and **13 artifacts listed**. Source-only compileall, TypeScript, diff, version,
+generated-dist, mutation-restoration, and static ownership/allowlist/ref scans
+passed. Exact RED/GREEN, commands, concerns, and constraints are in
+`.superpowers/sdd/eighth-final-review-fix-report.md`.
+
+Optional authenticated marker smoke remained skipped because safe model-backed
+user/session isolation was unavailable. No push, tag, publish, version, package,
+registry, real `%LOCALAPPDATA%\DynamicsHelper`, or MyCases operation occurred.
+Controller broad whole-branch review remains pending.
+
 ## Session Identity Contract
 
 - Case session ID is deterministic UUIDv5 derived from the bare 16-digit case number.
@@ -587,9 +632,9 @@ Blocked until the Contract Primitives spec freezes the adapter boundary:
 
 ## Current Decision State
 
-- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and seven review-fix waves are recorded through the seventh report, and the concise unversioned release draft exists.
+- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and eight review-fix waves are recorded through the eighth report, and the concise unversioned release draft exists.
 - Accepted design and plan are `441d0db` and `21108d9`.
-- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the seventh fix wave.
+- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the eighth fix wave.
 - No MyCases integration code, mode preference, workspace detector, coordinator adapter, persistence adapter, or MyCases canonical-file write has been implemented.
 - MyCasesKit response `675006a` accepts Form ③ and the Stage 1 deterministic persistence-gate model.
 - Five shared JSON fixtures and a README exist as examples, but six README items remain tentative; not every interface is frozen.
@@ -626,13 +671,13 @@ Use the following for continuation; update the exact HEAD and status from Git ra
    - docs/superpowers/plans/2026-07-15-dh-prompt-scope-cleanup.md
    - docs/superpowers/plans/2026-07-17-fifth-review-important-fixes.md
    - docs/superpowers/plans/2026-07-17-seventh-review-important-fixes.md
-   - .superpowers/sdd/seventh-final-review-fix-report.md
+   - .superpowers/sdd/eighth-final-review-fix-report.md
    - docs/superpowers/research/2026-07-14-dh-mycaseskit-stage0-instructions-brief.md
    - docs/superpowers/research/2026-07-14-dh-extension-stage0-integration-plan.md
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；其中 Host 109、Extension 43 和 build 通过仅是 beta.4 workspace-root 修复的历史证据。prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9。第七轮修复产品提交是 85355f8：hydration catch-up 进入同一个 single-flight mirror queue，Team Catalog set/remove 检查 callback-scoped lastError 并返回 failed truth；隔离 LOCALAPPDATA 的 Host focused 135/135、full 207/207，Extension focused 159/159（4 files）、full 272/272（18 files），build 2,217 modules / 13 artifacts 通过，source-only compileall/static/mutation 通过；证据见 seventh-final-review-fix-report.md。可选 marker smoke 因无法保证 authenticated model-backed user/session state 完全隔离而跳过；release draft 未选择版本。下一步仍是 controller 重新运行 broad whole-branch review；不要把本轮 focused/self-review 当作 broad review 已通过。
+历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9。第八轮从 87278d5 开始，产品提交是 0a23315、fcc6467：修复 personal bookmark Reset generation/storage ordering、Native Host errorKind allowlist、manifest last-success/in-flight retry state。隔离 Host focused 143/143、full 207/207，Extension focused 207/207（6 files）、full 303/303（18 files），build 2,217 modules / 13 artifacts，compileall/static/mutation 通过；证据见 eighth-final-review-fix-report.md。可选 marker smoke 因无法保证 authenticated model-backed user/session state 完全隔离而跳过；release draft 未选择版本。下一步仍是 controller 重新运行 broad whole-branch review；不要把本轮 focused/self-review 当作 broad review 已通过。
 
 已实现行为：所有 DH create/resume 都设置 skip_custom_instructions=True；CLI global、AGENTS、path instructions 等自动发现源全部排除。DH 显式注入 Core + 恰好一个可编辑源：Root 为空或 Repository ONLY 关闭时使用 DH-specific Instructions；Root 非空且 Repository ONLY 开启时只使用 <Root>/.github/copilot-instructions.md。Custom User Prompt 仍是每次 Analyze 的 PII-scrubbed user content。使用严格 UTF-8 immutable byte snapshot、framed fingerprint、same-UUID refresh 和 fail-closed errors。Options 区分 explicit empty（清空文件）与 omitted（不写），检查 update_config/config_saved，并保留可选 errorCode 到持久化和本地化显示。
 
