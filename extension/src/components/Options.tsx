@@ -63,12 +63,29 @@ type TeamMirrorIdentity = Readonly<{
     teamId: string;
 }>;
 
+type ResetPhase =
+    | 'host-pending'
+    | 'host-committed'
+    | 'sw-pending'
+    | 'local-cleanup-pending'
+    | 'complete';
+
+type ResetRetryAction = 'sw' | 'local-cleanup' | null;
+
+type ResetTransaction = Readonly<{
+    token: number;
+    identity: TeamMirrorIdentity;
+    requestGeneration: number;
+    bookmarkGeneration: number;
+    phase: ResetPhase;
+    retryAction: ResetRetryAction;
+}>;
+
 type PrefsMirrorAction = Readonly<{
     id: number;
     kind: 'team-sync' | 'team-clear' | 'manifest-fetch' | 'reset';
     identity: TeamMirrorIdentity;
     resetToken?: number;
-    hostCommitted?: boolean;
     canRun?: () => boolean;
     run: () => void;
 }>;
@@ -704,7 +721,7 @@ const OptionsInner: React.FC = () => {
     const settledPrefsMirrorActionsRef = useRef<Set<number>>(new Set());
     const latestPrefsMirrorIntentRef = useRef<PrefsMirrorIntent | null>(null);
     const resetTokenRef = useRef(0);
-    const pendingResetRetryActionRef = useRef<PrefsMirrorAction | null>(null);
+    const resetTransactionRef = useRef<ResetTransaction | null>(null);
     const prefsRef = useRef<Preferences>(DEFAULT_PREFS);
     const userTouchedRevisionRef = useRef(0);
     const [catchUpRevision, setCatchUpRevision] = useState(0);
@@ -1154,14 +1171,12 @@ const OptionsInner: React.FC = () => {
         canRun?: () => boolean,
         reset?: Readonly<{
             token: number;
-            hostCommitted: boolean;
         }>,
     ): PrefsMirrorAction => Object.freeze({
         id: ++prefsMirrorActionIdRef.current,
         kind,
         identity: Object.freeze({ ...identity }),
         resetToken: reset?.token,
-        hostCommitted: reset?.hostCommitted,
         canRun,
         run,
     });
@@ -1185,22 +1200,7 @@ const OptionsInner: React.FC = () => {
     const settlePrefsMirrorActions = (intent: PrefsMirrorIntent) => {
         for (const action of intent.actions) {
             if (settledPrefsMirrorActionsRef.current.has(action.id)) continue;
-            if (action.kind === 'reset' && action.hostCommitted !== true) continue;
-            if (action.canRun && !action.canRun()) continue;
-            settledPrefsMirrorActionsRef.current.add(action.id);
-            if (mirrorActionMatchesPrefs(action, intent.prefs)) {
-                action.run();
-            }
-        }
-    };
-
-    const settleHostAcknowledgedResetActions = (intent: PrefsMirrorIntent) => {
-        for (const action of intent.actions) {
-            if (
-                action.kind !== 'reset'
-                || action.hostCommitted === true
-                || settledPrefsMirrorActionsRef.current.has(action.id)
-            ) continue;
+            if (action.kind === 'reset') continue;
             if (action.canRun && !action.canRun()) continue;
             settledPrefsMirrorActionsRef.current.add(action.id);
             if (mirrorActionMatchesPrefs(action, intent.prefs)) {
@@ -1216,31 +1216,37 @@ const OptionsInner: React.FC = () => {
     ) => {
         const resetAction = mirrorIntent.actions.find(action =>
             action.kind === 'reset'
-            && action.hostCommitted !== true
             && !settledPrefsMirrorActionsRef.current.has(action.id)
             && mirrorActionMatchesPrefs(action, mirrorIntent.prefs),
         );
+        if (resetAction) {
+            // The mirror action owns only the first Host dispatch. Retry state
+            // lives in resetTransactionRef and can never re-enter this queue.
+            settledPrefsMirrorActionsRef.current.add(resetAction.id);
+        }
         sendHostConfigUpdate(configIntent, {
             ...options,
             resetToken: resetAction?.resetToken,
             onResult: decision => {
                 if (
                     !resetAction
-                    || settledPrefsMirrorActionsRef.current.has(resetAction.id)
                     || resetAction.resetToken !== resetTokenRef.current
                 ) return;
+                const transaction = resetTransactionRef.current;
                 if (
-                    configIntent.generation !== configUpdateRequestRevisionRef.current
-                    || !mirrorActionMatchesPrefs(resetAction, prefsRef.current)
-                ) {
-                    setResetIncomplete(true);
-                    return;
-                }
+                    !transaction
+                    || transaction.token !== resetAction.resetToken
+                    || transaction.phase !== 'host-pending'
+                ) return;
                 if (!decision.acknowledged) {
                     setResetIncomplete(true);
                     return;
                 }
-                settleHostAcknowledgedResetActions(mirrorIntent);
+                const committed = updateResetTransaction(transaction.token, {
+                    phase: 'host-committed',
+                    retryAction: 'sw',
+                });
+                if (committed) dispatchResetServiceWorker(committed);
             },
         });
     };
@@ -1840,11 +1846,9 @@ const OptionsInner: React.FC = () => {
         const manifestAction = opts?.fetchManifest
             ? createManifestFetchAction(intent.prefs)
             : undefined;
-        const resetRetryAction = pendingResetRetryActionRef.current;
-        pendingResetRetryActionRef.current = null;
         const mirrorIntent = createPrefsMirrorIntent(
             intent.prefs,
-            [opts?.mirrorAction, manifestAction, resetRetryAction].filter(
+            [opts?.mirrorAction, manifestAction].filter(
                 (action): action is PrefsMirrorAction => action != null,
             ),
             () => {
@@ -1902,146 +1906,191 @@ const OptionsInner: React.FC = () => {
     });
 
     const createResetMirrorAction = (
-        resetGeneration: number,
-        identity: TeamMirrorIdentity,
-        resetToken: number,
-        bookmarkResetGeneration: number,
-        hostCommitted = false,
+        transaction: ResetTransaction,
     ): PrefsMirrorAction => createPrefsMirrorAction(
         'reset',
-        identity,
-        () => {
-            const userRevisionAtDispatch = userTouchedRevisionRef.current;
-            const resetTokenIsCurrent = () => resetTokenRef.current === resetToken;
-            const resetScopeIsCurrent = () => (
-                resetTokenIsCurrent()
-                && teamRefreshGenerationRef.current === resetGeneration
-                && mirrorIdentityMatchesPrefs(identity, prefsRef.current)
-            );
-            const responseIsCurrent = () => resetScopeIsCurrent()
-                && userTouchedRevisionRef.current === userRevisionAtDispatch;
-            const retainResetForRetry = () => {
-                if (!resetScopeIsCurrent()) return;
-                pendingResetRetryActionRef.current = createResetMirrorAction(
-                    resetGeneration,
-                    identity,
-                    resetToken,
-                    bookmarkResetGeneration,
-                    true,
-                );
-                setResetIncomplete(true);
-            };
+        transaction.identity,
+        () => undefined,
+        undefined,
+        { token: transaction.token },
+    );
 
-            chrome.runtime.sendMessage({
-                type: "RESET_EXTENSION_STATE",
-                payload: {
-                    ...teamRequestPayload(resetGeneration, identity),
-                    resetToken,
-                },
-            }, (response) => {
-                if (!resetTokenIsCurrent()) return;
-                if (!responseIsCurrent()) {
-                    if (
-                        chrome.runtime.lastError
-                        || response?.status !== 'success'
-                        || response?.data?.syncStatus !== 'committed'
-                    ) {
-                        retainResetForRetry();
-                    }
-                    setResetIncomplete(true);
+    function updateResetTransaction(
+        token: number,
+        patch: Partial<Pick<ResetTransaction, 'phase' | 'retryAction'>>,
+    ): ResetTransaction | null {
+        const current = resetTransactionRef.current;
+        if (!current || current.token !== token) return null;
+        const next = Object.freeze({ ...current, ...patch });
+        resetTransactionRef.current = next;
+        return next;
+    }
+
+    function retainResetRetry(
+        transaction: ResetTransaction,
+        retryAction: Exclude<ResetRetryAction, null>,
+    ) {
+        if (resetTransactionRef.current?.token !== transaction.token) return;
+        updateResetTransaction(transaction.token, {
+            phase: retryAction === 'sw'
+                ? 'sw-pending'
+                : 'local-cleanup-pending',
+            retryAction,
+        });
+        setResetIncomplete(true);
+    }
+
+    function resetTeamScopeIsCurrent(transaction: ResetTransaction): boolean {
+        return resetTransactionRef.current?.token === transaction.token
+            && resetTokenRef.current === transaction.token
+            && teamRefreshGenerationRef.current === transaction.requestGeneration
+            && mirrorIdentityMatchesPrefs(transaction.identity, prefsRef.current);
+    }
+
+    function resetBookmarkScopeIsCurrent(transaction: ResetTransaction): boolean {
+        return resetTransactionRef.current?.token === transaction.token
+            && bookmarkGenerationRef.current === transaction.bookmarkGeneration;
+    }
+
+    function resetDefaultsAreCurrent(): boolean {
+        return (Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>)
+            .every(key => prefsRef.current[key] === DEFAULT_PREFS[key]);
+    }
+
+    function completeResetCleanup(transaction: ResetTransaction) {
+        if (resetTransactionRef.current?.token !== transaction.token) return;
+        updateResetTransaction(transaction.token, {
+            phase: 'complete',
+            retryAction: null,
+        });
+        setResetIncomplete(false);
+        showSuccess(
+            t(resetDefaultsAreCurrent() ? 'resetComplete' : 'resetCleanupComplete'),
+            2000,
+        );
+    }
+
+    function runResetLocalCleanup(transaction: ResetTransaction) {
+        const pending = updateResetTransaction(transaction.token, {
+            phase: 'local-cleanup-pending',
+            retryAction: 'local-cleanup',
+        });
+        if (!pending) return;
+
+        const continueWithBookmarks = () => {
+            if (!resetBookmarkScopeIsCurrent(pending)) {
+                retainResetRetry(pending, 'local-cleanup');
+                return;
+            }
+            queueBookmarkStorage({ kind: 'remove' }).then(() => {
+                if (!resetBookmarkScopeIsCurrent(pending)) {
+                    retainResetRetry(pending, 'local-cleanup');
                     return;
                 }
-                const responseIdentity = response?.data?.identity;
-                const responseMatches = response?.data?.resetToken === resetToken
-                    && response?.data?.requestGeneration === resetGeneration
-                    && responseIdentity?.enabled === identity.enabled
-                    && responseIdentity?.manifestUrl === identity.manifestUrl
-                    && (responseIdentity?.teamId || '') === identity.teamId;
-                if (
-                    chrome.runtime.lastError
-                    || response?.status !== 'success'
-                    || response?.data?.syncStatus !== 'committed'
-                    || !responseMatches
-                ) {
-                    retainResetForRetry();
-                    return;
-                }
-
-                chrome.storage.local.remove('dh_team_collapsed_labels', () => {
-                    if (!responseIsCurrent()) return;
-                    if (chrome.runtime.lastError) {
-                        retainResetForRetry();
+                loadItems().then(loaded => {
+                    if (!resetBookmarkScopeIsCurrent(pending)) {
+                        retainResetRetry(pending, 'local-cleanup');
                         return;
                     }
-
-                    // Shared team/analysis reset is already committed even if
-                    // a newer personal bookmark edit cancels only dh_items.
-                    setTeamItems([]);
-                    setTeamSynced("");
-                    setTeamCollapsedLabels(new Set());
-
-                    const bookmarkResetIsCurrent = () =>
-                        bookmarkGenerationRef.current === bookmarkResetGeneration;
-                    if (!bookmarkResetIsCurrent()) {
-                        pendingResetRetryActionRef.current = null;
-                        setResetIncomplete(true);
-                        return;
-                    }
-
-                    queueBookmarkStorage({ kind: 'remove' }).then(() => {
-                        if (!responseIsCurrent()) return;
-                        if (!bookmarkResetIsCurrent()) {
-                            pendingResetRetryActionRef.current = null;
-                            setResetIncomplete(true);
+                    const defaults = collapseFolders(loaded);
+                    applyItemsSnapshot(defaults);
+                    queueBookmarkStorage({
+                        kind: 'write',
+                        items: structuredClone(defaults),
+                    }).then(() => {
+                        if (!resetBookmarkScopeIsCurrent(pending)) {
+                            retainResetRetry(pending, 'local-cleanup');
                             return;
                         }
-                        loadItems().then(loaded => {
-                            if (!responseIsCurrent()) return;
-                            if (!bookmarkResetIsCurrent()) {
-                                pendingResetRetryActionRef.current = null;
-                                setResetIncomplete(true);
-                                return;
-                            }
-                            const defaults = collapseFolders(loaded);
-                            applyItemsSnapshot(defaults);
-                            queueBookmarkStorage({
-                                kind: 'write',
-                                items: structuredClone(defaults),
-                            }).then(() => {
-                                if (!responseIsCurrent()) return;
-                                if (!bookmarkResetIsCurrent()) {
-                                    pendingResetRetryActionRef.current = null;
-                                    setResetIncomplete(true);
-                                    return;
-                                }
-                                pendingResetRetryActionRef.current = null;
-                                setResetIncomplete(false);
-                                showSuccess(t('resetComplete'), 2000);
-                            }).catch(retainResetForRetry);
-                        });
-                    }).catch(retainResetForRetry);
+                        completeResetCleanup(pending);
+                    }).catch(() => retainResetRetry(pending, 'local-cleanup'));
                 });
+            }).catch(() => retainResetRetry(pending, 'local-cleanup'));
+        };
+
+        if (!resetTeamScopeIsCurrent(pending)) {
+            // A newer Team Catalog identity owns its collapse state. Personal
+            // bookmarks remain independently safe when their generation matches.
+            continueWithBookmarks();
+            return;
+        }
+
+        chrome.storage.local.remove('dh_team_collapsed_labels', () => {
+            if (chrome.runtime.lastError) {
+                retainResetRetry(pending, 'local-cleanup');
+                return;
+            }
+            if (resetTeamScopeIsCurrent(pending)) {
+                setTeamItems([]);
+                setTeamSynced("");
+                setTeamCollapsedLabels(new Set());
+            }
+            continueWithBookmarks();
+        });
+    }
+
+    function dispatchResetServiceWorker(transaction: ResetTransaction) {
+        const pending = updateResetTransaction(transaction.token, {
+            phase: 'sw-pending',
+            retryAction: 'sw',
+        });
+        if (!pending) return;
+        const userRevisionAtDispatch = userTouchedRevisionRef.current;
+
+        chrome.runtime.sendMessage({
+            type: "RESET_EXTENSION_STATE",
+            payload: {
+                ...teamRequestPayload(
+                    pending.requestGeneration,
+                    pending.identity,
+                ),
+                resetToken: pending.token,
+            },
+        }, (response) => {
+            if (resetTransactionRef.current?.token !== pending.token) return;
+            const responseIdentity = response?.data?.identity;
+            const responseMatches = response?.data?.resetToken === pending.token
+                && response?.data?.requestGeneration === pending.requestGeneration
+                && responseIdentity?.enabled === pending.identity.enabled
+                && responseIdentity?.manifestUrl === pending.identity.manifestUrl
+                && (responseIdentity?.teamId || '') === pending.identity.teamId;
+            if (
+                chrome.runtime.lastError
+                || response?.status !== 'success'
+                || response?.data?.syncStatus !== 'committed'
+                || !responseMatches
+            ) {
+                retainResetRetry(pending, 'sw');
+                return;
+            }
+
+            const localPending = updateResetTransaction(pending.token, {
+                phase: 'local-cleanup-pending',
+                retryAction: 'local-cleanup',
             });
-        },
-        undefined,
-        { token: resetToken, hostCommitted },
-    );
+            if (!localPending) return;
+            if (userTouchedRevisionRef.current !== userRevisionAtDispatch) {
+                setResetIncomplete(true);
+                return;
+            }
+            runResetLocalCleanup(localPending);
+        });
+    }
+
+    const handleResetCleanupRetry = () => {
+        clearStatus();
+        const transaction = resetTransactionRef.current;
+        if (!transaction) return;
+        if (transaction.retryAction === 'sw') {
+            dispatchResetServiceWorker(transaction);
+        } else if (transaction.retryAction === 'local-cleanup') {
+            runResetLocalCleanup(transaction);
+        }
+    };
 
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
             clearStatus();
-            const pendingSwRetry = pendingResetRetryActionRef.current;
-            if (
-                pendingSwRetry?.hostCommitted === true
-                && mirrorActionMatchesPrefs(pendingSwRetry, prefsRef.current)
-            ) {
-                pendingResetRetryActionRef.current = null;
-                writePrefsMirror(createPrefsMirrorIntent(
-                    prefsRef.current,
-                    [pendingSwRetry],
-                ));
-                return;
-            }
             invalidateTeamRefresh();
             userInstructionsEditTokenRef.current = {
                 revision: userInstructionsEditTokenRef.current.revision + 1,
@@ -2066,15 +2115,19 @@ const OptionsInner: React.FC = () => {
             };
             const resetToken = ++resetTokenRef.current;
             const bookmarkResetGeneration = mutatePersonalItems();
+            const transaction = Object.freeze({
+                token: resetToken,
+                identity: Object.freeze({ ...resetIdentity }),
+                requestGeneration: resetGeneration,
+                bookmarkGeneration: bookmarkResetGeneration,
+                phase: 'host-pending' as const,
+                retryAction: null,
+            });
+            resetTransactionRef.current = transaction;
+            setResetIncomplete(false);
             lastSuccessfulManifestUrlRef.current = '';
-            pendingResetRetryActionRef.current = null;
             persistPrefs(DEFAULT_PREFS, {
-                mirrorAction: createResetMirrorAction(
-                    resetGeneration,
-                    resetIdentity,
-                    resetToken,
-                    bookmarkResetGeneration,
-                ),
+                mirrorAction: createResetMirrorAction(transaction),
             });
         }
     };
@@ -2809,6 +2862,17 @@ const OptionsInner: React.FC = () => {
                         >
                             <div className="w-2 h-2 bg-amber-500 rounded-full shrink-0"></div>
                             <span>{persistenceWarning}</span>
+                            {resetIncomplete
+                                && resetTransactionRef.current?.retryAction
+                                && (
+                                    <button
+                                        type="button"
+                                        onClick={handleResetCleanupRetry}
+                                        className="ml-2 rounded-md border border-amber-400 bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                                    >
+                                        {t('retryResetCleanup')}
+                                    </button>
+                                )}
                         </div>
                     )}
 

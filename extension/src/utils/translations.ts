@@ -289,8 +289,13 @@ export const translations: TranslationDictionary = {
     updateFailed: { en: "Update failed", zh: "更新失败" },
     resetComplete: { en: "Reset complete.", zh: "重置完成。" },
     resetIncomplete: {
-        en: "Reset did not complete. Some state may already be cleared; current values were kept. Retry Reset to finish cleanup.",
-        zh: "重置未完成。部分状态可能已清除；当前值已保留。请再次重置以完成清理。",
+        en: "Reset did not complete. Some state may already be cleared; current values were kept.",
+        zh: "重置未完成。部分状态可能已清除；当前值已保留。",
+    },
+    retryResetCleanup: { en: "Retry cleanup", zh: "重试清理" },
+    resetCleanupComplete: {
+        en: "Reset cleanup complete. Current preferences were kept.",
+        zh: "重置清理已完成。当前偏好设置已保留。",
     },
     bookmarkPersistenceWarning: {
         en: "Bookmark changes are not saved. Make another bookmark change to retry.",
