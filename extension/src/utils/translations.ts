@@ -289,8 +289,8 @@ export const translations: TranslationDictionary = {
     updateFailed: { en: "Update failed", zh: "更新失败" },
     resetComplete: { en: "Reset complete.", zh: "重置完成。" },
     resetIncomplete: {
-        en: "Reset did not complete. Current values were kept; retry Reset to finish cleanup.",
-        zh: "重置未完成。当前值已保留；请再次重置以完成清理。",
+        en: "Reset did not complete. Some state may already be cleared; current values were kept. Retry Reset to finish cleanup.",
+        zh: "重置未完成。部分状态可能已清除；当前值已保留。请再次重置以完成清理。",
     },
     importSuccess: { en: "Imported successfully!", zh: "导入成功！" },
     availableForUpdate: { en: "available for update", zh: "可更新" },

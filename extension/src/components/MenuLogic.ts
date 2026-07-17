@@ -127,19 +127,21 @@ export function useMenuLogic() {
 async function loadItems(): Promise<MenuItem[]> {
     // 1. Load personal items
     let personalItems: MenuItem[] = [];
+    let hasSavedPersonalItems = false;
     try {
         if (chrome?.storage?.local) {
             const obj = await new Promise<{ dh_items?: MenuItem[] }>((resolve) => {
                 chrome.storage.local.get("dh_items", (items) => resolve(items as { dh_items?: MenuItem[] }));
             });
-            if (Array.isArray(obj.dh_items) && obj.dh_items.length > 0) {
+            if (Array.isArray(obj.dh_items)) {
                 personalItems = obj.dh_items;
+                hasSavedPersonalItems = true;
             }
         }
     } catch (_) { }
 
     // Fallback to items.json if no personal items saved
-    if (personalItems.length === 0) {
+    if (!hasSavedPersonalItems) {
         try {
             const url = chrome.runtime.getURL("items.json");
             const res = await fetch(url);
@@ -157,7 +159,7 @@ async function loadItems(): Promise<MenuItem[]> {
     }
 
     // Ultimate fallback
-    if (personalItems.length === 0) {
+    if (!hasSavedPersonalItems && personalItems.length === 0) {
         personalItems = [
             { type: "folder", label: "Favorites", children: [
                 { type: "link", label: "Dynamics Admin Center", url: "https://admin.powerplatform.microsoft.com/" },

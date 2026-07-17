@@ -162,6 +162,14 @@ token through the Service Worker; only matching `committed` truth clears local
 UI and shows success. Stale/failed/transport/superseded responses keep current
 values and show incomplete Reset.
 
+Personal bookmarks have a separate generation boundary. Every add/edit/delete/
+move/import/collapse and Reset intent calls `mutatePersonalItems`; all `dh_items`
+writes/removes use one Promise queue. Reset captures that generation and checks
+it before remove, after remove, after default loading, and after the default
+write. A newer mutation cancels only personal cleanup, is written after any
+already-started remove, stays visible, and reports that shared state may already
+have been cleared rather than claiming complete success.
+
 Options team cache hydration and storage follow-up reads use one UI generation
 plus captured enabled/URL/team identity before applying list/items/synced state.
 `useMenuLogic()` similarly accepts only its latest mount/storage load and ignores
@@ -174,6 +182,19 @@ hashing; every post-await continuation rechecks request ID before UI, duration,
 menu, or outcome-telemetry changes.
 
 Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe diagnostics and logs only failure kind plus numeric status. Every Options request captures enabled/URL/team plus a request generation. The Service Worker synchronously allocates a storage generation before any asynchronous pref/cache read, rejects stale identity before clear/fetch, rechecks generation after awaited reads, and queues identity validation together with awaited mutation. `setStorage` and `removeStorage` inspect `chrome.runtime.lastError` inside their callbacks and reject with fixed safe errors. Manifest/bookmark/304 writes and clear/Reset removes therefore cannot report committed after a rejected mutation; selected failed responses omit items and timestamps. The queue's rejection continuation keeps later operations usable. Options sends messages only and clears rendered team items/timestamp immediately on identity change.
+
+Manifest URL blur deduplication uses two refs, not one optimistic marker.
+`lastSuccessfulManifestUrlRef` changes only for a current identity-matching
+`committed` or `unchanged` response. `manifestFetchInFlightRef` stores a token
+and URL, suppresses only a duplicate concurrent URL, and is cleared only by its
+own callback. Auth/network/transport/failed/stale/skipped outcomes can retry on
+the next same-URL blur; URL A cannot clear or complete URL B.
+
+`normalizeNativeHostResponse` is the Service Worker allowlist for Host errors.
+It leaves success `data` unchanged and forwards only fallback text, normalized
+`error_code`, string `errorKind`, and finite numeric `httpStatus` on error. The
+`list_models` Options handler therefore receives `auth`, `unavailable`, or
+`unknown` classification without exposing arbitrary Host fields.
 
 Analysis pending and dismissal state is request scoped. Starts write `dh_pending_analysis:<encoded-requestId>`; completion removes only that key. The legacy singleton pending key remains readable. `seenAnalysisKey()` produces collision-safe request or exact legacy case/timestamp keys, so A/B acknowledgments coexist. Hydration performs one `get(null)`, selects the newest fresh pending matching the current case, observes pending storage changes/expiry, and derives matching seen state from the same snapshot. Reset removes both prefixes and legacy singletons.
 

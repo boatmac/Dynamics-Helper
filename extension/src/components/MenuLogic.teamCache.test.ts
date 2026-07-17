@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   deferNextStorageGet,
@@ -121,5 +121,22 @@ describe('MenuLogic latest team load ownership', () => {
     expect(hook.result.current.currentItems.map(item => item.label)).toEqual([
       'PERSONAL',
     ])
+  })
+
+  it('keeps a stored empty personal menu empty instead of loading defaults', async () => {
+    seedStorage({ dh_items: [] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify([
+        { type: 'link', label: 'MUST NOT RESURRECT' },
+      ]),
+    } as Response)
+    try {
+      const hook = renderHook(() => useMenuLogic())
+      await waitFor(() => expect(hook.result.current.currentItems).toEqual([]))
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      fetchMock.mockRestore()
+    }
   })
 })

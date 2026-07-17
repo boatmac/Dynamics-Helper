@@ -112,7 +112,7 @@ async function loadItems(): Promise<MenuItem[]> {
             const obj = await new Promise<{ dh_items?: MenuItem[] }>((resolve) => {
                 chrome.storage.local.get("dh_items", (items) => resolve(items as { dh_items?: MenuItem[] }));
             });
-            if (Array.isArray(obj.dh_items) && obj.dh_items.length > 0) return obj.dh_items;
+            if (Array.isArray(obj.dh_items)) return obj.dh_items;
         }
     } catch (_) { }
 
@@ -230,7 +230,7 @@ interface DraggableItemProps {
     path: number[];
     moveItem: (dragPath: number[], hoverPath: number[], placement: 'before' | 'after' | 'inside') => void;
     renderList: (list: MenuItem[], pathPrefix: number[], labelPathPrefix?: string[]) => React.ReactNode;
-    setItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
+    mutateItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
     setEditingItemPath: React.Dispatch<React.SetStateAction<number[] | null>>;
     editingItemPath: number[] | null;
     updateItemAt: (path: number[], newItem: MenuItem, list: MenuItem[]) => MenuItem[];
@@ -255,7 +255,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     path, 
     moveItem, 
     renderList, 
-    setItems, 
+    mutateItems,
     setEditingItemPath, 
     editingItemPath, 
     updateItemAt, 
@@ -276,8 +276,8 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     const isTeamItem = item.source === 'team';
     // Team folders ignore item.collapsed (next SW sync would wipe a write anyway)
     // and read from the ephemeral teamCollapsedLabels Set. Personal folders keep
-    // using item.collapsed which persists into dh_items via the setItems
-    // useEffect (instant persistence; no Save button as of Plan A).
+    // using item.collapsed which mutatePersonalItems persists into dh_items
+    // immediately (no Save button as of Plan A).
     const teamCollapseKey = isTeamItem && item.type === 'folder'
         ? currentTeamId + '\0' + [...labelPath, item.label].join('\0')
         : '';
@@ -411,7 +411,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                 <ItemEditor 
                     item={item} 
                     onSave={(newItem) => {
-                        setItems(prev => updateItemAt(currentPath, newItem, prev));
+                        mutateItems(prev => updateItemAt(currentPath, newItem, prev));
                         setEditingItemPath(null);
                     }}
                     onCancel={() => setEditingItemPath(null)}
@@ -435,7 +435,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                 toggleTeamCollapsed(key);
                             } else {
                                 const newItem = { ...item, collapsed: !item.collapsed };
-                                setItems(prev => updateItemAt(currentPath, newItem, prev));
+                                mutateItems(prev => updateItemAt(currentPath, newItem, prev));
                             }
                             setSelectedPath(isSelected ? null : currentPath);
                         } else {
@@ -466,7 +466,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                         onClick={(e) => {
                                              e.stopPropagation();
                                              const newItem: MenuItem = { type: 'link', label: t('newLinkLabel'), url: 'https://' };
-                                             setItems(prev => addItemAt(currentPath, newItem, prev));
+                                             mutateItems(prev => addItemAt(currentPath, newItem, prev));
                                         }}
                                         className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors" title={t('addChild')}
                                     >
@@ -486,7 +486,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         if (confirm(t('deleteItemConfirm'))) {
-                                            setItems(prev => deleteItemAt(currentPath, prev));
+                                            mutateItems(prev => deleteItemAt(currentPath, prev));
                                         }
                                     }}
                                     className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title={t('deleteTooltip')}
@@ -548,25 +548,71 @@ const OptionsInner: React.FC = () => {
     const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
     const hasRootPath = Boolean(prefs.rootPath?.trim());
     const effectiveRepositoryOnly = hasRootPath && prefs.useWorkspaceOnly !== false;
-    const [items, setItems] = useState<MenuItem[]>([]);
-    // Plan A: bookmark editor mutations (add / edit / delete / drag / toggle
-    // collapse) persist instantly via this effect. Guard prevents the initial
-    // mount writing an empty array over the storage's real data before the
-    // load completes.
-    const itemsLoadedRef = useRef(false);
-    useEffect(() => {
-        if (!itemsLoadedRef.current) return;
-        chrome.storage.local.set({ dh_items: items });
-    }, [items]);
+    const [items, setItemsState] = useState<MenuItem[]>([]);
+    const itemsRef = useRef<MenuItem[]>([]);
+    const bookmarkGenerationRef = useRef(0);
+    const bookmarkStorageQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+    const applyItemsSnapshot = (nextItems: MenuItem[]) => {
+        itemsRef.current = nextItems;
+        setItemsState(nextItems);
+    };
+
+    const queueBookmarkStorage = (
+        operation: Readonly<
+            | { kind: 'write'; items: MenuItem[] }
+            | { kind: 'remove' }
+        >,
+    ): Promise<void> => {
+        const run = () => new Promise<void>((resolve, reject) => {
+            const callback = () => {
+                const storageError = chrome.runtime.lastError;
+                if (storageError) {
+                    reject(new Error(storageError.message || 'Bookmark storage mutation failed'));
+                    return;
+                }
+                resolve();
+            };
+            if (operation.kind === 'remove') {
+                chrome.storage.local.remove('dh_items', callback);
+            } else {
+                chrome.storage.local.set({ dh_items: operation.items }, callback);
+            }
+        });
+        const queued = bookmarkStorageQueueRef.current.then(run, run);
+        bookmarkStorageQueueRef.current = queued.catch(() => undefined);
+        return queued;
+    };
+
+    // The only entry point for personal bookmark edits and Reset intent.
+    // Captured snapshots enter the same queue as Reset removal, so an already
+    // started remove always finishes before a newer edit is durably written.
+    const mutatePersonalItems = (
+        update?: React.SetStateAction<MenuItem[]>,
+    ): number => {
+        const generation = ++bookmarkGenerationRef.current;
+        if (update === undefined) return generation;
+        const nextItems = typeof update === 'function'
+            ? update(itemsRef.current)
+            : update;
+        applyItemsSnapshot(nextItems);
+        void queueBookmarkStorage({
+            kind: 'write',
+            items: structuredClone(nextItems),
+        }).catch(() => undefined);
+        return generation;
+    };
     type StatusMessage = { message: string; type: 'success' | 'error' } | null;
     const [status, setStatus] = useState<StatusMessage>(null);
     const statusTimerRef = useRef<number | null>(null);
-    // Track the manifest URL of the last successful fetch. When persistPrefs
-    // sees a different teamManifestUrl come through, it triggers a fresh
-    // manifest fetch. Sentinel '__unset__' means "no load/save has happened
-    // yet" so the very first storage hydration (which writes prefs back
-    // unchanged) does not spuriously count as a URL change.
-    const lastFetchedManifestUrlRef = useRef<string>('__unset__');
+    // Successful and in-flight manifest identities are intentionally separate.
+    // A failed/stale/skipped request must not suppress a later blur retry.
+    const lastSuccessfulManifestUrlRef = useRef<string>('');
+    const manifestFetchTokenRef = useRef(0);
+    const manifestFetchInFlightRef = useRef<null | Readonly<{
+        token: number;
+        manifestUrl: string;
+    }>>(null);
     const teamRefreshGenerationRef = useRef(0);
     const teamUiLoadGenerationRef = useRef(0);
 
@@ -738,7 +784,7 @@ const OptionsInner: React.FC = () => {
     // Switching teams keeps Set state but each team's keys are isolated by
     // their distinct teamId prefix.
     const [teamCollapsedLabels, setTeamCollapsedLabels] = useState<Set<string>>(new Set());
-    // Mirrors itemsLoadedRef: prevents the initial empty-Set mount from
+    // Guards the initial empty-Set mount from
     // overwriting stored collapse state before chrome.storage.local.get
     // resolves. Flipped to true once the initial load completes.
     const teamCollapsedLoadedRef = useRef(false);
@@ -1150,8 +1196,16 @@ const OptionsInner: React.FC = () => {
                     || prefsRef.current.teamManifestUrl !== identity.manifestUrl
                     || (prefsRef.current.team || '') !== identity.teamId
                 ) return;
-                if (identity.manifestUrl === lastFetchedManifestUrlRef.current) return;
-                lastFetchedManifestUrlRef.current = identity.manifestUrl;
+                if (identity.manifestUrl === lastSuccessfulManifestUrlRef.current) return;
+                if (
+                    manifestFetchInFlightRef.current?.manifestUrl
+                    === identity.manifestUrl
+                ) return;
+                const request = Object.freeze({
+                    token: ++manifestFetchTokenRef.current,
+                    manifestUrl: identity.manifestUrl,
+                });
+                manifestFetchInFlightRef.current = request;
                 const generation = ++teamRefreshGenerationRef.current;
                 chrome.runtime.sendMessage(
                     {
@@ -1163,26 +1217,36 @@ const OptionsInner: React.FC = () => {
                         ),
                     },
                     (response) => {
+                        const ownsInFlight =
+                            manifestFetchInFlightRef.current?.token === request.token
+                            && manifestFetchInFlightRef.current?.manifestUrl
+                                === request.manifestUrl;
+                        if (ownsInFlight) {
+                            manifestFetchInFlightRef.current = null;
+                        }
+                        // An older callback cannot clear or complete a newer
+                        // URL request, even if its own Host response succeeded.
+                        if (!ownsInFlight) return;
                         if (!teamSyncIsCurrent(
                             generation,
                             identity.manifestUrl,
                             identity.teamId,
                         )) return;
-                        const responseIdentity = response?.data?.identity;
-                        if (
-                            (response?.data?.requestGeneration !== undefined
-                                && response.data.requestGeneration !== generation)
-                            || (responseIdentity !== undefined && (
-                                responseIdentity.enabled !== identity.enabled
-                                || responseIdentity.manifestUrl !== identity.manifestUrl
-                                || responseIdentity.teamId !== identity.teamId
-                            ))
-                        ) return;
                         if (chrome.runtime.lastError) {
                             showError(t('manifestFetchFailed'), 5000);
                             setTeamFetchError({ kind: 'network' });
                             return;
                         }
+                        const responseIdentity = response?.data?.identity;
+                        const responseMatches =
+                            response?.data?.requestGeneration === generation
+                            && responseIdentity?.enabled === identity.enabled
+                            && responseIdentity?.manifestUrl === identity.manifestUrl
+                            && responseIdentity?.teamId === identity.teamId;
+                        const hasResponseIdentity =
+                            response?.data?.requestGeneration !== undefined
+                            || responseIdentity !== undefined;
+                        if (hasResponseIdentity && !responseMatches) return;
                         if (!response || response.status !== "success") {
                             const kind = (response?.errorKind as any) || 'unknown';
                             const httpStatus = response?.httpStatus as number | undefined;
@@ -1190,7 +1254,13 @@ const OptionsInner: React.FC = () => {
                             if (kind === 'auth') {
                                 showError(t('manifestFetchAuthToast'), 6000);
                             }
-                        } else {
+                        } else if (!responseMatches) {
+                            return;
+                        } else if (
+                            response?.data?.syncStatus === 'committed'
+                            || response?.data?.syncStatus === 'unchanged'
+                        ) {
+                            lastSuccessfulManifestUrlRef.current = identity.manifestUrl;
                             setTeamFetchError(null);
                         }
                     },
@@ -1266,13 +1336,6 @@ const OptionsInner: React.FC = () => {
                 if (loadedPrefs.primaryColor === "#2563eb") { // Old default blue
                     loadedPrefs.primaryColor = "#0D9488"; // New default teal
                 }
-                // Seed the change-detection ref with whatever is on disk so the
-                // very first save after page open is a no-op for manifest fetch
-                // (only an explicit user-driven URL change should trigger fetch).
-                if (!userTouchedFieldsRef.current.has('teamManifestUrl')) {
-                    lastFetchedManifestUrlRef.current = loadedPrefs.teamManifestUrl || '';
-                }
-                
                 const current = prefsRef.current;
                 const final = { ...DEFAULT_PREFS, ...loadedPrefs };
                 userTouchedFieldsRef.current.forEach(key => {
@@ -1280,10 +1343,6 @@ const OptionsInner: React.FC = () => {
                 });
 
                 setCurrentPrefs(final);
-            } else {
-                // No saved prefs yet (first run). The ref defaults to '' so the
-                // first save with a non-empty manifest URL triggers a fetch.
-                lastFetchedManifestUrlRef.current = '';
             }
 
             // Sync with Native Host (Source of Truth for backend config)
@@ -1438,9 +1497,6 @@ const OptionsInner: React.FC = () => {
                             if (extPrefs.team_catalog_enabled !== undefined && !touched.has('teamCatalogEnabled')) { newPrefs.teamCatalogEnabled = extPrefs.team_catalog_enabled; changed = true; }
                             if (extPrefs.team_manifest_url !== undefined && !touched.has('teamManifestUrl')) {
                                 newPrefs.teamManifestUrl = extPrefs.team_manifest_url;
-                                // Re-seed the change-detection ref so a host-driven URL
-                                // does not look like a user edit on the next save.
-                                lastFetchedManifestUrlRef.current = extPrefs.team_manifest_url || '';
                                 changed = true;
                             }
                             if (extPrefs.team !== undefined && !touched.has('team')) { newPrefs.team = extPrefs.team; changed = true; }
@@ -1516,11 +1572,15 @@ const OptionsInner: React.FC = () => {
 
         // Load Items and ensure collapsed by default. collapseFolders is the
         // module-level helper so handleReset can reuse it.
+        const itemsLoadGeneration = bookmarkGenerationRef.current;
         loadItems().then(loadedItems => {
-            setItems(collapseFolders(loadedItems));
-            // Mark hydration complete — subsequent setItems calls will now
-            // fall through the persist-on-change useEffect above.
-            itemsLoadedRef.current = true;
+            if (bookmarkGenerationRef.current !== itemsLoadGeneration) return;
+            const collapsedItems = collapseFolders(loadedItems);
+            applyItemsSnapshot(collapsedItems);
+            void queueBookmarkStorage({
+                kind: 'write',
+                items: structuredClone(collapsedItems),
+            }).catch(() => undefined);
         });
 
         // Restore team-folder collapse state independently from team cache
@@ -1617,15 +1677,13 @@ const OptionsInner: React.FC = () => {
     //
     //   1. Writes dh_prefs to chrome.storage.local
     //   2. Sends update_config to the host and inspects the structured result
-    //   3. If teamManifestUrl differs from lastFetchedManifestUrlRef AND
+    //   3. If teamManifestUrl differs from the last successful URL AND
     //      team catalog is enabled, asks the SW to fetch the manifest.
     //      Caller opts into this with { fetchManifest: true } so e.g. a
     //      colour-picker change does not waste an HTTP call.
     //
-    // Items (dh_items) are NOT written here — the bookmark editor uses
-    // setItems directly into chrome.storage via its own useEffect (see
-    // dh_items persistence above). Mixing the two would create double-writes
-    // on every editor click. Spec § 3.5 / AGENTS.md § 3 (after C7 update).
+    // Items (dh_items) are NOT written here. Personal bookmark mutations use
+    // mutatePersonalItems and its serialized storage queue above.
     const persistPrefs = (
         nextPrefs: Preferences,
         opts?: {
@@ -1696,6 +1754,7 @@ const OptionsInner: React.FC = () => {
 
     const invalidateTeamRefresh = () => {
         teamRefreshGenerationRef.current += 1;
+        manifestFetchInFlightRef.current = null;
         setIsSyncingTeam(false);
     };
 
@@ -1722,6 +1781,7 @@ const OptionsInner: React.FC = () => {
         resetGeneration: number,
         identity: TeamMirrorIdentity,
         resetToken: number,
+        bookmarkResetGeneration: number,
     ): PrefsMirrorAction => createPrefsMirrorAction(
         'reset',
         identity,
@@ -1740,6 +1800,7 @@ const OptionsInner: React.FC = () => {
                     resetGeneration,
                     identity,
                     resetToken,
+                    bookmarkResetGeneration,
                 );
                 setResetIncomplete(true);
             };
@@ -1772,26 +1833,60 @@ const OptionsInner: React.FC = () => {
                     return;
                 }
 
-                chrome.storage.local.remove(
-                    ["dh_items", "dh_team_collapsed_labels"],
-                    () => {
+                chrome.storage.local.remove('dh_team_collapsed_labels', () => {
+                    if (!responseIsCurrent()) return;
+                    if (chrome.runtime.lastError) {
+                        retainResetForRetry();
+                        return;
+                    }
+
+                    // Shared team/analysis reset is already committed even if
+                    // a newer personal bookmark edit cancels only dh_items.
+                    setTeamItems([]);
+                    setTeamSynced("");
+                    setTeamCollapsedLabels(new Set());
+
+                    const bookmarkResetIsCurrent = () =>
+                        bookmarkGenerationRef.current === bookmarkResetGeneration;
+                    if (!bookmarkResetIsCurrent()) {
+                        pendingResetRetryActionRef.current = null;
+                        setResetIncomplete(true);
+                        return;
+                    }
+
+                    queueBookmarkStorage({ kind: 'remove' }).then(() => {
                         if (!responseIsCurrent()) return;
-                        if (chrome.runtime.lastError) {
-                            retainResetForRetry();
+                        if (!bookmarkResetIsCurrent()) {
+                            pendingResetRetryActionRef.current = null;
+                            setResetIncomplete(true);
                             return;
                         }
                         loadItems().then(loaded => {
                             if (!responseIsCurrent()) return;
-                            setItems(collapseFolders(loaded));
-                            setTeamItems([]);
-                            setTeamSynced("");
-                            setTeamCollapsedLabels(new Set());
-                            pendingResetRetryActionRef.current = null;
-                            setResetIncomplete(false);
-                            showSuccess(t('resetComplete'), 2000);
+                            if (!bookmarkResetIsCurrent()) {
+                                pendingResetRetryActionRef.current = null;
+                                setResetIncomplete(true);
+                                return;
+                            }
+                            const defaults = collapseFolders(loaded);
+                            applyItemsSnapshot(defaults);
+                            queueBookmarkStorage({
+                                kind: 'write',
+                                items: structuredClone(defaults),
+                            }).then(() => {
+                                if (!responseIsCurrent()) return;
+                                if (!bookmarkResetIsCurrent()) {
+                                    pendingResetRetryActionRef.current = null;
+                                    setResetIncomplete(true);
+                                    return;
+                                }
+                                pendingResetRetryActionRef.current = null;
+                                setResetIncomplete(false);
+                                showSuccess(t('resetComplete'), 2000);
+                            }).catch(retainResetForRetry);
                         });
-                    },
-                );
+                    }).catch(retainResetForRetry);
+                });
             });
         },
     );
@@ -1821,12 +1916,15 @@ const OptionsInner: React.FC = () => {
                 teamId: '',
             };
             const resetToken = ++resetTokenRef.current;
+            const bookmarkResetGeneration = mutatePersonalItems();
+            lastSuccessfulManifestUrlRef.current = '';
             pendingResetRetryActionRef.current = null;
             persistPrefs(DEFAULT_PREFS, {
                 mirrorAction: createResetMirrorAction(
                     resetGeneration,
                     resetIdentity,
                     resetToken,
+                    bookmarkResetGeneration,
                 ),
             });
         }
@@ -2181,14 +2279,14 @@ const OptionsInner: React.FC = () => {
     // team items render with a Lock icon (existing isTeamItem branch in
     // renderRow at line ~419) and cannot be dragged (canDrag: !isTeamItem
     // at line ~259). Personal items always occupy the first items.length
-    // slots so path-based handlers (setItems(prev => updateItemAt(...)))
+    // slots so path-based mutation handlers remain correct
     // remain correct without translation.
     // Spec § 3.3 / § 3.5.
     //
     // CRITICAL: read-only handlers (getSelectedFolderName, isSelectedPathTeam)
     // resolve paths against THIS merged list because selectedPath comes from
     // the rendered tree which is also merged. Mutation handlers (addItemAt,
-    // updateItemAt, deleteItemAt + setItems) continue to operate on personal
+    // updateItemAt, deleteItemAt + mutatePersonalItems) operate on personal
     // `items` only. Calling sites are responsible for blocking mutations
     // against team paths (see Add button at L~1825).
     const mergedItems = useMemo(() => {
@@ -2287,7 +2385,7 @@ const OptionsInner: React.FC = () => {
     const moveItem = (dragPath: number[], hoverPath: number[], placement: 'before' | 'after' | 'inside') => {
         // Defense in depth: team items live at indices >= items.length in
         // the merged view. Mutation handlers operate on personal-only state
-        // (items) via setItems. If a drop accidentally targets a team item
+        // (items) via mutatePersonalItems. If a drop targets a team item
         // path, the resulting updateItemAt / addItemAt call would silently
         // miss (out-of-bounds into personal items). canDrop on the team
         // rows is the primary defense; this guard is the belt-and-braces.
@@ -2378,7 +2476,7 @@ const OptionsInner: React.FC = () => {
         };
         
         const finalItems = insertOp(finalInsertPath, removed, itemsAfterRemoval, placement);
-        setItems(finalItems);
+        mutatePersonalItems(finalItems);
     };
 
     // Bulk Actions
@@ -2395,7 +2493,7 @@ const OptionsInner: React.FC = () => {
                 return item;
             });
         };
-        setItems(prev => traverse(prev));
+        mutatePersonalItems(prev => traverse(prev));
 
         // Team folders can't persist collapsed via item.collapsed (next SW
         // sync wipes dh_team_items), so DraggableItem keys them into the
@@ -2434,7 +2532,7 @@ const OptionsInner: React.FC = () => {
                 const text = ev.target?.result as string;
                 const json = JSON.parse(text);
                 const newItems = Array.isArray(json) ? json : (json.items || []);
-                setItems(newItems);
+                mutatePersonalItems(newItems);
                 showSuccess(t('importSuccess'), 2000);
             } catch (err) {
                 alert(t('parseJsonFailed'));
@@ -2469,7 +2567,7 @@ const OptionsInner: React.FC = () => {
                         path={pathPrefix}
                         moveItem={moveItem}
                         renderList={renderList}
-                        setItems={setItems}
+                        mutateItems={mutatePersonalItems}
                         setEditingItemPath={setEditingItemPath}
                         editingItemPath={editingItemPath}
                         updateItemAt={updateItemAt}
@@ -2917,7 +3015,7 @@ const OptionsInner: React.FC = () => {
                                                                     setTeamCollapsedLabels(new Set());
                                                                     setTeamSynced('');
                                                                     setTeamFetchError(null);
-                                                                    lastFetchedManifestUrlRef.current = '';
+                                                                    lastSuccessfulManifestUrlRef.current = '';
                                                                     },
                                                                     ) });
                                                                 })();
@@ -3316,9 +3414,9 @@ const OptionsInner: React.FC = () => {
                                             if (isSelectedPathTeam()) return;
                                             const newItem: MenuItem = { type: 'link', label: t('newItemLabel'), url: 'https://' };
                                             if (selectedPath) {
-                                                setItems(prev => addItemAt(selectedPath, newItem, prev));
+                                                mutatePersonalItems(prev => addItemAt(selectedPath, newItem, prev));
                                             } else {
-                                                setItems(prev => [...prev, newItem]);
+                                                mutatePersonalItems(prev => [...prev, newItem]);
                                             }
                                         }}
                                         disabled={isSelectedPathTeam()}

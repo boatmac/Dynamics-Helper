@@ -154,13 +154,30 @@ only the newest successful snapshot; storage failure retains unsettled intent
 and exposes a warning. Reset
 is a tokenized Service Worker transaction whose response is
 `committed|stale|failed`; only matching committed truth permits local cleanup.
+Personal `dh_items` mutations additionally share one generation counter and
+serialized write/remove queue. A committed shared reset cannot remove or reload
+personal bookmarks after a newer personal generation; that outcome is partial,
+keeps the newer UI/storage snapshot, and never displays complete success.
 FAB similarly owns an Analyze request through all asynchronous response
 processing, including case hashing, so stale requests have no UI or telemetry
 authority.
 
 Analyze errors may carry optional `error_code`. The Service Worker persists raw safe fallback text plus optional `LastAnalysis.errorCode`, preserving an inner Analyze code over an outer wrapper code. Immediate and rehydrated FAB display use the same render-time localization helper for known codes; immediate unknown-code fallbacks may include a safe UI prefix, while rehydrated unknown/legacy codes retain the raw stored fallback. Instruction contents, Custom User Prompt contents, and prompt-source paths are excluded from normal logs and telemetry.
 
+Native Host error normalization is an allowlist boundary. Success `data` remains
+unchanged; error envelopes retain only fallback text, normalized `error_code`,
+string `errorKind`, and finite numeric `httpStatus`. This preserves model-list
+auth/unavailable classification through `NATIVE_MSG` without forwarding
+arbitrary Host fields.
+
 Service Worker persistence has two ownership domains. Team requests carry captured enabled/URL/team identity plus request generation; `teamCatalog.ts` synchronously invalidates older generations and queues validation with awaited manifest/item/ETag/timestamp/clear mutations. Its callback-style set/remove wrappers reject on callback-scoped Chrome storage errors. Mutation rejection becomes identity-safe `failed` truth with no items/timestamp success payload, while generation/identity mismatch remains `stale` and the queue accepts later work. `analysisStore.ts` uses request-scoped pending and identity-scoped seen keys, so A/B remain independent across worker restarts; hydration derives last, newest matching pending, and acknowledgment from one snapshot. Options issues Service Worker messages and does not mutate owned keys directly.
+
+Options manifest blur state separates the last successful URL from a tokenized
+in-flight `{token, manifestUrl}`. Duplicate concurrent blurs for the same URL
+coalesce. Only the current identity-matching `committed` or `unchanged` response
+promotes success; failed, transport, stale, and skipped outcomes release only
+their own token and remain retryable. An older URL callback cannot clear or
+complete a newer request.
 
 Options' ordered preference mirror attaches stable post-commit action IDs to
 user intents. Compatible newer snapshots inherit unsettled actions, incompatible

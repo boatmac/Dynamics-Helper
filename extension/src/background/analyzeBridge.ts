@@ -34,10 +34,19 @@ export function normalizeNativeHostResponse(msg: any): any {
     }
 
     const errorCode = normalizeErrorCode(msg?.error_code);
+    const errorKind = typeof msg?.errorKind === 'string'
+        ? msg.errorKind
+        : undefined;
+    const httpStatus = typeof msg?.httpStatus === 'number'
+        && Number.isFinite(msg.httpStatus)
+        ? msg.httpStatus
+        : undefined;
     return {
         status: 'error',
         error: msg?.error || msg?.message,
         ...(errorCode ? { error_code: errorCode } : {}),
+        ...(errorKind ? { errorKind } : {}),
+        ...(httpStatus === undefined ? {} : { httpStatus }),
     };
 }
 

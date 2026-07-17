@@ -204,6 +204,39 @@ describe('handleAnalyzeForward — SW persistence bridge', () => {
         })
     })
 
+    it.each(['auth', 'unavailable', 'unknown'])(
+        'preserves the safe %s outer error classification',
+        errorKind => {
+            expect(normalizeNativeHostResponse({
+                status: 'error',
+                error: 'safe fallback',
+                errorKind,
+                httpStatus: 503,
+                requestId: 'must-not-forward',
+                secret: 'must-not-forward',
+                payload: { token: 'must-not-forward' },
+            })).toEqual({
+                status: 'error',
+                error: 'safe fallback',
+                errorKind,
+                httpStatus: 503,
+            })
+        },
+    )
+
+    it('omits malformed safe metadata and every unknown outer field', () => {
+        expect(normalizeNativeHostResponse({
+            status: 'error',
+            error: 'safe fallback',
+            errorKind: { unsafe: true },
+            httpStatus: '503',
+            arbitrary: 'must-not-forward',
+        })).toEqual({
+            status: 'error',
+            error: 'safe fallback',
+        })
+    })
+
     it('UI-I6: preserves inner error_code in a success envelope', () => {
         const inner = {
             status: 'error',

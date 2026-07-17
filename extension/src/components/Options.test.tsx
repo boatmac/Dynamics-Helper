@@ -15,14 +15,29 @@ import {
 } from '../test/chromeMock'
 import { DEFAULT_PREFS } from '../utils/prefs'
 import { getTranslation } from '../utils/translations'
+import { normalizeNativeHostResponse } from '../background/analyzeBridge'
 
 const teamCatalogMock = vi.hoisted(() => ({
   syncTeamBookmarks: vi.fn(),
 }))
 
+const dndMock = vi.hoisted(() => ({
+  dropSpecs: [] as any[],
+}))
+
 vi.mock('../utils/teamCatalog', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../utils/teamCatalog')>()),
   syncTeamBookmarks: teamCatalogMock.syncTeamBookmarks,
+}))
+
+vi.mock('react-dnd', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-dnd')>()),
+  DndProvider: ({ children }: { children: unknown }) => children,
+  useDrag: () => [{ isDragging: false }, vi.fn()],
+  useDrop: (spec: any) => {
+    dndMock.dropSpecs.push(spec)
+    return [{ isOver: false, canDrop: true }, vi.fn()]
+  },
 }))
 
 // Mock telemetry BEFORE importing Options. telemetry.ts instantiates
@@ -113,6 +128,17 @@ const openCopilotSection = async () => {
   fireEvent.click(nav)
 }
 
+const openBookmarksSection = async () => {
+  const nav = await waitFor(() => {
+    const element = document.querySelector(
+      '[data-section="bookmarks"]',
+    ) as HTMLButtonElement | null
+    if (!element) throw new Error('bookmarks nav not rendered')
+    return element
+  })
+  fireEvent.click(nav)
+}
+
 const hydrateOptions = async (data: Record<string, unknown>) => {
   const deferred = deferNextResponse('get_config')
   render(<Options />)
@@ -162,6 +188,26 @@ const countUpdateConfigCalls = () =>
     return msg?.type === 'NATIVE_MSG' && msg?.payload?.action === 'update_config'
   }).length
 
+const manifestSyncMessages = () => chromeMockSpies.sendMessage.mock.calls
+  .map(call => call[0] as any)
+  .filter(message => message?.type === 'SYNC_TEAM_CATALOG'
+    && message?.payload?.manifestOnly === true)
+
+const manifestSyncResponse = (
+  message: any,
+  syncStatus: 'committed' | 'unchanged' | 'stale' | 'skipped' | 'failed',
+) => ({
+  status: syncStatus === 'failed' ? 'error' : 'success',
+  error: syncStatus === 'failed' ? 'manifest failure' : undefined,
+  errorKind: syncStatus === 'failed' ? 'network' : undefined,
+  data: {
+    manifestOnly: true,
+    syncStatus,
+    identity: message.payload.identity,
+    requestGeneration: message.payload.requestGeneration,
+  },
+})
+
 const findResetMessage = async () => waitFor(() => {
   const message = chromeMockSpies.sendMessage.mock.calls
     .map(call => call[0] as any)
@@ -185,6 +231,19 @@ const resolveCommittedReset = async (
   }))
   return message
 }
+
+const hydrateBookmarkOptions = async (items: Array<Record<string, unknown>>) => {
+  seedStorage({ dh_items: items })
+  await hydrateOptions({
+    root_path: '',
+    prompt_source_status: { status: 'ok' },
+    extension_preferences: { use_workspace_only: false },
+  })
+  await openBookmarksSection()
+  await waitFor(() => expect(document.body.textContent).toContain(items[0]?.label))
+}
+
+const personalItems = () => getStorageSnapshot().dh_items as Array<any> | undefined
 
 // Most recent dh_prefs storage.set carrying the given key.
 const findStorageWrite = (key: string) =>
@@ -548,6 +607,7 @@ describe('Options delayed initial chrome hydration', () => {
   beforeEach(() => {
     resetChromeMock()
     installChromeMock()
+    dndMock.dropSpecs = []
   })
 
   it('keeps an explicit instruction clear over a delayed stale storage snapshot', async () => {
@@ -1747,6 +1807,473 @@ describe('Options selected-team refresh generation', () => {
       expect(document.body.textContent).not.toContain('STALE AFTER RESET')
     } finally {
       confirm.mockRestore()
+    }
+  })
+})
+
+describe('Options personal bookmark Reset generation', () => {
+  beforeEach(() => {
+    resetChromeMock()
+    installChromeMock()
+    dndMock.dropSpecs = []
+  })
+
+  it.each([
+    ['add', async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
+      await waitFor(() => expect(document.body.textContent).toContain('New Item'))
+    }, 'New Item'],
+    ['edit', async () => {
+      fireEvent.click(screen.getByTitle('Edit'))
+      const label = screen.getByPlaceholderText('Label') as HTMLInputElement
+      fireEvent.change(label, { target: { value: 'Edited after reset' } })
+      fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+    }, 'Edited after reset'],
+    ['delete', async () => {
+      const confirmDelete = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      fireEvent.click(screen.getByTitle('Delete'))
+      confirmDelete.mockRestore()
+    }, null],
+    ['import', async () => {
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File([
+        JSON.stringify([{ type: 'link', label: 'Imported after reset', url: 'https://new.test' }]),
+      ], 'bookmarks.json', { type: 'application/json' })
+      fireEvent.change(input, { target: { files: [file] } })
+      await waitFor(() => expect(document.body.textContent).toContain('Imported after reset'))
+    }, 'Imported after reset'],
+    ['collapse', async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Expand All/i }))
+    }, 'Seed child'],
+  ] as const)(
+    'keeps a newer %s mutation when the Reset response is delayed',
+    async (_name, mutate, expectedLabel) => {
+      const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+      const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      try {
+        await hydrateBookmarkOptions([{
+          type: 'folder',
+          label: 'Seed folder',
+          collapsed: true,
+          children: [{ type: 'link', label: 'Seed child', url: 'https://old.test' }],
+        }])
+        fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+        await findResetMessage()
+
+        await mutate()
+        await waitFor(() => expect(personalItems()).toBeDefined())
+        const newerItems = structuredClone(personalItems())
+        await resolveCommittedReset(resetResponse)
+
+        await waitFor(() => expect(personalItems()).toEqual(newerItems))
+        expect(chromeMockSpies.storageRemove.mock.calls.some(call => {
+          const keys = call[0] as string[]
+          return Array.isArray(keys) && keys.includes('dh_items')
+        })).toBe(false)
+        if (expectedLabel) expect(document.body.textContent).toContain(expectedLabel)
+        else expect(document.body.textContent).not.toContain('Seed folder')
+        expect(screen.queryByText('Reset complete.')).toBeNull()
+        expect(await screen.findByRole('alert')).toHaveTextContent(/reset did not complete/i)
+        expect(screen.getByRole('alert')).toHaveTextContent(
+          /some state may already be cleared/i,
+        )
+      } finally {
+        confirmReset.mockRestore()
+      }
+    },
+  )
+
+  it('keeps a newer reorder when the Reset response is delayed', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await hydrateBookmarkOptions([
+        { type: 'link', label: 'First', url: 'https://first.test' },
+        { type: 'link', label: 'Second', url: 'https://second.test' },
+      ])
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await findResetMessage()
+
+      const target = dndMock.dropSpecs.filter(spec => spec.hover).at(-1)
+      expect(target).toBeDefined()
+      act(() => target.drop(
+        { path: [0], type: 'link' },
+        {
+          didDrop: () => false,
+          getClientOffset: () => ({ x: 1, y: 1 }),
+        },
+      ))
+      await waitFor(() => expect(personalItems()?.map(item => item.label)).toEqual([
+        'Second',
+        'First',
+      ]))
+
+      await resolveCommittedReset(resetResponse)
+      expect(personalItems()?.map(item => item.label)).toEqual(['Second', 'First'])
+      expect(document.body.textContent).toContain('First')
+      expect(document.body.textContent).toContain('Second')
+    } finally {
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('serializes delayed Reset removal before a newer bookmark write', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const delayedRemove = deferNextStorageRemove('dh_items')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await hydrateBookmarkOptions([
+        { type: 'link', label: 'Before reset', url: 'https://before.test' },
+      ])
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+
+      fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
+      await waitFor(() => expect(document.body.textContent).toContain('New Item'))
+      await act(async () => delayedRemove.resolve(undefined))
+
+      await waitFor(() => expect(personalItems()?.some(
+        item => item.label === 'New Item',
+      )).toBe(true))
+      expect(document.body.textContent).toContain('New Item')
+      expect(screen.queryByText('Reset complete.')).toBeNull()
+      expect(await screen.findByRole('alert')).toHaveTextContent(/reset did not complete/i)
+    } finally {
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('normal Reset clears personal storage and reloads collapsed defaults', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify([{
+        type: 'folder',
+        label: 'Packaged default',
+        children: [{ type: 'link', label: 'Default child', url: 'https://default.test' }],
+      }]),
+    } as Response)
+    try {
+      await hydrateBookmarkOptions([
+        { type: 'link', label: 'Personal only', url: 'https://personal.test' },
+      ])
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+
+      await waitFor(() => expect(personalItems()).toEqual([{
+        type: 'folder',
+        label: 'Packaged default',
+        collapsed: true,
+        children: [{ type: 'link', label: 'Default child', url: 'https://default.test' }],
+      }]))
+      expect(document.body.textContent).toContain('Packaged default')
+      expect(document.body.textContent).not.toContain('Default child')
+      expect(document.body.textContent).not.toContain('Personal only')
+      expect(screen.getByRole('status')).toHaveTextContent('Reset complete')
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('treats a stored empty personal menu as authoritative on reload', async () => {
+    seedStorage({ dh_items: [] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify([{
+        type: 'link',
+        label: 'Must not resurrect',
+        url: 'https://default.test',
+      }]),
+    } as Response)
+    try {
+      await hydrateOptions({
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      })
+      await openBookmarksSection()
+
+      expect(document.body.textContent).toContain('No bookmarks yet')
+      expect(document.body.textContent).not.toContain('Must not resurrect')
+      expect(personalItems()).toEqual([])
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+})
+
+describe('Options list_models outer error classification', () => {
+  beforeEach(() => {
+    resetChromeMock()
+    installChromeMock()
+    dndMock.dropSpecs = []
+  })
+
+  it.each([
+    ['auth', /run `copilot` in a terminal to re-auth/i],
+    ['unavailable', /Showing cached list; click Refresh to retry/i],
+    ['unknown', /Showing cached list; click Refresh to retry/i],
+  ] as const)(
+    'keeps Host %s classification through the Service Worker response path',
+    async (errorKind, expectedCopy) => {
+      const getConfig = deferNextResponse('get_config')
+      const listModels = deferNextResponse('list_models')
+      render(<Options />)
+      await act(async () => getConfig.resolve({
+        status: 'success',
+        data: {
+          root_path: '',
+          prompt_source_status: { status: 'ok' },
+          extension_preferences: { use_workspace_only: false },
+        },
+      }))
+
+      const normalized = normalizeNativeHostResponse({
+        status: 'error',
+        error: 'safe model fallback',
+        errorKind,
+        unsafe: 'must-not-reach-options',
+      })
+      expect(normalized).toEqual({
+        status: 'error',
+        error: 'safe model fallback',
+        errorKind,
+      })
+      await act(async () => listModels.resolve(normalized))
+      fireEvent.click(document.querySelector('[data-section="model"]') as HTMLButtonElement)
+
+      expect(await screen.findByText(expectedCopy)).toBeInTheDocument()
+      expect(document.body.textContent).not.toContain('must-not-reach-options')
+    },
+  )
+})
+
+describe('Options manifest blur retry state', () => {
+  beforeEach(() => {
+    resetChromeMock()
+    installChromeMock()
+    dndMock.dropSpecs = []
+  })
+
+  const renderManifestOptions = async (team?: string) => {
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: {
+        team_catalog_enabled: true,
+        team_manifest_url: 'https://example.com/original.json',
+        ...(team ? { team } : {}),
+        use_workspace_only: false,
+      },
+    })
+    fireEvent.click(document.querySelector('[data-section="team"]') as HTMLButtonElement)
+    return screen.getByPlaceholderText(
+      'https://example.com/team-manifest.json',
+    ) as HTMLInputElement
+  }
+
+  const blurUrl = async (input: HTMLInputElement, url: string) => {
+    if (input.value !== url) {
+      fireEvent.change(input, { target: { value: url } })
+    }
+    fireEvent.blur(input)
+    await waitFor(() => expect(manifestSyncMessages().at(-1)?.payload.identity.manifestUrl).toBe(url))
+  }
+
+  it.each(['auth', 'network'] as const)(
+    'retries the same URL after a current %s failure',
+    async errorKind => {
+      const first = deferNextResponse('SYNC_TEAM_CATALOG')
+      const second = deferNextResponse('SYNC_TEAM_CATALOG')
+      const input = await renderManifestOptions('team-a')
+      const url = 'https://example.com/retry.json'
+
+      await blurUrl(input, url)
+      const firstMessage = manifestSyncMessages()[0]
+      await act(async () => first.resolve({
+        ...manifestSyncResponse(firstMessage, 'failed'),
+        errorKind,
+      }))
+      fireEvent.blur(input)
+
+      await waitFor(() => expect(manifestSyncMessages()).toHaveLength(2))
+      await act(async () => second.resolve(
+        manifestSyncResponse(manifestSyncMessages()[1], 'committed'),
+      ))
+    },
+  )
+
+  it('retries the same URL after a transport failure', async () => {
+    const first = deferNextResponse('SYNC_TEAM_CATALOG')
+    const second = deferNextResponse('SYNC_TEAM_CATALOG')
+    const input = await renderManifestOptions('team-a')
+    const url = 'https://example.com/transport-retry.json'
+
+    await blurUrl(input, url)
+    await act(async () => first.reject(new Error('manifest transport closed')))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /Could not fetch manifest/i,
+    )
+    fireEvent.blur(input)
+
+    await waitFor(() => expect(manifestSyncMessages()).toHaveLength(2))
+    await act(async () => second.resolve(
+      manifestSyncResponse(manifestSyncMessages()[1], 'committed'),
+    ))
+  })
+
+  it('surfaces an identity-less failure without marking the URL successful', async () => {
+    const first = deferNextResponse('SYNC_TEAM_CATALOG')
+    const second = deferNextResponse('SYNC_TEAM_CATALOG')
+    const input = await renderManifestOptions('team-a')
+    const url = 'https://example.com/identity-less-retry.json'
+
+    await blurUrl(input, url)
+    await act(async () => first.resolve({
+      status: 'error',
+      error: 'generic Service Worker failure',
+    }))
+    expect(document.body.textContent).toContain('Could not fetch manifest')
+    fireEvent.blur(input)
+
+    await waitFor(() => expect(manifestSyncMessages()).toHaveLength(2))
+    await act(async () => second.resolve(
+      manifestSyncResponse(manifestSyncMessages()[1], 'committed'),
+    ))
+  })
+
+  it.each(['stale', 'skipped'] as const)(
+    'retries the same URL after a current %s response',
+    async syncStatus => {
+      const first = deferNextResponse('SYNC_TEAM_CATALOG')
+      const second = deferNextResponse('SYNC_TEAM_CATALOG')
+      const input = await renderManifestOptions('team-a')
+      const url = `https://example.com/${syncStatus}-retry.json`
+
+      await blurUrl(input, url)
+      await act(async () => first.resolve(
+        manifestSyncResponse(manifestSyncMessages()[0], syncStatus),
+      ))
+      fireEvent.blur(input)
+
+      await waitFor(() => expect(manifestSyncMessages()).toHaveLength(2))
+      await act(async () => second.resolve(
+        manifestSyncResponse(manifestSyncMessages()[1], 'committed'),
+      ))
+    },
+  )
+
+  it.each(['committed', 'unchanged'] as const)(
+    'skips a repeat blur after a current %s response',
+    async syncStatus => {
+      const first = deferNextResponse('SYNC_TEAM_CATALOG')
+      const input = await renderManifestOptions('team-a')
+      const url = `https://example.com/${syncStatus}.json`
+
+      await blurUrl(input, url)
+      await act(async () => first.resolve(
+        manifestSyncResponse(manifestSyncMessages()[0], syncStatus),
+      ))
+      fireEvent.blur(input)
+      await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+
+      expect(manifestSyncMessages()).toHaveLength(1)
+    },
+  )
+
+  it('coalesces duplicate same-URL blurs while the first request is in flight', async () => {
+    const first = deferNextResponse('SYNC_TEAM_CATALOG')
+    const input = await renderManifestOptions('team-a')
+    const url = 'https://example.com/in-flight.json'
+
+    await blurUrl(input, url)
+    fireEvent.blur(input)
+    await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+
+    expect(manifestSyncMessages()).toHaveLength(1)
+    await act(async () => first.resolve(
+      manifestSyncResponse(manifestSyncMessages()[0], 'committed'),
+    ))
+  })
+
+  it('does not let URL A callback clear or complete newer URL B state', async () => {
+    const responseA = deferNextResponse('SYNC_TEAM_CATALOG')
+    const responseB = deferNextResponse('SYNC_TEAM_CATALOG')
+    const retryB = deferNextResponse('SYNC_TEAM_CATALOG')
+    const input = await renderManifestOptions('team-a')
+
+    await blurUrl(input, 'https://example.com/a.json')
+    const messageA = manifestSyncMessages()[0]
+    await blurUrl(input, 'https://example.com/b.json')
+    const messageB = manifestSyncMessages()[1]
+
+    await act(async () => responseA.resolve(
+      manifestSyncResponse(messageA, 'committed'),
+    ))
+    fireEvent.blur(input)
+    await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+    expect(manifestSyncMessages()).toHaveLength(2)
+
+    await act(async () => responseB.resolve(
+      manifestSyncResponse(messageB, 'failed'),
+    ))
+    fireEvent.blur(input)
+    await waitFor(() => expect(manifestSyncMessages()).toHaveLength(3))
+    await act(async () => retryB.resolve(
+      manifestSyncResponse(manifestSyncMessages()[2], 'committed'),
+    ))
+  })
+
+  it('allows a first-time no-team URL to retry after failure', async () => {
+    const first = deferNextResponse('SYNC_TEAM_CATALOG')
+    const second = deferNextResponse('SYNC_TEAM_CATALOG')
+    const input = await renderManifestOptions()
+    const url = 'https://example.com/no-team.json'
+
+    await blurUrl(input, url)
+    expect(manifestSyncMessages()[0].payload.identity.teamId).toBe('')
+    await act(async () => first.resolve(
+      manifestSyncResponse(manifestSyncMessages()[0], 'failed'),
+    ))
+    fireEvent.blur(input)
+
+    await waitFor(() => expect(manifestSyncMessages()).toHaveLength(2))
+    await act(async () => second.resolve(
+      manifestSyncResponse(manifestSyncMessages()[1], 'unchanged'),
+    ))
+  })
+
+  it('fetches the same previously successful URL again after Reset', async () => {
+    const first = deferNextResponse('SYNC_TEAM_CATALOG')
+    const second = deferNextResponse('SYNC_TEAM_CATALOG')
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      const input = await renderManifestOptions('team-a')
+      const url = 'https://example.com/success-before-reset.json'
+      await blurUrl(input, url)
+      await act(async () => first.resolve(
+        manifestSyncResponse(manifestSyncMessages()[0], 'committed'),
+      ))
+
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+      fireEvent.click(document.querySelector('[data-section="team"]') as HTMLButtonElement)
+      fireEvent.click(screen.getByRole('checkbox', { name: /Enable Team Catalog/i }))
+      const resetInput = await screen.findByPlaceholderText(
+        'https://example.com/team-manifest.json',
+      ) as HTMLInputElement
+      fireEvent.change(resetInput, { target: { value: url } })
+      fireEvent.blur(resetInput)
+
+      await waitFor(() => expect(manifestSyncMessages()).toHaveLength(2))
+      await act(async () => second.resolve(
+        manifestSyncResponse(manifestSyncMessages()[1], 'committed'),
+      ))
+    } finally {
+      confirmReset.mockRestore()
     }
   })
 })
