@@ -157,14 +157,17 @@ actions. The latest successful durable callback, with no queued newer intent,
 settles before dispatch and runs the matching Host update from
 `onLatestCommit`. Storage
 `chrome.runtime.lastError` runs neither, leaves actions unsettled, and exposes a
-persistent retryable issue. Reset carries immutable default identity/generation/
-token through both phases. The matching preference mirror must commit and its
-tokenized Host `update_config` must return `success: true` or
-`config_saved: true` before Options dispatches `RESET_EXTENSION_STATE`.
-Completion additionally requires matching SW `syncStatus: 'committed'`.
-Unsaved/transport Host failure performs no SW cleanup; a saved refresh failure
-continues while retaining its separate warning. A post-Host SW failure retries
-only the idempotent SW phase with the same token and preserves newer edits.
+persistent retryable issue. Reset is separate after its initial mirror action:
+`resetTransactionRef` captures immutable default identity, request/bookmark
+generations, token, retry action, and phase (`host-pending`, `host-committed`,
+`sw-pending`, `local-cleanup-pending`, `complete`). The matching mirror must
+commit and tokenized Host `update_config` must return `success: true` or
+`config_saved: true` before Options dispatches `RESET_EXTENSION_STATE`. Options
+records `host-committed` before generation/supersession checks. From then on,
+Retry cleanup never enters `persistPrefs`, never sends Host/defaults, and reuses
+the token for only the pending SW/local phase. A normal Reset click always starts
+a new transaction. SW default-identity validation and separate team/bookmark
+generation checks prevent retry from clearing newer-owned state.
 
 Personal bookmarks have a separate generation boundary. Every add/edit/delete/
 move/import/collapse and Reset intent calls `mutatePersonalItems`; all `dh_items`
@@ -200,13 +203,16 @@ the next same-URL blur; URL A cannot clear or complete URL B. Every Options
 current/response team check normalizes an omitted team to `''`, so no-team
 committed/unchanged results deduplicate while failed/stale/skipped results retry.
 
-`normalizeNativeHostResponse` is the Service Worker allowlist for Host errors.
-It leaves success `data` unchanged and forwards only a string `error` or
-`message` fallback, normalized `error_code`, string `errorKind`, and finite
-numeric `httpStatus` on error. Objects, arrays, functions, and null are ignored
-without coercion and become the fixed `Native Host error` string. The
-`list_models` Options handler therefore receives `auth`, `unavailable`, or
-`unknown` classification without exposing arbitrary Host fields.
+`safeErrorText(candidates, fallback)` is the shared string-selection boundary
+for extension error persistence and display. It returns the first non-empty
+string unchanged; it never calls `String`/`toString` or serializes candidate
+objects, arrays, functions, symbols, or null. `analyzeBridge`,
+`normalizeNativeHostResponse`, `configUpdateResult`, Options prompt health and
+immediate warnings, FAB nested/outer/catch paths, and Service Worker immediate
+normalization all use it. `normalizeNativeHostResponse` still leaves success
+`data` unchanged and allowlists normalized `error_code`, string `errorKind`, and
+finite numeric `httpStatus`, so model-list classification remains available
+without exposing arbitrary Host fields.
 
 Analysis pending and dismissal state is request scoped. Starts write `dh_pending_analysis:<encoded-requestId>`; completion removes only that key. The legacy singleton pending key remains readable. `seenAnalysisKey()` produces collision-safe request or exact legacy case/timestamp keys, so A/B acknowledgments coexist. Hydration performs one `get(null)`, selects the newest fresh pending matching the current case, observes pending storage changes/expiry, and derives matching seen state from the same snapshot. Reset removes both prefixes and legacy singletons.
 

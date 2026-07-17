@@ -149,14 +149,20 @@ Prompt resolution is fail-closed. Missing/unreadable Core, unreadable selected D
 
 Options serializes and coalesces `dh_prefs` mirror writes. Normal persistence
 and post-hydration catch-up both capture immutable intents and route through the
-same queue. Host updates and typed team/Reset actions are latest-commit work of
-only the newest successful snapshot; storage failure retains unsettled intent
-and exposes a warning. Reset is one tokenized two-phase transaction. The default
+same queue. Host updates, typed team actions, and the initial Reset Host dispatch
+are latest-commit work of only the newest successful snapshot; storage failure
+retains unsettled intent and exposes a warning. Reset is one tokenized two-phase transaction. The default
 mirror and matching Host `update_config` must durably acknowledge before the
-Service Worker receives `RESET_EXTENSION_STATE`; only a matching SW
-`committed` result permits local cleanup and completion UI. Host failure causes
-no SW destruction, `config_saved: true` refresh failure continues with a
-separate warning, and post-Host SW failure retries only that idempotent phase.
+Service Worker receives `RESET_EXTENSION_STATE`. Options keeps an explicit
+transaction `{token, default identity, request/bookmark generations, phase,
+retryAction}` outside the coalescing mirror-action queue. Its phases are
+`host-pending`, `host-committed`, `sw-pending`, `local-cleanup-pending`, and
+`complete`. Host acknowledgment is recorded before newer-callback checks; after
+that point the token never resends Host or rewrites defaults. Only matching SW
+`committed` truth advances to scoped local cleanup. The warning's Retry cleanup
+control resumes the stored SW/local phase, while a normal Reset click creates a
+fresh transaction. Host failure causes no SW destruction, and
+`config_saved: true` refresh failure still permits cleanup.
 Personal `dh_items` mutations additionally share one generation counter and
 serialized write/remove queue. A committed shared reset cannot remove or reload
 personal bookmarks after a newer personal generation; that outcome is partial,
@@ -170,13 +176,15 @@ authority.
 
 Analyze errors may carry optional `error_code`. The Service Worker persists raw safe fallback text plus optional `LastAnalysis.errorCode`, preserving an inner Analyze code over an outer wrapper code. Immediate and rehydrated FAB display use the same render-time localization helper for known codes; immediate unknown-code fallbacks may include a safe UI prefix, while rehydrated unknown/legacy codes retain the raw stored fallback. Instruction contents, Custom User Prompt contents, and prompt-source paths are excluded from normal logs and telemetry.
 
-Native Host error normalization is an allowlist boundary. Success `data` remains
-unchanged; error envelopes retain only string `error`/`message` fallback text,
-normalized `error_code`, string `errorKind`, and finite numeric `httpStatus`.
-Non-string fallback values are never coerced or forwarded and become the fixed
-`Native Host error` string. This preserves model-list
-auth/unavailable classification through `NATIVE_MSG` without forwarding
-arbitrary Host fields.
+Extension error extraction uses one `safeErrorText` boundary. It returns the
+first non-empty string candidate or a trusted fixed/localized fallback and never
+coerces objects, arrays, functions, symbols, or null. Analyze persistence,
+Native response normalization, config updates, Options health/warnings, FAB
+nested/outer display, and Service Worker immediate error paths all use it.
+Success `data` remains unchanged; error envelopes retain only normalized
+`error_code`, string `errorKind`, finite numeric `httpStatus`, and selected
+string fallback text. This preserves model-list auth/unavailable classification
+without forwarding arbitrary Host fields.
 
 Service Worker persistence has two ownership domains. Team requests carry captured enabled/URL/team identity plus request generation; `teamCatalog.ts` synchronously invalidates older generations and queues validation with awaited manifest/item/ETag/timestamp/clear mutations. Its callback-style set/remove wrappers reject on callback-scoped Chrome storage errors. Mutation rejection becomes identity-safe `failed` truth with no items/timestamp success payload, while generation/identity mismatch remains `stale` and the queue accepts later work. `analysisStore.ts` uses request-scoped pending and identity-scoped seen keys, so A/B remain independent across worker restarts; hydration derives last, newest matching pending, and acknowledgment from one snapshot. Options issues Service Worker messages and does not mutate owned keys directly.
 

@@ -35,11 +35,11 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Permission and pre-tool approval logs omit request representations, tool names, paths, commands, URLs, and contents.
 - Unreadable/invalid-UTF-8 Custom User Prompt health now preserves the browser mirror and omits Host content instead of substituting empty; unrelated settings cannot truncate it, while explicit edit/clear repairs it.
 - Custom User Prompt writes are sparse, immutable revisioned intents like DH-specific Instructions; overlapping acknowledgements cannot lose a newer value.
-- Team sync, Reset, and related preference-mirror actions survive compatible later snapshots, cancel on incompatible team identity, and run once after durable commit.
+- Team sync and related preference-mirror actions survive compatible later snapshots and cancel on incompatible team identity. Reset cleanup ownership is a separate phased transaction after its initial durable mirror/Host dispatch.
 - Options and FAB menu Team Catalog reads ignore delayed results from old enabled/URL/team generations.
 - FAB Analyze spinner and safety timers are request-ID scoped, so stale A response/finally/timeout paths cannot clear or report over request B.
 - Preference mirrors are serialized/coalesced and inspect Chrome storage errors; no Host/team/Reset action runs before the latest durable commit, and failed intent remains retryable.
-- Reset responses carry default identity, generation, and token with committed/stale/failed truth; stale, failed, transport, or superseded callbacks never claim success or clear newer edits.
+- Reset responses carry default identity, generation, and token with committed/stale/failed truth; stale, failed, transport, or superseded callbacks never claim success or clear newer edits, and an explicit Retry cleanup action resumes the original transaction.
 - FAB retains request ownership through asynchronous case hashing, preventing stale response UI, duration, menu, and outcome telemetry.
 - Session refresh config no longer reads Custom User Prompt; Options hydration and each Analyze perform their own single canonical read. Explicit-null editable prompt fields fail before any write.
 - Hydration catch-up now enters the same immutable single-flight preference-mirror queue as normal edits; a failed mirror sends no Host update, and delayed older work cannot send over a newer edit.
@@ -47,20 +47,20 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Personal bookmark mutations and Reset now share a generation counter and serialized `dh_items` queue. Newer add/edit/delete/move/import/collapse changes survive delayed Reset response/removal, while normal Reset still reloads packaged defaults and partial cleanup is reported truthfully.
 - Native Host error normalization preserves allowlisted `errorKind` and `httpStatus`, so model-list authentication failures select re-auth guidance without forwarding arbitrary Host fields.
 - Manifest blur retries distinguish last successful from in-flight URLs. Failed, transport, stale, skipped, and first-time no-team requests can retry; committed/unchanged requests deduplicate, and old URL callbacks cannot disturb newer work.
-- Reset now uses one token across a Host-before-Service-Worker two-phase commit. Unsaved Host failures perform no destructive browser cleanup; saved refresh failures keep a separate warning; post-Host SW failures retry only the SW phase; completion requires both durable phases.
+- Reset now stores token, default identity, generations, retry action, and phase outside supersedable preference actions. Once Host durably commits, cleanup retry never resends Host or rewrites defaults; it uses the same token and safely scopes SW/local cleanup around newer preference/bookmark edits. Normal Reset intentionally starts a fresh transaction.
 - Personal bookmark set/remove failures retain the newest snapshot/removal intent, keep a localized persistence warning visible, suppress false Reset completion, and recover on the next coalesced mutation.
 - Options normalizes omitted team identity to the empty string for every manifest current/response check, so no-team committed/unchanged requests deduplicate while failed/stale/skipped requests remain retryable and old callbacks are ignored after team selection.
-- Native Host error fallbacks now accept strings only. Object, array, function, and null values are neither coerced nor forwarded and render the fixed safe fallback instead.
+- One shared string-only selector now covers Analyze persistence, Native response normalization, config updates, prompt health, Options warnings, FAB nested errors, and Service Worker immediate paths. Objects, arrays, functions, symbols, and null are never coerced; valid strings and allowlisted metadata are preserved.
 
 ## Verification
 
-- Ninth review product commits: `5596afa`, `9763b2e`, `d88c206`, and `f5d4acc`; the evidence commit follows them.
+- Tenth review product commits: `257f282` and `7979279`; the evidence commit follows them.
 - Isolated Host: **143/143 focused** and **207/207 full** tests passed.
-- Extension: **231/231 focused across 6 files** and **327/327 full across 18 files** passed.
-- Production build passed with **2,217 modules transformed** and **13 artifacts** listed.
+- Extension: **210/210 focused across 7 files** and **340/340 full across 19 files** passed.
+- Production build passed with **2,218 modules transformed** and **13 artifacts** listed.
 - Isolated source-only compileall, `git diff --check`, static/version scans, and restored break-and-fail mutations passed.
 - Optional authenticated marker smoke was not run because safe model-backed user/session isolation was unavailable; it remains non-gating.
-- The controller broad whole-branch review remains pending after this ninth fix wave.
+- The controller broad whole-branch review remains pending after this tenth fix wave.
 
 ## Upgrade notes
 

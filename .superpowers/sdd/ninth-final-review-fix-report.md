@@ -13,11 +13,13 @@
 
 ## Status
 
-All four Important ninth-review findings were fixed through TDD. The clean
-product head passes focused/full isolated Host, focused/full Extension,
-production build/TypeScript, source-only compileall, static ownership/identity/
-allowlist checks, generated-output checks, and one restored mutation proof per
-finding.
+The four ninth-review targets were addressed through TDD at product head
+`f5d4acc`, with the verification recorded below. The tenth whole-branch review
+later found two Important gaps in those claims: Host-committed Reset retry state
+was still coupled to supersedable preference actions, and string-only fallback
+selection existed only at the outer Native Host normalizer. Those gaps are fixed
+by `257f282` and `7979279`; current evidence is in
+`.superpowers/sdd/tenth-final-review-fix-report.md`.
 
 No push, tag, publish, version, package, registry, real
 `%LOCALAPPDATA%\DynamicsHelper`, or MyCases operation occurred. Optional
@@ -39,9 +41,11 @@ not guaranteed. Controller broad whole-branch review remains pending.
 - Completion requires the matching SW response identity/generation/token and
   `syncStatus: 'committed'`. Failed/stale/transport/superseded responses never
   display completion.
-- Once Host has committed, retry uses the same token and runs only the SW phase.
-  An explicit retry after a newer preference edit preserves that edit rather
-  than reapplying defaults or resending the Host reset.
+- At the ninth product head, the intended post-Host retry still lived in
+  `pendingResetRetryActionRef` and could be canceled by an incompatible/newer
+  preference snapshot. The former claim that every newer edit preserved retry
+  ownership was too broad. The tenth fix replaces it with an explicit phased
+  transaction and a separate Retry cleanup action.
 
 ### 2. Personal Bookmark Storage Failure
 
@@ -70,15 +74,19 @@ not guaranteed. Controller broad whole-branch review remains pending.
 - A no-team callback captured before a team selection cannot complete or release
   the selected-team request afterward.
 
-### 4. String-Only Error Fallback
+### 4. Outer Native Response String-Only Fallback
 
 - `normalizeNativeHostResponse` uses string `error`, then string `message`, then
   fixed `Native Host error`.
 - Object, array, function, and null values are neither forwarded nor coerced.
   A secret-bearing object's `toString` spy remains uncalled, and the secret is
   absent from the response, console calls, and Options warning.
-- Success `data`, normalized `error_code`, string `errorKind`, finite numeric
-  `httpStatus`, and valid string fallback behavior remain unchanged.
+- This ninth change did not cover inner Analyze persistence, direct
+  `update_config`, prompt health, or nested FAB display extraction. The former
+  report wording implied a broader boundary than the implementation provided.
+  The tenth fix introduces one shared selector across all reviewed paths while
+  retaining success `data`, normalized `error_code`, string `errorKind`, finite
+  numeric `httpStatus`, and valid string behavior.
 
 ## TDD RED Evidence
 

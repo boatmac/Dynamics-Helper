@@ -18,7 +18,8 @@ This file is the durable continuation point for moving Dynamics Helper developme
 - Seventh whole-branch Important-finding product fix: `85355f8` (`fix(review): harden storage commit truth`); evidence is `a7513e5` plus the following metadata correction in `.superpowers/sdd/seventh-final-review-fix-report.md`
 - Eighth whole-branch Important-finding product fixes: `0a23315` (`fix(review): preserve personal reset and retry truth`) and `fcc6467` (`fix(review): align reset cache status truth`); evidence follows in `.superpowers/sdd/eighth-final-review-fix-report.md`
 - Ninth whole-branch Important-finding product fixes: `5596afa` (`fix(reset): require host commit before cleanup`), `9763b2e` (`fix(bookmarks): retain failed persistence intent`), `d88c206` (`fix(team): normalize no-team manifest identity`), and `f5d4acc` (`fix(native): restrict error fallbacks to strings`); evidence follows in `.superpowers/sdd/ninth-final-review-fix-report.md`
-- Controller broad whole-branch review: **pending rerun after the ninth fix wave**
+- Tenth whole-branch Important-finding product fixes: `257f282` (`fix(reset): preserve committed cleanup ownership`) and `7979279` (`fix(errors): share string-only fallback selection`); evidence follows in `.superpowers/sdd/tenth-final-review-fix-report.md`
+- Controller broad whole-branch review: **pending rerun after the tenth fix wave**
 - Accepted prompt-scope spec: `441d0db` (`docs(spec): define deterministic DH prompt scopes`)
 - Accepted implementation plan: `21108d9` (`docs(plan): add DH prompt scope implementation plan`)
 - Source version: `2.0.74-beta.4`
@@ -85,10 +86,13 @@ cec901d docs(review): correct eighth verification metadata
 9763b2e fix(bookmarks): retain failed persistence intent
 d88c206 fix(team): normalize no-team manifest identity
 f5d4acc fix(native): restrict error fallbacks to strings
-HEAD docs(verification): record ninth review fixes
+b9cb024 docs(verification): record ninth review fixes
+257f282 fix(reset): preserve committed cleanup ownership
+7979279 fix(errors): share string-only fallback selection
+HEAD docs(verification): record tenth review fixes
 ```
 
-These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Ninth-wave starting head `cec901d` was 42 commits ahead of `origin/master`; its four product commits make the clean product head `f5d4acc`, 46 ahead and 0 behind. The evidence commit containing this handoff/report update will make the branch 47 ahead and 0 behind. The controller must still rerun its broad whole-branch review.
+These commits do not change version fields, release tags, `host/system_prompt.md`, UUIDv5 identity, or MyCasesKit. They have not implemented MyCases integration. Tenth-wave starting head `b9cb024` was 47 commits ahead of `origin/master`; its two product commits make the clean product head `7979279`, 49 ahead and 0 behind. The evidence commit containing this handoff/report update will make the branch 50 ahead and 0 behind. The controller must still rerun its broad whole-branch review.
 
 ## Remote VM Bootstrap
 
@@ -460,14 +464,13 @@ Product/test commits:
 - `d88c206f2484cde7824c3c3b48473a3ea3c729a7` (`fix(team): normalize no-team manifest identity`)
 - `f5d4acca883acf8b9ea0d0db76cc01f37f8fa994` (`fix(native): restrict error fallbacks to strings`)
 
-Reset now uses one transaction token through Host and Service Worker phases.
-After the default `dh_prefs` mirror commits, Options waits for matching
-`update_config` durability before dispatching `RESET_EXTENSION_STATE`.
-Unsaved/transport Host failure performs no SW destruction;
-`config_saved: true` refresh failure continues with a separate warning. Matching
-SW `syncStatus: 'committed'` is still required for completion. A post-Host SW
-failure retries only that idempotent phase with the same token and does not
-overwrite newer edits.
+At the ninth product head, Reset added one token and a Host-before-SW durability
+gate. Unsaved/transport Host failure performed no SW destruction, and
+`config_saved: true` refresh failure could continue to SW. However, the intended
+post-Host retry still lived in a supersedable preference-mirror action. The
+tenth review found that newer preference identity could drop that ownership;
+the phased transaction in the following addendum supersedes the ninth retry
+claim.
 
 Personal bookmark set/remove callbacks no longer disappear into the queue tail.
 The newest complete snapshot/removal intent remains pending after failure, the
@@ -481,11 +484,11 @@ identity to `''`. No-team `committed`/`unchanged` manifest responses mark URL
 success and deduplicate; auth/network/failed/stale/skipped outcomes display and
 retry; a callback captured before team selection is ignored afterward.
 
-`normalizeNativeHostResponse` accepts only string `error`/`message` fallback
-values. Object, array, function, and null values are not coerced, forwarded, or
-logged; callers receive fixed `Native Host error`. Normalized `error_code`,
-string `errorKind`, finite numeric `httpStatus`, and success `data` behavior are
-unchanged.
+The ninth string-only change applied to `normalizeNativeHostResponse`: its outer
+error envelope accepts only string `error`/`message` fallback values and retains
+the existing metadata allowlist. It did not yet cover direct inner Analyze,
+config-update, prompt-health, or FAB extraction; the shared selector in the
+tenth addendum closes that gap.
 
 Fresh gates at product head `f5d4acc`: **143/143 focused Host**, **207/207 full
 Host**, **231/231 focused Extension across 6 files**, and **327/327 full
@@ -497,6 +500,46 @@ commands, concerns, and safety constraints are in
 `.superpowers/sdd/ninth-final-review-fix-report.md`.
 
 Optional authenticated marker smoke remained skipped because safe model-backed
+user/session isolation was unavailable. No push, tag, publish, version, package,
+registry, real `%LOCALAPPDATA%\DynamicsHelper`, or MyCases operation occurred.
+Controller broad whole-branch review remains pending.
+
+## Tenth Review Important-Fix Addendum - 2026-07-17
+
+Starting head: `b9cb0246a4e4e04c23580850150c6df03680edcc`.
+Product/test commits:
+
+- `257f28245f7bd089304aa20a20ea67b4bfe22785` (`fix(reset): preserve committed cleanup ownership`)
+- `7979279d347f57ca5bcd684abe71b4db78283e37` (`fix(errors): share string-only fallback selection`)
+
+The ninth Reset report overclaimed ownership after a newer preference edit. The
+actual retry was still stored as a preference-mirror action and could be
+superseded. Options now keeps an explicit transaction with token, default Team
+identity, request/bookmark generations, retry action, and phases
+`host-pending|host-committed|sw-pending|local-cleanup-pending|complete`. Durable
+Host acknowledgment is stored before callback supersession checks. Retry
+cleanup uses the original token and only pending SW/local cleanup; it never
+resends Host or rewrites defaults. A normal Reset remains an intentional fresh
+transaction. SW and local cleanup use separate identity/generation gates so a
+newer language or bookmark edit survives.
+
+The ninth string-only change covered only the outer Native response normalizer.
+`safeErrorText` now provides one no-coercion selector for inner/outer Analyze,
+config updates, Options prompt health/immediate warnings, FAB nested/outer/catch
+display, and Service Worker immediate normalization. Throwing secret-bearing
+objects/arrays/functions/symbols are ignored; valid strings and existing
+`error_code`/`errorKind`/`httpStatus` allowlists remain intact.
+
+Fresh committed-product gates used isolated Host AppData roots: **143/143
+focused Host**, **207/207 full Host**, **210/210 focused Extension across 7
+files**, and **340/340 full Extension across 19 files**. Production build passed
+with **2,218 modules transformed** and **13 artifacts listed**. Source-only
+compileall, version/generated-output checks, diff/static scans, and restored
+phase/coercion mutations passed. Exact RED/GREEN, rejected-command notes,
+concerns, and constraints are in
+`.superpowers/sdd/tenth-final-review-fix-report.md`.
+
+Optional authenticated smoke remained skipped because safe model-backed
 user/session isolation was unavailable. No push, tag, publish, version, package,
 registry, real `%LOCALAPPDATA%\DynamicsHelper`, or MyCases operation occurred.
 Controller broad whole-branch review remains pending.
@@ -690,9 +733,9 @@ Blocked until the Contract Primitives spec freezes the adapter boundary:
 
 ## Current Decision State
 
-- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and nine review-fix waves are recorded through the ninth report, and the concise unversioned release draft exists.
+- Prompt-scope implementation/documentation Tasks 1-7 are approved through `90e6da3`; Task 8 and ten review-fix waves are recorded through the tenth report, and the concise unversioned release draft exists.
 - Accepted design and plan are `441d0db` and `21108d9`.
-- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the ninth fix wave.
+- Optional marker smoke was skipped because safe model-backed isolation could not be guaranteed; the controller broad whole-branch review remains pending after the tenth fix wave.
 - No MyCases integration code, mode preference, workspace detector, coordinator adapter, persistence adapter, or MyCases canonical-file write has been implemented.
 - MyCasesKit response `675006a` accepts Form ③ and the Stage 1 deterministic persistence-gate model.
 - Five shared JSON fixtures and a README exist as examples, but six README items remain tentative; not every interface is frozen.
@@ -729,13 +772,13 @@ Use the following for continuation; update the exact HEAD and status from Git ra
    - docs/superpowers/plans/2026-07-15-dh-prompt-scope-cleanup.md
    - docs/superpowers/plans/2026-07-17-fifth-review-important-fixes.md
    - docs/superpowers/plans/2026-07-17-seventh-review-important-fixes.md
-   - .superpowers/sdd/ninth-final-review-fix-report.md
+   - .superpowers/sdd/tenth-final-review-fix-report.md
    - docs/superpowers/research/2026-07-14-dh-mycaseskit-stage0-instructions-brief.md
    - docs/superpowers/research/2026-07-14-dh-extension-stage0-integration-plan.md
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9。第九轮从 cec901d 开始，产品提交是 5596afa、9763b2e、d88c206、f5d4acc：修复 Reset Host→SW 两阶段提交、personal bookmark storage failure/retry truth、no-team manifest identity，以及 string-only Native Host error fallback。隔离 Host focused 143/143、full 207/207，Extension focused 231/231（6 files）、full 327/327（18 files），build 2,217 modules / 13 artifacts，compileall/static/mutation 通过；证据见 ninth-final-review-fix-report.md。可选 marker smoke 因无法保证 authenticated model-backed user/session state 完全隔离而跳过；release draft 未选择版本。下一步仍是 controller 重新运行 broad whole-branch review；不要把本轮 focused/self-review 当作 broad review 已通过。
+历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9。第十轮从 b9cb024 开始，产品提交是 257f282 和 7979279：Reset 现在使用独立于 preference mirror action 的显式事务，保存 token/default identity/request+bookmark generation/retry action 和 host-pending|host-committed|sw-pending|local-cleanup-pending|complete phase；Host 一旦 durable commit，同一事务的 Retry cleanup 只重试安全的 SW/local cleanup，不再发送 Host 或 DEFAULT_PREFS，普通 Reset 则明确启动新事务。扩展错误回退统一使用 safeErrorText，覆盖 Analyze、update_config、prompt health、Options、FAB 和 Service Worker reviewed paths，非字符串值不发生 coercion。隔离 Host focused 143/143、full 207/207，Extension focused 210/210（7 files）、full 340/340（19 files），build 2,218 modules / 13 artifacts，compileall/static/mutation 通过；证据见 tenth-final-review-fix-report.md。可选 marker smoke 因无法保证 authenticated model-backed user/session state 完全隔离而跳过；release draft 未选择版本。下一步仍是 controller 重新运行 broad whole-branch review；不要把本轮 focused/self-review 当作 broad review 已通过。
 
 已实现行为：所有 DH create/resume 都设置 skip_custom_instructions=True；CLI global、AGENTS、path instructions 等自动发现源全部排除。DH 显式注入 Core + 恰好一个可编辑源：Root 为空或 Repository ONLY 关闭时使用 DH-specific Instructions；Root 非空且 Repository ONLY 开启时只使用 <Root>/.github/copilot-instructions.md。Custom User Prompt 仍是每次 Analyze 的 PII-scrubbed user content。使用严格 UTF-8 immutable byte snapshot、framed fingerprint、same-UUID refresh 和 fail-closed errors。Options 区分 explicit empty（清空文件）与 omitted（不写），检查 update_config/config_saved，并保留可选 errorCode 到持久化和本地化显示。
 
