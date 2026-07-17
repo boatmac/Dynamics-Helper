@@ -739,6 +739,8 @@ class NativeHost:
         status: dict[str, str] = {"status": "ok"}
         dh_raw: str | None = None
         dh_error: PromptSourceError | None = None
+        user_prompt_raw: str | None = None
+        user_prompt_error: PromptSourceError | None = None
 
         try:
             self._read_prompt_source(
@@ -757,6 +759,15 @@ class NativeHost:
             )
         except PromptSourceError as error:
             dh_error = error
+
+        try:
+            _, user_prompt_raw = self._read_prompt_source(
+                os.path.join(USER_DATA_DIR, "user_prompt.md"),
+                missing_error_code=None,
+                unreadable_error_code="user_prompt_unreadable",
+            )
+        except PromptSourceError as error:
+            user_prompt_error = error
 
         selected_error: PromptSourceError | None = None
         if effective_root and use_workspace_only:
@@ -777,10 +788,14 @@ class NativeHost:
             status = selected_error.to_result()
         if status["status"] == "ok" and dh_error is not None:
             status = dh_error.to_result()
+        if status["status"] == "ok" and user_prompt_error is not None:
+            status = user_prompt_error.to_result()
 
         fields: dict = {"prompt_source_status": status}
         if dh_raw is not None:
             fields["_user_instructions_raw"] = dh_raw
+        if user_prompt_raw is not None:
+            fields["_user_prompt_raw"] = user_prompt_raw
         return fields
 
     @staticmethod
@@ -1432,33 +1447,47 @@ class NativeHost:
                     type(e).__name__,
                 )
 
-        # 3. Read from File (Source of Truth)
-        current_prompt_content = ""
-        if os.path.exists(user_prompt_path):
+        # 3. Read from File (Source of Truth). A missing file is valid empty
+        # content. An unreadable file is omitted from get_config rather than
+        # being misrepresented as an explicit empty value.
+        current_prompt_content: str | None = None
+        prompt_health_fields: dict | None = None
+        if include_prompt_status:
+            prompt_health_fields = self._get_prompt_source_config_fields(
+                current_root,
+                bool(use_workspace_only),
+            )
+            current_prompt_content = prompt_health_fields.pop(
+                "_user_prompt_raw",
+                None,
+            )
+        else:
             try:
-                with open(user_prompt_path, "r", encoding="utf-8") as f:
-                    current_prompt_content = f.read()
-            except Exception as e:
+                _, current_prompt_content = self._read_prompt_source(
+                    user_prompt_path,
+                    missing_error_code=None,
+                    unreadable_error_code="user_prompt_unreadable",
+                )
+            except PromptSourceError as error:
                 logger.error(
                     "Failed to read Custom User Prompt (%s).",
-                    type(e).__name__,
+                    error.error_code,
                 )
 
         # 4. Inject into extension_preferences for Frontend Sync
         if "extension_preferences" not in session_config:
             session_config["extension_preferences"] = {}
 
-        # We force the file content into the config object sent to frontend
-        # This overrides whatever might be lingering in config.json
-        session_config["extension_preferences"]["user_prompt"] = current_prompt_content
+        # Remove any legacy config.json value. Only a successfully read file
+        # value, including an explicit empty string, is authoritative.
+        session_config["extension_preferences"].pop("user_prompt", None)
+        if current_prompt_content is not None:
+            session_config["extension_preferences"][
+                "user_prompt"
+            ] = current_prompt_content
 
-        if include_prompt_status:
-            session_config.update(
-                self._get_prompt_source_config_fields(
-                    current_root,
-                    bool(use_workspace_only),
-                )
-            )
+        if prompt_health_fields is not None:
+            session_config.update(prompt_health_fields)
 
         return session_config
 
@@ -1946,8 +1975,10 @@ class NativeHost:
         else:
             new_instr = None
 
-        new_prompt = payload.get("user_prompt")
-        if new_prompt is None:
+        new_prompt = _WORKING_DIRECTORY_UNSET
+        if "user_prompt" in payload:
+            new_prompt = payload["user_prompt"]
+        else:
             incoming_config = payload.get("config", {})
             if isinstance(incoming_config, dict):
                 ext = incoming_config.get("extension_preferences", {})
@@ -1958,7 +1989,13 @@ class NativeHost:
             ("user_instructions", new_instr),
             ("user_prompt", new_prompt),
         ):
-            if value is not None and not isinstance(value, str):
+            if (
+                value is not _WORKING_DIRECTORY_UNSET
+                and not (
+                    field_name == "user_instructions" and value is None
+                )
+                and not isinstance(value, str)
+            ):
                 return {
                     "success": False,
                     "config_saved": False,
@@ -1993,7 +2030,7 @@ class NativeHost:
                     os.path.join(USER_DATA_DIR, "copilot-instructions.md"),
                     new_instr,
                 )
-            if new_prompt is not None:
+            if new_prompt is not _WORKING_DIRECTORY_UNSET:
                 durable_write_attempted = True
                 self._write_utf8_text(
                     os.path.join(USER_DATA_DIR, "user_prompt.md"),

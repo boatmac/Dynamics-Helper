@@ -16,22 +16,32 @@ export interface InstructionUpdateToken {
   value: string
 }
 
+export interface PromptUpdateToken {
+  revision: number
+  value: string
+}
+
 export interface ConfigUpdateIntent<T extends object> {
   generation: number
   prefs: Readonly<T>
   instruction?: Readonly<InstructionUpdateToken>
+  prompt?: Readonly<PromptUpdateToken>
 }
 
 export function createConfigUpdateIntent<T extends object>(
   generation: number,
   prefs: T,
   instruction?: InstructionUpdateToken,
+  prompt?: PromptUpdateToken,
 ): ConfigUpdateIntent<T> {
   return Object.freeze({
     generation,
     prefs: Object.freeze({ ...prefs }),
     instruction: instruction
       ? Object.freeze({ ...instruction })
+      : undefined,
+    prompt: prompt
+      ? Object.freeze({ ...prompt })
       : undefined,
   })
 }
@@ -44,6 +54,23 @@ export function shouldIncludeUserInstructions(
 }
 
 export function acknowledgeInstructionRevision(
+  acknowledgedRevision: number,
+  sentRevision: number,
+  acknowledged: boolean,
+): number {
+  return acknowledged
+    ? Math.max(acknowledgedRevision, sentRevision)
+    : acknowledgedRevision
+}
+
+export function shouldIncludeUserPrompt(
+  editRevision: number,
+  acknowledgedRevision: number,
+): boolean {
+  return editRevision > acknowledgedRevision
+}
+
+export function acknowledgePromptRevision(
   acknowledgedRevision: number,
   sentRevision: number,
   acknowledged: boolean,

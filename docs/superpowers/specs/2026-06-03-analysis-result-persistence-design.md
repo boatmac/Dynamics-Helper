@@ -1,7 +1,7 @@
 # Analysis Result Persistence — Design
 
 **Date:** 2026-06-03
-**Status:** Implemented; amended 2026-07-15 for optional prompt error codes and 2026-07-17 for serialized mutations, coherent hydration, and per-identity acknowledgment keys
+**Status:** Implemented; amended 2026-07-15 for optional prompt error codes and 2026-07-17 for serialized mutations, coherent hydration, per-identity acknowledgment keys, and request-scoped FAB spinner/timers
 **Author:** opencode session 2026-06-03
 
 ## 1. Historical Pre-Implementation Context (2026-06-03)

@@ -1,7 +1,7 @@
 // Ported logic from legacy contentScript.js
 // Handles menu state, recursive rendering, and actions
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export interface MenuItem {
     type: 'folder' | 'link' | 'markdown' | 'back' | 'unknown';
@@ -56,13 +56,20 @@ export function useMenuLogic() {
     const [items, setItems] = useState<MenuItem[]>([]);
     const [navStack, setNavStack] = useState<MenuItem[][]>([]);
     const [currentItems, setCurrentItems] = useState<MenuItem[]>([]);
+    const loadGenerationRef = useRef(0);
 
     // Load Items
     useEffect(() => {
-        loadItems().then(data => {
+        let cancelled = false;
+        const loadLatest = async () => {
+            const generation = ++loadGenerationRef.current;
+            const data = await loadItems();
+            if (cancelled || generation !== loadGenerationRef.current) return;
             setItems(data);
+            setNavStack([]);
             setCurrentItems(data);
-        });
+        };
+        void loadLatest();
         
         // Listen for changes
         if (chrome?.storage?.onChanged) {
@@ -78,16 +85,20 @@ export function useMenuLogic() {
                     )
                 ) {
                     // Reload everything when either personal or team items change
-                    loadItems().then(data => {
-                        setItems(data);
-                        setNavStack([]);
-                        setCurrentItems(data);
-                    });
+                    void loadLatest();
                 }
             };
             chrome.storage.onChanged.addListener(listener);
-            return () => chrome.storage.onChanged.removeListener(listener);
+            return () => {
+                cancelled = true;
+                loadGenerationRef.current += 1;
+                chrome.storage.onChanged.removeListener(listener);
+            };
         }
+        return () => {
+            cancelled = true;
+            loadGenerationRef.current += 1;
+        };
     }, []);
 
     const navigateTo = (folder: MenuItem) => {

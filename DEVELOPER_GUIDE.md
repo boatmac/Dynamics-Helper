@@ -126,13 +126,43 @@ Strict Analyze/session resolution fails closed:
 * An existing empty Repository Instructions file is valid; a missing or unreadable/invalid-UTF-8 selected Repository file blocks Analyze.
 * The Host never falls back to the unselected DH-specific, Repository, or CLI-global source, and no user turn is sent on failure.
 
-`get_config` is intentionally softer. `_get_session_config(include_prompt_status=True)` returns normal configuration plus `prompt_source_status` without creating or committing a session snapshot. It returns readable `_user_instructions_raw`, including explicit empty content; if that file is unreadable, the raw field is omitted so Options retains its Chrome mirror and shows the safe health warning.
+`get_config` is intentionally softer. `_get_session_config(include_prompt_status=True)` returns normal configuration plus `prompt_source_status` without creating or committing a session snapshot. It returns readable `_user_instructions_raw` and `extension_preferences.user_prompt`, including explicit empty content. If either file exists but cannot be read as strict UTF-8, its content property is omitted so Options retains its Chrome mirror and shows the safe health warning; unreadable Custom User Prompt reports `user_prompt_unreadable`. Legacy hydration is used only when `prompt_source_status` is absent.
 
 After the latest `update_config` intent is durably acknowledged, Options sends one additional health-only `get_config`. This callback changes only `promptHealthIssue`; it never re-enters the full hydration merge. Both config and health generations must still match before applying a response, so an older health result cannot replace newer state. Transport/non-success responses leave the existing health issue unchanged.
 
 Prompt-source errors carry a stable `error_code` and safe English fallback. Options/FAB preserve unknown non-empty codes, localize known codes only at render time, and never tell users to re-authenticate for a source/configuration error. Logs may include safe source mode, classified code, or a short fingerprint prefix, but never instruction contents, Custom User Prompt contents, or prompt-source paths. SDK response-event diagnostics are likewise metadata-only: event type, data type, content presence, and content length. No-content fallback reports use that safe summary and never serialize the event, its data, or model content.
 
 FAB applies Custom User Prompt immediately before every send for an accurate editor/template preview. The Host remains authoritative: it rereads `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md` on each Analyze, truncates payload text from the first authoritative line-level marker, appends current non-empty file content exactly once, and then PII-scrubs the canonicalized text. Empty file content removes stale payload sections; an unreadable or invalid UTF-8 file blocks Analyze as `user_prompt_unreadable` without logging content or path.
+
+| Prompt/config error code | Host condition | Extension behavior |
+|---|---|---|
+| `dh_core_prompt_missing` | Core absent | Localized install repair warning |
+| `dh_core_prompt_unreadable` | Core read/decode failure | Localized install/permission warning |
+| `dh_specific_instructions_unreadable` | DH-specific file read/decode failure | Omit raw field; preserve Chrome mirror |
+| `repository_instructions_missing` | Selected Root file absent | Localized add-file/disable-mode warning |
+| `repository_instructions_unreadable` | Selected Root file read/decode failure | Localized repair/disable-mode warning |
+| `user_prompt_unreadable` | Custom User Prompt read/decode failure | Omit `user_prompt`; preserve mirror until explicit repair |
+
+Options treats `user_instructions` and top-level `user_prompt` as sparse
+revisioned writes. Their edit/clear/Reset handlers capture immutable
+`{revision, value}` tokens; unrelated updates omit both fields and
+`config.extension_preferences` never carries `user_prompt`. A saved response
+acknowledges only its captured revision, while transport/unsaved failures leave
+that revision pending for a later intent.
+
+The ordered `dh_prefs` mirror owns typed post-commit actions. Each action has a
+stable ID and captured Team Catalog identity. Compatible newer snapshots carry
+unsettled actions forward; incompatible enabled/URL/team snapshots cancel team
+actions. The latest durable callback settles before dispatch, preventing repair
+recursion from running an action twice. Reset carries through unrelated edits.
+
+Options team cache hydration and storage follow-up reads use one UI generation
+plus captured enabled/URL/team identity before applying list/items/synced state.
+`useMenuLogic()` similarly accepts only its latest mount/storage load and ignores
+all results after unmount. FAB Analyze state is the union of a local request ID
+and the current hydrated pending identity. The one active safety timer is tagged
+with its request ID; a new request cancels it, and stale response/finally/timeout
+paths cannot clear or report against the replacement request.
 
 Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe diagnostics and logs only failure kind plus numeric status. Every Options request captures enabled/URL/team plus a request generation. The Service Worker synchronously allocates a storage generation before any asynchronous pref/cache read, rejects stale identity before clear/fetch, rechecks generation after awaited reads, and queues identity validation together with awaited mutation. Deferred storage writes therefore finish before a later clear runs. Options sends messages only and clears rendered team items/timestamp immediately on identity change.
 

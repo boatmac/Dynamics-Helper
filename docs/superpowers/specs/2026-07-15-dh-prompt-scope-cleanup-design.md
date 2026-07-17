@@ -304,6 +304,7 @@ human-readable fallback message:
 | `dh_specific_instructions_unreadable` | Effective DH-specific file exists but cannot be decoded or read | Repair or replace the file in Options |
 | `repository_instructions_missing` | Repository-only effective and Root instruction file does not exist | Add the file or disable Repository ONLY |
 | `repository_instructions_unreadable` | Repository-only effective and Root instruction file cannot be decoded or read | Repair the file or disable Repository ONLY |
+| `user_prompt_unreadable` | Custom User Prompt exists but cannot be decoded or read | Repair or explicitly replace/clear it in Options |
 
 Known codes are rendered by the Extension as localized, actionable errors.
 Unknown codes retain the Host fallback text. These are configuration/install
@@ -345,6 +346,18 @@ Healthy status is `{ "prompt_source_status": { "status": "ok" } }`. If
 DH-specific content itself cannot be read, `get_config` must not represent that
 content as an empty string; Options retains its existing Chrome-mirrored value,
 shows the warning, and lets an explicit edit replace the unreadable file.
+The same sparse rule applies to Custom User Prompt: modern `get_config` omits
+`extension_preferences.user_prompt` when the file exists but is unreadable or
+invalid UTF-8, reports `user_prompt_unreadable`, and never substitutes empty
+content. Options preserves its Chrome mirror. Legacy hydration behavior is
+available only when `prompt_source_status` is absent.
+
+Both editable Host files use immutable revision/value tokens in Options.
+Unrelated updates omit `user_instructions` and top-level `user_prompt`; explicit
+edit, clear, and Reset include the matching captured token. Acknowledgement
+advances only the revision actually saved, so overlapping responses cannot
+acknowledge or retry a newer value under an older identity. Host omission means
+no write, while an explicit empty string truncates the corresponding file.
 
 Saving config is allowed, but an attempted active-session refresh still fails
 closed. When persistent writes succeeded but refresh failed, `update_config`
@@ -406,6 +419,10 @@ so a later Analyze cannot silently run under the old source.
 | **UI-I5** | Labels, descriptions, and known prompt-source errors are localized in English and Chinese. |
 | **UI-I6** | Prompt `error_code` survives Host, Service Worker persistence, immediate display, and rehydrated display. |
 | **UI-I7** | Options surfaces a failed post-save refresh and preserves the successfully saved values. |
+| **UI-I8** | Modern unreadable Custom User Prompt health omits Host content, preserves the Chrome mirror, and unrelated updates cannot rewrite its bytes; explicit replacement/clear repairs it through revision-safe acknowledgement. |
+| **UI-I9** | Preference-mirror post-commit actions carry across compatible newer snapshots, execute once after durable commit, and cancel on incompatible team identity. |
+| **UI-I10** | Options and Menu team cache reads apply only for their latest enabled/URL/team generation. |
+| **UI-I11** | FAB spinner and safety timeout ownership is request scoped across local and hydrated pending identities. |
 
 New invariant tests must follow the repository's break-and-fail discipline: each
 test is temporarily proven to fail when its corresponding behavior is broken,

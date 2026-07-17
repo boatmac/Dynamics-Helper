@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  acknowledgePromptRevision,
   acknowledgeInstructionRevision,
   classifyConfigUpdateResponse,
   createConfigUpdateIntent,
+  shouldIncludeUserPrompt,
   shouldIncludeUserInstructions,
 } from './configUpdateResult'
 
@@ -108,5 +110,30 @@ describe('config update results', () => {
     expect(Object.isFrozen(intent)).toBe(true)
     expect(Object.isFrozen(intent.prefs)).toBe(true)
     expect(Object.isFrozen(intent.instruction)).toBe(true)
+  })
+
+  it('captures an immutable Custom User Prompt revision and value', () => {
+    const prefs = { userPrompt: 'prompt-1', language: 'en' }
+    const prompt = { revision: 1, value: prefs.userPrompt }
+
+    const intent = createConfigUpdateIntent(1, prefs, undefined, prompt)
+    prefs.userPrompt = 'prompt-2'
+    prompt.value = 'prompt-2'
+
+    expect(intent.prompt).toEqual({ revision: 1, value: 'prompt-1' })
+    expect(Object.isFrozen(intent.prompt)).toBe(true)
+  })
+
+  it('does not let an older response acknowledge a newer prompt edit', () => {
+    let acknowledgedRevision = 0
+    acknowledgedRevision = acknowledgePromptRevision(
+      acknowledgedRevision,
+      1,
+      true,
+    )
+
+    expect(acknowledgedRevision).toBe(1)
+    expect(shouldIncludeUserPrompt(2, acknowledgedRevision)).toBe(true)
+    expect(acknowledgePromptRevision(1, 2, false)).toBe(1)
   })
 })

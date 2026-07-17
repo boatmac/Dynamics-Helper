@@ -40,13 +40,16 @@ import { trackEvent } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { localizePromptSourceError } from '../utils/promptSourceErrors';
 import {
+    acknowledgePromptRevision,
     acknowledgeInstructionRevision,
     classifyConfigUpdateResponse,
     createConfigUpdateIntent,
+    shouldIncludeUserPrompt,
     shouldIncludeUserInstructions,
     type ConfigUpdateIntent,
     type ConfigUpdateIssue,
     type InstructionUpdateToken,
+    type PromptUpdateToken,
 } from '../utils/configUpdateResult';
 
 type PromptSourceIssue = {
@@ -54,9 +57,24 @@ type PromptSourceIssue = {
     fallback: string;
 };
 
+type TeamMirrorIdentity = Readonly<{
+    enabled: boolean;
+    manifestUrl: string;
+    teamId: string;
+}>;
+
+type PrefsMirrorAction = Readonly<{
+    id: number;
+    kind: 'team-sync' | 'team-clear' | 'manifest-fetch' | 'reset';
+    identity: TeamMirrorIdentity;
+    canRun?: () => boolean;
+    run: () => void;
+}>;
+
 type PrefsMirrorIntent = {
     generation: number;
     prefs: Readonly<Preferences>;
+    actions: readonly PrefsMirrorAction[];
 };
 
 type PendingHydrationMirror = PrefsMirrorIntent & {
@@ -548,8 +566,8 @@ const OptionsInner: React.FC = () => {
     // yet" so the very first storage hydration (which writes prefs back
     // unchanged) does not spuriously count as a URL change.
     const lastFetchedManifestUrlRef = useRef<string>('__unset__');
-    const pendingManifestFetchUrlRef = useRef<string | null>(null);
     const teamRefreshGenerationRef = useRef(0);
+    const teamUiLoadGenerationRef = useRef(0);
 
     // Hydration guard: prefs state is fully populated only AFTER the host
     // get_config response merges its fields into state (see mount useEffect
@@ -584,9 +602,17 @@ const OptionsInner: React.FC = () => {
         value: DEFAULT_PREFS.userInstructions ?? '',
     });
     const userInstructionsAckRevisionRef = useRef(0);
+    const userPromptEditTokenRef = useRef<PromptUpdateToken>({
+        revision: 0,
+        value: DEFAULT_PREFS.userPrompt ?? '',
+    });
+    const userPromptAckRevisionRef = useRef(0);
     const configUpdateRequestRevisionRef = useRef(0);
     const promptHealthRequestRevisionRef = useRef(0);
     const prefsMirrorGenerationRef = useRef(0);
+    const prefsMirrorActionIdRef = useRef(0);
+    const prefsMirrorWritesInFlightRef = useRef(0);
+    const settledPrefsMirrorActionsRef = useRef<Set<number>>(new Set());
     const latestPrefsMirrorIntentRef = useRef<PrefsMirrorIntent | null>(null);
     const prefsRef = useRef<Preferences>(DEFAULT_PREFS);
     const userTouchedRevisionRef = useRef(0);
@@ -739,6 +765,78 @@ const OptionsInner: React.FC = () => {
         return nextPrefs;
     };
 
+    const teamUiIdentity = (candidate: Readonly<Preferences>) => ({
+        enabled: candidate.teamCatalogEnabled === true,
+        manifestUrl: candidate.teamManifestUrl || '',
+        teamId: candidate.team || '',
+    });
+
+    const teamUiIdentityIsCurrent = (
+        identity: ReturnType<typeof teamUiIdentity>,
+    ) => {
+        const current = teamUiIdentity(prefsRef.current);
+        return current.enabled === identity.enabled
+            && current.manifestUrl === identity.manifestUrl
+            && current.teamId === identity.teamId;
+    };
+
+    const loadTeamUiSnapshot = (candidate: Readonly<Preferences>) => {
+        const identity = teamUiIdentity(candidate);
+        const generation = ++teamUiLoadGenerationRef.current;
+        setTeamItems([]);
+        setTeamSynced('');
+        setTeamFetchError(null);
+        if (!identity.enabled || !identity.manifestUrl) {
+            setTeamList([]);
+            return;
+        }
+        chrome.storage.local.get([
+            'dh_team_synced',
+            'dh_team_items',
+            'dh_team_manifest',
+            'dh_team_manifest_url',
+            'dh_team',
+        ], data => {
+            if (
+                generation !== teamUiLoadGenerationRef.current
+                || !teamUiIdentityIsCurrent(identity)
+            ) return;
+            const manifest = data.dh_team_manifest as {
+                teams?: Array<{ id: string; label: string }>;
+            } | undefined;
+            const manifestCurrent =
+                data.dh_team_manifest_url === identity.manifestUrl;
+            setTeamList(
+                manifestCurrent && manifest && Array.isArray(manifest.teams)
+                    ? manifest.teams.map(team => ({
+                        id: team.id,
+                        label: team.label,
+                    }))
+                    : [],
+            );
+            const current = {
+                ...data,
+                dh_prefs: {
+                    teamCatalogEnabled: identity.enabled,
+                    teamManifestUrl: identity.manifestUrl,
+                    team: identity.teamId,
+                },
+            };
+            if (teamCacheIsCurrent(current)) {
+                setTeamItems(
+                    Array.isArray(data.dh_team_items)
+                        ? data.dh_team_items
+                        : [],
+                );
+                setTeamSynced(
+                    typeof data.dh_team_synced === 'string'
+                        ? data.dh_team_synced
+                        : '',
+                );
+            }
+        });
+    };
+
     const markUserTouched = (keys: Array<keyof Preferences>) => {
         keys.forEach(key => userTouchedFieldsRef.current.add(key));
         userTouchedRevisionRef.current += 1;
@@ -747,9 +845,9 @@ const OptionsInner: React.FC = () => {
     const buildHostConfigPayload = (
         nextPrefs: Readonly<Preferences>,
         instruction?: { value: string },
+        prompt?: { value: string },
     ) => {
         const payload: Record<string, unknown> = {
-            user_prompt: nextPrefs.userPrompt,
             config: {
                 root_path: nextPrefs.rootPath,
                 skill_directories: nextPrefs.skillDirectories
@@ -761,7 +859,6 @@ const OptionsInner: React.FC = () => {
                 mcp_config_path: nextPrefs.mcpConfigPath,
                 extension_preferences: {
                     auto_analyze_mode: nextPrefs.autoAnalyzeMode,
-                    user_prompt: nextPrefs.userPrompt,
                     enable_status_bubble: nextPrefs.enableStatusBubble,
                     beta_channel_enabled: nextPrefs.betaChannelEnabled,
                     use_workspace_only: nextPrefs.useWorkspaceOnly,
@@ -784,6 +881,9 @@ const OptionsInner: React.FC = () => {
         };
         if (instruction) {
             payload.user_instructions = instruction.value;
+        }
+        if (prompt) {
+            payload.user_prompt = prompt.value;
         }
         return { action: 'update_config', payload };
     };
@@ -824,10 +924,11 @@ const OptionsInner: React.FC = () => {
         } = {},
     ) => {
         const instruction = intent.instruction;
+        const prompt = intent.prompt;
 
         chrome.runtime.sendMessage({
             type: 'NATIVE_MSG',
-            payload: buildHostConfigPayload(intent.prefs, instruction),
+            payload: buildHostConfigPayload(intent.prefs, instruction, prompt),
         }, (response) => {
             const transportError = chrome.runtime.lastError;
             if (transportError) {
@@ -851,6 +952,13 @@ const OptionsInner: React.FC = () => {
                     decision.acknowledged,
                 );
             }
+            if (prompt) {
+                userPromptAckRevisionRef.current = acknowledgePromptRevision(
+                    userPromptAckRevisionRef.current,
+                    prompt.revision,
+                    decision.acknowledged,
+                );
+            }
             if (intent.generation === configUpdateRequestRevisionRef.current) {
                 setConfigUpdateIssue(decision.issue);
                 if (decision.acknowledged) {
@@ -869,7 +977,19 @@ const OptionsInner: React.FC = () => {
         )
             ? instructionToken
             : undefined;
-        return createConfigUpdateIntent(generation, nextPrefs, instruction);
+        const promptToken = userPromptEditTokenRef.current;
+        const prompt = shouldIncludeUserPrompt(
+            promptToken.revision,
+            userPromptAckRevisionRef.current,
+        )
+            ? promptToken
+            : undefined;
+        return createConfigUpdateIntent(
+            generation,
+            nextPrefs,
+            instruction,
+            prompt,
+        );
     };
 
     const requestHydrationCatchUp = () => {
@@ -886,89 +1006,145 @@ const OptionsInner: React.FC = () => {
 
     const createPrefsMirrorIntent = (
         nextPrefs: Readonly<Preferences>,
+        newActions: readonly PrefsMirrorAction[] = [],
     ): PrefsMirrorIntent => {
+        const previous = latestPrefsMirrorIntentRef.current;
+        const actionMap = new Map<number, PrefsMirrorAction>();
+        for (const action of [...(previous?.actions ?? []), ...newActions]) {
+            if (settledPrefsMirrorActionsRef.current.has(action.id)) continue;
+            if (!mirrorActionMatchesPrefs(action, nextPrefs)) {
+                settledPrefsMirrorActionsRef.current.add(action.id);
+                continue;
+            }
+            actionMap.set(action.id, action);
+        }
         const intent = Object.freeze({
             generation: ++prefsMirrorGenerationRef.current,
             prefs: Object.freeze({ ...nextPrefs }),
+            actions: Object.freeze([...actionMap.values()]),
         });
         latestPrefsMirrorIntentRef.current = intent;
         return intent;
+    };
+
+    const createPrefsMirrorAction = (
+        kind: PrefsMirrorAction['kind'],
+        identity: TeamMirrorIdentity,
+        run: () => void,
+        canRun?: () => boolean,
+    ): PrefsMirrorAction => Object.freeze({
+        id: ++prefsMirrorActionIdRef.current,
+        kind,
+        identity: Object.freeze({ ...identity }),
+        canRun,
+        run,
+    });
+
+    const mirrorActionMatchesPrefs = (
+        action: PrefsMirrorAction,
+        candidate: Readonly<Preferences>,
+    ) => action.identity.enabled === (candidate.teamCatalogEnabled === true)
+        && action.identity.manifestUrl === (candidate.teamManifestUrl || '')
+        && action.identity.teamId === (candidate.team || '');
+
+    const settlePrefsMirrorActions = (intent: PrefsMirrorIntent) => {
+        for (const action of intent.actions) {
+            if (settledPrefsMirrorActionsRef.current.has(action.id)) continue;
+            if (action.canRun && !action.canRun()) continue;
+            settledPrefsMirrorActionsRef.current.add(action.id);
+            if (mirrorActionMatchesPrefs(action, intent.prefs)) {
+                action.run();
+            }
+        }
     };
 
     const writePrefsMirror = (
         intent: PrefsMirrorIntent,
         onLatestCommit?: () => void,
     ) => {
+        prefsMirrorWritesInFlightRef.current += 1;
         chrome.storage.local.set({ dh_prefs: intent.prefs }, () => {
+            prefsMirrorWritesInFlightRef.current -= 1;
             const latestIntent = latestPrefsMirrorIntentRef.current;
             if (latestIntent && latestIntent.generation !== intent.generation) {
                 writePrefsMirror(latestIntent);
                 return;
             }
+            if (prefsMirrorWritesInFlightRef.current === 0) {
+                settlePrefsMirrorActions(intent);
+            }
             onLatestCommit?.();
         });
     };
 
-    const flushPendingManifestFetch = (nextPrefs: Readonly<Preferences>) => {
-        const pendingManifestUrl = pendingManifestFetchUrlRef.current;
-        if (
-            pendingManifestUrl
-            && nextPrefs.teamCatalogEnabled
-            && nextPrefs.teamManifestUrl === pendingManifestUrl
-        ) {
-            const previousUrl = lastFetchedManifestUrlRef.current;
-            pendingManifestFetchUrlRef.current = null;
-            if (pendingManifestUrl === previousUrl) return;
-
-            lastFetchedManifestUrlRef.current = pendingManifestUrl;
-            const generation = ++teamRefreshGenerationRef.current;
-            const teamId = nextPrefs.team || '';
-            chrome.runtime.sendMessage(
-                {
-                    type: "SYNC_TEAM_CATALOG",
-                    payload: teamRequestPayload(generation, {
-                        enabled: true,
-                        manifestUrl: pendingManifestUrl,
-                        teamId,
-                    }, { manifestOnly: true, resetCache: true }),
-                },
-                (response) => {
-                    if (
-                        generation !== teamRefreshGenerationRef.current
-                        || prefsRef.current.teamCatalogEnabled !== true
-                        || prefsRef.current.teamManifestUrl !== pendingManifestUrl
-                        || (prefsRef.current.team || '') !== teamId
-                    ) return;
-                    const responseIdentity = response?.data?.identity;
-                    if (
-                        (response?.data?.requestGeneration !== undefined
-                            && response.data.requestGeneration !== generation)
-                        || (responseIdentity !== undefined && (
-                            responseIdentity.enabled !== true
-                            || responseIdentity.manifestUrl !== pendingManifestUrl
-                            || responseIdentity.teamId !== teamId
-                        ))
-                    ) return;
-                    if (chrome.runtime.lastError) {
-                        showError(t('manifestFetchFailed'), 5000);
-                        setTeamFetchError({ kind: 'network' });
-                        return;
-                    }
-                    if (!response || response.status !== "success") {
-                        const kind = (response?.errorKind as any) || 'unknown';
-                        const httpStatus = response?.httpStatus as number | undefined;
-                        setTeamFetchError({ kind, httpStatus });
-                        if (kind === 'auth') {
-                            showError(t('manifestFetchAuthToast'), 6000);
-                        }
-                    } else {
-                        setTeamFetchError(null);
-                    }
-                },
-            );
-        } else if (pendingManifestUrl) {
-            pendingManifestFetchUrlRef.current = null;
+    const createManifestFetchAction = (
+        nextPrefs: Readonly<Preferences>,
+    ): PrefsMirrorAction | undefined => {
+        if (!nextPrefs.teamCatalogEnabled || !nextPrefs.teamManifestUrl) {
+            return undefined;
         }
+        const identity = {
+            enabled: true,
+            manifestUrl: nextPrefs.teamManifestUrl,
+            teamId: nextPrefs.team || '',
+        };
+        return createPrefsMirrorAction(
+            'manifest-fetch',
+            identity,
+            () => {
+                if (
+                    prefsRef.current.teamCatalogEnabled !== true
+                    || prefsRef.current.teamManifestUrl !== identity.manifestUrl
+                    || (prefsRef.current.team || '') !== identity.teamId
+                ) return;
+                if (identity.manifestUrl === lastFetchedManifestUrlRef.current) return;
+                lastFetchedManifestUrlRef.current = identity.manifestUrl;
+                const generation = ++teamRefreshGenerationRef.current;
+                chrome.runtime.sendMessage(
+                    {
+                        type: "SYNC_TEAM_CATALOG",
+                        payload: teamRequestPayload(
+                            generation,
+                            identity,
+                            { manifestOnly: true, resetCache: true },
+                        ),
+                    },
+                    (response) => {
+                        if (!teamSyncIsCurrent(
+                            generation,
+                            identity.manifestUrl,
+                            identity.teamId,
+                        )) return;
+                        const responseIdentity = response?.data?.identity;
+                        if (
+                            (response?.data?.requestGeneration !== undefined
+                                && response.data.requestGeneration !== generation)
+                            || (responseIdentity !== undefined && (
+                                responseIdentity.enabled !== identity.enabled
+                                || responseIdentity.manifestUrl !== identity.manifestUrl
+                                || responseIdentity.teamId !== identity.teamId
+                            ))
+                        ) return;
+                        if (chrome.runtime.lastError) {
+                            showError(t('manifestFetchFailed'), 5000);
+                            setTeamFetchError({ kind: 'network' });
+                            return;
+                        }
+                        if (!response || response.status !== "success") {
+                            const kind = (response?.errorKind as any) || 'unknown';
+                            const httpStatus = response?.httpStatus as number | undefined;
+                            setTeamFetchError({ kind, httpStatus });
+                            if (kind === 'auth') {
+                                showError(t('manifestFetchAuthToast'), 6000);
+                            }
+                        } else {
+                            setTeamFetchError(null);
+                        }
+                    },
+                );
+            },
+            () => prefsHydratedRef.current,
+        );
     };
 
     const requestHydrationMirror = (nextPrefs: Readonly<Preferences>) => {
@@ -976,6 +1152,7 @@ const OptionsInner: React.FC = () => {
         pendingHydrationMirrorRef.current = Object.freeze({
             generation: epoch,
             prefs: Object.freeze({ ...nextPrefs }),
+            actions: Object.freeze([]),
             userGenerationAtRequest: configUpdateRequestRevisionRef.current,
         });
         setHydrationMirrorEpoch(epoch);
@@ -993,11 +1170,7 @@ const OptionsInner: React.FC = () => {
             return;
         }
         const intent = createPrefsMirrorIntent(request.prefs);
-        writePrefsMirror(intent, () => {
-            if (prefsHydratedRef.current) {
-                flushPendingManifestFetch(intent.prefs);
-            }
-        });
+        writePrefsMirror(intent);
     }, [hydrationMirrorEpoch]);
 
     useEffect(() => {
@@ -1287,40 +1460,12 @@ const OptionsInner: React.FC = () => {
             itemsLoadedRef.current = true;
         });
 
-        // Load team catalog metadata
+        // Restore team-folder collapse state independently from team cache
+        // identity. Team list/items/synced are loaded by the generation-gated
+        // identity effect below after local/Host preferences settle.
         chrome.storage.local.get(
-            [
-                'dh_team_synced',
-                'dh_team_items',
-                'dh_team_manifest',
-                'dh_team_manifest_url',
-                'dh_team',
-                'dh_prefs',
-                'dh_team_collapsed_labels',
-            ],
+            ['dh_team_collapsed_labels'],
             (data: any) => {
-                const cacheCurrent = teamCacheIsCurrent(data);
-                if (cacheCurrent && data.dh_team_synced) {
-                    setTeamSynced(data.dh_team_synced);
-                }
-                if (cacheCurrent && Array.isArray(data.dh_team_items)) {
-                    setTeamItems(data.dh_team_items);
-                }
-                // Populate dropdown from cached manifest. No fetch here - the service
-                // worker startup hook is the only auto-fetch trigger (spec § 3.4).
-                // To force a refresh, the user clicks the Refresh button below.
-                const manifestMatchesUrl =
-                    data.dh_team_manifest_url === data.dh_prefs?.teamManifestUrl;
-                if (
-                    data.dh_prefs?.teamCatalogEnabled === true
-                    && manifestMatchesUrl
-                    && data.dh_team_manifest
-                    && Array.isArray(data.dh_team_manifest.teams)
-                ) {
-                    setTeamList(
-                        data.dh_team_manifest.teams.map((t: any) => ({ id: t.id, label: t.label })),
-                    );
-                }
                 // Restore collapsed-folder labels for team items. Stored as an
                 // array because Sets don't survive JSON / chrome.storage round-
                 // trip. Keys take the form `${teamId}\0${...labelPath}\0${label}`
@@ -1346,51 +1491,7 @@ const OptionsInner: React.FC = () => {
     }, [teamCollapsedLabels]);
 
     useEffect(() => {
-        if (
-            prefs.teamCatalogEnabled !== true
-            || !prefs.teamManifestUrl
-        ) {
-            return;
-        }
-        setTeamItems([]);
-        setTeamSynced('');
-        setTeamFetchError(null);
-        let cancelled = false;
-        chrome.storage.local.get([
-            'dh_team_synced',
-            'dh_team_items',
-            'dh_team_manifest',
-            'dh_team_manifest_url',
-            'dh_team',
-        ], data => {
-            if (cancelled) return;
-            const current = { ...data, dh_prefs: prefsRef.current };
-            const manifest = data.dh_team_manifest as {
-                teams?: Array<{ id: string; label: string }>;
-            } | undefined;
-            const manifestCurrent =
-                data.dh_team_manifest_url === prefsRef.current.teamManifestUrl;
-            if (
-                manifestCurrent
-                && manifest
-                && Array.isArray(manifest.teams)
-            ) {
-                setTeamList(manifest.teams.map(
-                    (team: any) => ({ id: team.id, label: team.label }),
-                ));
-            }
-            if (teamCacheIsCurrent(current)) {
-                setTeamItems(Array.isArray(data.dh_team_items) ? data.dh_team_items : []);
-                setTeamSynced(
-                    typeof data.dh_team_synced === 'string'
-                        ? data.dh_team_synced
-                        : '',
-                );
-            }
-        });
-        return () => {
-            cancelled = true;
-        };
+        loadTeamUiSnapshot(prefs);
     }, [prefs.teamCatalogEnabled, prefs.teamManifestUrl, prefs.team]);
 
     // Watch chrome.storage for team-catalog writes from elsewhere — most
@@ -1408,52 +1509,12 @@ const OptionsInner: React.FC = () => {
             if (areaName !== 'local') return;
             const hasRelevantChange = changes.dh_team_manifest
                 || changes.dh_team_items
-                || changes.dh_team_synced;
+                || changes.dh_team_synced
+                || changes.dh_team_manifest_url
+                || changes.dh_team
+                || changes.dh_prefs;
             if (!hasRelevantChange) return;
-
-            chrome.storage.local.get([
-                'dh_team_manifest_url',
-                'dh_team',
-            ], identity => {
-                const current = {
-                    ...identity,
-                    dh_prefs: prefsRef.current,
-                };
-                const manifestCurrent = prefsRef.current.teamCatalogEnabled === true
-                    && identity.dh_team_manifest_url === prefsRef.current.teamManifestUrl;
-                const selectedCacheCurrent = teamCacheIsCurrent(current);
-
-                if (changes.dh_team_manifest) {
-                    const newVal: any = changes.dh_team_manifest.newValue;
-                    if (
-                        manifestCurrent
-                        && newVal
-                        && Array.isArray(newVal.teams)
-                    ) {
-                        setTeamList(
-                            newVal.teams.map((t: any) => ({ id: t.id, label: t.label })),
-                        );
-                    } else if (newVal === undefined) {
-                        setTeamList([]);
-                    }
-                }
-                if (changes.dh_team_items) {
-                    const newVal: any = changes.dh_team_items.newValue;
-                    if (selectedCacheCurrent && Array.isArray(newVal)) {
-                        setTeamItems(newVal);
-                    } else if (newVal === undefined) {
-                        setTeamItems([]);
-                    }
-                }
-                if (changes.dh_team_synced) {
-                    const newVal: any = changes.dh_team_synced.newValue;
-                    if (selectedCacheCurrent && typeof newVal === 'string') {
-                        setTeamSynced(newVal);
-                    } else if (newVal === undefined) {
-                        setTeamSynced('');
-                    }
-                }
-            });
+            loadTeamUiSnapshot(prefsRef.current);
         };
         chrome.storage.onChanged.addListener(onStorageChanged);
         return () => chrome.storage.onChanged.removeListener(onStorageChanged);
@@ -1506,7 +1567,7 @@ const OptionsInner: React.FC = () => {
         nextPrefs: Preferences,
         opts?: {
             fetchManifest?: boolean;
-            onMirrorCommitted?: () => void;
+            mirrorAction?: PrefsMirrorAction;
         },
     ) => {
         // Three-segment persist (see spec § 4.1):
@@ -1530,17 +1591,16 @@ const OptionsInner: React.FC = () => {
         // hitting it during normal cold start is expected, not exceptional.
         // See docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md
         const intent = createIntent(nextPrefs);
-        if (opts?.fetchManifest && nextPrefs.teamCatalogEnabled && nextPrefs.teamManifestUrl) {
-            pendingManifestFetchUrlRef.current = nextPrefs.teamManifestUrl;
-        }
-        const mirrorIntent = createPrefsMirrorIntent(intent.prefs);
+        const manifestAction = opts?.fetchManifest
+            ? createManifestFetchAction(intent.prefs)
+            : undefined;
+        const mirrorIntent = createPrefsMirrorIntent(
+            intent.prefs,
+            [opts?.mirrorAction, manifestAction].filter(
+                (action): action is PrefsMirrorAction => action !== undefined,
+            ),
+        );
         writePrefsMirror(mirrorIntent, () => {
-            if (intent.generation === configUpdateRequestRevisionRef.current) {
-                opts?.onMirrorCommitted?.();
-            }
-            if (prefsHydratedRef.current) {
-                flushPendingManifestFetch(mirrorIntent.prefs);
-            }
             if (intent.generation !== configUpdateRequestRevisionRef.current) {
                 return;
             }
@@ -1598,6 +1658,10 @@ const OptionsInner: React.FC = () => {
                 revision: userInstructionsEditTokenRef.current.revision + 1,
                 value: DEFAULT_PREFS.userInstructions ?? '',
             };
+            userPromptEditTokenRef.current = {
+                revision: userPromptEditTokenRef.current.revision + 1,
+                value: DEFAULT_PREFS.userPrompt ?? '',
+            };
             // Mark ALL prefs keys as user-touched so a late host hydration
             // response cannot un-reset us. DEFAULT_PREFS is the user's
             // explicit choice — protect it from being merged-over. Without
@@ -1606,14 +1670,18 @@ const OptionsInner: React.FC = () => {
             markUserTouched(Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>);
             setCurrentPrefs(DEFAULT_PREFS);
             const resetGeneration = teamRefreshGenerationRef.current;
-            persistPrefs(DEFAULT_PREFS, { onMirrorCommitted: () => {
+            const resetIdentity = {
+                enabled: false,
+                manifestUrl: '',
+                teamId: '',
+            };
+            persistPrefs(DEFAULT_PREFS, { mirrorAction: createPrefsMirrorAction(
+                'reset',
+                resetIdentity,
+                () => {
             chrome.runtime.sendMessage({
                 type: "RESET_EXTENSION_STATE",
-                payload: teamRequestPayload(resetGeneration, {
-                    enabled: false,
-                    manifestUrl: '',
-                    teamId: '',
-                }),
+                payload: teamRequestPayload(resetGeneration, resetIdentity),
             }, () => {
                 chrome.storage.local.remove(["dh_items", "dh_team_collapsed_labels"], () => {
                 // Wrap loaded items in collapseFolders so Reset produces the
@@ -1629,7 +1697,8 @@ const OptionsInner: React.FC = () => {
                 showSuccess(t('resetComplete'), 2000);
                 });
             });
-            }});
+                },
+            ) });
         }
     };
 
@@ -1708,7 +1777,15 @@ const OptionsInner: React.FC = () => {
         });
         markUserTouched(['team', 'teamLabel']);
         persistPrefs(next, {
-            onMirrorCommitted: teamId ? dispatchTeamSync : dispatchTeamClear,
+            mirrorAction: createPrefsMirrorAction(
+                teamId ? 'team-sync' : 'team-clear',
+                {
+                    enabled: true,
+                    manifestUrl,
+                    teamId,
+                },
+                teamId ? dispatchTeamSync : dispatchTeamClear,
+            ),
         });
 
         if (!teamId) return;
@@ -2689,8 +2766,14 @@ const OptionsInner: React.FC = () => {
                                                                     const generation = teamRefreshGenerationRef.current;
                                                                     const next = updateCurrentPrefs({ teamManifestUrl: '', team: undefined, teamLabel: undefined });
                                                                     markUserTouched(['teamManifestUrl', 'team', 'teamLabel']);
-                                                                    persistPrefs(next, { onMirrorCommitted: async () => {
-                                                                    await chrome.runtime.sendMessage({
+                                                                    persistPrefs(next, { mirrorAction: createPrefsMirrorAction(
+                                                                    'team-clear',
+                                                                    {
+                                                                        enabled: true,
+                                                                        manifestUrl: '',
+                                                                        teamId: '',
+                                                                    },
+                                                                    () => { void chrome.runtime.sendMessage({
                                                                         type: 'SYNC_TEAM_CATALOG',
                                                                         payload: teamRequestPayload(generation, {
                                                                             enabled: true,
@@ -2704,7 +2787,8 @@ const OptionsInner: React.FC = () => {
                                                                     setTeamSynced('');
                                                                     setTeamFetchError(null);
                                                                     lastFetchedManifestUrlRef.current = '';
-                                                                    }});
+                                                                    },
+                                                                    ) });
                                                                 })();
                                                                 return;
                                                             }
@@ -2953,7 +3037,7 @@ const OptionsInner: React.FC = () => {
                                                         name="userPrompt"
                                                         aria-label={t('userPrompt')}
                                                         value={prefs.userPrompt || ""}
-                                                        onChange={(e) => { markUserTouched(['userPrompt']); updateCurrentPrefs({ userPrompt: e.target.value }); }} onBlur={handlePrefBlur}
+                                                        onChange={(e) => { userPromptEditTokenRef.current = { revision: userPromptEditTokenRef.current.revision + 1, value: e.target.value }; markUserTouched(['userPrompt']); updateCurrentPrefs({ userPrompt: e.target.value }); }} onBlur={handlePrefBlur}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
                                                         placeholder={t('userPromptPlaceholder')}
                                                     />

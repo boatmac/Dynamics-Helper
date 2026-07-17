@@ -5,11 +5,14 @@ import { PrefsLanguageProvider } from '../utils/i18n'
 
 const state = vi.hoisted(() => ({
   hydrationPending: true,
+  hydrationRequestId: 'hydrated-A',
+  analyzeTimeoutSeconds: 1200,
   scanForErrors: vi.fn(),
+  trackEvent: vi.fn(),
 }))
 
 vi.mock('../utils/telemetry', () => ({
-  trackEvent: vi.fn(),
+  trackEvent: state.trackEvent,
   trackException: vi.fn(),
   hashCaseId: vi.fn().mockResolvedValue('hash'),
 }))
@@ -26,7 +29,7 @@ vi.mock('../utils/prefs', () => ({
       autoAnalyzeMode: 'disabled',
       enableStatusBubble: true,
       language: 'en',
-      analyzeTimeoutSeconds: 1200,
+      analyzeTimeoutSeconds: state.analyzeTimeoutSeconds,
     },
   }),
   mergeRootPathOverride: (value: unknown) => value,
@@ -40,7 +43,7 @@ vi.mock('../hooks/useAnalysisHydration', () => ({
   useAnalysisHydration: () => ({
     popover: null,
     pending: state.hydrationPending
-      ? { caseNumber: '1234567890123456', requestId: 'hydrated', startTime: Date.now() }
+      ? { caseNumber: '1234567890123456', requestId: state.hydrationRequestId, startTime: Date.now() }
       : null,
     isAnalyzing: state.hydrationPending,
     dismissPopover: vi.fn().mockResolvedValue(undefined),
@@ -75,6 +78,9 @@ describe('FAB analyzing source reconciliation', () => {
     resetChromeMock()
     installChromeMock()
     state.hydrationPending = true
+    state.hydrationRequestId = 'hydrated-A'
+    state.analyzeTimeoutSeconds = 1200
+    state.trackEvent.mockReset()
     state.scanForErrors.mockReset().mockResolvedValue({
       caseNumber: '1234567890123456',
       ticketTitle: 'Fixture',
@@ -141,5 +147,114 @@ describe('FAB analyzing source reconciliation', () => {
     fireEvent.click(screen.getByTitle('Close'))
     fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
     await waitFor(() => expect(screen.getByRole('button', { name: /^analyze$/i })).not.toBeDisabled())
+  })
+
+  it('updates hydrated pending identity from true A to true B', async () => {
+    const response = deferNextResponse('analyze_error')
+    const randomUuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(
+      '00000000-0000-4000-8000-00000000000a',
+    )
+    try {
+      state.hydrationRequestId = '00000000-0000-4000-8000-00000000000a'
+      const { view, analyze } = await renderOpenFab()
+      await waitFor(() => expect(analyze).toBeDisabled())
+
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dh-trigger-analyze', {
+          detail: { selectionText: 'request A context' },
+        }))
+        await Promise.resolve()
+      })
+      state.hydrationRequestId = '00000000-0000-4000-8000-00000000000b'
+      view.rerender(
+        <PrefsLanguageProvider language="en">
+          <FAB />
+        </PrefsLanguageProvider>,
+      )
+      await act(async () => response.resolve({
+        status: 'success',
+        data: {
+          status: 'success',
+          data: { markdown: 'request A complete', saved_to: 'a.md' },
+        },
+      }))
+
+      await waitFor(() => expect(screen.getByText('request A complete')).toBeInTheDocument())
+      fireEvent.click(screen.getByTitle('Close'))
+      fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+      await waitFor(() => expect(
+        screen.getByRole('button', { name: /^analyze$/i }),
+      ).toBeDisabled())
+
+      state.hydrationPending = false
+      view.rerender(
+        <PrefsLanguageProvider language="en">
+          <FAB />
+        </PrefsLanguageProvider>,
+      )
+      await waitFor(() => expect(
+        screen.getByRole('button', { name: /^analyze$/i }),
+      ).not.toBeDisabled())
+    } finally {
+      randomUuid.mockRestore()
+    }
+  })
+
+  it('keeps request B active when request A resolves and reaches its old timeout', async () => {
+    state.hydrationPending = false
+    state.analyzeTimeoutSeconds = 60
+    const responseA = deferNextResponse('analyze_error')
+    const responseB = deferNextResponse('analyze_error')
+    const randomUuid = vi.spyOn(crypto, 'randomUUID')
+      .mockReturnValueOnce('00000000-0000-4000-8000-00000000000a')
+      .mockReturnValueOnce('00000000-0000-4000-8000-00000000000b')
+    const { analyze } = await renderOpenFab()
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(analyze)
+      await act(async () => {
+        vi.advanceTimersByTime(10_000)
+        await Promise.resolve()
+      })
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dh-trigger-analyze', {
+          detail: { selectionText: 'request B context' },
+        }))
+        await Promise.resolve()
+      })
+
+      await act(async () => responseA.resolve({
+        status: 'success',
+        data: {
+          status: 'success',
+          data: { markdown: 'STALE REQUEST A', saved_to: 'a.md' },
+        },
+      }))
+      expect(analyze).toBeDisabled()
+      expect(screen.queryByText('STALE REQUEST A')).toBeNull()
+
+      await act(async () => {
+        vi.advanceTimersByTime(60_001)
+        await Promise.resolve()
+      })
+      expect(analyze).toBeDisabled()
+      expect(state.trackEvent).not.toHaveBeenCalledWith('Analyze Timeout')
+
+      await act(async () => responseB.resolve({
+        status: 'success',
+        data: {
+          status: 'success',
+          data: { markdown: 'REQUEST B COMPLETE', saved_to: 'b.md' },
+        },
+      }))
+      expect(screen.getByText('REQUEST B COMPLETE')).toBeInTheDocument()
+      fireEvent.click(screen.getByTitle('Close'))
+      fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+      expect(screen.getByRole('button', { name: /^analyze$/i })).not.toBeDisabled()
+    } finally {
+      act(() => vi.clearAllTimers())
+      vi.useRealTimers()
+      randomUuid.mockRestore()
+    }
   })
 })

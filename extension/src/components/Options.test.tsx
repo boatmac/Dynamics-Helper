@@ -8,6 +8,7 @@ import {
   deferNextStorageGet,
   deferNextStorageRemove,
   deferNextStorageSet,
+  emitStorageChanges,
   getStorageSnapshot,
   seedStorage,
   chromeMockSpies,
@@ -123,6 +124,14 @@ const openDhInstructionsEditor = async (): Promise<HTMLTextAreaElement> => {
   fireEvent.click(screen.getAllByRole('button', { name: /edit|编辑/i })[0])
   return screen.getByLabelText(
     /DH-specific Instructions|DH 专用指令/i,
+  ) as HTMLTextAreaElement
+}
+
+const openUserPromptEditor = async (): Promise<HTMLTextAreaElement> => {
+  await openCopilotSection()
+  fireEvent.click(screen.getAllByRole('button', { name: /edit|编辑/i }).at(-1)!)
+  return screen.getByLabelText(
+    /Custom User Prompt|自定义用户提示词/i,
   ) as HTMLTextAreaElement
 }
 
@@ -895,6 +904,148 @@ describe('Options selected-team refresh generation', () => {
     }
   })
 
+  it('carries a delayed selected-team sync through an unrelated later edit exactly once', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    const teamMirror = deferNextStorageSet('dh_prefs')
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'team-b' } })
+    const unrelatedMirror = deferNextStorageSet('dh_prefs')
+    fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+
+    await act(async () => teamMirror.resolve(undefined))
+    await act(async () => unrelatedMirror.resolve(undefined))
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
+    )).toHaveLength(1))
+    expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
+    )).toHaveLength(1)
+    await act(async () => response.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'skipped',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-b',
+        },
+      },
+    }))
+  })
+
+  it('waits for a delayed older team mirror before running the carried sync', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    const teamMirror = deferNextStorageSet('dh_prefs')
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'team-b' } })
+    const unrelatedMirror = deferNextStorageSet('dh_prefs')
+    fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+
+    await act(async () => unrelatedMirror.resolve(undefined))
+    expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
+    )).toHaveLength(0)
+
+    await act(async () => teamMirror.resolve(undefined))
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG'
+        && (call[0] as any)?.payload?.identity?.teamId === 'team-b',
+    )).toHaveLength(1))
+    await act(async () => response.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'skipped',
+        identity: {
+          enabled: true,
+          manifestUrl: 'https://example.com/manifest.json',
+          teamId: 'team-b',
+        },
+      },
+    }))
+  })
+
+  it('carries delayed Reset through an unrelated post-reset edit exactly once', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await hydrateTeamOptions()
+      const resetMirror = deferNextStorageSet('dh_prefs')
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      const unrelatedMirror = deferNextStorageSet('dh_prefs')
+      fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+
+      await act(async () => resetMirror.resolve(undefined))
+      await act(async () => unrelatedMirror.resolve(undefined))
+      await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(
+        call => (call[0] as any)?.type === 'RESET_EXTENSION_STATE',
+      )).toHaveLength(1))
+      expect(chromeMockSpies.sendMessage.mock.calls.filter(
+        call => (call[0] as any)?.type === 'RESET_EXTENSION_STATE',
+      )).toHaveLength(1)
+      await act(async () => resetResponse.resolve({ status: 'success' }))
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+
+  it('waits for a delayed reset mirror before running carried Reset', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await hydrateTeamOptions()
+      const resetMirror = deferNextStorageSet('dh_prefs')
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      const unrelatedMirror = deferNextStorageSet('dh_prefs')
+      fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+
+      await act(async () => unrelatedMirror.resolve(undefined))
+      expect(chromeMockSpies.sendMessage.mock.calls.filter(
+        call => (call[0] as any)?.type === 'RESET_EXTENSION_STATE',
+      )).toHaveLength(0)
+
+      await act(async () => resetMirror.resolve(undefined))
+      await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(
+        call => (call[0] as any)?.type === 'RESET_EXTENSION_STATE',
+      )).toHaveLength(1))
+      await act(async () => resetResponse.resolve({ status: 'success' }))
+    } finally {
+      confirm.mockRestore()
+    }
+  })
+
+  it('cancels a delayed selected-team action after an incompatible team change', async () => {
+    const currentResponse = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    const oldMirror = deferNextStorageSet('dh_prefs')
+    const teamSelect = screen.getByRole('combobox')
+    fireEvent.change(teamSelect, { target: { value: 'team-b' } })
+    const currentMirror = deferNextStorageSet('dh_prefs')
+    fireEvent.change(teamSelect, { target: { value: 'team-a' } })
+
+    await act(async () => oldMirror.resolve(undefined))
+    await act(async () => currentMirror.resolve(undefined))
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.type === 'SYNC_TEAM_CATALOG',
+    )).toHaveLength(1))
+    const sync = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .find(message => message?.type === 'SYNC_TEAM_CATALOG')
+    expect(sync.payload.identity.teamId).toBe('team-a')
+    await act(async () => currentResponse.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'skipped',
+        identity: sync.payload.identity,
+        requestGeneration: sync.payload.requestGeneration,
+      },
+    }))
+  })
+
   it('does not timestamp a current skipped response', async () => {
     const response = deferNextResponse('SYNC_TEAM_CATALOG')
     await hydrateTeamOptions()
@@ -1145,6 +1296,147 @@ describe('Options selected-team refresh generation', () => {
         new Date('2026-07-17T00:00:00.000Z').toLocaleString(),
       )
     })
+  })
+
+  it('ignores a delayed initial team A cache read after Host hydration selects team B', async () => {
+    const manifestUrl = 'https://example.com/manifest.json'
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        teamCatalogEnabled: true,
+        teamManifestUrl: manifestUrl,
+        team: 'team-a',
+      },
+      dh_team_manifest_url: manifestUrl,
+      dh_team: 'team-a',
+      dh_team_manifest: {
+        teams: [{ id: 'team-a', label: 'STALE TEAM A' }],
+      },
+      dh_team_items: [{ type: 'link', label: 'STALE ITEM A' }],
+      dh_team_synced: '2026-01-01T00:00:00.000Z',
+    })
+    const getConfig = deferNextResponse('get_config')
+    const delayedA = deferNextStorageGet('dh_team_items')
+    render(<Options />)
+    await waitFor(() => expect(chromeMockSpies.storageGet.mock.calls.some(
+      call => Array.isArray(call[0]) && call[0].includes('dh_team_items'),
+    )).toBe(true))
+
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        teamCatalogEnabled: true,
+        teamManifestUrl: manifestUrl,
+        team: 'team-b',
+      },
+      dh_team_manifest_url: manifestUrl,
+      dh_team: 'team-b',
+      dh_team_manifest: {
+        teams: [{ id: 'team-b', label: 'CURRENT TEAM B' }],
+      },
+      dh_team_items: [{ type: 'link', label: 'CURRENT ITEM B' }],
+      dh_team_synced: '2026-07-17T12:00:00.000Z',
+    })
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          team_catalog_enabled: true,
+          team_manifest_url: manifestUrl,
+          team: 'team-b',
+          use_workspace_only: false,
+        },
+      },
+    }))
+    fireEvent.click(document.querySelector('[data-section="team"]') as HTMLButtonElement)
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('CURRENT TEAM B')
+      expect(document.body.textContent).toContain('(1 items)')
+      expect(document.body.textContent).toContain(
+        new Date('2026-07-17T12:00:00.000Z').toLocaleString(),
+      )
+    })
+
+    await act(async () => delayedA.resolve(undefined))
+    expect(document.body.textContent).toContain('CURRENT TEAM B')
+    expect(document.body.textContent).not.toContain('STALE TEAM A')
+    expect(document.body.textContent).not.toContain('STALE ITEM A')
+    expect(document.body.textContent).toContain(
+      new Date('2026-07-17T12:00:00.000Z').toLocaleString(),
+    )
+  })
+
+  it('ignores a delayed team A storage follow-up after switching to team B', async () => {
+    const response = deferNextResponse('SYNC_TEAM_CATALOG')
+    await hydrateTeamOptions()
+    const delayedA = deferNextStorageGet('dh_team_items')
+    act(() => emitStorageChanges({
+      dh_team_items: {
+        oldValue: [],
+        newValue: [{ type: 'link', label: 'STALE STORAGE A' }],
+      },
+      dh_team_synced: {
+        oldValue: '2026-01-01T00:00:00.000Z',
+        newValue: '2026-01-02T00:00:00.000Z',
+      },
+    }))
+
+    seedStorage({
+      dh_team: 'team-b',
+      dh_team_items: [{ type: 'link', label: 'CURRENT STORAGE B' }],
+      dh_team_synced: '2026-07-17T13:00:00.000Z',
+    })
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'team-b' } })
+    await waitFor(() => expect(document.body.textContent).toContain(
+      new Date('2026-07-17T13:00:00.000Z').toLocaleString(),
+    ))
+    await act(async () => delayedA.resolve(undefined))
+
+    expect(document.body.textContent).toContain(
+      new Date('2026-07-17T13:00:00.000Z').toLocaleString(),
+    )
+    fireEvent.click(document.querySelector('[data-section="bookmarks"]') as HTMLButtonElement)
+    expect(document.body.textContent).toContain('CURRENT STORAGE B')
+    expect(document.body.textContent).not.toContain('STALE STORAGE A')
+    const sync = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .find(message => message?.type === 'SYNC_TEAM_CATALOG'
+        && message?.payload?.identity?.teamId === 'team-b')
+    await act(async () => response.resolve({
+      status: 'success',
+      data: {
+        syncStatus: 'skipped',
+        identity: sync.payload.identity,
+        requestGeneration: sync.payload.requestGeneration,
+      },
+    }))
+  })
+
+  it('ignores a delayed team A storage follow-up after Reset', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      await hydrateTeamOptions()
+      const delayedA = deferNextStorageGet('dh_team_items')
+      act(() => emitStorageChanges({
+        dh_team_items: {
+          oldValue: [],
+          newValue: [{ type: 'link', label: 'STALE AFTER RESET' }],
+        },
+      }))
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.some(
+        call => (call[0] as any)?.type === 'RESET_EXTENSION_STATE',
+      )).toBe(true))
+      await act(async () => delayedA.resolve(undefined))
+      await act(async () => resetResponse.resolve({ status: 'success' }))
+
+      expect(document.body.textContent).not.toContain('STALE AFTER RESET')
+    } finally {
+      confirm.mockRestore()
+    }
   })
 })
 
@@ -1763,6 +2055,214 @@ describe('Options prompt health and inspected sparse writes', () => {
     expect(screen.getByRole('alert').textContent).toMatch(
       /DH-specific Instructions/i,
     )
+  })
+
+  it('retains mirrored Custom User Prompt when modern Host omits an unreadable value', async () => {
+    seedStorage({
+      dh_prefs: { ...DEFAULT_PREFS, userPrompt: 'KEEP-PROMPT-MIRROR' },
+    })
+    await hydrateOptions({
+      root_path: '',
+      system_message: { content: 'DO-NOT-USE-AS-PROMPT' },
+      prompt_source_status: {
+        status: 'error',
+        error_code: 'user_prompt_unreadable',
+        error: 'fallback',
+      },
+      extension_preferences: { use_workspace_only: false },
+    })
+
+    expect((await openUserPromptEditor()).value).toBe('KEEP-PROMPT-MIRROR')
+    expect(screen.getByRole('alert').textContent).toMatch(/Custom User Prompt/i)
+  })
+
+  it('hydrates legacy Custom User Prompt only when prompt health is absent', async () => {
+    seedStorage({
+      dh_prefs: { ...DEFAULT_PREFS, userPrompt: 'STALE-PROMPT' },
+    })
+    await hydrateOptions({
+      root_path: '',
+      extension_preferences: {
+        use_workspace_only: false,
+        user_prompt: 'LEGACY-PROMPT',
+      },
+    })
+
+    expect((await openUserPromptEditor()).value).toBe('LEGACY-PROMPT')
+  })
+
+  it('omits Custom User Prompt from unrelated preference updates', async () => {
+    const update = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: {
+        use_workspace_only: false,
+        user_prompt: 'UNCHANGED-PROMPT',
+      },
+    })
+
+    fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+    const call = await waitFor(() => {
+      const found = chromeMockSpies.sendMessage.mock.calls
+        .map(entry => entry[0] as any)
+        .find(message => message?.payload?.action === 'update_config')
+      if (!found) throw new Error('update_config not sent')
+      return found
+    })
+
+    expect(Object.hasOwn(call.payload.payload, 'user_prompt')).toBe(false)
+    expect(Object.hasOwn(
+      call.payload.payload.config.extension_preferences,
+      'user_prompt',
+    )).toBe(false)
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it('sends an explicit Custom User Prompt replacement and clear', async () => {
+    const replacement = deferNextResponse('update_config')
+    const clear = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: {
+        use_workspace_only: false,
+        user_prompt: 'OLD-PROMPT',
+      },
+    })
+    const editor = await openUserPromptEditor()
+
+    fireEvent.change(editor, { target: { value: 'NEW-PROMPT' } })
+    fireEvent.blur(editor)
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+    let calls = chromeMockSpies.sendMessage.mock.calls
+      .map(entry => entry[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(calls[0].payload.payload.user_prompt).toBe('NEW-PROMPT')
+    await act(async () => replacement.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+
+    fireEvent.change(editor, { target: { value: '' } })
+    fireEvent.blur(editor)
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(2))
+    calls = chromeMockSpies.sendMessage.mock.calls
+      .map(entry => entry[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(calls[1].payload.payload.user_prompt).toBe('')
+    await act(async () => clear.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it('sends an explicit empty Custom User Prompt on Reset', async () => {
+    const update = deferNextResponse('update_config')
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: {
+        use_workspace_only: false,
+        user_prompt: 'CLEAR-ON-RESET',
+      },
+    })
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    try {
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      const call = await waitFor(() => {
+        const found = chromeMockSpies.sendMessage.mock.calls
+          .map(entry => entry[0] as any)
+          .find(message => message?.payload?.action === 'update_config')
+        if (!found) throw new Error('reset update_config not sent')
+        return found
+      })
+      expect(call.payload.payload.user_prompt).toBe('')
+      await act(async () => update.resolve({
+        status: 'success',
+        data: { success: true, config_saved: true },
+      }))
+      await act(async () => resetResponse.resolve({ status: 'success' }))
+    } finally {
+      confirmSpy.mockRestore()
+    }
+  })
+
+  it('keeps prompt revision 2 pending when revision 1 succeeds late', async () => {
+    const firstUpdate = deferNextResponse('update_config')
+    const secondUpdate = deferNextResponse('update_config')
+    const retryUpdate = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: {
+        use_workspace_only: false,
+        user_prompt: 'initial',
+      },
+    })
+    const editor = await openUserPromptEditor()
+
+    fireEvent.change(editor, { target: { value: 'prompt-1' } })
+    fireEvent.blur(editor)
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+    fireEvent.change(editor, { target: { value: 'prompt-2' } })
+    fireEvent.blur(editor)
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(2))
+
+    await act(async () => firstUpdate.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    await act(async () => secondUpdate.resolve({
+      status: 'error',
+      error: 'retry prompt revision 2',
+    }))
+    fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(3))
+
+    const calls = chromeMockSpies.sendMessage.mock.calls
+      .map(entry => entry[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(calls.at(-1).payload.payload.user_prompt).toBe('prompt-2')
+    await act(async () => retryUpdate.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it('clears unreadable Custom User Prompt health after explicit repair', async () => {
+    const update = deferNextResponse('update_config')
+    seedStorage({
+      dh_prefs: { ...DEFAULT_PREFS, userPrompt: 'MIRRORED-PROMPT' },
+    })
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: {
+        status: 'error',
+        error_code: 'user_prompt_unreadable',
+        error: 'fallback',
+      },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const health = deferNextResponse('get_config')
+    const editor = await openUserPromptEditor()
+    fireEvent.change(editor, { target: { value: 'REPAIRED-PROMPT' } })
+    fireEvent.blur(editor)
+
+    await act(async () => update.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+    expect(screen.getByRole('alert').textContent).toMatch(/Custom User Prompt/i)
+    await act(async () => health.resolve({
+      status: 'success',
+      data: { prompt_source_status: { status: 'ok' } },
+    }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
   })
 
   it('hydrates an explicit empty DH instruction value', async () => {

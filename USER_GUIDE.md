@@ -146,7 +146,18 @@ In **Settings → Copilot Configuration**, you can customize two Markdown text f
 * **DH-specific Instructions**: System-role rules used across DH analyses when Repository ONLY is not effective. Use this for DH-only preferences such as response style or analysis emphasis. The canonical file is `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`.
 * **Custom User Prompt**: User-role content appended once and PII-scrubbed with the case payload. Use it for recurring questions such as "Provide a root cause analysis and mitigation steps." Options previews the text, while `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md` is authoritative: the Host rereads it on every Analyze and replaces any stale prompt section in the browser payload.
 
-Both fields support Markdown formatting. Click **Preview** above either textarea to see rendered output and **Edit** to return to raw text. Both panes can be resized. Clearing DH-specific Instructions is a real saved operation: an explicit empty value truncates its file. Unrelated setting changes omit that field and leave the file unchanged.
+Both fields support Markdown formatting. Click **Preview** above either textarea to see rendered output and **Edit** to return to raw text. Both panes can be resized. Clearing either field is a real saved operation: an explicit empty value truncates its file. Unrelated setting changes omit both prompt-file fields and leave their files unchanged. If Custom User Prompt is unreadable or invalid UTF-8, Options keeps the last browser-mirrored text instead of displaying a false empty value; explicitly edit/clear the field to repair the Host file.
+
+Prompt/configuration errors are actionable and do not mean authentication failed:
+
+| Code | Meaning | Action |
+|---|---|---|
+| `dh_core_prompt_missing` | DH Core is missing | Repair or reinstall Dynamics Helper |
+| `dh_core_prompt_unreadable` | DH Core cannot be read | Repair the installation or permissions |
+| `dh_specific_instructions_unreadable` | DH-specific Instructions cannot be read | Replace or clear them in Options |
+| `repository_instructions_missing` | Root instructions are missing | Add `.github/copilot-instructions.md` or disable Repository ONLY |
+| `repository_instructions_unreadable` | Root instructions cannot be read | Repair the file or disable Repository ONLY |
+| `user_prompt_unreadable` | Custom User Prompt cannot be read | Replace or clear it in Options |
 
 ### Workspace Configuration (Advanced)
 

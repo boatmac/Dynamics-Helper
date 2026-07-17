@@ -22,6 +22,7 @@ describe('prompt source error localization', () => {
         ['dh_specific_instructions_unreadable', 'DH instructions unreadable'],
         ['repository_instructions_missing', 'repository instructions missing'],
         ['repository_instructions_unreadable', 'repository instructions unreadable'],
+        ['user_prompt_unreadable', 'user prompt unreadable'],
     ])('maps %s and ignores fallback', (code, expected) => {
         expect(localizePromptSourceError(code, 'HOST FALLBACK', t)).toBe(expected)
     })
@@ -44,6 +45,7 @@ describe('prompt source error localization', () => {
         'dh_specific_instructions_unreadable',
         'repository_instructions_missing',
         'repository_instructions_unreadable',
+        'user_prompt_unreadable',
     ])('has real English and Chinese copy for %s', code => {
         const english = localizePromptSourceError(
             code,

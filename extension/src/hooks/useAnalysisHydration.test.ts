@@ -256,6 +256,31 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
         expect(hook.result.current.pending).toBeNull()
     })
 
+    it('updates pending identity when storage changes from true A to true B', async () => {
+        const pendingA = makePending({ requestId: 'req-A' })
+        const pendingB = makePending({
+            requestId: 'req-B',
+            startTime: pendingA.startTime + 1,
+        })
+        const keyA = pendingAnalysisKey(pendingA.requestId)
+        const keyB = pendingAnalysisKey(pendingB.requestId)
+        seedStorage({ [keyA]: pendingA })
+        const hook = renderHook(() => useAnalysisHydration(CASE_A))
+        await waitFor(() => expect(
+            hook.result.current.pending?.requestId,
+        ).toBe('req-A'))
+
+        act(() => emitStorageChanges({
+            [keyA]: { oldValue: pendingA, newValue: undefined },
+            [keyB]: { oldValue: undefined, newValue: pendingB },
+        }))
+
+        await waitFor(() => expect(
+            hook.result.current.pending?.requestId,
+        ).toBe('req-B'))
+        expect(hook.result.current.isAnalyzing).toBe(true)
+    })
+
     it('expires a hydrated pending marker while the hook remains mounted', async () => {
         vi.useFakeTimers()
         const now = new Date('2026-07-17T00:00:00.000Z')

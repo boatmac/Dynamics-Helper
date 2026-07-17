@@ -33,6 +33,11 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Pending analyses use request-scoped storage keys, so concurrent cases and acknowledgments no longer compete across Service Worker restarts.
 - Hydrated pending and local in-flight Analyze state are reconciled independently, preventing stuck or prematurely-cleared spinners.
 - Permission and pre-tool approval logs omit request representations, tool names, paths, commands, URLs, and contents.
+- Unreadable/invalid-UTF-8 Custom User Prompt health now preserves the browser mirror and omits Host content instead of substituting empty; unrelated settings cannot truncate it, while explicit edit/clear repairs it.
+- Custom User Prompt writes are sparse, immutable revisioned intents like DH-specific Instructions; overlapping acknowledgements cannot lose a newer value.
+- Team sync, Reset, and related preference-mirror actions survive compatible later snapshots, cancel on incompatible team identity, and run once after durable commit.
+- Options and FAB menu Team Catalog reads ignore delayed results from old enabled/URL/team generations.
+- FAB Analyze spinner and safety timers are request-ID scoped, so stale A response/finally/timeout paths cannot clear or report over request B.
 
 ## Verification
 

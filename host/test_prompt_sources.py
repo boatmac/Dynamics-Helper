@@ -383,6 +383,91 @@ class TestPromptConfigApi(
             "dh_specific_instructions_unreadable",
         )
 
+    def test_get_config_unreadable_user_prompt_omits_value_and_reports_health(self):
+        prompt_path = os.path.join(self.user_dir, "user_prompt.md")
+        self._write(prompt_path, b"\xff\xfe")
+
+        config = self.host._get_session_config(include_prompt_status=True)
+
+        self.assertEqual(
+            config["prompt_source_status"]["error_code"],
+            "user_prompt_unreadable",
+        )
+        self.assertNotIn(
+            "user_prompt",
+            config.get("extension_preferences", {}),
+        )
+
+    async def test_unrelated_update_preserves_unreadable_user_prompt_bytes(self):
+        prompt_path = os.path.join(self.user_dir, "user_prompt.md")
+        original = b"\xff\xfeDO-NOT-TRUNCATE"
+        self._write(prompt_path, original)
+
+        result = await self.host.handle_update_config({
+            "config": {
+                "extension_preferences": {"language": "zh"},
+            },
+        })
+
+        self.assertTrue(result["config_saved"])
+        with open(prompt_path, "rb") as stream:
+            self.assertEqual(stream.read(), original)
+
+    async def test_explicit_user_prompt_replacement_repairs_health(self):
+        prompt_path = os.path.join(self.user_dir, "user_prompt.md")
+        self._write(prompt_path, b"\xff")
+
+        result = await self.host.handle_update_config({
+            "user_prompt": "replacement prompt",
+        })
+        config = self.host._get_session_config(include_prompt_status=True)
+
+        self.assertTrue(result["config_saved"])
+        with open(prompt_path, "rb") as stream:
+            self.assertEqual(stream.read(), b"replacement prompt")
+        self.assertEqual(config["prompt_source_status"], {"status": "ok"})
+        self.assertEqual(
+            config["extension_preferences"]["user_prompt"],
+            "replacement prompt",
+        )
+
+    async def test_explicit_empty_user_prompt_clears_file(self):
+        prompt_path = os.path.join(self.user_dir, "user_prompt.md")
+        self._write(prompt_path, b"old prompt")
+
+        result = await self.host.handle_update_config({"user_prompt": ""})
+
+        self.assertTrue(result["config_saved"])
+        with open(prompt_path, "rb") as stream:
+            self.assertEqual(stream.read(), b"")
+
+    async def test_top_level_user_prompt_presence_wins_over_legacy_nested_value(self):
+        prompt_path = os.path.join(self.user_dir, "user_prompt.md")
+
+        await self.host.handle_update_config({
+            "user_prompt": "",
+            "config": {
+                "extension_preferences": {"user_prompt": "legacy value"},
+            },
+        })
+
+        with open(prompt_path, "rb") as stream:
+            self.assertEqual(stream.read(), b"")
+
+    async def test_explicit_null_user_prompt_is_rejected_before_writes(self):
+        prompt_path = os.path.join(self.user_dir, "user_prompt.md")
+        self._write(prompt_path, b"preserved prompt")
+
+        result = await self.host.handle_update_config({"user_prompt": None})
+
+        self.assertEqual(result, {
+            "success": False,
+            "config_saved": False,
+            "error": "user_prompt must be a string.",
+        })
+        with open(prompt_path, "rb") as stream:
+            self.assertEqual(stream.read(), b"preserved prompt")
+
     def test_get_config_missing_dh_specific_returns_raw_empty(self):
         os.remove(self.dh_path)
         config = self.host._get_session_config(include_prompt_status=True)

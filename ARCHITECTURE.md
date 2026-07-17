@@ -143,13 +143,21 @@ Prompt resolution is fail-closed. Missing/unreadable Core, unreadable selected D
 
 ### Config and Error Boundary
 
-`get_config` uses a soft health projection rather than creating a strict session snapshot. It returns normal configuration plus `prompt_source_status`; Options therefore remains available to repair a bad source. Readable DH-specific text is returned separately as `_user_instructions_raw`, including an explicit empty string. If unreadable, that field is omitted so the Chrome mirror is not overwritten with a false empty value.
+`get_config` uses a soft health projection rather than creating a strict session snapshot. It returns normal configuration plus `prompt_source_status`; Options therefore remains available to repair a bad source. Readable DH-specific text is returned separately as `_user_instructions_raw`, and readable Custom User Prompt as `extension_preferences.user_prompt`, including explicit empty strings. An unreadable/invalid-UTF-8 file omits its content property; Custom User Prompt uses `user_prompt_unreadable`, so neither editor is overwritten with a false empty value.
 
-`update_config` distinguishes sparse field omission from explicit empty content. Omitted `user_instructions` performs no instruction write; explicit `""` truncates the file. Its structured result separates durable persistence (`config_saved`) from session refresh (`success`). Options inspects every result, preserves values acknowledged as saved, retries unacknowledged instruction revisions, and shows render-time localized warnings. The Host does not roll back uncertain partial writes; it invalidates stale active prompt state once a durable writer was attempted.
+`update_config` distinguishes sparse field omission from explicit empty content for both `user_instructions` and top-level `user_prompt`. Omission performs no file write; explicit `""` truncates the selected file. Options carries immutable revision/value tokens only on explicit edit/clear/Reset, acknowledges matching saved revisions, and retries unacknowledged values. Its structured result separates durable persistence (`config_saved`) from session refresh (`success`). The Host does not roll back uncertain partial writes; it invalidates stale active prompt state once a durable writer was attempted.
 
 Analyze errors may carry optional `error_code`. The Service Worker persists raw safe fallback text plus optional `LastAnalysis.errorCode`, preserving an inner Analyze code over an outer wrapper code. Immediate and rehydrated FAB display use the same render-time localization helper for known codes; immediate unknown-code fallbacks may include a safe UI prefix, while rehydrated unknown/legacy codes retain the raw stored fallback. Instruction contents, Custom User Prompt contents, and prompt-source paths are excluded from normal logs and telemetry.
 
 Service Worker persistence has two ownership domains. Team requests carry captured enabled/URL/team identity plus request generation; `teamCatalog.ts` synchronously invalidates older generations and queues validation with awaited manifest/item/ETag/timestamp/clear mutations. `analysisStore.ts` uses request-scoped pending and identity-scoped seen keys, so A/B remain independent across worker restarts; hydration derives last, newest matching pending, and acknowledgment from one snapshot. Options issues Service Worker messages and does not mutate owned keys directly.
+
+Options' ordered preference mirror attaches stable post-commit action IDs to
+user intents. Compatible newer snapshots inherit unsettled actions, incompatible
+team identities cancel them, and settlement precedes dispatch so recursive
+repair writes remain exactly once. Options and Menu team UI reads separately
+generation-gate asynchronous cache snapshots. FAB local Analyze ownership and
+safety timers are request-ID scoped and reconcile with the hook's full hydrated
+pending identity rather than a boolean mirror.
 
 ### Product Scope
 

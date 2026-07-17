@@ -286,7 +286,11 @@ const FAB: React.FC = () => {
     // scrollIntoView in legacyFeatures.ts::highlight) is unaffected — only
     // the redundant bubble notification is suppressed.
     const isAnalyzingRef = React.useRef(false);
-    const localAnalyzeInFlightRef = React.useRef(false);
+    const localAnalyzeRequestIdRef = React.useRef<string | null>(null);
+    const analyzeSafetyTimerRef = React.useRef<{
+        requestId: string;
+        timeoutId: ReturnType<typeof setTimeout>;
+    } | null>(null);
     const analyzeFlowEndedAtRef = React.useRef(0);
     const ANALYZE_BUBBLE_PROTECTION_MS = 6000;
     
@@ -310,6 +314,14 @@ const FAB: React.FC = () => {
     // (matching pending marker inside MAX_PENDING_DISPLAY_AGE_MS).
     const hydration = useAnalysisHydration(scrapedData?.caseNumber || '');
     const hydratedPendingRef = React.useRef(hydration.pending);
+
+    const reconcileAnalyzingState = () => {
+        const next = Boolean(
+            localAnalyzeRequestIdRef.current || hydratedPendingRef.current,
+        );
+        setIsAnalyzing(next);
+        isAnalyzingRef.current = next;
+    };
 
     // C2a+: keep currentCaseRef in sync with the latest scrapedData.caseNumber
     // so async closures inside handleAnalyze (await response, setTimeout) can
@@ -343,10 +355,18 @@ const FAB: React.FC = () => {
     // hydrated spinner but must never clear an active local Analyze.
     useEffect(() => {
         hydratedPendingRef.current = hydration.pending;
-        const next = localAnalyzeInFlightRef.current || hydration.isAnalyzing;
-        setIsAnalyzing(next);
-        isAnalyzingRef.current = next;
-    }, [hydration.isAnalyzing]);
+        reconcileAnalyzingState();
+    }, [
+        hydration.pending?.requestId,
+        hydration.pending?.caseNumber,
+        hydration.pending?.startTime,
+    ]);
+
+    useEffect(() => () => {
+        if (analyzeSafetyTimerRef.current) {
+            clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
+        }
+    }, []);
 
     // Initial Health Check to wake up Host and check for updates
     useEffect(() => {
@@ -755,10 +775,6 @@ const FAB: React.FC = () => {
 
             if (hasValidIdentifier && hasEnoughContent) { 
                     setHasAutoAnalyzed(true); // Mark as handled immediately to prevent double-fire
-                    // Immediate feedback: Set analyzing state so UI reflects it instantly
-                    setIsAnalyzing(true);
-                    localAnalyzeInFlightRef.current = true;
-        isAnalyzingRef.current = true;
                     showStatusBubble(t('analyzing'), 'default', 0); // Show analyzing status persistently until done
                     setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
             }
@@ -774,10 +790,6 @@ const FAB: React.FC = () => {
 
             if (isSevCritical && isInitialPending && hasValidIdentifier && rawContent.length > 20) {
                 setHasAutoAnalyzed(true);
-                // Immediate feedback: Set analyzing state so UI reflects it instantly
-                setIsAnalyzing(true);
-                localAnalyzeInFlightRef.current = true;
-        isAnalyzingRef.current = true;
                 showStatusBubble(t('analyzing'), 'default', 0);
                 setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
             }
@@ -790,9 +802,6 @@ const FAB: React.FC = () => {
 
              if (isInitialPending && hasValidIdentifier && rawContent.length > 20) {
                  setHasAutoAnalyzed(true);
-                 setIsAnalyzing(true);
-                 localAnalyzeInFlightRef.current = true;
-        isAnalyzingRef.current = true;
                  showStatusBubble(t('analyzing'), 'default', 0);
                  setTimeout(() => handleAnalyze(scrapedData), 100);
              }
@@ -844,21 +853,26 @@ const FAB: React.FC = () => {
         const hasContent = targetData.errorText || targetData.description || targetData.ticketTitle;
         if (!hasContent) return;
 
+        const requestId = crypto.randomUUID();
+        if (analyzeSafetyTimerRef.current) {
+            clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
+            analyzeSafetyTimerRef.current = null;
+        }
+        latestRequestId.current = requestId;
+        localAnalyzeRequestIdRef.current = requestId;
+        reconcileAnalyzingState();
+
         trackEvent('Analyze Clicked', { 
             hasContext: !!targetData.source,
             sap: targetData.productCategory || 'Unknown'
         });
 
-        setIsAnalyzing(true);
-        localAnalyzeInFlightRef.current = true;
-        isAnalyzingRef.current = true;
         const startTime = Date.now();
         // Snapshot the case this run was launched on. Used to detect mid-flight
         // D365 tab switches: if the user moves to a different case, popovers
         // and bubbles should reference the originating case rather than
         // visually attach to the unrelated case currently on screen.
         const caseNumberOfRun = targetData.caseNumber || '';
-        let requestId: string | undefined;
         
         // Safety timeout to prevent infinite "Analyzing..." state.
         // Derived from prefs.analyzeTimeoutSeconds (C2b-lite, user-
@@ -868,22 +882,27 @@ const FAB: React.FC = () => {
         const _analyzeTimeoutSec = Math.max(60, Math.min(3600, prefs.analyzeTimeoutSeconds ?? 1200));
         const _safetyTimeoutMs = (_analyzeTimeoutSec + 10) * 1000;
         const timeoutId = setTimeout(() => {
-            setIsAnalyzing(prev => {
-                if (prev) {
-                    showAnalysisError(
-                        t('analysisFailed'),
-                        caseNumberOfRun,
-                        undefined,
-                        requestId
-                            ? { requestId, caseNumber: caseNumberOfRun }
-                            : undefined,
-                    );
-                    trackEvent('Analyze Timeout');
-                    return false;
-                }
-                return prev;
-            });
+            if (localAnalyzeRequestIdRef.current !== requestId) return;
+            if (analyzeSafetyTimerRef.current?.requestId === requestId) {
+                analyzeSafetyTimerRef.current = null;
+            }
+            localAnalyzeRequestIdRef.current = null;
+            if (latestRequestId.current === requestId) {
+                latestRequestId.current = null;
+            }
+            if (hydratedPendingRef.current?.requestId === requestId) {
+                hydratedPendingRef.current = null;
+            }
+            reconcileAnalyzingState();
+            showAnalysisError(
+                t('analysisFailed'),
+                caseNumberOfRun,
+                undefined,
+                { requestId, caseNumber: caseNumberOfRun },
+            );
+            trackEvent('Analyze Timeout');
         }, _safetyTimeoutMs);
+        analyzeSafetyTimerRef.current = { requestId, timeoutId };
 
         try {
             // Construct payload
@@ -901,9 +920,6 @@ const FAB: React.FC = () => {
             if (!statusBubble.visible) {
                  showStatusBubble(t('analyzing'), 'default', 0);
             }
-
-            requestId = crypto.randomUUID();
-            latestRequestId.current = requestId;
 
             const response = await chrome.runtime.sendMessage({
                 type: "NATIVE_MSG",
@@ -936,12 +952,15 @@ const FAB: React.FC = () => {
                 return;
             }
 
+            if (analyzeSafetyTimerRef.current?.requestId === requestId) {
+                clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
+                analyzeSafetyTimerRef.current = null;
+            }
+
             // Stop listening to progress updates for this request to prevent race conditions
             // where a lagging "Processing..." message overwrites the success message.
             latestRequestId.current = null;
 
-            clearTimeout(timeoutId); // Clear timeout on response
-            
             // Format response to be user friendly
             if (response.status === 'success') {
                 const nativeResp = response.data;
@@ -1049,24 +1068,31 @@ const FAB: React.FC = () => {
                 );
             }
         } catch (e: any) {
-            showAnalysisError(
-                `${t('errorLabel')}: ${e.message}`,
-                caseNumberOfRun,
-                undefined,
-                requestId
-                    ? { requestId, caseNumber: caseNumberOfRun }
-                    : undefined,
-            );
-            trackEvent('Analyze Exception', { errorCode: 'unclassified' });
+            if (latestRequestId.current === requestId) {
+                showAnalysisError(
+                    `${t('errorLabel')}: ${e.message}`,
+                    caseNumberOfRun,
+                    undefined,
+                    { requestId, caseNumber: caseNumberOfRun },
+                );
+                trackEvent('Analyze Exception', { errorCode: 'unclassified' });
+            }
         } finally {
-            localAnalyzeInFlightRef.current = false;
-            const hydratedRequestStillActive = Boolean(
-                hydratedPendingRef.current
-                && hydratedPendingRef.current.requestId !== requestId,
-            );
-            setIsAnalyzing(hydratedRequestStillActive);
-            isAnalyzingRef.current = hydratedRequestStillActive;
-            analyzeFlowEndedAtRef.current = Date.now();
+            if (analyzeSafetyTimerRef.current?.requestId === requestId) {
+                clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
+                analyzeSafetyTimerRef.current = null;
+            }
+            if (localAnalyzeRequestIdRef.current === requestId) {
+                localAnalyzeRequestIdRef.current = null;
+                if (latestRequestId.current === requestId) {
+                    latestRequestId.current = null;
+                }
+                if (hydratedPendingRef.current?.requestId === requestId) {
+                    hydratedPendingRef.current = null;
+                }
+                analyzeFlowEndedAtRef.current = Date.now();
+            }
+            reconcileAnalyzingState();
             // Don't clear bubble here immediately if success/error, let the timeout handle it. 
             // If manual cancel or something else, we might need to check.
         }
