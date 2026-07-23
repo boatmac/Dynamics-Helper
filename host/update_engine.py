@@ -1,7 +1,9 @@
 import os
 import shutil
+import stat
 import tempfile
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Callable
 
@@ -14,9 +16,11 @@ from package_manifest import (
 )
 from update_journal import (
     ActiveTransaction,
+    FORWARD_FAILURE_CODES,
     InitiatingProcessIdentity,
     JournalPhase,
     JournalReason,
+    JournalValidationError,
     SeedOperationReceipt,
     TransactionPaths,
     UpdateError,
@@ -57,6 +61,38 @@ class UpdateStateConflict(UpdateEngineError):
 
 class PreparedTransactionConflict(UpdateStateConflict):
     error_code = "update_transaction_conflict"
+
+
+class _RollbackEvidenceMissing(UpdateEngineError):
+    pass
+
+
+class _UnsafeRecoveryState(UpdateStateConflict):
+    pass
+
+
+class PathState(StrEnum):
+    ABSENT = "absent"
+    EXACT = "exact"
+    MISMATCH = "mismatch"
+
+
+@dataclass(frozen=True)
+class TransferState:
+    source: PathState
+    destination: PathState
+
+
+@dataclass(frozen=True)
+class _RollbackRow:
+    live: Path
+    failed_new: Path
+    backup: Path
+    new_expected: tuple[FileDigest, ...] | None
+    prior_expected: tuple[FileDigest, ...] | None
+    tree: bool
+    remove_label: str
+    restore_label: str
 
 
 def _ignore_operation(_label):
@@ -288,7 +324,7 @@ class UpdateEngine:
     ) -> UpdateJournal:
         tx = parse_transaction_id(transaction_id)
         with self._mutex_factory(self.install_root):
-            paths, journal, _plan = self._load_authority(tx)
+            paths, journal, plan = self._load_authority(tx)
             if journal.phase is not JournalPhase.PREPARED:
                 raise UpdateStateConflict()
             if journal.initiator is UpdateInitiator.BROWSER:
@@ -302,57 +338,177 @@ class UpdateEngine:
                 initiating_process=process_identity,
             )
             write_journal_atomic(paths.journal, waiting)
-            self.hooks.after_journal_transition(waiting.phase)
-            if process_identity is not None:
-                self.hooks.wait_for_initiating_host_exit(process_identity)
+            try:
+                self.hooks.after_journal_transition(waiting.phase)
+                if process_identity is not None:
+                    self.hooks.wait_for_initiating_host_exit(process_identity)
+            except Exception as error:
+                return self._rollback_locked(
+                    paths,
+                    waiting,
+                    plan,
+                    self._forward_failure_code(
+                        error, JournalReason.HOST_EXIT_WAIT_FAILED
+                    ),
+                )
             return waiting
 
     def resume(self, transaction_id: str) -> UpdateJournal:
         tx = parse_transaction_id(transaction_id)
         with self._mutex_factory(self.install_root):
             paths, journal, plan = self._load_authority(tx)
-            if journal.phase is JournalPhase.PREPARED:
+            if journal.phase in (
+                JournalPhase.PREPARED,
+                JournalPhase.COMMITTED,
+                JournalPhase.ROLLED_BACK,
+                JournalPhase.RECOVERY_REQUIRED,
+            ):
                 return journal
+            if journal.phase is JournalPhase.ROLLING_BACK:
+                return self._rollback_locked(
+                    paths,
+                    journal,
+                    plan,
+                    journal.original_failure_code,
+                )
             if journal.phase is JournalPhase.WAITING_FOR_HOST_EXIT:
                 if journal.initiating_process is not None:
-                    self.hooks.wait_for_initiating_host_exit(
-                        journal.initiating_process
+                    try:
+                        self.hooks.wait_for_initiating_host_exit(
+                            journal.initiating_process
+                        )
+                    except Exception as error:
+                        return self._rollback_after_forward_failure(
+                            paths,
+                            plan,
+                            error,
+                            JournalReason.HOST_EXIT_WAIT_FAILED,
+                        )
+                try:
+                    self._backup_host(paths, plan)
+                    journal = transition(journal, JournalPhase.HOST_BACKED_UP)
+                    write_journal_atomic(paths.journal, journal)
+                    self.hooks.after_journal_transition(journal.phase)
+                except Exception as error:
+                    return self._rollback_after_forward_failure(
+                        paths,
+                        plan,
+                        error,
+                        JournalReason.HOST_BACKUP_FAILED,
                     )
-                self._backup_host(paths, plan)
-                journal = transition(journal, JournalPhase.HOST_BACKED_UP)
-                write_journal_atomic(paths.journal, journal)
-                self.hooks.after_journal_transition(journal.phase)
             if journal.phase is JournalPhase.HOST_BACKED_UP:
-                self._install_host(paths, plan)
-                journal = transition(journal, JournalPhase.HOST_INSTALLED)
-                write_journal_atomic(paths.journal, journal)
-                self.hooks.after_journal_transition(journal.phase)
+                try:
+                    self._install_host(paths, plan)
+                    journal = transition(journal, JournalPhase.HOST_INSTALLED)
+                    write_journal_atomic(paths.journal, journal)
+                    self.hooks.after_journal_transition(journal.phase)
+                except Exception as error:
+                    return self._rollback_after_forward_failure(
+                        paths,
+                        plan,
+                        error,
+                        JournalReason.HOST_INSTALL_FAILED,
+                    )
             if journal.phase is JournalPhase.HOST_INSTALLED:
-                self._backup_extension(paths, plan)
-                journal = transition(journal, JournalPhase.EXTENSION_BACKED_UP)
-                write_journal_atomic(paths.journal, journal)
-                self.hooks.after_journal_transition(journal.phase)
+                try:
+                    self._backup_extension(paths, plan)
+                    journal = transition(journal, JournalPhase.EXTENSION_BACKED_UP)
+                    write_journal_atomic(paths.journal, journal)
+                    self.hooks.after_journal_transition(journal.phase)
+                except Exception as error:
+                    return self._rollback_after_forward_failure(
+                        paths,
+                        plan,
+                        error,
+                        JournalReason.EXTENSION_BACKUP_FAILED,
+                    )
             if journal.phase is JournalPhase.EXTENSION_BACKED_UP:
-                self._install_extension_and_seed(paths, journal, plan)
-                journal = read_journal(paths.journal)
-                journal = transition(journal, JournalPhase.EXTENSION_INSTALLED)
-                write_journal_atomic(paths.journal, journal)
-                self.hooks.after_journal_transition(journal.phase)
+                try:
+                    self._install_extension_and_seed(paths, journal, plan)
+                    journal = read_journal(paths.journal)
+                    journal = transition(journal, JournalPhase.EXTENSION_INSTALLED)
+                    write_journal_atomic(paths.journal, journal)
+                    self.hooks.after_journal_transition(journal.phase)
+                except Exception as error:
+                    return self._rollback_after_forward_failure(
+                        paths,
+                        plan,
+                        error,
+                        JournalReason.EXTENSION_INSTALL_FAILED,
+                    )
             if journal.phase is JournalPhase.EXTENSION_INSTALLED:
-                self._install_metadata(paths, plan)
-                journal = transition(journal, JournalPhase.METADATA_INSTALLED)
-                write_journal_atomic(paths.journal, journal)
-                self.hooks.after_journal_transition(journal.phase)
+                try:
+                    self._install_metadata(paths, plan)
+                    journal = transition(journal, JournalPhase.METADATA_INSTALLED)
+                    write_journal_atomic(paths.journal, journal)
+                    self.hooks.after_journal_transition(journal.phase)
+                except Exception as error:
+                    return self._rollback_after_forward_failure(
+                        paths,
+                        plan,
+                        error,
+                        JournalReason.METADATA_INSTALL_FAILED,
+                    )
             if journal.phase is JournalPhase.METADATA_INSTALLED:
-                journal = transition(journal, JournalPhase.PROBING)
-                write_journal_atomic(paths.journal, journal)
-                self.hooks.after_journal_transition(journal.phase)
+                try:
+                    journal = transition(journal, JournalPhase.PROBING)
+                    write_journal_atomic(paths.journal, journal)
+                    self.hooks.after_journal_transition(journal.phase)
+                except Exception as error:
+                    return self._rollback_after_forward_failure(
+                        paths,
+                        plan,
+                        error,
+                        JournalReason.METADATA_INSTALL_FAILED,
+                    )
             if journal.phase is JournalPhase.PROBING:
-                self.hooks.probe_installed_product(self.install_root, plan)
+                try:
+                    self.hooks.probe_installed_product(self.install_root, plan)
+                except Exception as error:
+                    return self._rollback_after_forward_failure(
+                        paths,
+                        plan,
+                        error,
+                        JournalReason.STARTUP_PROBE_FAILED,
+                    )
                 journal = transition(journal, JournalPhase.COMMITTED)
                 write_journal_atomic(paths.journal, journal)
                 self.hooks.after_journal_transition(journal.phase)
             return journal
+
+    def _forward_failure_code(
+        self,
+        error: Exception,
+        default: JournalReason,
+    ) -> JournalReason:
+        current: BaseException | None = error
+        seen: set[int] = set()
+        while current is not None and id(current) not in seen:
+            seen.add(id(current))
+            if isinstance(current, PermissionError):
+                return JournalReason.LOCKED_PATH
+            if isinstance(current, OSError) and getattr(current, "winerror", None) in (
+                32,
+                33,
+            ):
+                return JournalReason.LOCKED_PATH
+            current = current.__cause__ or current.__context__
+        return default
+
+    def _rollback_after_forward_failure(
+        self,
+        paths: TransactionPaths,
+        plan: OwnershipPlan,
+        error: Exception,
+        default: JournalReason,
+    ) -> UpdateJournal:
+        journal = read_journal(paths.journal)
+        return self._rollback_locked(
+            paths,
+            journal,
+            plan,
+            self._forward_failure_code(error, default),
+        )
 
     def _run_operation(self, label: str, operation) -> None:
         self.hooks.before_filesystem_operation(label)
@@ -382,6 +538,17 @@ class UpdateEngine:
                 "host:backup:_internal",
                 lambda: os.replace(internal, target),
             )
+        if plan.metadata_was_present:
+            paths.metadata_backup.mkdir(parents=True, exist_ok=True)
+            for item in plan.prior_metadata_files:
+                source = self.install_root / item.path
+                target = paths.metadata_backup / item.path
+                if not source.exists():
+                    raise UpdateStateConflict()
+                self._run_operation(
+                    f"metadata:backup:{item.path}",
+                    lambda source=source, target=target: os.replace(source, target),
+                )
 
     def _install_host(self, paths: TransactionPaths, plan: OwnershipPlan) -> None:
         self.hooks.before_live_phase(JournalPhase.HOST_INSTALLED, paths, plan)
@@ -523,8 +690,398 @@ class UpdateEngine:
             if sha256_file(self.install_root / item.path) != item.sha256:
                 raise UpdateStateConflict()
 
-    def rollback(self, transaction_id: str, failure_code: JournalReason):
-        raise UpdateEngineError()
+    def _classify_file(self, path: Path, expected_sha256: str) -> PathState:
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return PathState.ABSENT
+        attributes = getattr(info, "st_file_attributes", 0)
+        reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        if not stat.S_ISREG(info.st_mode) or attributes & reparse:
+            return PathState.MISMATCH
+        try:
+            return (
+                PathState.EXACT
+                if sha256_file(path) == expected_sha256
+                else PathState.MISMATCH
+            )
+        except FileNotFoundError:
+            return PathState.MISMATCH
+
+    def _classify_tree(
+        self,
+        path: Path,
+        expected_files: tuple[FileDigest, ...],
+    ) -> PathState:
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return PathState.ABSENT
+        attributes = getattr(info, "st_file_attributes", 0)
+        reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        if not stat.S_ISDIR(info.st_mode) or attributes & reparse:
+            return PathState.MISMATCH
+        try:
+            actual_paths: list[str] = []
+
+            def visit(directory: Path) -> bool:
+                children = sorted(directory.iterdir(), key=lambda item: item.name)
+                if not children:
+                    return False
+                for child in children:
+                    child_info = child.lstat()
+                    child_attributes = getattr(
+                        child_info, "st_file_attributes", 0
+                    )
+                    if child_attributes & reparse:
+                        return False
+                    if stat.S_ISDIR(child_info.st_mode):
+                        if not visit(child):
+                            return False
+                    elif stat.S_ISREG(child_info.st_mode):
+                        actual_paths.append(child.relative_to(path).as_posix())
+                    else:
+                        return False
+                return True
+
+            if not visit(path):
+                return PathState.MISMATCH
+            actual_paths.sort()
+            if tuple(actual_paths) != tuple(item.path for item in expected_files):
+                return PathState.MISMATCH
+            if any(
+                sha256_file(path.joinpath(*item.path.split("/"))) != item.sha256
+                for item in expected_files
+            ):
+                return PathState.MISMATCH
+        except FileNotFoundError:
+            return PathState.MISMATCH
+        return PathState.EXACT
+
+    def _classify_transfer(
+        self,
+        source: Path,
+        destination: Path,
+        expected_files: tuple[FileDigest, ...],
+        *,
+        tree: bool,
+    ) -> TransferState:
+        if tree:
+            source_state = self._classify_tree(source, expected_files)
+            destination_state = self._classify_tree(destination, expected_files)
+        else:
+            if len(expected_files) != 1:
+                raise UpdateStateConflict()
+            source_state = self._classify_file(
+                source, expected_files[0].sha256
+            )
+            destination_state = self._classify_file(
+                destination, expected_files[0].sha256
+            )
+        return TransferState(source_state, destination_state)
+
+    def _rollback_rows(
+        self,
+        paths: TransactionPaths,
+        plan: OwnershipPlan,
+    ) -> tuple[_RollbackRow, ...]:
+        rows: list[_RollbackRow] = []
+
+        new_metadata = {item.path: item for item in plan.metadata_files}
+        prior_metadata = {item.path: item for item in plan.prior_metadata_files}
+        for name in sorted(new_metadata.keys() | prior_metadata.keys()):
+            rows.append(
+                _RollbackRow(
+                    live=self.install_root / name,
+                    failed_new=paths.failed_new_root / "metadata" / name,
+                    backup=paths.metadata_backup / name,
+                    new_expected=(new_metadata[name],) if name in new_metadata else None,
+                    prior_expected=(prior_metadata[name],) if name in prior_metadata else None,
+                    tree=False,
+                    remove_label=f"remove-new-metadata:{name}",
+                    restore_label=f"restore-metadata:{name}",
+                )
+            )
+
+        rows.append(
+            _RollbackRow(
+                live=self.install_root / "extension",
+                failed_new=paths.failed_new_root / "extension",
+                backup=paths.extension_backup,
+                new_expected=plan.extension_files,
+                prior_expected=(
+                    plan.prior_extension_files
+                    if plan.extension_was_present
+                    else None
+                ),
+                tree=True,
+                remove_label="remove-new-extension",
+                restore_label="restore-extension",
+            )
+        )
+
+        new_internal = tuple(
+            FileDigest(item.path.removeprefix("_internal/"), item.sha256)
+            for item in plan.host_files
+            if item.path.startswith("_internal/")
+        )
+        prior_internal = tuple(
+            FileDigest(item.path.removeprefix("_internal/"), item.sha256)
+            for item in plan.prior_host_files
+            if item.path.startswith("_internal/")
+        )
+        new_flat = {
+            item.path: item for item in plan.host_files if "/" not in item.path
+        }
+        prior_flat = {
+            item.path: item
+            for item in plan.prior_host_files
+            if "/" not in item.path
+        }
+
+        def host_file_row(name: str) -> _RollbackRow:
+            return _RollbackRow(
+                live=self.install_root / name,
+                failed_new=paths.failed_new_root / "host" / name,
+                backup=paths.host_backup / name,
+                new_expected=(new_flat[name],) if name in new_flat else None,
+                prior_expected=(prior_flat[name],) if name in prior_flat else None,
+                tree=False,
+                remove_label=f"remove-new-host:{name}",
+                restore_label=f"restore-host:{name}",
+            )
+
+        all_flat = new_flat.keys() | prior_flat.keys()
+        if "dh_native_host.exe" in all_flat:
+            rows.append(host_file_row("dh_native_host.exe"))
+        if new_internal or prior_internal:
+            rows.append(
+                _RollbackRow(
+                    live=self.install_root / "_internal",
+                    failed_new=paths.failed_new_root / "host" / "_internal",
+                    backup=paths.host_backup / "_internal",
+                    new_expected=new_internal or None,
+                    prior_expected=prior_internal or None,
+                    tree=True,
+                    remove_label="remove-new-host:_internal",
+                    restore_label="restore-host:_internal",
+                )
+            )
+        for name in sorted(all_flat - {"dh_native_host.exe"}):
+            rows.append(host_file_row(name))
+        return tuple(rows)
+
+    def _classify_expected(
+        self,
+        path: Path,
+        expected: tuple[FileDigest, ...],
+        *,
+        tree: bool,
+    ) -> PathState:
+        if tree:
+            return self._classify_tree(path, expected)
+        if len(expected) != 1:
+            raise UpdateStateConflict()
+        return self._classify_file(path, expected[0].sha256)
+
+    def _path_is_absent(self, path: Path) -> bool:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return True
+        return False
+
+    def _evaluate_rollback_row(
+        self,
+        row: _RollbackRow,
+    ) -> tuple[bool, bool]:
+        if row.new_expected is None:
+            if not self._path_is_absent(row.failed_new):
+                raise _UnsafeRecoveryState()
+            failed_state = PathState.ABSENT
+            live_new = None
+        else:
+            remove_state = self._classify_transfer(
+                row.live,
+                row.failed_new,
+                row.new_expected,
+                tree=row.tree,
+            )
+            live_new = remove_state.source
+            failed_state = remove_state.destination
+            if failed_state is PathState.MISMATCH:
+                raise _UnsafeRecoveryState()
+
+        if row.prior_expected is None:
+            if not self._path_is_absent(row.backup):
+                raise _UnsafeRecoveryState()
+            if self._path_is_absent(row.live):
+                return False, False
+            if (
+                live_new is PathState.EXACT
+                and failed_state is PathState.ABSENT
+            ):
+                return True, False
+            raise _UnsafeRecoveryState()
+
+        restore_state = self._classify_transfer(
+            row.backup,
+            row.live,
+            row.prior_expected,
+            tree=row.tree,
+        )
+        backup_state = restore_state.source
+        live_prior = restore_state.destination
+        if backup_state is PathState.MISMATCH:
+            raise _UnsafeRecoveryState()
+        if backup_state is PathState.ABSENT:
+            if live_prior is PathState.EXACT:
+                return False, False
+            if self._path_is_absent(row.live):
+                raise _RollbackEvidenceMissing()
+            raise _UnsafeRecoveryState()
+        if self._path_is_absent(row.live):
+            return False, True
+        if live_new is PathState.EXACT and failed_state is PathState.ABSENT:
+            return True, True
+        raise _UnsafeRecoveryState()
+
+    def _plan_rollback_operations(
+        self,
+        paths: TransactionPaths,
+        plan: OwnershipPlan,
+    ) -> tuple[tuple[_RollbackRow, ...], tuple[_RollbackRow, ...]]:
+        rows = self._rollback_rows(paths, plan)
+        remove: list[_RollbackRow] = []
+        restore: list[_RollbackRow] = []
+        for row in rows:
+            remove_pending, restore_pending = self._evaluate_rollback_row(row)
+            if remove_pending:
+                remove.append(row)
+            if restore_pending:
+                restore.append(row)
+
+        metadata = [row for row in restore if row.restore_label.startswith("restore-metadata:")]
+        extension = [row for row in restore if row.restore_label == "restore-extension"]
+        host = [row for row in restore if row.restore_label.startswith("restore-host:")]
+        host.sort(
+            key=lambda row: (
+                row.restore_label.endswith("dh_native_host.exe"),
+                row.restore_label,
+            )
+        )
+        metadata.sort(key=lambda row: row.restore_label, reverse=True)
+        return tuple(remove), tuple((*host, *extension, *metadata))
+
+    def _move_rollback_row(
+        self,
+        row: _RollbackRow,
+        *,
+        restore: bool,
+    ) -> None:
+        source = row.backup if restore else row.live
+        target = row.live if restore else row.failed_new
+        label = row.restore_label if restore else row.remove_label
+
+        def move() -> None:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source, target)
+
+        self._run_operation(label, move)
+
+    def _resume_rollback_products(
+        self,
+        paths: TransactionPaths,
+        plan: OwnershipPlan,
+    ) -> None:
+        remove, restore = self._plan_rollback_operations(paths, plan)
+        for row in remove:
+            self._move_rollback_row(row, restore=False)
+        for row in restore:
+            self._move_rollback_row(row, restore=True)
+        pending_remove, pending_restore = self._plan_rollback_operations(paths, plan)
+        if pending_remove or pending_restore:
+            raise UpdateStateConflict()
+
+    def _rollback_locked(
+        self,
+        paths: TransactionPaths,
+        journal: UpdateJournal,
+        plan: OwnershipPlan,
+        failure_code: JournalReason,
+    ) -> UpdateJournal:
+        if journal.phase in (JournalPhase.COMMITTED, JournalPhase.ROLLED_BACK):
+            return journal
+        if journal.phase is JournalPhase.RECOVERY_REQUIRED:
+            rolling = transition(journal, JournalPhase.ROLLING_BACK)
+            write_journal_atomic(paths.journal, rolling)
+            self.hooks.after_journal_transition(rolling.phase)
+        elif journal.phase is JournalPhase.ROLLING_BACK:
+            rolling = journal
+        else:
+            rolling = transition(
+                journal,
+                JournalPhase.ROLLING_BACK,
+                failure_code=failure_code,
+            )
+            write_journal_atomic(paths.journal, rolling)
+            self.hooks.after_journal_transition(rolling.phase)
+        try:
+            self._resume_rollback_products(paths, plan)
+            rolled_back = transition(rolling, JournalPhase.ROLLED_BACK)
+            write_journal_atomic(paths.journal, rolled_back)
+            self.hooks.after_journal_transition(rolled_back.phase)
+            return rolled_back
+        except Exception as rollback_error:
+            reason = (
+                JournalReason.MANUAL_RECOVERY_REQUIRED
+                if isinstance(rollback_error, _UnsafeRecoveryState)
+                else JournalReason.ROLLBACK_FAILED
+            )
+            recovery = transition(
+                rolling,
+                JournalPhase.RECOVERY_REQUIRED,
+                failure_code=reason,
+            )
+            try:
+                write_journal_atomic(paths.journal, recovery)
+            except Exception as persistence_error:
+                rollback_safe = UpdateEngineError()
+                rollback_safe.__cause__ = rollback_error
+                persistence_safe = JournalValidationError()
+                persistence_safe.__cause__ = persistence_error
+                raise ExceptionGroup(
+                    "rollback_and_journal_persistence_failed",
+                    [rollback_safe, persistence_safe],
+                )
+            self.hooks.after_journal_transition(recovery.phase)
+            return recovery
+
+    def rollback(
+        self, transaction_id: str, failure_code: JournalReason
+    ) -> UpdateJournal:
+        tx = parse_transaction_id(transaction_id)
+        with self._mutex_factory(self.install_root):
+            paths, journal, plan = self._load_authority(tx)
+            if journal.phase in (JournalPhase.COMMITTED, JournalPhase.ROLLED_BACK):
+                return journal
+            if journal.phase is JournalPhase.RECOVERY_REQUIRED:
+                if failure_code != journal.original_failure_code:
+                    raise UpdateStateConflict()
+            elif journal.phase is JournalPhase.ROLLING_BACK:
+                if failure_code != journal.original_failure_code:
+                    raise UpdateStateConflict()
+            elif journal.phase not in (
+                JournalPhase.WAITING_FOR_HOST_EXIT,
+                JournalPhase.HOST_BACKED_UP,
+                JournalPhase.HOST_INSTALLED,
+                JournalPhase.EXTENSION_BACKED_UP,
+                JournalPhase.EXTENSION_INSTALLED,
+                JournalPhase.METADATA_INSTALLED,
+                JournalPhase.PROBING,
+            ) or failure_code not in FORWARD_FAILURE_CODES:
+                raise UpdateStateConflict()
+            return self._rollback_locked(paths, journal, plan, failure_code)
 
     def finalize_terminal_evidence(self, transaction_id: str) -> bool:
         paths = self._paths(transaction_id)
