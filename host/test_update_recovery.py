@@ -3,13 +3,37 @@ import shutil
 import stat
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
+from install_integrity import UpdateProbeResult
+from package_manifest import load_update_manifest
+from product_info import VERSION
 from test_native_registration import MemoryRegistryBackend
+from test_update_engine_host import TX, make_package
+from test_update_support import FakeMutationMutex, InjectedCrash
+from update_engine import UpdateEngine, UpdateEngineHooks
+from update_journal import (
+    JournalReason,
+    InitiatingProcessIdentity,
+    JournalPhase,
+    TransactionPaths,
+    UpdateInitiator,
+    read_journal,
+)
+from update_platform import RUN_ONCE_VALUE_NAME, RetainedProcessHandle
+from update_ownership import read_ownership_plan
 from update_recovery import (
+    RecoveryController,
+    RecoveryDependencies,
+    RecoveryDiagnostics,
     RecoveryError,
     RunnerSource,
+    TemporaryStagedProbeWorkspace,
+    launch_active_recovery,
+    launch_complete_update,
     install_recovery_tree,
     inventory_onedir,
     register_status_host,
@@ -51,6 +75,151 @@ def snapshot_tree(root: Path) -> dict[str, tuple[str, bytes | None]]:
         else:
             result[relative] = ("other", None)
     return result
+
+
+def inventory_files(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
+
+
+class MemoryRunOnceStore:
+    def __init__(self):
+        self.values = {}
+        self.write_calls = []
+        self.delete_calls = []
+
+    def write_expand_string(self, name, value):
+        self.write_calls.append((name, value))
+        self.values[name] = ("REG_EXPAND_SZ", value)
+
+    def read(self, name):
+        return self.values.get(name)
+
+    def delete(self, name):
+        self.delete_calls.append(name)
+        self.values.pop(name, None)
+
+
+class RecordingStagedProbeWorkspace:
+    def __init__(self, root: Path):
+        self.root = root.resolve()
+        self.create_calls = []
+        self.remove_calls = []
+        self.last_root = self.root
+
+    def create(self, forbidden_roots):
+        self.create_calls.append(tuple(forbidden_roots))
+        self.root.mkdir()
+        self.last_root = self.root
+        return self.root
+
+    def remove(self, root):
+        self.remove_calls.append(root)
+        shutil.rmtree(root)
+
+
+class RecordingProbeProcess:
+    def __init__(self, result):
+        self.result = result
+        self.results = []
+        self.calls = []
+        self.snapshots = []
+        self.callback = None
+
+    def run_probe(self, executable, manifest_path):
+        self.calls.append(
+            SimpleNamespace(executable=executable, manifest_path=manifest_path)
+        )
+        self.snapshots.append(inventory_files(executable.parent))
+        if self.callback is not None:
+            self.callback(executable, manifest_path)
+        if self.results:
+            return self.results.pop(0)
+        return self.result
+
+
+class NoopProcessAdapter:
+    def __init__(self):
+        self.opened_identities = []
+        self.waited_identities = []
+        self.closed_identities = []
+        self.launched = []
+        self.handle = None
+        self.return_absent = False
+        self.wait_result = True
+        self.wait_error = None
+
+    def capture_current_identity(self, expected_executable):
+        raise AssertionError("capture not expected")
+
+    def open_identity(self, identity, expected_executable):
+        self.opened_identities.append(identity)
+        if self.return_absent:
+            return None
+        if self.handle is not None:
+            return self.handle
+        return RetainedProcessHandle(
+            identity=identity,
+            executable=expected_executable,
+            native_handle=501,
+        )
+
+    def wait(self, handle, timeout_seconds):
+        self.waited_identities.append(handle.identity)
+        if self.wait_error is not None:
+            raise self.wait_error
+        return self.wait_result
+
+    def close(self, handle):
+        if not handle.closed:
+            handle.closed = True
+            self.closed_identities.append(handle.identity)
+
+    def launch_detached(self, executable, args, cwd):
+        self.launched.append((executable, tuple(args), cwd))
+        return InitiatingProcessIdentity(99, "win-create-time-99")
+
+
+class NoopClock:
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class NonPathPathLike(os.PathLike[str]):
+    def __init__(self, value: Path):
+        self.value = value
+
+    def __fspath__(self):
+        return os.fspath(self.value)
+
+
+class ReturningStagedProbeWorkspace:
+    def __init__(self, value):
+        self.value = value
+        self.remove_calls = []
+
+    def create(self, _forbidden_roots):
+        return self.value
+
+    def remove(self, root):
+        self.remove_calls.append(root)
+
+
+class FailingRemoveWorkspace(RecordingStagedProbeWorkspace):
+    def remove(self, root):
+        self.remove_calls.append(root)
+        raise OSError("injected cleanup failure")
 
 
 class RecoveryTreeTests(unittest.TestCase):
@@ -310,6 +479,622 @@ class RecoveryTreeTests(unittest.TestCase):
         with self.assertRaisesRegex(RecoveryError, "^invalid_updates_root$"):
             install_recovery_tree(source, invalid)
         self.assertFalse(invalid.exists())
+
+
+class StagedHostPreflightTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.install_root = self.root / "install"
+        self.install_root.mkdir()
+        self.package = make_package(self.root)
+        self.mutex = FakeMutationMutex()
+        self.engine = UpdateEngine(
+            self.install_root,
+            mutex_factory=lambda _root: self.mutex,
+        )
+        self.engine.create_prepared(
+            self.package,
+            TX,
+            expected_version=VERSION,
+            prior_version=None,
+            initiator=UpdateInitiator.BROWSER,
+        )
+        self.paths = TransactionPaths.for_install(self.install_root, TX)
+        self.journal = read_journal(self.paths.journal)
+        self.ownership = read_ownership_plan(self.paths.ownership)
+        self.manifest = load_update_manifest(self.paths.probe_manifest)
+        self.success_result = UpdateProbeResult(
+            status="success",
+            host_version=self.journal.target_version,
+            extension_version=self.journal.target_version,
+            capabilities=self.manifest.provided_capabilities,
+        )
+        self.workspace = RecordingStagedProbeWorkspace(
+            self.root / "staged-probe-view"
+        )
+        self.probe = RecordingProbeProcess(self.success_result)
+        self.run_once = MemoryRunOnceStore()
+        self.process = NoopProcessAdapter()
+        self.events = []
+        self.dependencies = RecoveryDependencies(
+            process=self.process,
+            probe_process=self.probe,
+            staged_probe_workspace=self.workspace,
+            run_once=self.run_once,
+            clock=NoopClock(),
+            mutex_factory=lambda _root: self.mutex,
+            set_cwd=lambda _path: None,
+            diagnostics=RecoveryDiagnostics(
+                after_staged_probe_event=self.events.append
+            ),
+        )
+        self.controller = RecoveryController(
+            self.install_root, self.dependencies
+        )
+
+    def expected_combined_inventory(self):
+        expected = {}
+        for record in (
+            *self.ownership.host_files,
+            *self.ownership.metadata_files,
+            *self.ownership.seed_files,
+        ):
+            expected[record.path] = (
+                self.paths.staged_host / record.path
+            ).read_bytes()
+        for record in self.ownership.extension_files:
+            expected[f"extension/{record.path}"] = (
+                self.paths.staged_extension / record.path
+            ).read_bytes()
+        return expected
+
+    def test_preflight_starts_combined_staged_frozen_target_before_activation(self):
+        live_before = snapshot_tree(self.install_root)
+
+        with mock.patch("update_recovery.UpdateEngine") as engine_class:
+            result = self.controller.preflight_prepared_target(TX)
+
+        self.assertEqual(result, self.success_result)
+        call = self.probe.calls[0]
+        self.assertEqual(call.executable.name, "dh_native_host.exe")
+        self.assertNotEqual(call.executable.parent, self.paths.staged_host)
+        self.assertFalse(call.executable.is_relative_to(self.install_root))
+        self.assertEqual(
+            call.manifest_path, self.paths.probe_manifest.resolve()
+        )
+        self.assertEqual(
+            self.probe.snapshots[0], self.expected_combined_inventory()
+        )
+        self.assertFalse(self.workspace.last_root.exists())
+        self.assertEqual(read_journal(self.paths.journal), self.journal)
+        self.assertEqual(snapshot_tree(self.install_root), live_before)
+        self.assertEqual(self.run_once.write_calls, [])
+        engine_class.assert_not_called()
+        self.assertEqual(self.events, ["create", "copy", "process", "remove"])
+
+    def test_failed_preflight_leaves_prepared_inert(self):
+        self.probe.result = UpdateProbeResult(
+            status="error", error_code="package_probe_failed"
+        )
+        live_before = snapshot_tree(self.install_root)
+        with mock.patch("update_recovery.UpdateEngine") as engine_class:
+            with self.assertRaisesRegex(
+                RecoveryError, "^staged_probe_failed$"
+            ):
+                self.controller.preflight_prepared_target(TX)
+        self.assertEqual(read_journal(self.paths.journal).phase, JournalPhase.PREPARED)
+        self.assertEqual(snapshot_tree(self.install_root), live_before)
+        self.assertEqual(self.run_once.write_calls, [])
+        engine_class.assert_not_called()
+        self.assertFalse(self.workspace.last_root.exists())
+
+    def test_staged_probe_workspace_receives_every_forbidden_root(self):
+        self.controller.preflight_prepared_target(TX)
+        self.assertEqual(
+            self.workspace.create_calls,
+            [(
+                self.paths.install_root,
+                self.paths.updates_root,
+                self.paths.transaction_root,
+                self.paths.staged_root,
+                self.paths.probe_root,
+            )],
+        )
+
+    def test_probe_time_staged_mutation_fails_before_any_activation_mutation(self):
+        self.probe.callback = lambda _exe, _manifest: (
+            self.paths.staged_host / "system_prompt.md"
+        ).write_bytes(b"mutated-after-copy")
+        live_before = snapshot_tree(self.install_root)
+        with mock.patch("update_recovery.UpdateEngine") as engine_class:
+            with self.assertRaisesRegex(
+                RecoveryError, "^staged_probe_failed$"
+            ):
+                self.controller.preflight_prepared_target(TX)
+        self.assertEqual(read_journal(self.paths.journal).phase, JournalPhase.PREPARED)
+        self.assertEqual(self.run_once.write_calls, [])
+        engine_class.assert_not_called()
+        self.assertFalse(self.workspace.last_root.exists())
+        self.assertNotEqual(snapshot_tree(self.install_root), live_before)
+
+    def test_probe_time_staged_mutation_table_fails_before_activation(self):
+        cases = (
+            ("host", self.paths.staged_host / "system_prompt.md", b"mutated-host"),
+            (
+                "extension",
+                self.paths.staged_extension / "assets/app.js",
+                b"mutated-extension",
+            ),
+            (
+                "metadata",
+                self.paths.staged_host / "installed-product.json",
+                b"mutated-metadata",
+            ),
+            ("added", self.paths.staged_host / "added.bin", b"added"),
+        )
+        for name, target, payload in cases:
+            with self.subTest(name=name):
+                existed = target.exists()
+                original = target.read_bytes() if existed else None
+                self.probe.callback = (
+                    lambda _exe, _manifest, target=target, payload=payload:
+                    target.write_bytes(payload)
+                )
+                with mock.patch("update_recovery.UpdateEngine") as engine_class:
+                    with self.assertRaisesRegex(
+                        RecoveryError, "^staged_probe_failed$"
+                    ):
+                        self.controller.preflight_prepared_target(TX)
+                self.assertEqual(
+                    read_journal(self.paths.journal).phase,
+                    JournalPhase.PREPARED,
+                )
+                self.assertEqual(self.run_once.write_calls, [])
+                engine_class.assert_not_called()
+                self.assertFalse(self.workspace.last_root.exists())
+                if existed:
+                    target.write_bytes(original)
+                else:
+                    target.unlink()
+                self.probe.callback = None
+                self.probe.calls.clear()
+                self.probe.snapshots.clear()
+                self.events.clear()
+
+    def test_probe_result_identity_mismatch_table_is_fixed_failure(self):
+        cases = (
+            replace(self.success_result, host_version="wrong"),
+            replace(self.success_result, extension_version="wrong"),
+            replace(self.success_result, capabilities=("wrong",)),
+            replace(self.success_result, capabilities=()),
+        )
+        for result in cases:
+            with self.subTest(result=result):
+                self.probe.result = result
+                with self.assertRaisesRegex(
+                    RecoveryError, "^staged_probe_failed$"
+                ):
+                    self.controller.preflight_prepared_target(TX)
+                self.assertEqual(
+                    read_journal(self.paths.journal).phase,
+                    JournalPhase.PREPARED,
+                )
+                self.assertEqual(self.run_once.write_calls, [])
+                self.assertFalse(self.workspace.last_root.exists())
+                self.probe.calls.clear()
+                self.probe.snapshots.clear()
+                self.events.clear()
+
+    def test_copy_process_and_cleanup_faults_are_fixed_and_inert(self):
+        live_before = snapshot_tree(self.install_root)
+        cases = ("copy", "process", "cleanup")
+        for case in cases:
+            with self.subTest(case=case):
+                workspace = (
+                    FailingRemoveWorkspace(self.root / "cleanup-view")
+                    if case == "cleanup"
+                    else RecordingStagedProbeWorkspace(
+                        self.root / f"{case}-view"
+                    )
+                )
+                dependencies = replace(
+                    self.dependencies,
+                    staged_probe_workspace=workspace,
+                )
+                controller = RecoveryController(
+                    self.install_root, dependencies
+                )
+                copy_patch = (
+                    mock.patch(
+                        "update_recovery._copy_plain_file",
+                        side_effect=OSError("injected copy failure"),
+                    )
+                    if case == "copy"
+                    else mock.patch("update_recovery._copy_plain_file", wraps=__import__("update_recovery")._copy_plain_file)
+                )
+                process_error = self.probe.callback
+                if case == "process":
+                    self.probe.callback = lambda *_args: (_ for _ in ()).throw(
+                        OSError("injected process failure")
+                    )
+                with copy_patch, mock.patch(
+                    "update_recovery.UpdateEngine"
+                ) as engine_class, self.assertRaisesRegex(
+                    RecoveryError, "^staged_probe_failed$"
+                ):
+                    controller.preflight_prepared_target(TX)
+                self.probe.callback = process_error
+                self.assertEqual(
+                    read_journal(self.paths.journal).phase,
+                    JournalPhase.PREPARED,
+                )
+                self.assertEqual(self.run_once.write_calls, [])
+                engine_class.assert_not_called()
+                self.assertEqual(snapshot_tree(self.install_root), live_before)
+                if case in ("copy", "process"):
+                    self.assertFalse(workspace.last_root.exists())
+                self.probe.calls.clear()
+                self.probe.snapshots.clear()
+                self.events.clear()
+
+    def test_workspace_adapter_rejects_wrong_type_or_escaping_root_before_copy_or_cleanup(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        values = (
+            os.fspath(outside),
+            NonPathPathLike(outside),
+            self.paths.staged_root / ".." / self.paths.probe_root.name,
+        )
+        for value in values:
+            with self.subTest(value_type=type(value).__name__):
+                workspace = ReturningStagedProbeWorkspace(value)
+                dependencies = replace(
+                    self.dependencies, staged_probe_workspace=workspace
+                )
+                controller = RecoveryController(
+                    self.install_root, dependencies
+                )
+                with mock.patch(
+                    "update_recovery._materialize_staged_probe_root"
+                ) as materialize, self.assertRaisesRegex(
+                    RecoveryError, "^staged_probe_failed$"
+                ):
+                    controller.preflight_prepared_target(TX)
+                materialize.assert_not_called()
+                self.assertEqual(workspace.remove_calls, [])
+                self.assertEqual(self.run_once.write_calls, [])
+
+
+class RecoveryFixture:
+    initiator = UpdateInitiator.BROWSER
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.install_root = self.root / "install"
+        self.install_root.mkdir()
+        self.package = make_package(self.root)
+        self.mutex = FakeMutationMutex()
+        self.prior_version = None
+        if self.initiator is UpdateInitiator.BROWSER:
+            shutil.copytree(
+                self.package.stage_root / "host",
+                self.install_root,
+                dirs_exist_ok=True,
+            )
+            shutil.copytree(
+                self.package.stage_root / "extension",
+                self.install_root / "extension",
+            )
+            self.prior_version = VERSION
+        self.preparer = UpdateEngine(
+            self.install_root,
+            mutex_factory=lambda _root: self.mutex,
+        )
+        self.preparer.create_prepared(
+            self.package,
+            TX,
+            expected_version=(
+                VERSION if self.initiator is UpdateInitiator.BROWSER else None
+            ),
+            prior_version=self.prior_version,
+            initiator=self.initiator,
+        )
+        self.paths = TransactionPaths.for_install(self.install_root, TX)
+        self.manifest = load_update_manifest(self.paths.probe_manifest)
+        self.success = UpdateProbeResult(
+            status="success",
+            host_version=VERSION,
+            extension_version=VERSION,
+            capabilities=self.manifest.provided_capabilities,
+        )
+        self.probe = RecordingProbeProcess(self.success)
+        self.workspace = RecordingStagedProbeWorkspace(
+            self.root / "probe-view"
+        )
+        self.run_once = MemoryRunOnceStore()
+        self.process = NoopProcessAdapter()
+        self.cwd_calls = []
+        self.events = []
+        self.clock = NoopClock()
+        self.dependencies = RecoveryDependencies(
+            process=self.process,
+            probe_process=self.probe,
+            staged_probe_workspace=self.workspace,
+            run_once=self.run_once,
+            clock=self.clock,
+            mutex_factory=lambda _root: self.mutex,
+            set_cwd=self.cwd_calls.append,
+            diagnostics=RecoveryDiagnostics(
+                after_staged_probe_event=self.events.append,
+                after_recovery_setup_event=self.events.append,
+            ),
+        )
+        self.controller = RecoveryController(
+            self.install_root, self.dependencies
+        )
+        source = (
+            self.install_root
+            if self.initiator is UpdateInitiator.BROWSER
+            else self.paths.staged_host
+        )
+        self.registry = (
+            MemoryRegistryBackend()
+            if self.initiator is UpdateInitiator.BROWSER
+            else None
+        )
+        self.recovery = self.controller.prepare_recovery_runtime(
+            TX, source, self.registry
+        )
+        self.probe.calls.clear()
+        self.probe.snapshots.clear()
+        self.events.clear()
+
+
+class RecoveryRunnerTests(RecoveryFixture, unittest.TestCase):
+    def test_prepare_runtime_order_and_browser_registry_contract(self):
+        self.controller.prepare_recovery_runtime(
+            TX, self.install_root, self.registry
+        )
+        self.assertEqual(
+            self.events,
+            [
+                "create",
+                "copy",
+                "process",
+                "remove",
+                "tree-installed",
+                "status-registered",
+            ],
+        )
+        self.events.clear()
+        self.probe.calls.clear()
+        with self.assertRaisesRegex(RecoveryError, "^staged_probe_failed$"):
+            self.controller.prepare_recovery_runtime(
+                TX, self.install_root, None
+            )
+        self.assertEqual(self.events, [])
+        self.assertEqual(self.probe.calls, [])
+
+    def test_activation_persists_complete_identity_before_retained_wait(self):
+        identity = InitiatingProcessIdentity(
+            77, "win-create-time-133801632000000000"
+        )
+        result = self.controller.run_complete_update(TX, identity)
+        self.assertEqual(result.phase, JournalPhase.COMMITTED)
+        self.assertEqual(result.initiating_process, identity)
+        self.assertEqual(self.process.opened_identities, [identity])
+        self.assertEqual(self.process.waited_identities, [identity])
+        self.assertEqual(self.process.closed_identities, [identity])
+        self.assertIsNone(self.run_once.read(RUN_ONCE_VALUE_NAME))
+
+    def test_failed_staged_preflight_never_arms_or_activates(self):
+        self.probe.result = UpdateProbeResult(
+            status="error", error_code="package_probe_failed"
+        )
+        identity = InitiatingProcessIdentity(77, "win-create-time-77")
+        before = read_journal(self.paths.journal)
+        with self.assertRaisesRegex(RecoveryError, "^staged_probe_failed$"):
+            self.controller.run_complete_update(TX, identity)
+        self.assertEqual(read_journal(self.paths.journal), before)
+        self.assertEqual(self.run_once.write_calls, [])
+        self.assertEqual(self.process.opened_identities, [])
+
+    def test_wrong_or_absent_browser_identity_leaves_prepared(self):
+        identity = InitiatingProcessIdentity(77, "win-create-time-77")
+        self.process.return_absent = True
+        with self.assertRaisesRegex(
+            RecoveryError, "^initiating_process_identity_missing$"
+        ):
+            self.controller.run_complete_update(TX, identity)
+        self.assertEqual(read_journal(self.paths.journal).phase, JournalPhase.PREPARED)
+        self.assertEqual(self.run_once.write_calls, [])
+
+    def test_wait_failure_maps_through_plan_b_rollback_and_closes_once(self):
+        self.process.wait_result = False
+        identity = InitiatingProcessIdentity(77, "win-create-time-77")
+        result = self.controller.run_complete_update(TX, identity)
+        self.assertEqual(result.phase, JournalPhase.ROLLED_BACK)
+        self.assertEqual(result.original_failure_code, JournalReason.HOST_EXIT_WAIT_FAILED)
+        self.assertEqual(self.process.closed_identities, [identity])
+        self.assertIsNone(self.run_once.read(RUN_ONCE_VALUE_NAME))
+
+    def test_interruption_after_arm_rearms_and_closes_retained_handle_once(self):
+        identity = InitiatingProcessIdentity(77, "win-create-time-77")
+        diagnostics = replace(
+            self.dependencies.diagnostics,
+            after_journal_transition=lambda phase: (
+                (_ for _ in ()).throw(InjectedCrash())
+                if phase is JournalPhase.WAITING_FOR_HOST_EXIT
+                else None
+            ),
+        )
+        controller = RecoveryController(
+            self.install_root,
+            replace(self.dependencies, diagnostics=diagnostics),
+        )
+        with self.assertRaises(InjectedCrash):
+            controller.run_complete_update(TX, identity)
+        self.assertIsNotNone(self.run_once.read(RUN_ONCE_VALUE_NAME))
+        self.assertEqual(self.process.closed_identities, [identity])
+        self.assertEqual(read_journal(self.paths.journal).phase, JournalPhase.WAITING_FOR_HOST_EXIT)
+
+    def test_duplicate_activation_preserves_original_identity(self):
+        identity = InitiatingProcessIdentity(77, "win-create-time-77")
+        first = self.controller.run_complete_update(TX, identity)
+        with self.assertRaisesRegex(RecoveryError, "^update_activation_failed$"):
+            self.controller.run_complete_update(
+                TX,
+                InitiatingProcessIdentity(78, "win-create-time-78"),
+            )
+        self.assertEqual(read_journal(self.paths.journal).initiating_process, identity)
+        self.assertEqual(first.phase, JournalPhase.COMMITTED)
+
+    def test_recover_active_resets_cwd_and_opens_waiting_identity_once(self):
+        identity = InitiatingProcessIdentity(77, "win-create-time-77")
+        self.preparer.activate_prepared(TX, identity)
+        result = self.controller.recover_active()
+        self.assertEqual(result.phase, JournalPhase.COMMITTED)
+        self.assertEqual(self.cwd_calls, [self.paths.transaction_root.resolve()])
+        self.assertEqual(self.process.opened_identities, [identity])
+        self.assertEqual(self.process.waited_identities, [identity])
+
+    def test_rollback_failed_retry_uses_persisted_original_failure(self):
+        old_executable = (self.install_root / "dh_native_host.exe").read_bytes()
+        self.probe.results = [
+            self.success,
+            UpdateProbeResult(status="error", error_code="package_probe_failed"),
+        ]
+
+        def remove_backup(label):
+            if label == "restore-host:dh_native_host.exe":
+                (self.paths.host_backup / "dh_native_host.exe").unlink(missing_ok=True)
+
+        diagnostics = replace(
+            self.dependencies.diagnostics,
+            before_filesystem_operation=remove_backup,
+        )
+        controller = RecoveryController(
+            self.install_root,
+            replace(self.dependencies, diagnostics=diagnostics),
+        )
+        identity = InitiatingProcessIdentity(77, "win-create-time-77")
+        failed = controller.run_complete_update(TX, identity)
+        self.assertEqual(failed.phase, JournalPhase.RECOVERY_REQUIRED)
+        self.assertEqual(failed.reason_code, JournalReason.ROLLBACK_FAILED)
+        self.assertEqual(failed.original_failure_code, JournalReason.STARTUP_PROBE_FAILED)
+        self.assertIsNotNone(self.run_once.read(RUN_ONCE_VALUE_NAME))
+
+        self.paths.host_backup.mkdir(parents=True, exist_ok=True)
+        (self.paths.host_backup / "dh_native_host.exe").write_bytes(old_executable)
+        recovered = RecoveryController(
+            self.install_root,
+            replace(self.dependencies, diagnostics=RecoveryDiagnostics()),
+        ).recover_active()
+        self.assertEqual(recovered.phase, JournalPhase.ROLLED_BACK)
+        self.assertEqual(recovered.original_failure_code, JournalReason.STARTUP_PROBE_FAILED)
+
+    def test_manual_recovery_required_removes_run_once_without_retry(self):
+        self.probe.results = [self.success, self.success]
+
+        def corrupt_live(_executable, _manifest):
+            if len(self.probe.calls) == 2:
+                (self.install_root / "system_prompt.md").write_bytes(b"corrupt-live")
+
+        self.probe.callback = corrupt_live
+        identity = InitiatingProcessIdentity(77, "win-create-time-77")
+        result = self.controller.run_complete_update(TX, identity)
+        self.assertEqual(result.phase, JournalPhase.RECOVERY_REQUIRED)
+        self.assertEqual(result.reason_code, JournalReason.MANUAL_RECOVERY_REQUIRED)
+        self.assertIsNone(self.run_once.read(RUN_ONCE_VALUE_NAME))
+        reread = self.controller.recover_active()
+        self.assertEqual(reread, result)
+        self.assertIsNone(self.run_once.read(RUN_ONCE_VALUE_NAME))
+
+    def test_wait_until_ready_times_out_prepared_and_accepts_matching_waiting(self):
+        identity = InitiatingProcessIdentity(77, "win-create-time-77")
+        with self.assertRaisesRegex(RecoveryError, "^update_activation_failed$"):
+            self.controller.wait_until_ready(TX, identity, 0.1)
+        self.assertGreaterEqual(self.clock.now, 0.1)
+        self.preparer.activate_prepared(TX, identity)
+        self.assertEqual(
+            self.controller.wait_until_ready(TX, identity, 0).phase,
+            JournalPhase.WAITING_FOR_HOST_EXIT,
+        )
+
+    def test_recover_journal_rejects_path_outside_exact_transaction(self):
+        outside = self.root / "journal.json"
+        outside.write_bytes(self.paths.journal.read_bytes())
+        with self.assertRaisesRegex(RecoveryError, "^journal_outside_updates$"):
+            self.controller.recover_journal(outside)
+
+    def test_launch_helpers_use_canonical_transaction_cwd(self):
+        identity = InitiatingProcessIdentity(77, "win-create-time-77")
+        launch_complete_update(
+            self.process, self.recovery, self.paths, identity
+        )
+        self.assertEqual(
+            self.process.launched[-1][2], self.paths.transaction_root.resolve()
+        )
+        launch_active_recovery(self.process, self.install_root)
+        self.assertEqual(
+            self.process.launched[-1][2], self.paths.transaction_root.resolve()
+        )
+
+
+class InstallerRecoveryTests(RecoveryFixture, unittest.TestCase):
+    initiator = UpdateInitiator.INSTALLER
+
+    def test_installer_activation_uses_null_identity_and_never_opens_or_waits(self):
+        result = self.controller.run_installer_update(TX)
+        self.assertEqual(result.phase, JournalPhase.COMMITTED)
+        self.assertIsNone(result.initiating_process)
+        self.assertEqual(self.process.opened_identities, [])
+        self.assertEqual(self.process.waited_identities, [])
+        self.assertIsNone(self.run_once.read(RUN_ONCE_VALUE_NAME))
+
+    def test_installed_probe_remains_commit_gate_after_staged_probe_passes(self):
+        self.probe.results = [
+            self.success,
+            UpdateProbeResult(
+                status="error", error_code="package_probe_failed"
+            ),
+        ]
+        result = self.controller.run_installer_update(TX)
+        self.assertEqual(len(self.probe.calls), 2)
+        self.assertFalse(
+            self.probe.calls[0].executable.is_relative_to(self.install_root)
+        )
+        self.assertEqual(
+            self.probe.calls[1].executable,
+            self.install_root / "dh_native_host.exe",
+        )
+        self.assertEqual(result.phase, JournalPhase.ROLLED_BACK)
+
+    def test_browser_and_installer_methods_reject_wrong_initiator(self):
+        identity = InitiatingProcessIdentity(77, "win-create-time-77")
+        with self.assertRaises(RecoveryError):
+            self.controller.run_complete_update(TX, identity)
+
+    def test_prepare_runtime_order_and_installer_registry_contract(self):
+        self.controller.prepare_recovery_runtime(
+            TX, self.paths.staged_host, None
+        )
+        self.assertEqual(
+            self.events,
+            ["create", "copy", "process", "remove", "tree-installed"],
+        )
+        self.events.clear()
+        self.probe.calls.clear()
+        with self.assertRaisesRegex(RecoveryError, "^staged_probe_failed$"):
+            self.controller.prepare_recovery_runtime(
+                TX, self.paths.staged_host, MemoryRegistryBackend()
+            )
+        self.assertEqual(self.events, [])
+        self.assertEqual(self.probe.calls, [])
 
 
 if __name__ == "__main__":
