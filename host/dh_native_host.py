@@ -127,8 +127,7 @@ import traceback
 import urllib.request
 from dataclasses import dataclass
 import hashlib
-
-VERSION = "2.0.74-beta.4"
+from product_info import VERSION
 
 # --- Cross-repo session-id coordination anchor (2026-07-03) ---
 # DH derives each Copilot session id as a deterministic UUIDv5 from the bare

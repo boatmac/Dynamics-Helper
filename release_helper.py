@@ -5,18 +5,18 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 # Configuration
-# Run from root of repo
-ROOT_DIR = os.getcwd()
-EXT_DIR = os.path.join(ROOT_DIR, "extension")
-HOST_DIR = os.path.join(ROOT_DIR, "host")
-PACKAGE_JSON = os.path.join(EXT_DIR, "package.json")
-MANIFEST_JSON = os.path.join(EXT_DIR, "manifest.json")
-HOST_FILE = os.path.join(HOST_DIR, "dh_native_host.py")
-EXT_DIST_DIR = os.path.join(EXT_DIR, "dist")
-INSTALL_SCRIPT = os.path.join(ROOT_DIR, "installer_core.ps1")
-INSTALL_WRAPPER = os.path.join(ROOT_DIR, "install.bat")
+ROOT_DIR = Path(__file__).resolve().parent
+EXT_DIR = ROOT_DIR / "extension"
+HOST_DIR = ROOT_DIR / "host"
+PACKAGE_JSON = EXT_DIR / "package.json"
+MANIFEST_JSON = EXT_DIR / "manifest.json"
+HOST_FILE = HOST_DIR / "product_info.py"
+EXT_DIST_DIR = EXT_DIR / "dist"
+INSTALL_SCRIPT = ROOT_DIR / "installer_core.ps1"
+INSTALL_WRAPPER = ROOT_DIR / "install.bat"
 
 
 def update_json_version(file_path, new_version):
