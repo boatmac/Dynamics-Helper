@@ -133,7 +133,10 @@ import traceback
 import urllib.request
 from dataclasses import dataclass
 import hashlib
-from product_info import VERSION
+from pathlib import Path
+
+from install_integrity import InstallationVerification, InstallationVerifier
+from product_info import VERSION, get_host_capabilities
 
 # --- Cross-repo session-id coordination anchor (2026-07-03) ---
 # DH derives each Copilot session id as a deterministic UUIDv5 from the bare
@@ -487,6 +490,9 @@ class NativeHost:
         self.current_prompt_fingerprint: str | None = None
         self.last_session_error: str | None = None
         self.last_prompt_source_error: PromptSourceError | None = None
+        self._installation_verifier = InstallationVerifier(
+            Path(self._get_install_dir())
+        )
 
         # Log startup location
         logger.info(
@@ -620,6 +626,41 @@ class NativeHost:
         if getattr(sys, "frozen", False):
             return os.path.dirname(sys.executable)
         return os.path.dirname(os.path.abspath(__file__))
+
+    @staticmethod
+    def _serialize_installation_verification(
+        verification: InstallationVerification,
+    ) -> dict[str, str]:
+        if verification.mode == "development":
+            if verification.integrity != "development" or not verification.host_version:
+                return {
+                    "mode": "packaged",
+                    "integrity": "failed",
+                    "error_code": "installation_integrity_failed",
+                }
+            return {
+                "mode": "development",
+                "integrity": "development",
+                "host_version": verification.host_version,
+            }
+        if verification.integrity == "verified":
+            if not verification.host_version or not verification.extension_version:
+                return {
+                    "mode": "packaged",
+                    "integrity": "failed",
+                    "error_code": "installation_integrity_failed",
+                }
+            return {
+                "mode": "packaged",
+                "integrity": "verified",
+                "host_version": verification.host_version,
+                "extension_version": verification.extension_version,
+            }
+        return {
+            "mode": "packaged",
+            "integrity": "failed",
+            "error_code": "installation_integrity_failed",
+        }
 
     @staticmethod
     def _prompt_source_mode(
@@ -2662,13 +2703,39 @@ class NativeHost:
                         "status": "healthy",
                         "message": "Copilot SDK Active",
                         "host_version": VERSION,
+                        "capabilities": list(
+                            get_host_capabilities().provided
+                        ),
                     }
                 else:
                     response["data"] = {
                         "status": "error",
                         "message": "SDK not initialized",
                         "host_version": VERSION,
+                        "capabilities": list(
+                            get_host_capabilities().provided
+                        ),
                     }
+
+            elif action == "get_capabilities":
+                capabilities = get_host_capabilities()
+                response["data"] = {
+                    "host_version": capabilities.host_version,
+                    "capabilities": list(capabilities.provided),
+                }
+
+            elif action == "verify_installation":
+                try:
+                    verification = self._installation_verifier.verify()
+                except Exception:
+                    verification = InstallationVerification(
+                        mode="packaged",
+                        integrity="failed",
+                        error_code="installation_integrity_failed",
+                    )
+                response["data"] = self._serialize_installation_verification(
+                    verification
+                )
 
             elif action == "check_updates":
                 if self.loop:
@@ -2727,6 +2794,9 @@ class NativeHost:
                 # Cast to dict for JSON serialization
                 data = dict(session_config)
                 data["host_version"] = VERSION
+                data["capabilities"] = list(
+                    get_host_capabilities().provided
+                )
                 response["data"] = data
 
             elif action == "list_models":
