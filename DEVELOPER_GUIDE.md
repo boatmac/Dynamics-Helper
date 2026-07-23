@@ -565,6 +565,37 @@ When replacing `dh_native_host.exe`, the file may be locked by the OS or antivir
 
 ## Release Process & Testing
 
+### Package Integrity Boundary
+
+`host/package_manifest.py` owns canonical package schemas, ownership classes,
+path rules, and hashes. `host/package_archive.py` validates staged trees and
+performs manual two-pass ZIP extraction; never use `ZipFile.extract()` or
+`extractall()`. `host/install_integrity.py` verifies a frozen live product and
+implements the early probe consumed by `host/early_cli.py`.
+
+Key interfaces:
+
+```text
+generate_release_documents(stage_root, package_version) -> ReleaseDocuments
+write_release_documents(stage_root, documents) -> None
+validate_staged_package(stage_root, expected_version=None) -> ValidatedPackage
+stage_and_validate_archive(archive_path, stage_root, expected_version=None)
+write_deterministic_archive(stage_root, archive_path) -> None
+InstallationVerifier(install_root, frozen=None).verify()
+```
+
+Canonical DH JSON is strict UTF-8, sorted compact ASCII, no BOM, and one final
+newline. Package paths are relative POSIX paths; traversal, backslashes,
+absolute/drive/UNC paths, alternate data streams, trailing dot/space, reserved
+Windows names, exact/casefold duplicates, symlinks, and reparse points fail
+closed. Test Host subprocesses with fresh `LOCALAPPDATA`, `APPDATA`,
+`USERPROFILE`, `HOME`, `TEMP`, and `TMP` values before process start.
+
+For safe tests, call pure helpers against temporary synthetic source/stage
+trees. Do not invoke the release CLI: it also edits versions and can perform Git
+or publishing operations. Plan A keeps the legacy updater active and does not
+advertise `transactional-update-v1`.
+
 ### 1. Release Automation
 
 We use `release_helper.py` to manage versions and builds.

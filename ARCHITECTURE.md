@@ -82,6 +82,31 @@ The host supports in-place updates without requiring the user to re-download and
 * **`host/updater.py`** (~208 lines): The `Updater` class handling download, extraction, and locked-file fallback.
 * **`extension/src/components/Options.tsx`**: Displays update status and "Update Now" button.
 
+### Release Integrity Metadata (Plan A)
+
+Release staging now generates three canonical documents without changing the
+active update flow:
+
+* `update-manifest.json` assigns every packaged regular file one ownership
+  class and SHA-256. It is package-only and cannot hash itself.
+* `host/release-integrity.json` inventories exact Host and Extension product
+  bytes. It excludes seed/user files and both metadata files.
+* `host/installed-product.json` links the integrity document, package version,
+  capabilities, ownership schema, and legacy allowlist version.
+
+Staging and ZIP output are deterministic, files-only, and reject traversal,
+case collisions, symlinks/reparse points, unsupported entry types, encrypted
+entries, missing/extra files, and hash/link mismatches. The Host exposes
+`get_capabilities` and `verify_installation`; source mode reports
+`development`, while a frozen install fails closed when product bytes or
+metadata disagree. `--update-probe` runs before logging, config, updater, or SDK
+initialization and emits only an allowlisted JSON result.
+
+This is dormant hardening, not the transactional updater. The existing
+extension-first in-place updater, reload behavior, and locked-executable
+fallback above remain active until Plans B-D are implemented and verified.
+Only `prompt-scope-v1` is advertised in Plan A.
+
 ## 5. Session Persistence Architecture
 
 The host maintains Copilot sessions so users can continue analysis in the Copilot CLI.

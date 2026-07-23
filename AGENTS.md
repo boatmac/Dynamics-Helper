@@ -286,6 +286,24 @@ This file defines the operational rules, development workflows, and coding stand
 * **--onedir Layout:** The release zip contains a `host/` folder with the exe, `_internal/` directory (Python runtime, DLLs), and config files. The updater copies all files to the install directory, protecting user files (`config.json`, `copilot-instructions.md`, log files) via `_USER_FILES` set.
 * **Locked File Handling:** When replacing `dh_native_host.exe`, the old file may be locked by the OS or antivirus. The updater renames it to `.exe.old` (or `.exe.old2`, `.exe.old3` as fallback). Other files (`_internal/`, `system_prompt.md`) are overwritten directly.
 * **Do Not Break:** The `--register` CLI flag and the self-update flow are critical for production users. Test changes carefully.
+* **Plan A package boundary:** Every packaged regular file is represented once
+  in `update-manifest.json` with one ownership class and a lowercase SHA-256;
+  `host/release-integrity.json` inventories product bytes and
+  `host/installed-product.json` links that inventory. Hashes detect incomplete
+  or mixed packages; they are not signatures.
+* **Archive safety:** New package code must use `stage_and_validate_archive`.
+  Never use `ZipFile.extract()` or `extractall()`. Reject traversal, duplicate
+  and case-colliding paths, directory entries, links/reparse points, encrypted
+  entries, unsupported types, and missing/extra/hash-mismatched files before
+  accepting a stage.
+* **Capability timing:** Plan A advertises only `prompt-scope-v1`. Do not add
+  `transactional-update-v1` until the complete Plan D cutover and frozen gates
+  pass. `get_capabilities`/`verify_installation` are diagnostics in Plan A, not
+  protected-action enforcement.
+* **Host test isolation:** Every Host subprocess receives fresh existing
+  `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP`
+  directories before process start. Automated tests never use the real install,
+  registry, browser registration, updater network, or release publication.
 
 ### 8. Secret Field Persistence
 
@@ -368,7 +386,7 @@ This script automates version bumping, git operations, building, and publishing.
 
 **What it does:**
 
-1. Updates version in `package.json`, `manifest.json`, and `dh_native_host.py`.
+1. Updates version in `package.json`, `manifest.json`, and `host/product_info.py`.
 2. **Commits & Tags:** Creates a `chore: release vX.X.X` commit and a `vX.X.X` git tag.
 3. **Builds:** Runs `npm build` and `pyinstaller --onedir`.
 4. **Packages:** Creates `DynamicsHelper_vX.X.X.zip` in `releases/` (contains `extension/`, `host/` with exe + `_internal/`, installer scripts).

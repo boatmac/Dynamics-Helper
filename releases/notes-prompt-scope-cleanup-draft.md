@@ -65,3 +65,16 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 ## Upgrade notes
 
 No instruction file or preference-key migration is performed. Existing DH-specific and Custom User Prompt content remains in `%LOCALAPPDATA%\DynamicsHelper`.
+
+Release packages now include canonical `update-manifest.json`,
+`host/release-integrity.json`, and `host/installed-product.json`. The Host can
+report package capabilities and frozen-install integrity, and its early probe
+runs before normal startup side effects. These checks detect incomplete or
+mixed product files; SHA-256 values are consistency checks, not package
+authentication.
+
+The first upgrade into this build still runs the historical in-place updater.
+A complete ordinary-file copy bootstraps both Host metadata files, while a
+partial but startable copy is reported as `installation_integrity_failed`.
+That first upgrade is not transactional, and the active updater remains the
+legacy implementation until the later transaction/runtime plans are completed.
