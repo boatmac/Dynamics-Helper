@@ -1,7 +1,12 @@
+import ast
+import ctypes
+import inspect
+import json
 import os
 import shutil
 import stat
 import tempfile
+import threading
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -11,6 +16,7 @@ from unittest import mock
 from install_integrity import UpdateProbeResult
 from package_manifest import load_update_manifest
 from product_info import VERSION
+from native_registration import STATUS_HOST_NAME
 from test_native_registration import MemoryRegistryBackend
 from test_update_engine_host import TX, make_package
 from test_update_support import FakeMutationMutex, InjectedCrash
@@ -20,23 +26,41 @@ from update_journal import (
     InitiatingProcessIdentity,
     JournalPhase,
     TransactionPaths,
+    TerminalVersion,
     UpdateInitiator,
     read_journal,
+    terminal_version,
 )
 from update_platform import RUN_ONCE_VALUE_NAME, RetainedProcessHandle
 from update_ownership import read_ownership_plan
 from update_recovery import (
+    FINALIZATION_CURSOR_STATES,
+    FINALIZATION_RECEIPT_STATE,
+    FinalizationCursor,
+    FinalizationError,
+    FinalizationFilesystem,
+    FinalizationReceipt,
+    OSFinalizationFilesystem,
     RecoveryController,
     RecoveryDependencies,
     RecoveryDiagnostics,
     RecoveryError,
     RunnerSource,
     TemporaryStagedProbeWorkspace,
+    acknowledge_update_finalization,
+    finalize_update_status,
     launch_active_recovery,
     launch_complete_update,
     install_recovery_tree,
     inventory_onedir,
     register_status_host,
+    require_no_pending_finalization,
+    receipt_from_terminal_journal,
+    load_finalization_ack,
+    load_finalization_cursor,
+    load_finalization_receipt,
+    _replace_finalization_file,
+    _same_finalization_volume,
     select_runner_source,
     validate_recovery_tree,
 )
@@ -1095,6 +1119,819 @@ class InstallerRecoveryTests(RecoveryFixture, unittest.TestCase):
             )
         self.assertEqual(self.events, [])
         self.assertEqual(self.probe.calls, [])
+
+
+class TerminalFixture:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        fresh_install: bool,
+        rolled_back: bool,
+    ):
+        self.root = root
+        self.install = root / "install"
+        self.install.mkdir(parents=True)
+        self.package = make_package(root)
+        self.mutex = FakeMutationMutex()
+        self.registry = MemoryRegistryBackend()
+        self.finalize_factory_calls = []
+        prior_version = None
+        if not fresh_install:
+            shutil.copytree(
+                self.package.stage_root / "host",
+                self.install,
+                dirs_exist_ok=True,
+            )
+            shutil.copytree(
+                self.package.stage_root / "extension",
+                self.install / "extension",
+            )
+            prior_version = VERSION
+
+        def probe(_root, _plan):
+            if rolled_back:
+                raise RuntimeError("fixed test probe failure")
+
+        self.engine = UpdateEngine(
+            self.install,
+            mutex_factory=lambda _root: self.mutex,
+            hooks=UpdateEngineHooks(probe_installed_product=probe),
+        )
+        self.engine.create_prepared(
+            self.package,
+            TX,
+            expected_version=None,
+            prior_version=prior_version,
+            initiator=UpdateInitiator.INSTALLER,
+        )
+        self.engine.activate_prepared(TX, None)
+        self.terminal = self.engine.resume(TX)
+        expected_phase = (
+            JournalPhase.ROLLED_BACK if rolled_back else JournalPhase.COMMITTED
+        )
+        if self.terminal.phase is not expected_phase:
+            raise AssertionError(self.terminal)
+        self.paths = TransactionPaths.for_install(self.install, TX)
+        self.receipt_path = self.paths.updates_root / "receipts" / f"{TX}.json"
+        self.cursor_path = self.paths.updates_root / "finalization-cursor.json"
+        self.ack_path = self.paths.updates_root / "finalization-ack.json"
+
+    def mutex_factory(self, _root):
+        return self.mutex
+
+    def engine_factory(self, root):
+        self.finalize_factory_calls.append(root)
+        return UpdateEngine(
+            root,
+            mutex_factory=lambda _root: self.mutex,
+        )
+
+    def finalize(self):
+        return finalize_update_status(
+            self.install,
+            TX,
+            self.registry,
+            self.engine_factory,
+            mutex_factory=self.mutex_factory,
+        )
+
+    def acknowledge(self):
+        return acknowledge_update_finalization(
+            self.install,
+            TX,
+            mutex_factory=self.mutex_factory,
+        )
+
+    def barrier(self):
+        return require_no_pending_finalization(
+            self.install,
+            mutex_factory=self.mutex_factory,
+        )
+
+
+class FinalizationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+
+    def make_terminal(self, *, fresh=False, rolled_back=False):
+        return TerminalFixture(
+            self.root,
+            fresh_install=fresh,
+            rolled_back=rolled_back,
+        )
+
+    def test_finalization_filesystem_protocol_order_is_exact(self):
+        self.assertEqual(
+            tuple(
+                name
+                for name, value in FinalizationFilesystem.__dict__.items()
+                if callable(value) and not name.startswith("_")
+            ),
+            (
+                "atomic_write",
+                "read",
+                "exists",
+                "has_atomic_scratch",
+                "move_receipt_to_ack",
+                "remove_cursor",
+                "fsync_file",
+                "fsync_directory",
+            ),
+        )
+
+    def test_record_constructor_and_four_terminal_projection_table(self):
+        valid = (
+            ("committed", TerminalVersion(VERSION, False)),
+            ("committed", TerminalVersion(VERSION, True)),
+            ("rolled-back", TerminalVersion(VERSION, False)),
+            ("rolled-back", TerminalVersion(None, True)),
+        )
+        for outcome, projected in valid:
+            with self.subTest(outcome=outcome, projected=projected):
+                receipt = FinalizationReceipt(TX, outcome, projected)
+                self.assertEqual(receipt.terminal_version, projected)
+                cursor = FinalizationCursor(
+                    TX, outcome, projected, "receipt-ready"
+                )
+                self.assertEqual(cursor.terminal_version, projected)
+        invalid = (
+            ("committed", TerminalVersion(None, True)),
+            ("committed", TerminalVersion(None, False)),
+            ("rolled-back", TerminalVersion(None, False)),
+            ("rolled-back", TerminalVersion(VERSION, True)),
+        )
+        for outcome, projected in invalid:
+            with self.subTest(outcome=outcome, projected=projected):
+                with self.assertRaises(FinalizationError):
+                    FinalizationReceipt(TX, outcome, projected)
+        self.assertEqual(
+            FINALIZATION_CURSOR_STATES,
+            frozenset({"reserved", "receipt-ready"}),
+        )
+        self.assertEqual(
+            FINALIZATION_RECEIPT_STATE, "finalized-awaiting-ack"
+        )
+
+    def test_real_plan_b_four_way_terminal_projection_is_preserved(self):
+        cases = (
+            (False, False, TerminalVersion(VERSION, False)),
+            (True, False, TerminalVersion(VERSION, True)),
+            (False, True, TerminalVersion(VERSION, False)),
+            (True, True, TerminalVersion(None, True)),
+        )
+        for index, (fresh, rolled_back, expected) in enumerate(cases):
+            with self.subTest(fresh=fresh, rolled_back=rolled_back):
+                fixture = TerminalFixture(
+                    self.root / f"case-{index}",
+                    fresh_install=fresh,
+                    rolled_back=rolled_back,
+                )
+                self.assertEqual(terminal_version(fixture.terminal), expected)
+                self.assertEqual(fixture.finalize().terminal_version, expected)
+
+    def test_cursor_receipt_ready_precedes_plan_b_cleanup(self):
+        fixture = self.make_terminal()
+        receipt = fixture.finalize()
+        self.assertEqual(
+            receipt.to_dict(),
+            {
+                "outcome": "committed",
+                "state": "finalized-awaiting-ack",
+                "terminal_version": {
+                    "fresh_install": False,
+                    "version": VERSION,
+                },
+                "transactionId": TX,
+            },
+        )
+        cursor = load_finalization_cursor(
+            fixture.cursor_path, OSFinalizationFilesystem()
+        )
+        self.assertEqual(cursor.state, "receipt-ready")
+        self.assertEqual(
+            load_finalization_receipt(
+                fixture.receipt_path, TX, OSFinalizationFilesystem()
+            ),
+            receipt,
+        )
+        self.assertFalse(fixture.paths.active.exists())
+        self.assertFalse(fixture.paths.transaction_root.exists())
+        self.assertEqual(fixture.finalize_factory_calls, [fixture.install])
+
+    def test_lost_finalize_response_replays_same_receipt_without_second_source(self):
+        fixture = self.make_terminal()
+        first = fixture.finalize()
+        first_bytes = fixture.receipt_path.read_bytes()
+        second = fixture.finalize()
+        self.assertEqual(second, first)
+        self.assertEqual(fixture.receipt_path.read_bytes(), first_bytes)
+
+    def test_different_transaction_is_blocked_while_cursor_pending(self):
+        fixture = self.make_terminal()
+        fixture.finalize()
+        other = "f" * 32
+        with self.assertRaisesRegex(
+            FinalizationError, "^finalization_ack_pending$"
+        ):
+            finalize_update_status(
+                fixture.install,
+                other,
+                fixture.registry,
+                lambda _root: self.fail("engine factory called"),
+                mutex_factory=fixture.mutex_factory,
+            )
+        self.assertFalse(
+            (fixture.paths.updates_root / "receipts" / f"{other}.json").exists()
+        )
+
+    def test_different_id_cursor_precedence_skips_registry_and_engine_factory(self):
+        fixture = self.make_terminal()
+        fixture.finalize()
+        registry_before = dict(fixture.registry.values)
+        calls = []
+        with self.assertRaisesRegex(
+            FinalizationError, "^finalization_ack_pending$"
+        ):
+            finalize_update_status(
+                fixture.install,
+                "e" * 32,
+                fixture.registry,
+                lambda root: calls.append(root),
+                mutex_factory=fixture.mutex_factory,
+            )
+        self.assertEqual(calls, [])
+        self.assertEqual(fixture.registry.values, registry_before)
+
+    def test_invalid_id_or_root_fails_before_mutex_and_filesystem_construction(self):
+        fixture = self.make_terminal()
+        mutex_calls = []
+        with mock.patch(
+            "update_recovery.OSFinalizationFilesystem"
+        ) as filesystem_class:
+            with self.assertRaises(FinalizationError):
+                finalize_update_status(
+                    fixture.install,
+                    "bad-id",
+                    fixture.registry,
+                    fixture.engine_factory,
+                    mutex_factory=lambda root: mutex_calls.append(root),
+                )
+            with self.assertRaises(FinalizationError):
+                require_no_pending_finalization(
+                    Path("relative"),
+                    mutex_factory=lambda root: mutex_calls.append(root),
+                )
+        self.assertEqual(mutex_calls, [])
+        filesystem_class.assert_not_called()
+
+    def test_default_filesystem_is_constructed_only_inside_mutex(self):
+        fixture = self.make_terminal()
+        events = []
+
+        class RecordingMutex:
+            def __enter__(self):
+                events.append("mutex-enter")
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                events.append("mutex-exit")
+
+        real_class = OSFinalizationFilesystem
+
+        def create_filesystem():
+            events.append("filesystem-construct")
+            return real_class()
+
+        with mock.patch(
+            "update_recovery.OSFinalizationFilesystem",
+            side_effect=create_filesystem,
+        ):
+            finalize_update_status(
+                fixture.install,
+                TX,
+                fixture.registry,
+                fixture.engine_factory,
+                mutex_factory=lambda _root: RecordingMutex(),
+            )
+        self.assertLess(
+            events.index("mutex-enter"), events.index("filesystem-construct")
+        )
+        self.assertLess(
+            events.index("filesystem-construct"), events.index("mutex-exit")
+        )
+
+    def test_ack_atomically_moves_receipt_to_fixed_slot_then_opens_barrier(self):
+        fixture = self.make_terminal()
+        fixture.barrier()
+        receipt = fixture.finalize()
+        source_bytes = fixture.receipt_path.read_bytes()
+        with self.assertRaisesRegex(
+            FinalizationError, "^finalization_ack_pending$"
+        ):
+            fixture.barrier()
+        self.assertTrue(fixture.acknowledge())
+        self.assertFalse(fixture.receipt_path.exists())
+        self.assertFalse(fixture.cursor_path.exists())
+        self.assertEqual(fixture.ack_path.read_bytes(), source_bytes)
+        self.assertEqual(
+            load_finalization_ack(
+                fixture.ack_path, OSFinalizationFilesystem()
+            ),
+            receipt,
+        )
+        fixture.barrier()
+        self.assertTrue(fixture.acknowledge())
+
+    def test_ack_rejects_before_plan_b_cleanup_is_complete(self):
+        fixture = self.make_terminal()
+        receipt = receipt_from_terminal_journal(fixture.terminal)
+        fs = OSFinalizationFilesystem()
+        fixture.paths.updates_root.joinpath("receipts").mkdir()
+        fs.atomic_write(
+            fixture.cursor_path,
+            FinalizationCursor(
+                TX,
+                receipt.outcome,
+                receipt.terminal_version,
+                "receipt-ready",
+            ).to_dict(),
+        )
+        fs.atomic_write(fixture.receipt_path, receipt.to_dict())
+        with self.assertRaisesRegex(
+            FinalizationError, "^finalization_cleanup_incomplete$"
+        ):
+            fixture.acknowledge()
+        self.assertTrue(fixture.receipt_path.exists())
+
+    def test_strict_record_loaders_reject_noncanonical_duplicate_and_wrong_state(self):
+        fixture = self.make_terminal()
+        receipt = receipt_from_terminal_journal(fixture.terminal)
+        fixture.paths.updates_root.joinpath("receipts").mkdir()
+        fixture.receipt_path.write_bytes(
+            json.dumps(receipt.to_dict(), indent=2).encode("utf-8")
+        )
+        with self.assertRaisesRegex(
+            FinalizationError, "^invalid_finalization_receipt$"
+        ):
+            load_finalization_receipt(
+                fixture.receipt_path, TX, OSFinalizationFilesystem()
+            )
+        fixture.receipt_path.write_bytes(
+            b'{"outcome":"committed","outcome":"committed",'
+            b'"state":"finalized-awaiting-ack",'
+            b'"terminal_version":{"fresh_install":false,"version":"x"},'
+            b'"transactionId":"0123456789abcdef0123456789abcdef"}\n'
+        )
+        with self.assertRaises(FinalizationError):
+            load_finalization_receipt(
+                fixture.receipt_path, TX, OSFinalizationFilesystem()
+            )
+
+    def test_reserved_cursor_only_reconstructs_receipt_on_same_id_replay(self):
+        fixture = self.make_terminal()
+        receipt = receipt_from_terminal_journal(fixture.terminal)
+        fs = OSFinalizationFilesystem()
+        fs.atomic_write(
+            fixture.cursor_path,
+            FinalizationCursor(
+                TX, receipt.outcome, receipt.terminal_version, "reserved"
+            ).to_dict(),
+        )
+        replay = fixture.finalize()
+        self.assertEqual(replay, receipt)
+        self.assertTrue(fixture.receipt_path.exists())
+        self.assertEqual(
+            load_finalization_cursor(fixture.cursor_path, fs).state,
+            "receipt-ready",
+        )
+
+    def test_receipt_ready_cursor_normalizes_receipt_scratch_only(self):
+        fixture = self.make_terminal()
+        receipt = receipt_from_terminal_journal(fixture.terminal)
+        fs = OSFinalizationFilesystem()
+        fs.atomic_write(
+            fixture.cursor_path,
+            FinalizationCursor(
+                TX,
+                receipt.outcome,
+                receipt.terminal_version,
+                "receipt-ready",
+            ).to_dict(),
+        )
+        fixture.paths.updates_root.joinpath("receipts").mkdir()
+        scratch = fixture.receipt_path.with_name(
+            f".{fixture.receipt_path.name}.tmp"
+        )
+        expected = json.dumps(
+            receipt.to_dict(),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8") + b"\n"
+        scratch.write_bytes(expected[: len(expected) // 2])
+        replay = fixture.finalize()
+        self.assertEqual(replay, receipt)
+        self.assertFalse(scratch.exists())
+        self.assertEqual(
+            load_finalization_receipt(fixture.receipt_path, TX, fs), receipt
+        )
+
+    def test_cursor_scratch_blocks_start_and_newer_finalization(self):
+        fixture = self.make_terminal()
+        receipt = receipt_from_terminal_journal(fixture.terminal)
+        scratch = fixture.cursor_path.with_name(
+            f".{fixture.cursor_path.name}.tmp"
+        )
+        expected = json.dumps(
+            FinalizationCursor(
+                TX, receipt.outcome, receipt.terminal_version, "reserved"
+            ).to_dict(),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8") + b"\n"
+        scratch.write_bytes(expected[: len(expected) // 2])
+        with self.assertRaisesRegex(
+            FinalizationError, "^finalization_ack_pending$"
+        ):
+            fixture.barrier()
+        with self.assertRaisesRegex(
+            FinalizationError, "^finalization_ack_pending$"
+        ):
+            finalize_update_status(
+                fixture.install,
+                "f" * 32,
+                fixture.registry,
+                lambda _root: self.fail("engine factory called"),
+                mutex_factory=fixture.mutex_factory,
+            )
+        fixture.finalize()
+        self.assertFalse(scratch.exists())
+
+    def test_post_move_replay_removes_cursor_without_recreating_receipt(self):
+        fixture = self.make_terminal()
+        receipt = fixture.finalize()
+        os.replace(fixture.receipt_path, fixture.ack_path)
+        self.assertTrue(fixture.acknowledge())
+        self.assertFalse(fixture.receipt_path.exists())
+        self.assertFalse(fixture.cursor_path.exists())
+        self.assertEqual(
+            load_finalization_ack(
+                fixture.ack_path, OSFinalizationFilesystem()
+            ),
+            receipt,
+        )
+
+    def test_post_move_replay_refsyncs_ack_and_both_parents_before_cursor(self):
+        fixture = self.make_terminal()
+        fixture.finalize()
+        os.replace(fixture.receipt_path, fixture.ack_path)
+        fs = OSFinalizationFilesystem()
+        with (
+            mock.patch.object(fs, "fsync_file") as fsync_file,
+            mock.patch.object(fs, "fsync_directory") as fsync_directory,
+            mock.patch.object(
+                fs,
+                "remove_cursor",
+                wraps=fs.remove_cursor,
+            ) as remove_cursor,
+        ):
+            self.assertTrue(
+                acknowledge_update_finalization(
+                    fixture.install,
+                    TX,
+                    filesystem=fs,
+                    mutex_factory=fixture.mutex_factory,
+                )
+            )
+        fsync_file.assert_called_once_with(fixture.ack_path)
+        self.assertIn(mock.call(fixture.receipt_path.parent), fsync_directory.call_args_list)
+        self.assertIn(mock.call(fixture.ack_path.parent), fsync_directory.call_args_list)
+        remove_cursor.assert_called_once_with(fixture.cursor_path)
+
+    def test_cursor_scratch_with_matching_ack_replays_cleanup(self):
+        fixture = self.make_terminal()
+        receipt = fixture.finalize()
+        os.replace(fixture.receipt_path, fixture.ack_path)
+        fixture.cursor_path.unlink()
+        scratch = fixture.cursor_path.with_name(
+            f".{fixture.cursor_path.name}.tmp"
+        )
+        expected = json.dumps(
+            FinalizationCursor(
+                TX,
+                receipt.outcome,
+                receipt.terminal_version,
+                "receipt-ready",
+            ).to_dict(),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8") + b"\n"
+        scratch.write_bytes(expected[: len(expected) // 2])
+        self.assertTrue(fixture.acknowledge())
+        self.assertFalse(fixture.cursor_path.exists())
+        self.assertFalse(scratch.exists())
+        fixture.barrier()
+
+    def test_cursor_removal_failure_keeps_barrier_and_replays(self):
+        fixture = self.make_terminal()
+        fixture.finalize()
+        real_remove = OSFinalizationFilesystem.remove_cursor
+        with mock.patch.object(
+            OSFinalizationFilesystem,
+            "remove_cursor",
+            side_effect=OSError("injected cursor removal failure"),
+        ):
+            with self.assertRaisesRegex(
+                FinalizationError, "^finalization_cleanup_failed$"
+            ):
+                fixture.acknowledge()
+        self.assertTrue(fixture.cursor_path.exists())
+        self.assertTrue(fixture.ack_path.exists())
+        with self.assertRaisesRegex(
+            FinalizationError, "^finalization_ack_pending$"
+        ):
+            fixture.barrier()
+        self.assertTrue(fixture.acknowledge())
+        self.assertFalse(fixture.cursor_path.exists())
+
+    def test_older_ack_replay_is_read_only_while_newer_cursor_exists(self):
+        fixture = self.make_terminal()
+        old_receipt = fixture.finalize()
+        fixture.acknowledge()
+        next_id = "f" * 32
+        newer = FinalizationReceipt(
+            next_id,
+            "committed",
+            TerminalVersion(VERSION, False),
+        )
+        fs = OSFinalizationFilesystem()
+        fs.atomic_write(
+            fixture.cursor_path,
+            FinalizationCursor(
+                next_id,
+                newer.outcome,
+                newer.terminal_version,
+                "receipt-ready",
+            ).to_dict(),
+        )
+        fs.atomic_write(
+            fixture.paths.updates_root / "receipts" / f"{next_id}.json",
+            newer.to_dict(),
+        )
+        before_cursor = fixture.cursor_path.read_bytes()
+        self.assertTrue(fixture.acknowledge())
+        self.assertEqual(fixture.cursor_path.read_bytes(), before_cursor)
+        self.assertEqual(
+            load_finalization_ack(fixture.ack_path, fs), old_receipt
+        )
+
+    def test_malformed_old_ack_does_not_block_valid_new_terminal_authority(self):
+        fixture = self.make_terminal()
+        fixture.ack_path.write_bytes(b"malformed-old-ack")
+        receipt = fixture.finalize()
+        self.assertEqual(receipt.transaction_id, TX)
+        self.assertTrue(fixture.receipt_path.exists())
+        self.assertTrue(fixture.cursor_path.exists())
+
+    def test_ack_scratch_is_rejected_and_fixed_ack_alone_does_not_block_start(self):
+        fixture = self.make_terminal()
+        fixture.finalize()
+        fixture.acknowledge()
+        fixture.barrier()
+        scratch = fixture.ack_path.with_name(f".{fixture.ack_path.name}.tmp")
+        scratch.write_bytes(b"forbidden")
+        with self.assertRaisesRegex(
+            FinalizationError, "^invalid_finalization_acknowledgment$"
+        ):
+            fixture.acknowledge()
+
+    def test_finalization_source_has_no_random_or_receipt_scan_or_direct_ack_write(self):
+        source = Path("host/update_recovery.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        finalization_functions = {
+            "_scratch_path",
+            "_canonical_finalization_bytes",
+            "_require_finalization_path",
+            "_replace_finalization_file",
+            "_same_finalization_volume",
+            "_parse_finalization_value",
+            "load_finalization_receipt",
+            "load_finalization_cursor",
+            "load_finalization_ack",
+            "_ensure_receipts_directory",
+            "_write_and_verify_cursor",
+            "_write_and_verify_receipt",
+            "_terminal_receipt_from_authority",
+            "_terminal_cleanup_complete",
+            "_finalization_paths",
+            "finalize_update_status",
+            "acknowledge_update_finalization",
+            "require_no_pending_finalization",
+        }
+        forbidden = {
+            "uuid4",
+            "mkstemp",
+            "NamedTemporaryFile",
+            "rglob",
+            "glob",
+            "iterdir",
+            "walk",
+        }
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.name in finalization_functions:
+                calls = {
+                    (
+                        call.func.id
+                        if isinstance(call.func, ast.Name)
+                        else call.func.attr
+                        if isinstance(call.func, ast.Attribute)
+                        else ""
+                    )
+                    for call in ast.walk(node)
+                    if isinstance(call, ast.Call)
+                }
+                self.assertFalse(calls & forbidden, node.name)
+        acknowledge_source = inspect.getsource(acknowledge_update_finalization)
+        self.assertNotIn("copy2", acknowledge_source)
+        self.assertNotIn("unlink", acknowledge_source)
+        self.assertIn("move_receipt_to_ack", acknowledge_source)
+        production = Path("host/update_recovery.py").read_text(encoding="utf-8")
+        self.assertEqual(production.count("os.replace(receipt_path, ack_path)"), 1)
+
+    def test_finalization_test_class_map_and_move_owner_are_exact(self):
+        tests = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+        unittest_classes = {
+            node.name
+            for node in tests.body
+            if isinstance(node, ast.ClassDef)
+            and any(
+                (isinstance(base, ast.Attribute) and base.attr == "TestCase")
+                or (isinstance(base, ast.Name) and base.id == "TestCase")
+                for base in node.bases
+            )
+        }
+        self.assertEqual(
+            unittest_classes,
+            {
+                "RecoveryTreeTests",
+                "StagedHostPreflightTests",
+                "RecoveryRunnerTests",
+                "InstallerRecoveryTests",
+                "FinalizationTests",
+                "FinalizationWindowsDurabilityTests",
+            },
+        )
+        source = Path("host/update_recovery.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        owners = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if any(
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "move_receipt_to_ack"
+                for call in ast.walk(node)
+            ):
+                owners.append(node.name)
+        self.assertEqual(owners, ["acknowledge_update_finalization"])
+
+    def test_plan_c_never_directly_deletes_workspace_or_active(self):
+        source = inspect.getsource(finalize_update_status)
+        self.assertNotIn("unlink(", source)
+        self.assertNotIn("rmtree(", source)
+        self.assertIn("finalize_terminal_evidence", source)
+
+
+class FakeMoveFunction:
+    def __init__(self, success=True):
+        self.success = success
+        self.argtypes = None
+        self.restype = None
+        self.source = None
+        self.target = None
+        self.flags = None
+
+    def __call__(self, source, target, flags):
+        self.source = source
+        self.target = target
+        self.flags = flags
+        return self.success
+
+
+class FakeMoveFileApi:
+    def __init__(self, success=True):
+        self.MoveFileExW = FakeMoveFunction(success)
+
+
+class FinalizationWindowsDurabilityTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.source = self.root / "source.json"
+        self.target = self.root / "target.json"
+
+    def test_replace_uses_replace_existing_and_write_through(self):
+        api = FakeMoveFileApi(success=True)
+        with mock.patch("update_recovery.os.name", "nt"):
+            _replace_finalization_file(
+                self.source, self.target, windows_api=api
+            )
+        self.assertEqual(api.MoveFileExW.flags, 0x00000001 | 0x00000008)
+        self.assertEqual(api.MoveFileExW.source, str(self.source))
+        self.assertEqual(api.MoveFileExW.target, str(self.target))
+
+    def test_replace_failure_is_fixed(self):
+        api = FakeMoveFileApi(success=False)
+        with mock.patch("update_recovery.os.name", "nt"), self.assertRaisesRegex(
+            OSError, "^finalization_replace_failed$"
+        ):
+            _replace_finalization_file(
+                self.source, self.target, windows_api=api
+            )
+
+    def test_acknowledgment_uses_one_os_replace_from_receipt_to_fixed_slot(self):
+        fs = OSFinalizationFilesystem()
+        receipts = self.root / "updates/receipts"
+        receipts.mkdir(parents=True)
+        ack = self.root / "updates/finalization-ack.json"
+        receipt = receipts / f"{TX}.json"
+        receipt.write_bytes(b"receipt\n")
+        with (
+            mock.patch("update_recovery.os.replace") as replace_call,
+            mock.patch(
+                "update_recovery._same_finalization_volume", return_value=True
+            ),
+            mock.patch.object(fs, "fsync_file") as fsync_file,
+            mock.patch.object(fs, "fsync_directory") as fsync_directory,
+            mock.patch("update_recovery._lstat_plain"),
+        ):
+            fs.move_receipt_to_ack(receipt, ack)
+        replace_call.assert_called_once_with(receipt, ack)
+        fsync_file.assert_called_once_with(ack)
+        self.assertEqual(
+            fsync_directory.call_args_list,
+            [mock.call(receipts), mock.call(ack.parent)],
+        )
+
+    def test_same_volume_uses_device_identity_without_following_symlinks(self):
+        receipts = self.root / "updates/receipts"
+        updates = self.root / "updates"
+        with mock.patch(
+            "update_recovery.os.stat",
+            side_effect=(mock.Mock(st_dev=7), mock.Mock(st_dev=7)),
+        ) as stat_call:
+            self.assertTrue(_same_finalization_volume(receipts, updates))
+        self.assertEqual(
+            stat_call.call_args_list,
+            [
+                mock.call(receipts, follow_symlinks=False),
+                mock.call(updates, follow_symlinks=False),
+            ],
+        )
+        with mock.patch(
+            "update_recovery.os.stat",
+            side_effect=(mock.Mock(st_dev=7), mock.Mock(st_dev=8)),
+        ):
+            self.assertFalse(_same_finalization_volume(receipts, updates))
+
+    def test_cross_volume_move_fails_before_replace(self):
+        fs = OSFinalizationFilesystem()
+        receipts = self.root / "updates/receipts"
+        receipts.mkdir(parents=True)
+        receipt = receipts / f"{TX}.json"
+        receipt.write_bytes(b"receipt\n")
+        ack = self.root / "updates/finalization-ack.json"
+        with (
+            mock.patch(
+                "update_recovery._same_finalization_volume", return_value=False
+            ),
+            mock.patch("update_recovery.os.replace") as replace_call,
+            mock.patch("update_recovery._lstat_plain"),
+            self.assertRaisesRegex(OSError, "^finalization_replace_failed$"),
+        ):
+            fs.move_receipt_to_ack(receipt, ack)
+        replace_call.assert_not_called()
+
+    def test_ack_slot_has_no_atomic_write_or_scratch_path(self):
+        fs = OSFinalizationFilesystem()
+        updates = self.root / "updates"
+        updates.mkdir()
+        ack = updates / "finalization-ack.json"
+        with self.assertRaisesRegex(
+            FinalizationError, "^invalid_finalization_acknowledgment$"
+        ):
+            fs.atomic_write(ack, {"forbidden": True})
+        self.assertFalse(fs.has_atomic_scratch(ack))
 
 
 if __name__ == "__main__":

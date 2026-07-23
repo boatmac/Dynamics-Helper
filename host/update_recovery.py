@@ -1,3 +1,5 @@
+import ctypes
+import json
 import os
 import shutil
 import stat
@@ -8,9 +10,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
+from ctypes import wintypes
 
 from install_integrity import UpdateProbeResult
 from native_registration import RegistryBackend, register_status_manifest
+from native_registration import STATUS_HOST_NAME, unregister_host
 from package_manifest import (
     OwnershipClass,
     canonical_json_bytes,
@@ -23,14 +27,19 @@ from update_engine import UpdateEngine, UpdateEngineHooks
 from update_journal import (
     FORWARD_FAILURE_CODES,
     InitiatingProcessIdentity,
+    JournalValidationError,
     JournalPhase,
     JournalReason,
     TransactionPaths,
+    TerminalVersion,
     UpdateInitiator,
     parse_transaction_id,
     read_active_transaction,
     read_journal,
     resolve_active_journal,
+    parse_terminal_version,
+    terminal_version,
+    terminal_version_to_value,
 )
 from update_mutex import MutationMutex, create_windows_mutation_mutex
 from update_ownership import (
@@ -53,6 +62,27 @@ from update_platform import (
     RUN_ONCE_VALUE_NAME,
     arm_run_once,
 )
+
+
+FINALIZATION_RECEIPT_STATE = "finalized-awaiting-ack"
+FINALIZATION_CURSOR_STATES = frozenset({"reserved", "receipt-ready"})
+MOVEFILE_REPLACE_EXISTING = 0x00000001
+MOVEFILE_WRITE_THROUGH = 0x00000008
+
+
+def _reject_constant(_value: str) -> object:
+    raise ValueError("non_finite_json_number")
+
+
+def _reject_duplicate_pairs(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate_json_key")
+        result[key] = value
+    return result
 
 
 class RecoveryError(RuntimeError):
@@ -86,6 +116,871 @@ class RecoveryError(RuntimeError):
             raise ValueError("unknown_recovery_error")
         self.error_code = error_code
         super().__init__(error_code)
+
+
+class FinalizationError(RuntimeError):
+    _ALLOWED = frozenset(
+        {
+            "transaction_not_terminal",
+            "active_transaction_mismatch",
+            "invalid_finalization_receipt",
+            "invalid_finalization_cursor",
+            "invalid_finalization_acknowledgment",
+            "finalization_cleanup_failed",
+            "finalization_cleanup_incomplete",
+            "finalization_record_round_trip_failed",
+            "finalization_ack_pending",
+            "finalization_not_current",
+        }
+    )
+
+    def __init__(self, error_code: str) -> None:
+        if error_code not in self._ALLOWED:
+            raise ValueError("unknown_finalization_error")
+        self.error_code = error_code
+        super().__init__(error_code)
+
+
+def _validate_finalization_fields(
+    transaction_id: str,
+    outcome: str,
+    version: TerminalVersion,
+    *,
+    error_code: str,
+) -> None:
+    try:
+        parse_transaction_id(transaction_id)
+        if type(outcome) is not str or outcome not in {
+            "committed",
+            "rolled-back",
+        }:
+            raise ValueError("invalid outcome")
+        if (
+            type(version) is not TerminalVersion
+            or type(version.fresh_install) is not bool
+        ):
+            raise ValueError("invalid terminal version")
+        if outcome == "committed":
+            valid = type(version.version) is str and bool(version.version)
+        else:
+            valid = (
+                version.fresh_install and version.version is None
+            ) or (
+                not version.fresh_install
+                and type(version.version) is str
+                and bool(version.version)
+            )
+        if not valid:
+            raise ValueError("invalid terminal version projection")
+    except (JournalValidationError, TypeError, ValueError) as error:
+        raise FinalizationError(error_code) from error
+
+
+@dataclass(frozen=True)
+class FinalizationReceipt:
+    transaction_id: str
+    outcome: str
+    terminal_version: TerminalVersion
+    state: str = FINALIZATION_RECEIPT_STATE
+
+    def __post_init__(self) -> None:
+        _validate_finalization_fields(
+            self.transaction_id,
+            self.outcome,
+            self.terminal_version,
+            error_code="invalid_finalization_receipt",
+        )
+        if type(self.state) is not str or self.state != FINALIZATION_RECEIPT_STATE:
+            raise FinalizationError("invalid_finalization_receipt")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "transactionId": self.transaction_id,
+            "outcome": self.outcome,
+            "terminal_version": terminal_version_to_value(
+                self.terminal_version
+            ),
+            "state": self.state,
+        }
+
+
+@dataclass(frozen=True)
+class FinalizationCursor:
+    transaction_id: str
+    outcome: str
+    terminal_version: TerminalVersion
+    state: str = "reserved"
+
+    def __post_init__(self) -> None:
+        _validate_finalization_fields(
+            self.transaction_id,
+            self.outcome,
+            self.terminal_version,
+            error_code="invalid_finalization_cursor",
+        )
+        if type(self.state) is not str or self.state not in FINALIZATION_CURSOR_STATES:
+            raise FinalizationError("invalid_finalization_cursor")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "transactionId": self.transaction_id,
+            "outcome": self.outcome,
+            "terminal_version": terminal_version_to_value(
+                self.terminal_version
+            ),
+            "state": self.state,
+        }
+
+
+def receipt_from_terminal_journal(journal) -> FinalizationReceipt:
+    if journal.phase not in (JournalPhase.COMMITTED, JournalPhase.ROLLED_BACK):
+        raise FinalizationError("transaction_not_terminal")
+    return FinalizationReceipt(
+        journal.transaction_id,
+        journal.phase.value,
+        terminal_version(journal),
+    )
+
+
+def cursor_from_receipt(
+    receipt: FinalizationReceipt,
+    state: str,
+) -> FinalizationCursor:
+    return FinalizationCursor(
+        receipt.transaction_id,
+        receipt.outcome,
+        receipt.terminal_version,
+        state,
+    )
+
+
+def receipt_from_cursor(cursor: FinalizationCursor) -> FinalizationReceipt:
+    return FinalizationReceipt(
+        cursor.transaction_id,
+        cursor.outcome,
+        cursor.terminal_version,
+    )
+
+
+class FinalizationFilesystem(Protocol):
+    def atomic_write(self, path: Path, value: dict[str, object]) -> None:
+        raise AssertionError("finalization filesystem protocol method")
+
+    def read(self, path: Path) -> bytes:
+        raise AssertionError("finalization filesystem protocol method")
+
+    def exists(self, path: Path) -> bool:
+        raise AssertionError("finalization filesystem protocol method")
+
+    def has_atomic_scratch(self, path: Path) -> bool:
+        raise AssertionError("finalization filesystem protocol method")
+
+    def move_receipt_to_ack(self, source: Path, target: Path) -> None:
+        raise AssertionError("finalization filesystem protocol method")
+
+    def remove_cursor(self, path: Path) -> None:
+        raise AssertionError("finalization filesystem protocol method")
+
+    def fsync_file(self, path: Path) -> None:
+        raise AssertionError("finalization filesystem protocol method")
+
+    def fsync_directory(self, path: Path) -> None:
+        raise AssertionError("finalization filesystem protocol method")
+
+
+def _scratch_path(target: Path) -> Path:
+    return target.with_name(f".{target.name}.tmp")
+
+
+def _canonical_finalization_bytes(value: dict[str, object]) -> bytes:
+    return (
+        json.dumps(
+            value,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _finalization_path_kind(path: Path) -> str:
+    if not isinstance(path, Path) or not path.is_absolute():
+        raise ValueError("invalid finalization record path")
+    if path.parent.name.casefold() == "receipts":
+        return "receipt"
+    if path.name == "finalization-cursor.json":
+        return "cursor"
+    if path.name == "finalization-ack.json":
+        return "ack"
+    raise ValueError("invalid finalization record path")
+
+
+def _error_for_kind(kind: str) -> str:
+    return {
+        "receipt": "invalid_finalization_receipt",
+        "cursor": "invalid_finalization_cursor",
+        "ack": "invalid_finalization_acknowledgment",
+    }.get(kind, "invalid_finalization_cursor")
+
+
+def _require_finalization_path(path: Path, *, kind: str) -> Path:
+    error_code = _error_for_kind(kind)
+    if not isinstance(path, Path) or not path.is_absolute() or ".." in path.parts:
+        raise FinalizationError(error_code)
+    parent = path.parent.resolve(strict=False)
+    try:
+        if kind == "receipt":
+            transaction_id = parse_transaction_id(path.stem)
+            if (
+                path.suffix != ".json"
+                or parent.name.casefold() != "receipts"
+                or parent.parent.name.casefold() != "updates"
+                or path.name != f"{transaction_id}.json"
+            ):
+                raise ValueError
+            _require_plain_ancestor_chain(parent.parent)
+            if parent.exists() or parent.is_symlink():
+                _lstat_plain(parent, require_directory=True)
+        elif kind == "cursor":
+            if path.name != "finalization-cursor.json" or parent.name.casefold() != "updates":
+                raise ValueError
+            _require_plain_ancestor_chain(parent)
+        elif kind == "ack":
+            if path.name != "finalization-ack.json" or parent.name.casefold() != "updates":
+                raise ValueError
+            _require_plain_ancestor_chain(parent)
+        else:
+            raise ValueError
+    except (RecoveryError, JournalValidationError, OSError, ValueError) as error:
+        raise FinalizationError(error_code) from error
+    return parent / path.name
+
+
+def _replace_finalization_file(
+    source: Path,
+    target: Path,
+    *,
+    windows_api: object | None = None,
+) -> None:
+    if os.name != "nt":
+        os.replace(source, target)
+        return
+    try:
+        kernel32 = windows_api or ctypes.WinDLL(
+            "kernel32", use_last_error=True
+        )
+    except OSError as error:
+        raise OSError("finalization_replace_failed") from error
+    kernel32.MoveFileExW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+    ]
+    kernel32.MoveFileExW.restype = wintypes.BOOL
+    if not kernel32.MoveFileExW(
+        str(source),
+        str(target),
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+    ):
+        raise OSError("finalization_replace_failed")
+
+
+def _same_finalization_volume(source_parent: Path, target_parent: Path) -> bool:
+    try:
+        source_stat = os.stat(source_parent, follow_symlinks=False)
+        target_stat = os.stat(target_parent, follow_symlinks=False)
+    except OSError:
+        return False
+    source_device = getattr(source_stat, "st_dev", None)
+    target_device = getattr(target_stat, "st_dev", None)
+    return (
+        type(source_device) is int
+        and type(target_device) is int
+        and source_device == target_device
+    )
+
+
+class OSFinalizationFilesystem:
+    def atomic_write(self, path: Path, value: dict[str, object]) -> None:
+        kind = _finalization_path_kind(path)
+        if kind == "ack":
+            raise FinalizationError("invalid_finalization_acknowledgment")
+        target = _require_finalization_path(path, kind=kind)
+        expected = _canonical_finalization_bytes(value)
+        _lstat_plain(target.parent, require_directory=True)
+        sibling = _scratch_path(target)
+        if sibling.exists() or sibling.is_symlink():
+            _lstat_plain(sibling, require_directory=False)
+            scratch = sibling.read_bytes()
+            if not expected.startswith(scratch):
+                raise FinalizationError(_error_for_kind(kind))
+            sibling.unlink()
+            self.fsync_directory(target.parent)
+        with sibling.open("xb") as stream:
+            stream.write(expected)
+            stream.flush()
+            os.fsync(stream.fileno())
+        _replace_finalization_file(sibling, target)
+        self.fsync_directory(target.parent)
+
+    def read(self, path: Path) -> bytes:
+        target = _require_finalization_path(
+            path, kind=_finalization_path_kind(path)
+        )
+        _lstat_plain(target, require_directory=False)
+        return target.read_bytes()
+
+    def exists(self, path: Path) -> bool:
+        target = _require_finalization_path(
+            path, kind=_finalization_path_kind(path)
+        )
+        if not target.exists() and not target.is_symlink():
+            return False
+        _lstat_plain(target, require_directory=False)
+        return True
+
+    def has_atomic_scratch(self, path: Path) -> bool:
+        target = _require_finalization_path(
+            path, kind=_finalization_path_kind(path)
+        )
+        scratch = _scratch_path(target)
+        if target.name == "finalization-ack.json":
+            if scratch.exists() or scratch.is_symlink():
+                raise FinalizationError("invalid_finalization_acknowledgment")
+            return False
+        if not scratch.exists() and not scratch.is_symlink():
+            return False
+        _lstat_plain(scratch, require_directory=False)
+        return True
+
+    def move_receipt_to_ack(self, source: Path, target: Path) -> None:
+        receipt_path = _require_finalization_path(source, kind="receipt")
+        ack_path = _require_finalization_path(target, kind="ack")
+        _lstat_plain(receipt_path, require_directory=False)
+        _lstat_plain(receipt_path.parent, require_directory=True)
+        _lstat_plain(ack_path.parent, require_directory=True)
+        if ack_path.exists() or ack_path.is_symlink():
+            _lstat_plain(ack_path, require_directory=False)
+        if (
+            receipt_path.parent.parent != ack_path.parent
+            or not _same_finalization_volume(
+                receipt_path.parent, ack_path.parent
+            )
+        ):
+            raise OSError("finalization_replace_failed")
+        os.replace(receipt_path, ack_path)
+        self.fsync_file(ack_path)
+        self.fsync_directory(receipt_path.parent)
+        if ack_path.parent != receipt_path.parent:
+            self.fsync_directory(ack_path.parent)
+
+    def remove_cursor(self, path: Path) -> None:
+        target = _require_finalization_path(path, kind="cursor")
+        _lstat_plain(target, require_directory=False)
+        target.unlink()
+        self.fsync_directory(target.parent)
+
+    def fsync_file(self, path: Path) -> None:
+        target = _require_finalization_path(
+            path, kind=_finalization_path_kind(path)
+        )
+        _lstat_plain(target, require_directory=False)
+        with target.open("rb+") as stream:
+            os.fsync(stream.fileno())
+
+    def fsync_directory(self, path: Path) -> None:
+        if os.name == "nt":
+            return
+        descriptor = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+
+def _parse_finalization_value(
+    raw: bytes,
+    *,
+    expected_state: str,
+    error_code: str,
+) -> tuple[str, str, TerminalVersion]:
+    try:
+        value = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=_reject_constant,
+        )
+        if type(value) is not dict or set(value) != {
+            "transactionId",
+            "outcome",
+            "terminal_version",
+            "state",
+        }:
+            raise ValueError
+        transaction_id = parse_transaction_id(value["transactionId"])
+        outcome = value["outcome"]
+        version = parse_terminal_version(value["terminal_version"])
+        _validate_finalization_fields(
+            transaction_id,
+            outcome,
+            version,
+            error_code=error_code,
+        )
+        if type(value["state"]) is not str or value["state"] != expected_state:
+            raise ValueError
+        if raw != _canonical_finalization_bytes(value):
+            raise ValueError
+        return transaction_id, outcome, version
+    except (
+        JournalValidationError,
+        UnicodeDecodeError,
+        TypeError,
+        ValueError,
+    ) as error:
+        raise FinalizationError(error_code) from error
+
+
+def load_finalization_receipt(
+    path: Path,
+    expected_id: str,
+    filesystem: FinalizationFilesystem,
+) -> FinalizationReceipt:
+    try:
+        raw = filesystem.read(path)
+        transaction_id, outcome, version = _parse_finalization_value(
+            raw,
+            expected_state=FINALIZATION_RECEIPT_STATE,
+            error_code="invalid_finalization_receipt",
+        )
+        if transaction_id != expected_id:
+            raise FinalizationError("invalid_finalization_receipt")
+        return FinalizationReceipt(transaction_id, outcome, version)
+    except FinalizationError:
+        raise
+    except Exception as error:
+        raise FinalizationError("invalid_finalization_receipt") from error
+
+
+def load_finalization_cursor(
+    path: Path,
+    filesystem: FinalizationFilesystem,
+) -> FinalizationCursor:
+    try:
+        raw = filesystem.read(path)
+        value = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=_reject_constant,
+        )
+        if type(value) is not dict or set(value) != {
+            "transactionId",
+            "outcome",
+            "terminal_version",
+            "state",
+        }:
+            raise ValueError
+        cursor = FinalizationCursor(
+            parse_transaction_id(value["transactionId"]),
+            value["outcome"],
+            parse_terminal_version(value["terminal_version"]),
+            value["state"],
+        )
+        if raw != _canonical_finalization_bytes(value):
+            raise ValueError
+        return cursor
+    except FinalizationError:
+        raise
+    except Exception as error:
+        raise FinalizationError("invalid_finalization_cursor") from error
+
+
+def load_finalization_ack(
+    path: Path,
+    filesystem: FinalizationFilesystem,
+) -> FinalizationReceipt:
+    try:
+        raw = filesystem.read(path)
+        transaction_id, outcome, version = _parse_finalization_value(
+            raw,
+            expected_state=FINALIZATION_RECEIPT_STATE,
+            error_code="invalid_finalization_acknowledgment",
+        )
+        return FinalizationReceipt(transaction_id, outcome, version)
+    except FinalizationError:
+        raise
+    except Exception as error:
+        raise FinalizationError("invalid_finalization_acknowledgment") from error
+
+
+_FINALIZATION_FS_METHODS = (
+    "atomic_write",
+    "read",
+    "exists",
+    "has_atomic_scratch",
+    "move_receipt_to_ack",
+    "remove_cursor",
+    "fsync_file",
+    "fsync_directory",
+)
+
+
+def _require_finalization_filesystem(value: object, error_code: str) -> None:
+    if any(
+        not callable(getattr(value, name, None))
+        for name in _FINALIZATION_FS_METHODS
+    ):
+        raise FinalizationError(error_code)
+
+
+def _ensure_receipts_directory(path: Path) -> None:
+    if path.name != "receipts" or path.parent.name.casefold() != "updates":
+        raise FinalizationError("invalid_finalization_receipt")
+    try:
+        _require_plain_ancestor_chain(path.parent)
+        _lstat_plain(path.parent, require_directory=True)
+        if not path.exists():
+            path.mkdir()
+        _lstat_plain(path, require_directory=True)
+    except (OSError, RecoveryError) as error:
+        raise FinalizationError("invalid_finalization_receipt") from error
+
+
+def _write_and_verify_cursor(
+    path: Path,
+    value: FinalizationCursor,
+    fs: FinalizationFilesystem,
+) -> None:
+    try:
+        fs.atomic_write(path, value.to_dict())
+        if load_finalization_cursor(path, fs) != value:
+            raise FinalizationError("finalization_record_round_trip_failed")
+    except FinalizationError:
+        raise
+    except Exception as error:
+        raise FinalizationError("invalid_finalization_cursor") from error
+
+
+def _write_and_verify_receipt(
+    path: Path,
+    value: FinalizationReceipt,
+    fs: FinalizationFilesystem,
+) -> None:
+    try:
+        _ensure_receipts_directory(path.parent)
+        fs.atomic_write(path, value.to_dict())
+        if load_finalization_receipt(path, value.transaction_id, fs) != value:
+            raise FinalizationError("finalization_record_round_trip_failed")
+    except FinalizationError:
+        raise
+    except Exception as error:
+        raise FinalizationError("invalid_finalization_receipt") from error
+
+
+def _terminal_receipt_from_authority(
+    paths: TransactionPaths,
+    tx: str,
+) -> FinalizationReceipt:
+    try:
+        active = read_active_transaction(paths.active)
+        if (
+            active.transaction_id != tx
+            or resolve_active_journal(paths.updates_root, active) != paths.journal
+        ):
+            raise FinalizationError("active_transaction_mismatch")
+        journal = read_journal(paths.journal)
+        if journal.transaction_id != tx:
+            raise FinalizationError("active_transaction_mismatch")
+        return receipt_from_terminal_journal(journal)
+    except FinalizationError:
+        raise
+    except Exception as error:
+        raise FinalizationError("active_transaction_mismatch") from error
+
+
+def _terminal_cleanup_complete(paths: TransactionPaths, tx: str) -> bool:
+    if paths.transaction_root.exists() or paths.transaction_root.is_symlink():
+        return False
+    if paths.active.exists() or paths.active.is_symlink():
+        try:
+            active = read_active_transaction(paths.active)
+        except Exception as error:
+            raise FinalizationError("active_transaction_mismatch") from error
+        if active.transaction_id != tx:
+            raise FinalizationError("active_transaction_mismatch")
+        return False
+    return True
+
+
+def _finalization_paths(install_root: Path, transaction_id: str):
+    try:
+        tx = parse_transaction_id(transaction_id)
+        paths = TransactionPaths.for_install(install_root, tx)
+    except Exception as error:
+        raise FinalizationError("active_transaction_mismatch") from error
+    if install_root != paths.install_root:
+        raise FinalizationError("active_transaction_mismatch")
+    receipt_path = paths.updates_root / "receipts" / f"{tx}.json"
+    cursor_path = paths.updates_root / "finalization-cursor.json"
+    ack_path = paths.updates_root / "finalization-ack.json"
+    return tx, paths, receipt_path, cursor_path, ack_path
+
+
+def finalize_update_status(
+    install_root: Path,
+    transaction_id: str,
+    registry: RegistryBackend,
+    engine_factory: Callable[[Path], UpdateEngine],
+    *,
+    filesystem: FinalizationFilesystem | None = None,
+    mutex_factory: Callable[[Path], MutationMutex] = create_windows_mutation_mutex,
+) -> FinalizationReceipt:
+    tx, paths, receipt_path, cursor_path, ack_path = _finalization_paths(
+        install_root, transaction_id
+    )
+    fs = filesystem
+    if fs is not None:
+        _require_finalization_filesystem(fs, "invalid_finalization_receipt")
+    try:
+        mutex = mutex_factory(paths.install_root)
+    except Exception as error:
+        raise FinalizationError("finalization_cleanup_failed") from error
+    acknowledged = False
+    with mutex:
+        if fs is None:
+            fs = OSFinalizationFilesystem()
+        cursor_exists = fs.exists(cursor_path)
+        cursor_scratch = fs.has_atomic_scratch(cursor_path)
+        if cursor_exists:
+            cursor = load_finalization_cursor(cursor_path, fs)
+            if cursor.transaction_id != tx:
+                raise FinalizationError("finalization_ack_pending")
+            receipt = receipt_from_cursor(cursor)
+            if cursor.state == "reserved":
+                if fs.exists(receipt_path):
+                    if load_finalization_receipt(receipt_path, tx, fs) != receipt:
+                        raise FinalizationError("invalid_finalization_receipt")
+                else:
+                    _write_and_verify_receipt(receipt_path, receipt, fs)
+                cursor = cursor_from_receipt(receipt, "receipt-ready")
+                _write_and_verify_cursor(cursor_path, cursor, fs)
+            elif cursor_scratch:
+                _write_and_verify_cursor(cursor_path, cursor, fs)
+            if fs.exists(receipt_path):
+                if load_finalization_receipt(receipt_path, tx, fs) != receipt:
+                    raise FinalizationError("invalid_finalization_receipt")
+                if fs.has_atomic_scratch(receipt_path):
+                    _write_and_verify_receipt(receipt_path, receipt, fs)
+            elif fs.has_atomic_scratch(receipt_path):
+                _write_and_verify_receipt(receipt_path, receipt, fs)
+            elif fs.exists(ack_path):
+                if load_finalization_ack(ack_path, fs) != receipt:
+                    raise FinalizationError(
+                        "invalid_finalization_acknowledgment"
+                    )
+                if not _terminal_cleanup_complete(paths, tx):
+                    raise FinalizationError(
+                        "invalid_finalization_acknowledgment"
+                    )
+                acknowledged = True
+            else:
+                raise FinalizationError("finalization_cleanup_incomplete")
+        elif cursor_scratch:
+            try:
+                active = read_active_transaction(paths.active)
+            except Exception as error:
+                raise FinalizationError("invalid_finalization_cursor") from error
+            if active.transaction_id != tx:
+                raise FinalizationError("finalization_ack_pending")
+            receipt = _terminal_receipt_from_authority(paths, tx)
+            cursor = cursor_from_receipt(receipt, "reserved")
+            _write_and_verify_cursor(cursor_path, cursor, fs)
+            _write_and_verify_receipt(receipt_path, receipt, fs)
+            _write_and_verify_cursor(
+                cursor_path,
+                cursor_from_receipt(receipt, "receipt-ready"),
+                fs,
+            )
+        else:
+            if fs.exists(receipt_path) or fs.has_atomic_scratch(receipt_path):
+                raise FinalizationError("invalid_finalization_receipt")
+            if fs.exists(ack_path):
+                try:
+                    prior = load_finalization_ack(ack_path, fs)
+                except FinalizationError as ack_error:
+                    try:
+                        receipt = _terminal_receipt_from_authority(paths, tx)
+                    except Exception:
+                        raise ack_error
+                else:
+                    if prior.transaction_id == tx:
+                        if not _terminal_cleanup_complete(paths, tx):
+                            raise FinalizationError(
+                                "invalid_finalization_acknowledgment"
+                            )
+                        fs.fsync_directory(cursor_path.parent)
+                        return prior
+            receipt = _terminal_receipt_from_authority(paths, tx)
+            _write_and_verify_cursor(
+                cursor_path,
+                cursor_from_receipt(receipt, "reserved"),
+                fs,
+            )
+            _write_and_verify_receipt(receipt_path, receipt, fs)
+            _write_and_verify_cursor(
+                cursor_path,
+                cursor_from_receipt(receipt, "receipt-ready"),
+                fs,
+            )
+    if not acknowledged:
+        try:
+            unregister_host(registry, STATUS_HOST_NAME)
+            engine_factory(paths.install_root).finalize_terminal_evidence(tx)
+        except Exception as error:
+            raise FinalizationError("finalization_cleanup_failed") from error
+    return receipt
+
+
+def acknowledge_update_finalization(
+    install_root: Path,
+    transaction_id: str,
+    *,
+    filesystem: FinalizationFilesystem | None = None,
+    mutex_factory: Callable[[Path], MutationMutex] = create_windows_mutation_mutex,
+) -> bool:
+    tx, paths, receipt_path, cursor_path, ack_path = _finalization_paths(
+        install_root, transaction_id
+    )
+    fs = filesystem
+    if fs is not None:
+        _require_finalization_filesystem(
+            fs, "invalid_finalization_acknowledgment"
+        )
+    try:
+        mutex = mutex_factory(paths.install_root)
+    except Exception as error:
+        raise FinalizationError("finalization_cleanup_failed") from error
+    with mutex:
+        if fs is None:
+            fs = OSFinalizationFilesystem()
+        if fs.has_atomic_scratch(ack_path):
+            raise FinalizationError("invalid_finalization_acknowledgment")
+        if not fs.exists(cursor_path):
+            if fs.has_atomic_scratch(cursor_path):
+                if fs.exists(ack_path):
+                    ack = load_finalization_ack(ack_path, fs)
+                    if ack.transaction_id != tx:
+                        raise FinalizationError("finalization_not_current")
+                    if fs.exists(receipt_path) or fs.has_atomic_scratch(
+                        receipt_path
+                    ):
+                        raise FinalizationError("invalid_finalization_receipt")
+                    if not _terminal_cleanup_complete(paths, tx):
+                        raise FinalizationError(
+                            "finalization_cleanup_incomplete"
+                        )
+                    try:
+                        _write_and_verify_cursor(
+                            cursor_path,
+                            cursor_from_receipt(ack, "receipt-ready"),
+                            fs,
+                        )
+                        fs.fsync_file(ack_path)
+                        fs.fsync_directory(receipt_path.parent)
+                        fs.fsync_directory(ack_path.parent)
+                        fs.remove_cursor(cursor_path)
+                    except FinalizationError:
+                        raise
+                    except Exception as error:
+                        raise FinalizationError(
+                            "finalization_cleanup_failed"
+                        ) from error
+                    return True
+                raise FinalizationError("finalization_cleanup_incomplete")
+            if not fs.exists(ack_path):
+                raise FinalizationError("finalization_not_current")
+            ack = load_finalization_ack(ack_path, fs)
+            if ack.transaction_id != tx:
+                raise FinalizationError("finalization_not_current")
+            if fs.exists(receipt_path) or fs.has_atomic_scratch(receipt_path):
+                raise FinalizationError("invalid_finalization_receipt")
+            if not _terminal_cleanup_complete(paths, tx):
+                raise FinalizationError("finalization_cleanup_incomplete")
+            fs.fsync_directory(cursor_path.parent)
+            return True
+        cursor = load_finalization_cursor(cursor_path, fs)
+        if cursor.transaction_id != tx:
+            if fs.exists(ack_path):
+                prior = load_finalization_ack(ack_path, fs)
+                if prior.transaction_id == tx:
+                    return True
+            raise FinalizationError("finalization_not_current")
+        if cursor.state != "receipt-ready":
+            raise FinalizationError("finalization_cleanup_incomplete")
+        expected = receipt_from_cursor(cursor)
+        if not _terminal_cleanup_complete(paths, tx):
+            raise FinalizationError("finalization_cleanup_incomplete")
+        if fs.exists(receipt_path):
+            if load_finalization_receipt(receipt_path, tx, fs) != expected:
+                raise FinalizationError("invalid_finalization_receipt")
+            try:
+                fs.move_receipt_to_ack(receipt_path, ack_path)
+            except Exception as error:
+                raise FinalizationError("finalization_cleanup_failed") from error
+        elif not fs.exists(ack_path):
+            raise FinalizationError("finalization_cleanup_incomplete")
+        if load_finalization_ack(ack_path, fs) != expected:
+            raise FinalizationError("invalid_finalization_acknowledgment")
+        if not fs.exists(receipt_path):
+            try:
+                fs.fsync_file(ack_path)
+                fs.fsync_directory(receipt_path.parent)
+                fs.fsync_directory(ack_path.parent)
+            except Exception as error:
+                raise FinalizationError("finalization_cleanup_failed") from error
+        try:
+            fs.remove_cursor(cursor_path)
+        except Exception as error:
+            raise FinalizationError("finalization_cleanup_failed") from error
+        return True
+
+
+def require_no_pending_finalization(
+    install_root: Path,
+    *,
+    filesystem: FinalizationFilesystem | None = None,
+    mutex_factory: Callable[[Path], MutationMutex] = create_windows_mutation_mutex,
+) -> None:
+    if not isinstance(install_root, Path) or not install_root.is_absolute():
+        raise FinalizationError("invalid_finalization_cursor")
+    try:
+        root = install_root.resolve(strict=True)
+    except OSError as error:
+        raise FinalizationError("invalid_finalization_cursor") from error
+    if root != install_root:
+        raise FinalizationError("invalid_finalization_cursor")
+    fs = filesystem
+    cursor_path = root / "updates" / "finalization-cursor.json"
+    if fs is not None:
+        _require_finalization_filesystem(fs, "invalid_finalization_cursor")
+    try:
+        mutex = mutex_factory(root)
+    except Exception as error:
+        raise FinalizationError("finalization_cleanup_failed") from error
+    with mutex:
+        if fs is None:
+            fs = OSFinalizationFilesystem()
+        try:
+            if fs.exists(cursor_path):
+                load_finalization_cursor(cursor_path, fs)
+                raise FinalizationError("finalization_ack_pending")
+            if fs.has_atomic_scratch(cursor_path):
+                raise FinalizationError("finalization_ack_pending")
+        except FinalizationError:
+            raise
+        except Exception as error:
+            raise FinalizationError("finalization_cleanup_failed") from error
 
 
 class RunnerSource(StrEnum):
