@@ -1,5 +1,6 @@
 import os
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -16,11 +17,13 @@ from update_journal import (
     InitiatingProcessIdentity,
     JournalPhase,
     JournalReason,
+    SeedOperationReceipt,
     TransactionPaths,
     UpdateError,
     UpdateInitiator,
     UpdateJournal,
     new_staging_journal,
+    record_seed_receipt,
     parse_transaction_id,
     read_active_transaction,
     read_journal,
@@ -41,6 +44,7 @@ from update_ownership import (
     read_ownership_plan,
     write_ownership_plan_atomic,
 )
+from package_manifest import sha256_file
 
 
 class UpdateEngineError(UpdateError):
@@ -323,6 +327,31 @@ class UpdateEngine:
                 journal = transition(journal, JournalPhase.HOST_INSTALLED)
                 write_journal_atomic(paths.journal, journal)
                 self.hooks.after_journal_transition(journal.phase)
+            if journal.phase is JournalPhase.HOST_INSTALLED:
+                self._backup_extension(paths, plan)
+                journal = transition(journal, JournalPhase.EXTENSION_BACKED_UP)
+                write_journal_atomic(paths.journal, journal)
+                self.hooks.after_journal_transition(journal.phase)
+            if journal.phase is JournalPhase.EXTENSION_BACKED_UP:
+                self._install_extension_and_seed(paths, journal, plan)
+                journal = read_journal(paths.journal)
+                journal = transition(journal, JournalPhase.EXTENSION_INSTALLED)
+                write_journal_atomic(paths.journal, journal)
+                self.hooks.after_journal_transition(journal.phase)
+            if journal.phase is JournalPhase.EXTENSION_INSTALLED:
+                self._install_metadata(paths, plan)
+                journal = transition(journal, JournalPhase.METADATA_INSTALLED)
+                write_journal_atomic(paths.journal, journal)
+                self.hooks.after_journal_transition(journal.phase)
+            if journal.phase is JournalPhase.METADATA_INSTALLED:
+                journal = transition(journal, JournalPhase.PROBING)
+                write_journal_atomic(paths.journal, journal)
+                self.hooks.after_journal_transition(journal.phase)
+            if journal.phase is JournalPhase.PROBING:
+                self.hooks.probe_installed_product(self.install_root, plan)
+                journal = transition(journal, JournalPhase.COMMITTED)
+                write_journal_atomic(paths.journal, journal)
+                self.hooks.after_journal_transition(journal.phase)
             return journal
 
     def _run_operation(self, label: str, operation) -> None:
@@ -385,6 +414,114 @@ class UpdateEngine:
                 self.install_root / executable.path,
             ),
         )
+
+    def _backup_extension(self, paths: TransactionPaths, plan: OwnershipPlan) -> None:
+        self.hooks.before_live_phase(JournalPhase.EXTENSION_BACKED_UP, paths, plan)
+        live = self.install_root / "extension"
+        backup = paths.extension_backup
+        if plan.extension_was_present:
+            if backup.exists() and not live.exists():
+                return
+            if backup.exists() or not live.exists():
+                raise UpdateStateConflict()
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            self._run_operation(
+                "extension:backup",
+                lambda: os.replace(live, backup),
+            )
+        elif live.exists() or backup.exists():
+            raise UpdateStateConflict()
+
+    def _install_extension_and_seed(
+        self,
+        paths: TransactionPaths,
+        journal: UpdateJournal,
+        plan: OwnershipPlan,
+    ) -> None:
+        self.hooks.before_live_phase(JournalPhase.EXTENSION_INSTALLED, paths, plan)
+        staged_extension = paths.staged_extension
+        live_extension = self.install_root / "extension"
+        if staged_extension.exists() and not live_extension.exists():
+            self._run_operation(
+                "extension:install",
+                lambda: os.replace(staged_extension, live_extension),
+            )
+        elif staged_extension.exists() or not live_extension.exists():
+            raise UpdateStateConflict()
+
+        if not plan.seed_files or journal.seed_receipt is not None:
+            return
+        seed = plan.seed_files[0]
+        staged = paths.staged_host / seed.path
+        live = self.install_root / seed.path
+        seed_installed = False
+        if staged.exists() and not live.exists():
+            self._run_operation(
+                f"install-seed:{seed.path}",
+                lambda: os.replace(staged, live),
+            )
+            seed_installed = True
+        elif staged.exists() and live.exists():
+            seed_installed = False
+        elif not staged.exists():
+            seed_installed = True
+        else:
+            raise UpdateStateConflict()
+        observed = sha256_file(live) if live.exists() else None
+        receipt = SeedOperationReceipt(
+            path=seed.path,
+            expected_sha256=seed.sha256,
+            seed_installed=seed_installed,
+            observed_live_sha256=observed,
+        )
+        updated = record_seed_receipt(journal, receipt)
+        self._run_operation(
+            "journal:record-seed-receipt",
+            lambda: write_journal_atomic(paths.journal, updated),
+        )
+
+    def _copy_file_replace(self, source: Path, target: Path) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".tmp-", dir=target.parent)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(source.read_bytes())
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, target)
+        except Exception:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            temporary.unlink(missing_ok=True)
+            raise
+
+    def _install_metadata(self, paths: TransactionPaths, plan: OwnershipPlan) -> None:
+        self.hooks.before_live_phase(JournalPhase.METADATA_INSTALLED, paths, plan)
+        # Validate both sources before replacing either live file.
+        for item in plan.metadata_files:
+            source = paths.staged_host / item.path
+            if not source.exists() or sha256_file(source) != item.sha256:
+                raise UpdateStateConflict()
+            live = self.install_root / item.path
+            if live.exists() and sha256_file(live) != item.sha256:
+                raise UpdateStateConflict()
+        for item in plan.metadata_files:
+            source = paths.staged_host / item.path
+            live = self.install_root / item.path
+            if live.exists():
+                continue
+            self._run_operation(
+                f"metadata:install:{item.path}",
+                lambda source=source, live=live: self._copy_file_replace(
+                    source, live
+                ),
+            )
+        for item in plan.metadata_files:
+            if sha256_file(self.install_root / item.path) != item.sha256:
+                raise UpdateStateConflict()
 
     def rollback(self, transaction_id: str, failure_code: JournalReason):
         raise UpdateEngineError()

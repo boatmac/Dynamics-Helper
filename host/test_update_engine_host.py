@@ -174,7 +174,7 @@ class HostPhaseTests(EngineFixture):
         identity = InitiatingProcessIdentity(123, "created")
         engine.activate_prepared(TX, identity)
         journal = engine.resume(TX)
-        self.assertEqual(journal.phase, JournalPhase.HOST_INSTALLED)
+        self.assertEqual(journal.phase, JournalPhase.COMMITTED)
         backup_exe = self.install / "updates/transactions" / TX / "backup/host/dh_native_host.exe"
         self.assertEqual(backup_exe.read_bytes(), old_exe)
         before_labels = [value for kind, value in self.hooks.events if kind == "before"]
