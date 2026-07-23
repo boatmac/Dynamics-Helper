@@ -2,6 +2,7 @@ import ctypes
 import hashlib
 import os
 from pathlib import Path
+from typing import Protocol
 
 from update_journal import UpdateError
 
@@ -18,6 +19,18 @@ class MutationMutexError(UpdateError):
 
 class UpdateAlreadyInProgress(MutationMutexError):
     error_code = "update_already_in_progress"
+
+
+class MutationMutex(Protocol):
+    held: bool
+
+    def acquire(self) -> None: ...
+
+    def release(self) -> None: ...
+
+    def __enter__(self): ...
+
+    def __exit__(self, exc_type, exc, traceback): ...
 
 
 def canonical_install_identity(install_root: Path) -> str:
