@@ -213,6 +213,16 @@ class DeterministicArchiveWriterTests(unittest.TestCase):
                 all(not info.filename.endswith("/") for info in package.infolist())
             )
 
+    def test_archive_writer_preserves_colliding_unowned_sibling(self):
+        archive = self.root / "result.zip"
+        collision = self.root / ".zip-deadbeef"
+        collision.write_bytes(b"keep")
+        fixed = type("FixedUuid", (), {"hex": "deadbeef" * 4})()
+        with patch("package_archive.uuid.uuid4", return_value=fixed):
+            write_deterministic_archive(self.stage, archive)
+        self.assertEqual(collision.read_bytes(), b"keep")
+        self.assertTrue(archive.is_file())
+
 
 class HostileArchiveTests(unittest.TestCase):
     def setUp(self):
@@ -348,6 +358,20 @@ class HostileArchiveTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             stage_and_validate_archive(archive, destination)
         self.assertEqual(sentinel.read_bytes(), b"keep")
+
+    def test_extractor_preserves_colliding_unowned_sibling(self):
+        archive = self.root / "valid-collision.zip"
+        write_deterministic_archive(self.stage, archive)
+        collision = self.root / ".ext-deadbeef"
+        collision.mkdir()
+        sentinel = collision / "sentinel.txt"
+        sentinel.write_bytes(b"keep")
+        fixed = type("FixedUuid", (), {"hex": "deadbeef" * 4})()
+        destination = self.root / "collision-stage"
+        with patch("package_archive.uuid.uuid4", return_value=fixed):
+            stage_and_validate_archive(archive, destination)
+        self.assertEqual(sentinel.read_bytes(), b"keep")
+        self.assertTrue(destination.is_dir())
 
     def test_encrypted_flag_is_rejected_before_open(self):
         archive = self.root / "encrypted.zip"

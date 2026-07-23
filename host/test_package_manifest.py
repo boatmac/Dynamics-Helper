@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from unittest.mock import patch
 
 from package_manifest import (
     INSTALLED_PRODUCT_SCHEMA_VERSION,
@@ -536,6 +537,24 @@ class ReleaseDocumentGenerationTests(unittest.TestCase):
             entries["host/helper.dll"].ownership,
             OwnershipClass.HOST_PRODUCT_FILE,
         )
+
+    def test_metadata_writer_preserves_colliding_unowned_siblings(self):
+        stage = self._make_stage()
+        documents = generate_release_documents(stage, "2.0.74-beta.4")
+        collisions = (
+            stage / ".tmp-deadbeef",
+            stage / "host" / ".tmp-deadbeef",
+        )
+        for path in collisions:
+            path.write_bytes(b"keep")
+        with patch(
+            "package_manifest.tempfile.mkstemp",
+            side_effect=FileExistsError("collision"),
+        ):
+            with self.assertRaises(FileExistsError):
+                write_release_documents(stage, documents)
+        for path in collisions:
+            self.assertEqual(path.read_bytes(), b"keep")
 
 
 class FilesystemEntryTypeTests(unittest.TestCase):

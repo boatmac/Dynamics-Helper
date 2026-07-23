@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import release_helper
 from package_archive import write_deterministic_archive
-from package_manifest import load_installed_product, sha256_file
+from package_manifest import ManifestError, load_installed_product, sha256_file
 from updater import Updater
 
 
@@ -95,6 +95,57 @@ class TestReleaseStaging(unittest.TestCase):
                 "2.0.74-beta.4",
             )
         self.assertEqual(sentinel.read_bytes(), b"keep")
+
+    def test_stage_release_preserves_colliding_unowned_sibling(self):
+        collision = self.stage.parent / ".stg-deadbeef"
+        collision.mkdir()
+        sentinel = collision / "sentinel.txt"
+        sentinel.write_bytes(b"keep")
+        fixed = type("FixedUuid", (), {"hex": "deadbeef" * 4})()
+        with patch("release_helper.uuid.uuid4", return_value=fixed):
+            release_helper.stage_release(
+                self.source,
+                self.stage,
+                "2.0.74-beta.4",
+            )
+        self.assertEqual(sentinel.read_bytes(), b"keep")
+        self.assertFalse((self.stage / "sentinel.txt").exists())
+
+    def test_create_zip_does_not_delete_colliding_stage_name(self):
+        output = self.root / "collision-output"
+        output.mkdir()
+        collision = output / ".pkg-deadbeef"
+        collision.mkdir()
+        sentinel = collision / "sentinel.txt"
+        sentinel.write_bytes(b"keep")
+        fixed = type("FixedUuid", (), {"hex": "deadbeef" * 4})()
+        with (
+            patch("release_helper.uuid.uuid4", return_value=fixed),
+            self.assertRaises(FileExistsError),
+        ):
+            release_helper.create_zip(
+                "2.0.74-beta.4",
+                source_root=self.source,
+                output_dir=output,
+            )
+        self.assertEqual(sentinel.read_bytes(), b"keep")
+
+    def test_stage_release_rejects_source_tree_before_copy(self):
+        with (
+            patch(
+                "package_manifest._walk_regular_relative_paths",
+                side_effect=ManifestError("unsupported filesystem entry"),
+            ) as preflight,
+            patch("release_helper.shutil.copytree") as copytree,
+        ):
+            with self.assertRaises(ManifestError):
+                release_helper.stage_release(
+                    self.source,
+                    self.stage,
+                    "2.0.74-beta.4",
+                )
+        preflight.assert_called_once()
+        copytree.assert_not_called()
 
     def test_create_zip_is_deterministic_through_public_helper(self):
         output = self.root / "out"

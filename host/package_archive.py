@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import stat
+import tempfile
 import uuid
 import zipfile
 from dataclasses import dataclass
@@ -157,7 +158,12 @@ def write_deterministic_archive(stage_root: Path, archive_path: Path) -> None:
         sorted(_iter_stage_files(validated.stage_root), key=lambda item: item[0])
     )
     archive_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = archive_path.with_name(f".zip-{uuid.uuid4().hex[:8]}")
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".zip-",
+        dir=archive_path.parent,
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
     try:
         with zipfile.ZipFile(
             temporary,
@@ -234,11 +240,10 @@ def stage_and_validate_archive(
 ) -> ValidatedPackage:
     if stage_root.exists() or stage_root.is_symlink():
         raise FileExistsError(stage_root)
-    temporary = stage_root.with_name(f".ext-{uuid.uuid4().hex[:8]}")
+    temporary = Path(tempfile.mkdtemp(prefix=".ext-", dir=stage_root.parent))
     try:
         with zipfile.ZipFile(archive_path, "r") as archive:
             entries = _preflight_zip_infos(archive.infolist())
-            temporary.mkdir(parents=False)
             root = temporary.resolve(strict=True)
             for logical_path, info in entries:
                 destination = temporary.joinpath(*logical_path.split("/"))

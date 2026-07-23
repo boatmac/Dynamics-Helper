@@ -3,7 +3,7 @@ import json
 import os
 import re
 import stat
-import uuid
+import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -863,14 +863,19 @@ def generate_release_documents(
 
 
 def _write_sibling_replace(path: Path, payload: bytes) -> None:
-    temporary = path.with_name(f".tmp-{uuid.uuid4().hex[:8]}")
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".tmp-", dir=path.parent)
+    temporary = Path(temporary_name)
     try:
-        with temporary.open("xb") as stream:
+        with os.fdopen(descriptor, "wb") as stream:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
     except Exception:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
         temporary.unlink(missing_ok=True)
         raise
 

@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -192,7 +193,12 @@ def build_host():
 
 def stage_release(source_root: Path, stage_root: Path, version: str) -> Path:
     from package_archive import validate_staged_package
-    from package_manifest import generate_release_documents, write_release_documents
+    from package_manifest import (
+        _require_regular_file,
+        _walk_regular_relative_paths,
+        generate_release_documents,
+        write_release_documents,
+    )
 
     source_root = source_root.resolve(strict=True)
     required = (
@@ -207,9 +213,13 @@ def stage_release(source_root: Path, stage_root: Path, version: str) -> Path:
     for path in required:
         if not path.exists():
             raise FileNotFoundError(path)
+    _walk_regular_relative_paths(required[0])
+    _walk_regular_relative_paths(required[1])
+    for path in required[2:]:
+        _require_regular_file(path)
     if stage_root.exists():
         raise FileExistsError(stage_root)
-    temporary = stage_root.with_name(f".stg-{uuid.uuid4().hex[:8]}")
+    temporary = Path(tempfile.mkdtemp(prefix=".stg-", dir=stage_root.parent))
     try:
         shutil.copytree(required[0], temporary / "extension")
         shutil.copytree(required[1], temporary / "host")
@@ -241,13 +251,16 @@ def create_zip(
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f"DynamicsHelper_v{version}.zip"
     stage = output / f".pkg-{uuid.uuid4().hex[:8]}"
+    stage_owned = False
     try:
         stage_release(source, stage, version)
+        stage_owned = True
         write_deterministic_archive(stage, archive)
         print(f"Zip created: {archive}")
         return str(archive)
     finally:
-        shutil.rmtree(stage, ignore_errors=True)
+        if stage_owned:
+            shutil.rmtree(stage, ignore_errors=True)
 
 
 def publish_to_github(version, zip_path, prerelease=False, notes_file=None):

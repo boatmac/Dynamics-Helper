@@ -139,6 +139,19 @@ class InstallationVerifierTests(unittest.TestCase):
             "failed",
         )
 
+    def test_unexpected_verifier_exception_fails_closed(self):
+        live = self._make_live()
+        verifier = InstallationVerifier(live, frozen=True)
+        with patch.object(
+            verifier,
+            "_verify_packaged",
+            side_effect=RuntimeError("SECRET-VERIFIER"),
+        ):
+            result = verifier.verify()
+        self.assertEqual(result.integrity, "failed")
+        self.assertEqual(result.error_code, "installation_integrity_failed")
+        self.assertNotIn("SECRET-VERIFIER", repr(result))
+
 
 class UpdateProbeTests(unittest.TestCase):
     def setUp(self):
@@ -223,6 +236,18 @@ class UpdateProbeTests(unittest.TestCase):
             run_update_probe(self.manifest, install_root=self.live).status,
             "success",
         )
+
+    def test_unexpected_probe_exception_returns_fixed_failure(self):
+        with patch(
+            "install_integrity.load_update_manifest",
+            side_effect=RuntimeError("SECRET-PROBE"),
+        ):
+            result = run_update_probe(self.manifest, install_root=self.live)
+        self.assertEqual(
+            result,
+            UpdateProbeResult(status="error", error_code="package_probe_failed"),
+        )
+        self.assertNotIn("SECRET-PROBE", repr(result))
 
     def test_relinked_integrity_with_reserved_host_path_fails(self):
         live = self._make_live()

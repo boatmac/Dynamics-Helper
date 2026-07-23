@@ -145,7 +145,7 @@ class InstallationVerifier:
         if self._cached is None:
             try:
                 self._cached = self._verify_packaged()
-            except (ManifestError, OSError, ValueError):
+            except Exception:
                 self._cached = InstallationVerification(
                     mode="packaged",
                     integrity="failed",
@@ -254,7 +254,7 @@ def run_update_probe(
             extension_version=verification.extension_version,
             capabilities=PROVIDED_PROTOCOL_CAPABILITIES,
         )
-    except (ManifestError, OSError, ValueError):
+    except Exception:
         return UpdateProbeResult(
             status="error",
             error_code="package_probe_failed",
