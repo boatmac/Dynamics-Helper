@@ -177,9 +177,16 @@ class EntrypointFixture:
                 "update_entrypoint.InitiatingProcessIdentity",
                 "update_entrypoint.register_main_host",
                 "update_entrypoint.serve_status_host",
+                "native_registration.WindowsRegistryBackend",
+                "native_registration.register_main_host",
+                "update_status_host.serve_status_host",
+                "update_journal.InitiatingProcessIdentity",
+                "update_platform.InitiatingProcessIdentity",
+                "update_recovery.InitiatingProcessIdentity",
                 "update_recovery.RecoveryController",
                 "update_recovery.RecoveryDependencies",
                 "update_recovery.RecoveryDiagnostics",
+                "update_recovery.create_production_recovery_controller",
                 "update_recovery.CtypesWin32ProcessApi",
                 "update_recovery.WindowsProcessAdapter",
                 "update_recovery.SubprocessProbeAdapter",
@@ -193,6 +200,8 @@ class EntrypointFixture:
                 "update_platform.WindowsRunOnceStore",
                 "update_platform.SystemClock",
                 "update_mutex.create_windows_mutation_mutex",
+                "early_cli.run_update_probe",
+                "install_integrity.run_update_probe",
             )
         )
 
@@ -622,9 +631,6 @@ class EntrypointDispatchTests(EntrypointFixture, unittest.TestCase):
                             "update_entrypoint.dispatch_early_cli",
                             wraps=plan_a_dispatch,
                         ))
-                        stack.enter_context(
-                            mock.patch("early_cli.run_update_probe", exploding)
-                        )
                         self.assertEqual(
                             dispatch_early_mode(
                                 str(executable),
