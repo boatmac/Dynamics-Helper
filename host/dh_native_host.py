@@ -2,6 +2,12 @@
 # Must run before stdout redirection to allow printing status to console.
 import sys
 
+from early_cli import dispatch_early_cli
+
+_early_exit_code = dispatch_early_cli(sys.argv)
+if _early_exit_code is not None:
+    raise SystemExit(_early_exit_code)
+
 if "--register" in sys.argv:
     import os
     import json

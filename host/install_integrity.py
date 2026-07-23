@@ -6,7 +6,10 @@ from package_manifest import (
     LEGACY_PRODUCT_ALLOWLIST_VERSION,
     OWNERSHIP_SCHEMA_VERSION,
     ManifestError,
+    OwnershipClass,
     ReleaseIntegrity,
+    UpdateManifest,
+    _require_product_bijection,
     _read_chrome_manifest,
     _require_plain_directory,
     _require_regular_file,
@@ -14,6 +17,7 @@ from package_manifest import (
     canonical_json_bytes,
     load_installed_product,
     load_release_integrity,
+    load_update_manifest,
     normalize_package_path,
     release_integrity_to_dict,
     sha256_bytes,
@@ -32,6 +36,15 @@ class InstallationVerification:
     integrity: str
     host_version: str | None = None
     extension_version: str | None = None
+    error_code: str | None = None
+
+
+@dataclass(frozen=True)
+class UpdateProbeResult:
+    status: str
+    host_version: str | None = None
+    extension_version: str | None = None
+    capabilities: tuple[str, ...] = ()
     error_code: str | None = None
 
 
@@ -186,4 +199,63 @@ class InstallationVerifier:
             integrity="verified",
             host_version=VERSION,
             extension_version=extension_version,
+        )
+
+
+def _require_probe_manifest_matches_integrity(
+    root: Path,
+    manifest: UpdateManifest,
+) -> None:
+    if not any(
+        entry.path == "host/system_prompt.md"
+        and entry.ownership is OwnershipClass.HOST_PRODUCT_FILE
+        for entry in manifest.entries
+    ):
+        raise ValueError("DH Core missing from package manifest")
+    integrity = load_release_integrity(root / "release-integrity.json")
+    _require_product_bijection(manifest, integrity)
+
+
+def run_update_probe(
+    manifest_path: Path,
+    *,
+    install_root: Path | None = None,
+) -> UpdateProbeResult:
+    try:
+        manifest = load_update_manifest(manifest_path)
+        root = (
+            install_root.resolve(strict=True)
+            if install_root is not None
+            else (
+                Path(sys.executable).resolve().parent
+                if getattr(sys, "frozen", False)
+                else Path(__file__).resolve().parent
+            )
+        )
+        if manifest.package_version != VERSION:
+            raise ValueError("version mismatch")
+        if not set(manifest.required_capabilities).issubset(
+            PROVIDED_PROTOCOL_CAPABILITIES
+        ):
+            raise ValueError("required capability missing")
+        if manifest.provided_capabilities != PROVIDED_PROTOCOL_CAPABILITIES:
+            raise ValueError("provided capability mismatch")
+        _require_probe_manifest_matches_integrity(root, manifest)
+        verification = InstallationVerifier(root, frozen=True).verify()
+        if verification.integrity != "verified":
+            raise ValueError("installation verification failed")
+        if verification.host_version != manifest.package_version:
+            raise ValueError("host version mismatch")
+        if verification.extension_version != manifest.package_version:
+            raise ValueError("extension version mismatch")
+        return UpdateProbeResult(
+            status="success",
+            host_version=verification.host_version,
+            extension_version=verification.extension_version,
+            capabilities=PROVIDED_PROTOCOL_CAPABILITIES,
+        )
+    except (ManifestError, OSError, ValueError):
+        return UpdateProbeResult(
+            status="error",
+            error_code="package_probe_failed",
         )

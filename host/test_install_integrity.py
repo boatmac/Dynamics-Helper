@@ -4,7 +4,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from install_integrity import InstallationVerification, InstallationVerifier
+from install_integrity import (
+    InstallationVerification,
+    InstallationVerifier,
+    UpdateProbeResult,
+    run_update_probe,
+)
 from package_manifest import (
     InstalledProduct,
     canonical_json_bytes,
@@ -132,6 +137,91 @@ class InstallationVerifierTests(unittest.TestCase):
         self.assertEqual(
             InstallationVerifier(live, frozen=True).verify().integrity,
             "failed",
+        )
+
+
+class UpdateProbeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        stage = self.root / "stage"
+        files = {
+            "host/dh_native_host.exe": b"host-exe",
+            "host/_internal/python313.dll": b"runtime",
+            "host/system_prompt.md": b"core",
+            "host/register.py": b"register",
+            "host/config.json": b"{}\n",
+            "extension/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+            "extension/assets/app.js": b"app",
+            "installer_core.ps1": b"installer",
+            "install.bat": b"wrapper",
+        }
+        for relative, payload in files.items():
+            path = stage.joinpath(*relative.split("/"))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+        documents = generate_release_documents(stage, VERSION)
+        write_release_documents(stage, documents)
+        self.manifest = self.root / "external" / "update-manifest.json"
+        self.manifest.parent.mkdir()
+        shutil.copy2(stage / "update-manifest.json", self.manifest)
+        self.live = self.root / "live"
+        shutil.copytree(stage / "host", self.live)
+        shutil.copytree(stage / "extension", self.live / "extension")
+
+    def _make_live(self) -> Path:
+        live = self.root / next(tempfile._get_candidate_names())
+        stage = self.root / "stage"
+        shutil.copytree(stage / "host", live)
+        shutil.copytree(stage / "extension", live / "extension")
+        return live
+
+    def test_valid_probe_returns_only_allowlisted_success(self):
+        self.assertEqual(
+            run_update_probe(self.manifest, install_root=self.live),
+            UpdateProbeResult(
+                status="success",
+                host_version=VERSION,
+                extension_version=VERSION,
+                capabilities=("prompt-scope-v1",),
+            ),
+        )
+
+    def test_probe_failure_table(self):
+        failures = (
+            ("host-file", lambda: (self.live / "system_prompt.md").write_bytes(b"changed")),
+            ("core-missing", lambda: (self.live / "system_prompt.md").unlink()),
+            ("extension-version", lambda: (self.live / "extension/manifest.json").write_text('{"version":"9.9.9"}\n', encoding="utf-8")),
+            ("manifest-malformed", lambda: self.manifest.write_bytes(b"{}\n")),
+        )
+        expected = UpdateProbeResult(
+            status="error",
+            error_code="package_probe_failed",
+        )
+        for name, mutate in failures:
+            with self.subTest(name=name):
+                self.tearDown_probe_state()
+                mutate()
+                self.assertEqual(
+                    run_update_probe(self.manifest, install_root=self.live),
+                    expected,
+                )
+
+    def tearDown_probe_state(self):
+        # Rebuild from the fixture bytes so each mutation is independent.
+        if self.live.exists():
+            shutil.rmtree(self.live)
+        stage = self.root / "stage"
+        shutil.copytree(stage / "host", self.live)
+        shutil.copytree(stage / "extension", self.live / "extension")
+        shutil.copy2(stage / "update-manifest.json", self.manifest)
+
+    def test_manifest_parent_is_not_used_as_install_root(self):
+        self.assertNotEqual(self.manifest.parent, self.live)
+        self.assertEqual(
+            run_update_probe(self.manifest, install_root=self.live).status,
+            "success",
         )
 
     def test_relinked_integrity_with_reserved_host_path_fails(self):
