@@ -144,6 +144,20 @@ class BuildOwnershipPlanTests(unittest.TestCase):
         self.assertIn("_internal/stale.dll", {item.path for item in plan.prior_host_files})
         self.assertEqual(plan.seed_files, ())
 
+    def test_installed_declared_hash_mismatch_is_rejected(self):
+        install = self.root / "installed-mismatch"
+        shutil.copytree(self.package.stage_root / "host", install)
+        shutil.copytree(self.package.stage_root / "extension", install / "extension")
+        (install / "system_prompt.md").write_bytes(b"changed-without-relink")
+        with self.assertRaises(OwnershipError):
+            build_ownership_plan(
+                self.package,
+                install,
+                TX,
+                expected_version=VERSION,
+                prior_version=VERSION,
+            )
+
     def test_half_metadata_is_not_legacy(self):
         install = self.root / "half"
         install.mkdir()

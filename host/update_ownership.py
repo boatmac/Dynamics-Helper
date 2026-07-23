@@ -184,6 +184,26 @@ def build_ownership_plan(
                 raise OwnershipError()
             if not extension_exists:
                 raise OwnershipError()
+            for record in integrity.host_files:
+                live_path = root.joinpath(*record.path.split("/"))
+                if not live_path.is_file() or sha256_file(live_path) != record.sha256:
+                    raise OwnershipError()
+            actual_extension = _digest_tree(root / "extension")
+            if {
+                (item.path, item.sha256) for item in actual_extension
+            } != {
+                (record.path, record.sha256)
+                for record in integrity.extension_files
+            }:
+                # Stale children are allowed and captured for rollback; every
+                # declared file still must match.
+                declared = {
+                    record.path: record.sha256
+                    for record in integrity.extension_files
+                }
+                actual = {item.path: item.sha256 for item in actual_extension}
+                if any(actual.get(path) != digest for path, digest in declared.items()):
+                    raise OwnershipError()
             prior_host = tuple(
                 sorted(
                     FileDigest(record.path, record.sha256)
@@ -198,7 +218,7 @@ def build_ownership_plan(
                 if item.path not in declared
             )
             prior_host = tuple(sorted((*prior_host, *stale)))
-            prior_extension = _digest_tree(root / "extension")
+            prior_extension = actual_extension
             prior_metadata = tuple(
                 sorted(
                     FileDigest(name, sha256_file(root / name))
