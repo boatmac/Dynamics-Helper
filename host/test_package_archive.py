@@ -1,4 +1,6 @@
 import os
+import stat
+import struct
 import tempfile
 import unittest
 import zipfile
@@ -8,6 +10,8 @@ from unittest.mock import patch
 
 from package_archive import (
     PackageValidationError,
+    _preflight_zip_infos,
+    stage_and_validate_archive,
     validate_staged_package,
     write_deterministic_archive,
 )
@@ -208,6 +212,170 @@ class DeterministicArchiveWriterTests(unittest.TestCase):
             self.assertTrue(
                 all(not info.filename.endswith("/") for info in package.infolist())
             )
+
+
+class HostileArchiveTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.stage = make_stage(self.root / "source")
+
+    def _valid_entries(self) -> list[tuple[str, bytes, int, int]]:
+        return [
+            (relative, self.stage.joinpath(*relative.split("/")).read_bytes(), 3, 0o100644 << 16)
+            for relative in sorted(
+                path.relative_to(self.stage).as_posix()
+                for path in self.stage.rglob("*")
+                if path.is_file()
+            )
+        ]
+
+    def _write_archive(
+        self,
+        name: str,
+        extras: tuple[tuple[str, bytes, int, int], ...] = (),
+    ) -> Path:
+        archive = self.root / f"{name}.zip"
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as output:
+            for filename, payload, create_system, external_attr in (
+                *self._valid_entries(),
+                *extras,
+            ):
+                info = zipfile.ZipInfo(filename)
+                info.create_system = create_system
+                info.external_attr = external_attr
+                output.writestr(info, payload)
+        for filename, _payload, _create_system, _external_attr in extras:
+            if "\\" not in filename:
+                continue
+            normalized = filename.replace("\\", "/")
+            data = bytearray(archive.read_bytes())
+            original = normalized.encode("utf-8")
+            replacement = filename.encode("utf-8")
+            self.assertEqual(len(original), len(replacement))
+            self.assertEqual(data.count(original), 2)
+            archive.write_bytes(data.replace(original, replacement))
+        return archive
+
+    def test_hostile_archive_table(self):
+        cases = (
+            ("parent", "../escape.txt", 3, 0o100644 << 16, "invalid_package_path"),
+            ("absolute", "/escape.txt", 3, 0o100644 << 16, "invalid_package_path"),
+            ("drive", "C:/escape.txt", 3, 0o100644 << 16, "invalid_package_path"),
+            ("duplicate", "host/system_prompt.md", 3, 0o100644 << 16, "duplicate_package_path"),
+            ("case-collision", "extension/assets/APP.js", 3, 0o100644 << 16, "duplicate_package_path"),
+            ("symlink", "host/link", 3, 0o120777 << 16, "unsupported_archive_entry"),
+            ("fifo", "host/pipe", 3, 0o010644 << 16, "unsupported_archive_entry"),
+            ("directory", "host/_internal/", 3, 0o040755 << 16, "unsupported_archive_entry"),
+            ("extra-directory", "surprise/", 3, 0o040755 << 16, "unsupported_archive_entry"),
+            ("ads", "extension/assets/app.js:secret", 3, 0o100644 << 16, "invalid_package_path"),
+            ("trailing-dot", "extension/assets/app.js.", 3, 0o100644 << 16, "invalid_package_path"),
+            ("trailing-space", "extension/assets/app.js ", 3, 0o100644 << 16, "invalid_package_path"),
+            ("reserved", "extension/assets/CON.txt", 3, 0o100644 << 16, "invalid_package_path"),
+            ("dos-directory", "surprise", 0, 0x10, "unsupported_archive_entry"),
+        )
+        for name, filename, create_system, attrs, expected in cases:
+            archive = self._write_archive(
+                name,
+                ((filename, b"x", create_system, attrs),),
+            )
+            destination = self.root / f"{name}-stage"
+            with self.subTest(name=name):
+                with self.assertRaises(PackageValidationError) as captured:
+                    stage_and_validate_archive(archive, destination)
+                self.assertEqual(captured.exception.error_code, expected)
+                self.assertFalse(destination.exists())
+        self.assertFalse((self.root.parent / "escape.txt").exists())
+
+    def test_preflight_rejects_backslash_before_extraction(self):
+        class BackslashInfo:
+            filename = r"host\escape.txt"
+            flag_bits = 0
+            create_system = 3
+            external_attr = 0o100644 << 16
+
+            @staticmethod
+            def is_dir() -> bool:
+                return False
+
+        with self.assertRaises(PackageValidationError) as captured:
+            _preflight_zip_infos([BackslashInfo()])
+        self.assertEqual(captured.exception.error_code, "invalid_package_path")
+
+    def test_preflight_rejects_parent_segments_before_extraction(self):
+        class ParentInfo:
+            filename = "../escape.txt"
+            flag_bits = 0
+            create_system = 3
+            external_attr = 0o100644 << 16
+
+            @staticmethod
+            def is_dir() -> bool:
+                return False
+
+        with self.assertRaises(PackageValidationError) as captured:
+            _preflight_zip_infos([ParentInfo()])
+        self.assertEqual(captured.exception.error_code, "invalid_package_path")
+
+    def test_deterministic_archive_round_trips(self):
+        archive = self.root / "round-trip.zip"
+        destination = self.root / "round-trip-stage"
+        write_deterministic_archive(self.stage, archive)
+        validated = stage_and_validate_archive(
+            archive,
+            destination,
+            expected_version="2.0.74-beta.4",
+        )
+        self.assertEqual(validated.manifest.package_version, "2.0.74-beta.4")
+
+    def test_dos_regular_entry_reaches_manifest_validation(self):
+        archive = self._write_archive(
+            "dos-file",
+            (("surprise.txt", b"x", 0, 0),),
+        )
+        with self.assertRaises(PackageValidationError) as captured:
+            stage_and_validate_archive(archive, self.root / "dos-file-stage")
+        self.assertEqual(captured.exception.error_code, "package_file_unmanifested")
+
+    def test_preexisting_stage_destination_is_untouched(self):
+        archive = self.root / "valid.zip"
+        write_deterministic_archive(self.stage, archive)
+        destination = self.root / "existing"
+        destination.mkdir()
+        sentinel = destination / "sentinel.txt"
+        sentinel.write_bytes(b"keep")
+        with self.assertRaises(FileExistsError):
+            stage_and_validate_archive(archive, destination)
+        self.assertEqual(sentinel.read_bytes(), b"keep")
+
+    def test_encrypted_flag_is_rejected_before_open(self):
+        archive = self.root / "encrypted.zip"
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as output:
+            output.writestr("one.txt", b"x")
+        data = bytearray(archive.read_bytes())
+        local = data.find(b"PK\x03\x04")
+        central = data.find(b"PK\x01\x02")
+        self.assertGreaterEqual(local, 0)
+        self.assertGreaterEqual(central, 0)
+        struct.pack_into(
+            "<H",
+            data,
+            local + 6,
+            struct.unpack_from("<H", data, local + 6)[0] | 1,
+        )
+        struct.pack_into(
+            "<H",
+            data,
+            central + 8,
+            struct.unpack_from("<H", data, central + 8)[0] | 1,
+        )
+        archive.write_bytes(data)
+        with patch("zipfile.ZipFile.open", side_effect=AssertionError("opened")) as opened:
+            with self.assertRaises(PackageValidationError) as captured:
+                stage_and_validate_archive(archive, self.root / "encrypted-stage")
+        self.assertEqual(captured.exception.error_code, "unsupported_archive_entry")
+        opened.assert_not_called()
 
 
 if __name__ == "__main__":
