@@ -300,6 +300,33 @@ This file defines the operational rules, development workflows, and coding stand
   `transactional-update-v1` until the complete Plan D cutover and frozen gates
   pass. `get_capabilities`/`verify_installation` are diagnostics in Plan A, not
   protected-action enforcement.
+* **Dormant Plan B engine:** `host/update_journal.py`,
+  `host/update_ownership.py`, `host/update_mutex.py`, and
+  `host/update_engine.py` implement the transaction engine but are not routed
+  from `dh_native_host.py`, `updater.py`, the Extension, or the installer yet.
+  The legacy updater above remains the active production path until Plans C/D
+  complete the detached recovery and runtime cutover.
+* **Transaction authority:** IDs are lowercase 32-hex from exactly 16 random
+  bytes. Stable authority is `updates/active.json` plus
+  `updates/transactions/<id>/journal.json`; `TransactionPaths` intentionally
+  has no `recovery_root`. `UpdateEngine` exclusively owns journal transitions,
+  active/workspace mutation, nonterminal resume, rollback, and terminal evidence
+  cleanup under the installation mutex.
+* **Preparation and ownership:** N may validate an internally consistent N+1
+  package using the caller's trusted `expected_version`; never compare it with
+  the importing Host's `VERSION`. Filter `UpdateManifest.entries`, require
+  manifest/integrity Chrome identity and metadata links, stage only in
+  `<id>.preparing`, and atomically promote it. Preserve `config.json`,
+  `copilot-instructions.md`, `user_prompt.md`, logs, generated `manifest.json`,
+  unknown top-level paths, and unrelated `updates/**`.
+* **Activation and failure lineage:** Browser activation requires immutable
+  `{pid, creation_token}`; installer activation requires `None` and never waits
+  on itself. `reason_code` is current status, while `original_failure_code` and
+  `rollback_from` remain immutable. Retry recovery with the original forward
+  code. Fresh seed ownership is recorded durably and user-created/edited config
+  always wins. `finalize_terminal_evidence` runs only after Plan C receipt
+  durability/status unregister and removes active before the matching terminal
+  workspace.
 * **Host test isolation:** Every Host subprocess receives fresh existing
   `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP`
   directories before process start. Automated tests never use the real install,

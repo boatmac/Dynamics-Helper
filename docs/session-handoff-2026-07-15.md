@@ -544,6 +544,46 @@ user/session isolation was unavailable. No push, tag, publish, version, package,
 registry, real `%LOCALAPPDATA%\DynamicsHelper`, or MyCases operation occurred.
 Controller broad whole-branch review remains pending.
 
+## Plan B Journal Engine Addendum - 2026-07-23
+
+Implementation base after reviewed Plan A: `00fff06741f3c8a575fd3c6eba45c4d7cd1b1a62`.
+Plan B product/test commits:
+
+- `3bfb1faa65ec049cfece1a6378f0ba143566be41` (`feat(update): add strict transaction journal`)
+- `b1158a4` (`feat(update): persist exact product ownership`)
+- `1f26277` (`feat(update): serialize installation mutation`)
+- `0fce143` (`feat(update): prepare and replace host under mutex`)
+- `d91698c` (`feat(update): install extension metadata and fresh seed`)
+- `41d7ccf` (`fix(update): verify installed ownership before mutation`)
+- `2e41229` (`feat(update): preserve rollback failure lineage`)
+- `9ca3fadfb6edabad2285bad42ea95e5fab7a4f73` (`test(update): exhaust journal fault matrix`)
+
+Plan B now provides strict transaction IDs/journals, stable
+`updates/active.json`, exact Plan A-linked ownership, one installation mutation
+mutex, atomic `<id>.preparing` promotion, idempotent Host/Extension/metadata
+phases, exact live probe, evidence-preserving rollback/retry, and terminal
+cleanup. Browser activation uses immutable `{pid, creation_token}`; installer
+activation uses null identity and skips waiting. Current `reason_code` is
+separate from immutable `original_failure_code`/`rollback_from`. Fresh seed
+receipts preserve transaction-installed and user-created/edited config.
+
+The literal matrix covers installed, legacy-v1, fresh-seeded,
+fresh-preexisting, and fresh-post-plan-user-creation modes. It freezes 216
+operation labels across three axes (648 cases), 65 phase-transition crashes, and
+2 seed-receipt transition crashes. The final candidate gates passed **76/76
+focused Plan B in 528.913s** and **349/349 full Host in 543.192s**, with no
+skips. Compileall, stale-contract/scope scans, Plan A signature/field probe,
+transaction-writer ownership, and diff checks passed.
+
+This engine remains dormant. The legacy updater is still the production route;
+`transactional-update-v1` remains unadvertised until Plan D cutover. Plan C must
+consume Plan B's exact readers/paths/API, use `probe_manifest`, retry recovery
+with `original_failure_code`, write its terminal receipt before calling
+`finalize_terminal_evidence`, and serialize terminal identity via
+`terminal_version` (including null version for fresh rollback). No real update,
+installer, registry, AppData installation, network, release, version, tag, push,
+or publish operation occurred.
+
 ## Session Identity Contract
 
 - Case session ID is deterministic UUIDv5 derived from the bare 16-digit case number.

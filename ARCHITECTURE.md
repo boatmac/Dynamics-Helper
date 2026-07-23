@@ -102,10 +102,52 @@ entries, missing/extra files, and hash/link mismatches. The Host exposes
 metadata disagree. `--update-probe` runs before logging, config, updater, or SDK
 initialization and emits only an allowlisted JSON result.
 
-This is dormant hardening, not the transactional updater. The existing
-extension-first in-place updater, reload behavior, and locked-executable
-fallback above remain active until Plans B-D are implemented and verified.
-Only `prompt-scope-v1` is advertised in Plan A.
+Plan A remains dormant hardening. Plan B now adds a dormant standard-library
+transaction engine, but the existing extension-first in-place updater, reload
+behavior, and locked-executable fallback above remain active until Plans C/D
+wire and verify detached recovery/runtime cutover. Only `prompt-scope-v1` is
+advertised before that complete cutover.
+
+### Dormant Transaction Engine (Plan B)
+
+`update_journal.py` owns strict canonical journal/active schemas, transaction-ID
+generation, transitions, and terminal-version projection. `update_ownership.py`
+filters Plan A `UpdateManifest.entries` into exact fresh, installed, or
+legacy-v1 ownership. N accepts an internally consistent N+1 only when it matches
+the caller's `expected_version`; manifest/integrity package capabilities,
+Chrome `version`/`version_name`, product bijections, metadata hashes, and old
+installed product hashes must all agree.
+
+`update_mutex.py` provides one named installation mutation mutex.
+`update_engine.py` exclusively mutates `updates/transactions/**`, stable
+`updates/active.json`, and product-owned live paths under that mutex. Preparation
+is inert in `updates/transactions/<id>.preparing`; it writes canonical staging
+journal, probe manifest, staged Host/Extension, ownership, and prepared journal,
+then atomically promotes to `updates/transactions/<id>` before writing active.
+The final workspace contains `staged/`, `backup/host`, `backup/extension`,
+`backup/metadata`, `failed-new/`, `probe/update-manifest.json`,
+`ownership.json`, and `journal.json`. `TransactionPaths` has no recovery root.
+
+Browser activation stores immutable `InitiatingProcessIdentity(pid,
+creation_token)` before waiting for the initiating Host to exit. Synchronous
+installer activation persists `initiator=installer`, accepts `process_identity`
+`None`, and skips that wait. Forward phases replace Host roots before the
+executable, replace Extension as a whole tree, install the metadata pair, and
+probe exact live bytes before commit. Every move uses exact source/destination
+hash state: exact/absent is pending, absent/exact is complete, and every other
+combination fails closed before that phase mutates.
+
+Rollback removes new metadata, Extension, and Host products, restores exact
+prior products, and never owns user config. Fresh seed handling records one
+durable `SeedOperationReceipt`; a post-plan user creation, later edit, or delete
+is preserved. `reason_code` reports current status, while
+`original_failure_code` and `rollback_from` retain the first forward failure.
+Unsafe mismatch yields `manual_recovery_required`; ordinary reverse failure
+yields `rollback_failed`, with all workspace/backup/failed-new evidence retained.
+Terminal `committed`/`rolled-back` evidence remains until Plan C durably writes
+its receipt and calls `finalize_terminal_evidence`, which removes active before
+the matching workspace. `terminal_version` projects committed target, rolled
+back prior, or `{fresh_install:true, version:null}` for fresh rollback.
 
 ## 5. Session Persistence Architecture
 

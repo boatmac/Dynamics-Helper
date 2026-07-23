@@ -596,6 +596,52 @@ trees. Do not invoke the release CLI: it also edits versions and can perform Git
 or publishing operations. Plan A keeps the legacy updater active and does not
 advertise `transactional-update-v1`.
 
+### Dormant Plan B Transaction API
+
+Plan B is implemented but not routed into production. The legacy updater stays
+active until Plans C/D complete their gates. Plan C/D must consume these exact
+interfaces rather than writing journal, active, or workspace paths directly:
+
+```text
+parse_transaction_id(value: object) -> str
+generate_transaction_id(random_bytes: Callable[[int], bytes] = secrets.token_bytes) -> str
+read_journal(path: Path) -> UpdateJournal
+read_active_transaction(path: Path) -> ActiveTransaction
+resolve_active_journal(updates_root: Path, active: ActiveTransaction) -> Path
+TransactionPaths.for_install(install_root: Path, transaction_id: object) -> TransactionPaths
+UpdateEngine.create_prepared(package: ValidatedPackage, transaction_id: str, *, expected_version: str | None, prior_version: str | None, initiator: UpdateInitiator) -> UpdateJournal
+UpdateEngine.activate_prepared(transaction_id: str, process_identity: InitiatingProcessIdentity | None) -> UpdateJournal
+UpdateEngine.resume(transaction_id: str) -> UpdateJournal
+UpdateEngine.rollback(transaction_id: str, failure_code: JournalReason) -> UpdateJournal
+UpdateEngine.finalize_terminal_evidence(transaction_id: str) -> bool
+terminal_version(journal: UpdateJournal) -> TerminalVersion
+parse_terminal_version(value: object) -> TerminalVersion
+terminal_version_to_value(value: TerminalVersion) -> dict[str, object]
+```
+
+`generate_transaction_id` consumes exactly 16 random bytes and returns lowercase
+32-hex. Browser TypeScript uses its reviewed `crypto.getRandomValues` adapter;
+no other Python generator is allowed. Browser preparation passes a selected
+non-null target and browser activation passes `InitiatingProcessIdentity(pid,
+creation_token)`. Installer preparation may pass a trusted target or `None`,
+then activates with `None`; it must not open/wait on its own process.
+
+Stable authority is `updates/active.json`, pointing to the exact journal beneath
+`updates/transactions/<id>`. Preparation alone uses `<id>.preparing` and atomic
+promotion. Plan C must consume `TransactionPaths.probe_manifest`, let the engine
+own probing/commit/rollback, and call `finalize_terminal_evidence` only after a
+durable finalization receipt and status unregister. Recovery retry passes
+`original_failure_code`, never current `rollback_failed`. Receipt serialization
+uses `terminal_version`, including the fresh rollback JSON
+`{"fresh_install":true,"version":null}`.
+
+The five literal ownership modes are installed, legacy, fresh-seeded,
+fresh-preexisting, and fresh-post-plan-user-creation. The matrix freezes 216
+operation-label cases across before-operation fault, after-operation crash, and
+synthesized post-operation state (648 cases), plus 67 journal-transition crash
+cases. Run all Plan B focused tests with `PYTHONPATH=host` and isolated values
+for `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP`.
+
 ### 1. Release Automation
 
 We use `release_helper.py` to manage versions and builds.
