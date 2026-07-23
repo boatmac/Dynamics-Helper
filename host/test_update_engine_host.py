@@ -179,8 +179,8 @@ class HostPhaseTests(EngineFixture):
         self.assertEqual(backup_exe.read_bytes(), old_exe)
         before_labels = [value for kind, value in self.hooks.events if kind == "before"]
         self.assertLess(
-            before_labels.index("host:backup:dh_native_host.exe"),
-            before_labels.index("host:install:dh_native_host.exe"),
+            before_labels.index("backup-host:dh_native_host.exe"),
+            before_labels.index("install-host:dh_native_host.exe"),
         )
 
 

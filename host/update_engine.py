@@ -95,6 +95,15 @@ class _RollbackRow:
     restore_label: str
 
 
+@dataclass(frozen=True)
+class _MoveRow:
+    source: Path
+    destination: Path
+    expected: tuple[FileDigest, ...]
+    tree: bool
+    label: str
+
+
 def _ignore_operation(_label):
     return None
 
@@ -148,10 +157,21 @@ class UpdateEngine:
                 raise UpdateStateConflict()
             if resolve_active_journal(paths.updates_root, active) != paths.journal:
                 raise UpdateStateConflict()
-            journal = read_journal(paths.journal)
-            plan = read_ownership_plan(paths.ownership)
         except UpdateStateConflict:
             raise
+        except Exception as error:
+            raise UpdateStateConflict() from error
+        journal, plan = self._load_transaction_authority(paths, transaction_id)
+        return paths, journal, plan
+
+    def _load_transaction_authority(
+        self,
+        paths: TransactionPaths,
+        transaction_id: str,
+    ) -> tuple[UpdateJournal, OwnershipPlan]:
+        try:
+            journal = read_journal(paths.journal)
+            plan = read_ownership_plan(paths.ownership)
         except Exception as error:
             raise UpdateStateConflict() from error
         if journal.transaction_id != transaction_id or plan.transaction_id != transaction_id:
@@ -164,7 +184,36 @@ class UpdateEngine:
             raise UpdateStateConflict()
         if journal.fresh_install != (plan.source is OwnershipSource.FRESH):
             raise UpdateStateConflict()
-        return paths, journal, plan
+        if journal.seed_receipt is not None:
+            if (
+                plan.source is not OwnershipSource.FRESH
+                or len(plan.seed_files) != 1
+                or journal.seed_receipt.path != plan.seed_files[0].path
+                or journal.seed_receipt.expected_sha256 != plan.seed_files[0].sha256
+            ):
+                raise UpdateStateConflict()
+        receipt_required = journal.phase in (
+            JournalPhase.EXTENSION_INSTALLED,
+            JournalPhase.METADATA_INSTALLED,
+            JournalPhase.PROBING,
+            JournalPhase.COMMITTED,
+        ) or (
+            journal.phase
+            in (
+                JournalPhase.ROLLING_BACK,
+                JournalPhase.ROLLED_BACK,
+                JournalPhase.RECOVERY_REQUIRED,
+            )
+            and journal.rollback_from
+            in (
+                JournalPhase.EXTENSION_INSTALLED,
+                JournalPhase.METADATA_INSTALLED,
+                JournalPhase.PROBING,
+            )
+        )
+        if plan.seed_files and receipt_required and journal.seed_receipt is None:
+            raise UpdateStateConflict()
+        return journal, plan
 
     def create_prepared(
         self,
@@ -207,17 +256,21 @@ class UpdateEngine:
                 raise PreparedTransactionConflict()
             if paths.active.exists():
                 try:
-                    active = read_active_transaction(paths.active)
-                    if active.transaction_id != tx:
-                        raise PreparedTransactionConflict()
-                    journal = read_journal(paths.journal)
-                    persisted = read_ownership_plan(paths.ownership)
-                    if (
-                        journal.phase is not JournalPhase.PREPARED
-                        or ownership_plan_bytes(persisted) != candidate_bytes
-                        or journal.ownership_sha256 != candidate_digest
-                    ):
-                        raise PreparedTransactionConflict()
+                    _paths, journal, persisted = self._load_authority(tx)
+                    self._require_prepared_candidate(
+                        journal,
+                        persisted,
+                        candidate,
+                        candidate_bytes,
+                        initiator,
+                    )
+                    self._verify_prepared_workspace(
+                        package,
+                        candidate,
+                        candidate_bytes,
+                        paths,
+                        preparing=False,
+                    )
                     return journal
                 except PreparedTransactionConflict:
                     raise
@@ -227,30 +280,34 @@ class UpdateEngine:
                 try:
                     journal = read_journal(paths.journal)
                     persisted = read_ownership_plan(paths.ownership)
-                    if (
-                        journal.phase is not JournalPhase.PREPARED
-                        or ownership_plan_bytes(persisted) != candidate_bytes
-                    ):
-                        raise PreparedTransactionConflict()
-                    write_active_transaction_atomic(
-                        paths.active,
-                        ActiveTransaction(1, tx, f"transactions/{tx}/journal.json"),
+                    self._require_prepared_candidate(
+                        journal,
+                        persisted,
+                        candidate,
+                        candidate_bytes,
+                        initiator,
+                    )
+                    self._verify_prepared_workspace(
+                        package,
+                        candidate,
+                        candidate_bytes,
+                        paths,
+                        preparing=False,
+                    )
+                    self._run_preparation_operation(
+                        "active:write",
+                        lambda: write_active_transaction_atomic(
+                            paths.active,
+                            ActiveTransaction(
+                                1, tx, f"transactions/{tx}/journal.json"
+                            ),
+                        ),
                     )
                     return journal
                 except PreparedTransactionConflict:
                     raise
                 except Exception as error:
                     raise PreparedTransactionConflict() from error
-            if paths.preparing_root.exists():
-                shutil.rmtree(paths.preparing_root)
-            self._run_operation(
-                "workspace:create-preparing",
-                lambda: (
-                    paths.preparing_staged_host.mkdir(parents=True),
-                    paths.preparing_staged_extension.mkdir(parents=True),
-                    paths.preparing_probe_manifest.parent.mkdir(parents=True),
-                ),
-            )
             staging = new_staging_journal(
                 transaction_id=tx,
                 initiator=initiator,
@@ -259,43 +316,99 @@ class UpdateEngine:
                 fresh_install=candidate.source is OwnershipSource.FRESH,
                 ownership_sha256=candidate_digest,
             )
-            self._run_operation(
-                "workspace:write-staging-journal",
-                lambda: write_journal_atomic(paths.preparing_journal, staging),
+            return self._resume_preparation(
+                package,
+                candidate,
+                candidate_bytes,
+                paths,
+                staging,
             )
-            self._copy_prepared_files(package, candidate, paths)
-            paths.preparing_probe_manifest.write_bytes(
-                canonical_json_bytes(update_manifest_to_dict(package.manifest))
-            )
-            self._run_operation(
-                "workspace:write-ownership",
-                lambda: write_ownership_plan_atomic(
-                    paths.preparing_ownership, candidate
-                ),
-            )
-            prepared = transition(staging, JournalPhase.PREPARED)
-            write_journal_atomic(paths.preparing_journal, prepared)
-            paths.transactions_root.mkdir(parents=True, exist_ok=True)
-            self._run_operation(
-                "workspace:promote-preparing",
-                lambda: os.replace(paths.preparing_root, paths.transaction_root),
-            )
-            self._run_operation(
-                "active:write",
-                lambda: write_active_transaction_atomic(
-                    paths.active,
-                    ActiveTransaction(1, tx, f"transactions/{tx}/journal.json"),
-                ),
-            )
-            return read_journal(paths.journal)
 
-    def _copy_prepared_files(
+    def _require_prepared_candidate(
+        self,
+        journal: UpdateJournal,
+        persisted: OwnershipPlan,
+        candidate: OwnershipPlan,
+        candidate_bytes: bytes,
+        initiator: UpdateInitiator,
+    ) -> None:
+        if (
+            journal.phase is not JournalPhase.PREPARED
+            or journal.initiator is not initiator
+            or journal.target_version != candidate.target_version
+            or journal.prior_version != candidate.prior_version
+            or journal.ownership_sha256 != ownership_plan_sha256(candidate)
+            or ownership_plan_bytes(persisted) != candidate_bytes
+        ):
+            raise PreparedTransactionConflict()
+
+    def _run_preparation_operation(self, label: str, operation) -> None:
+        try:
+            self._run_operation(label, operation)
+        except PreparedTransactionConflict:
+            raise
+        except Exception as error:
+            raise PreparedTransactionConflict() from error
+
+    def _preparing_orphan_is_cleanup_safe(self, paths: TransactionPaths) -> bool:
+        allowed_directories = {
+            "staged",
+            "staged/host",
+            "staged/extension",
+            "probe",
+        }
+        try:
+            for child in paths.preparing_root.rglob("*"):
+                relative = child.relative_to(paths.preparing_root).as_posix()
+                if child.is_symlink() or not child.is_dir():
+                    return False
+                if relative not in allowed_directories:
+                    return False
+        except OSError:
+            return False
+        return True
+
+    def _classify_bytes(self, path: Path, expected: bytes) -> PathState:
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            return PathState.ABSENT
+        attributes = getattr(info, "st_file_attributes", 0)
+        reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        if not stat.S_ISREG(info.st_mode) or attributes & reparse:
+            return PathState.MISMATCH
+        try:
+            return PathState.EXACT if path.read_bytes() == expected else PathState.MISMATCH
+        except OSError:
+            return PathState.MISMATCH
+
+    def _write_bytes_replace(self, path: Path, payload: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=".tmp-", dir=path.parent)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        except Exception:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            temporary.unlink(missing_ok=True)
+            raise
+
+    def _preparation_entries(
         self,
         package: ValidatedPackage,
         plan: OwnershipPlan,
         paths: TransactionPaths,
-    ) -> None:
+    ) -> tuple[tuple[str, Path, Path, str], ...]:
         allowed_seed = {item.path for item in plan.seed_files}
+        host_entries = []
+        extension_entries = []
         for entry in package.manifest.entries:
             if entry.ownership is OwnershipClass.PACKAGE_ONLY:
                 continue
@@ -307,15 +420,199 @@ class UpdateEngine:
             if entry.path.startswith("host/"):
                 relative = entry.path.removeprefix("host/")
                 target = paths.preparing_staged_host.joinpath(*relative.split("/"))
+                host_entries.append(
+                    (f"workspace:stage-host:{relative}", source, target, entry.sha256)
+                )
             elif entry.path.startswith("extension/"):
                 relative = entry.path.removeprefix("extension/")
                 target = paths.preparing_staged_extension.joinpath(
                     *relative.split("/")
                 )
+                extension_entries.append(
+                    (
+                        f"workspace:stage-extension:{relative}",
+                        source,
+                        target,
+                        entry.sha256,
+                    )
+                )
             else:
                 continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
+        return tuple(
+            sorted(host_entries, key=lambda item: item[0])
+            + sorted(extension_entries, key=lambda item: item[0])
+        )
+
+    def _verify_prepared_workspace(
+        self,
+        package: ValidatedPackage,
+        candidate: OwnershipPlan,
+        candidate_bytes: bytes,
+        paths: TransactionPaths,
+        *,
+        preparing: bool,
+    ) -> None:
+        if preparing:
+            staged_host = paths.preparing_staged_host
+            staged_extension = paths.preparing_staged_extension
+            probe_manifest = paths.preparing_probe_manifest
+            ownership = paths.preparing_ownership
+        else:
+            staged_host = paths.staged_host
+            staged_extension = paths.staged_extension
+            probe_manifest = paths.probe_manifest
+            ownership = paths.ownership
+        expected_host = tuple(
+            sorted(
+                (
+                    *candidate.host_files,
+                    *candidate.seed_files,
+                    *candidate.metadata_files,
+                )
+            )
+        )
+        probe_bytes = canonical_json_bytes(update_manifest_to_dict(package.manifest))
+        if (
+            self._classify_tree(staged_host, expected_host) is not PathState.EXACT
+            or self._classify_tree(staged_extension, candidate.extension_files)
+            is not PathState.EXACT
+            or self._classify_bytes(probe_manifest, probe_bytes)
+            is not PathState.EXACT
+            or self._classify_bytes(ownership, candidate_bytes)
+            is not PathState.EXACT
+        ):
+            raise PreparedTransactionConflict()
+
+    def _resume_preparation(
+        self,
+        package: ValidatedPackage,
+        candidate: OwnershipPlan,
+        candidate_bytes: bytes,
+        paths: TransactionPaths,
+        staging: UpdateJournal,
+    ) -> UpdateJournal:
+        if paths.preparing_root.exists() and not paths.preparing_journal.exists():
+            if not self._preparing_orphan_is_cleanup_safe(paths):
+                raise PreparedTransactionConflict()
+            self._run_preparation_operation(
+                "workspace:remove-orphan-preparing",
+                lambda: shutil.rmtree(paths.preparing_root),
+            )
+
+        if not paths.preparing_root.exists():
+            self._run_preparation_operation(
+                "workspace:create-preparing",
+                lambda: (
+                    paths.preparing_staged_host.mkdir(parents=True),
+                    paths.preparing_staged_extension.mkdir(parents=True),
+                    paths.preparing_probe_manifest.parent.mkdir(parents=True),
+                ),
+            )
+
+        if paths.preparing_journal.exists():
+            try:
+                journal = read_journal(paths.preparing_journal)
+            except Exception as error:
+                raise PreparedTransactionConflict() from error
+            if (
+                journal.transaction_id != staging.transaction_id
+                or journal.initiator is not staging.initiator
+                or journal.target_version != staging.target_version
+                or journal.prior_version != staging.prior_version
+                or journal.fresh_install != staging.fresh_install
+                or journal.ownership_sha256 != staging.ownership_sha256
+                or journal.phase not in (JournalPhase.STAGING, JournalPhase.PREPARED)
+            ):
+                raise PreparedTransactionConflict()
+        else:
+            self._run_preparation_operation(
+                "workspace:write-staging-journal",
+                lambda: write_journal_atomic(paths.preparing_journal, staging),
+            )
+            self.hooks.after_journal_transition(JournalPhase.STAGING)
+            journal = staging
+
+        probe_bytes = canonical_json_bytes(update_manifest_to_dict(package.manifest))
+        probe_state = self._classify_bytes(paths.preparing_probe_manifest, probe_bytes)
+        if probe_state is PathState.MISMATCH:
+            raise PreparedTransactionConflict()
+        if probe_state is PathState.ABSENT:
+            self._run_preparation_operation(
+                "workspace:write-probe-manifest",
+                lambda: self._write_bytes_replace(
+                    paths.preparing_probe_manifest, probe_bytes
+                ),
+            )
+
+        entries = self._preparation_entries(package, candidate, paths)
+        for label, source, target, expected_sha256 in entries:
+            state = self._classify_file(target, expected_sha256)
+            if state is PathState.MISMATCH:
+                raise PreparedTransactionConflict()
+            if state is PathState.ABSENT:
+                self._run_preparation_operation(
+                    label,
+                    lambda source=source, target=target: (
+                        target.parent.mkdir(parents=True, exist_ok=True),
+                        shutil.copy2(source, target),
+                    ),
+                )
+
+        ownership_state = self._classify_bytes(
+            paths.preparing_ownership, candidate_bytes
+        )
+        if ownership_state is PathState.MISMATCH:
+            raise PreparedTransactionConflict()
+        if ownership_state is PathState.ABSENT:
+            self._run_preparation_operation(
+                "workspace:write-ownership",
+                lambda: write_ownership_plan_atomic(
+                    paths.preparing_ownership, candidate
+                ),
+            )
+
+        if journal.phase is JournalPhase.STAGING:
+            prepared = transition(journal, JournalPhase.PREPARED)
+            self._run_preparation_operation(
+                "workspace:write-prepared-journal",
+                lambda: write_journal_atomic(paths.preparing_journal, prepared),
+            )
+            self.hooks.after_journal_transition(JournalPhase.PREPARED)
+            journal = prepared
+
+        for _label, _source, target, expected_sha256 in entries:
+            if self._classify_file(target, expected_sha256) is not PathState.EXACT:
+                raise PreparedTransactionConflict()
+        if self._classify_bytes(paths.preparing_probe_manifest, probe_bytes) is not PathState.EXACT:
+            raise PreparedTransactionConflict()
+        if self._classify_bytes(paths.preparing_ownership, candidate_bytes) is not PathState.EXACT:
+            raise PreparedTransactionConflict()
+        self._verify_prepared_workspace(
+            package,
+            candidate,
+            candidate_bytes,
+            paths,
+            preparing=True,
+        )
+
+        if paths.transaction_root.exists() or not paths.preparing_root.exists():
+            raise PreparedTransactionConflict()
+        self._run_preparation_operation(
+            "workspace:promote-preparing",
+            lambda: os.replace(paths.preparing_root, paths.transaction_root),
+        )
+        self._run_preparation_operation(
+            "active:write",
+            lambda: write_active_transaction_atomic(
+                paths.active,
+                ActiveTransaction(
+                    1,
+                    staging.transaction_id,
+                    f"transactions/{staging.transaction_id}/journal.json",
+                ),
+            ),
+        )
+        return read_journal(paths.journal)
 
     def activate_prepared(
         self,
@@ -385,7 +682,7 @@ class UpdateEngine:
                             JournalReason.HOST_EXIT_WAIT_FAILED,
                         )
                 try:
-                    self._backup_host(paths, plan)
+                    self._resume_host_backup(journal, plan, paths)
                     journal = transition(journal, JournalPhase.HOST_BACKED_UP)
                     write_journal_atomic(paths.journal, journal)
                     self.hooks.after_journal_transition(journal.phase)
@@ -398,7 +695,7 @@ class UpdateEngine:
                     )
             if journal.phase is JournalPhase.HOST_BACKED_UP:
                 try:
-                    self._install_host(paths, plan)
+                    self._resume_host_install(journal, plan, paths)
                     journal = transition(journal, JournalPhase.HOST_INSTALLED)
                     write_journal_atomic(paths.journal, journal)
                     self.hooks.after_journal_transition(journal.phase)
@@ -411,7 +708,7 @@ class UpdateEngine:
                     )
             if journal.phase is JournalPhase.HOST_INSTALLED:
                 try:
-                    self._backup_extension(paths, plan)
+                    self._resume_extension_backup(journal, plan, paths)
                     journal = transition(journal, JournalPhase.EXTENSION_BACKED_UP)
                     write_journal_atomic(paths.journal, journal)
                     self.hooks.after_journal_transition(journal.phase)
@@ -424,7 +721,7 @@ class UpdateEngine:
                     )
             if journal.phase is JournalPhase.EXTENSION_BACKED_UP:
                 try:
-                    self._install_extension_and_seed(paths, journal, plan)
+                    self._resume_extension_install(journal, plan, paths)
                     journal = read_journal(paths.journal)
                     journal = transition(journal, JournalPhase.EXTENSION_INSTALLED)
                     write_journal_atomic(paths.journal, journal)
@@ -438,7 +735,7 @@ class UpdateEngine:
                     )
             if journal.phase is JournalPhase.EXTENSION_INSTALLED:
                 try:
-                    self._install_metadata(paths, plan)
+                    self._resume_metadata_install(journal, plan, paths)
                     journal = transition(journal, JournalPhase.METADATA_INSTALLED)
                     write_journal_atomic(paths.journal, journal)
                     self.hooks.after_journal_transition(journal.phase)
@@ -463,7 +760,7 @@ class UpdateEngine:
                     )
             if journal.phase is JournalPhase.PROBING:
                 try:
-                    self.hooks.probe_installed_product(self.install_root, plan)
+                    self._resume_probe(journal, plan, paths)
                 except Exception as error:
                     return self._rollback_after_forward_failure(
                         paths,
@@ -515,106 +812,190 @@ class UpdateEngine:
         operation()
         self.hooks.after_filesystem_operation(label)
 
-    def _backup_host(self, paths: TransactionPaths, plan: OwnershipPlan) -> None:
-        self.hooks.before_live_phase(JournalPhase.HOST_BACKED_UP, paths, plan)
-        backup = paths.host_backup
-        backup.mkdir(parents=True, exist_ok=True)
-        flat = [item for item in plan.prior_host_files if "/" not in item.path]
-        flat.sort(key=lambda item: (item.path != "dh_native_host.exe", item.path))
-        for item in flat:
-            source = self.install_root / item.path
-            if not source.exists():
+    def _preflight_phase(
+        self,
+        rows: tuple[_MoveRow, ...],
+    ) -> tuple[_MoveRow, ...]:
+        pending = []
+        for row in rows:
+            state = self._classify_transfer(
+                row.source,
+                row.destination,
+                row.expected,
+                tree=row.tree,
+            )
+            if state == TransferState(PathState.EXACT, PathState.ABSENT):
+                pending.append(row)
+            elif state != TransferState(PathState.ABSENT, PathState.EXACT):
                 raise UpdateStateConflict()
-            target = backup / item.path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            self._run_operation(
-                f"host:backup:{item.path}",
-                lambda source=source, target=target: os.replace(source, target),
-            )
-        internal = self.install_root / "_internal"
-        if internal.exists():
-            target = backup / "_internal"
-            self._run_operation(
-                "host:backup:_internal",
-                lambda: os.replace(internal, target),
-            )
-        if plan.metadata_was_present:
-            paths.metadata_backup.mkdir(parents=True, exist_ok=True)
-            for item in plan.prior_metadata_files:
-                source = self.install_root / item.path
-                target = paths.metadata_backup / item.path
-                if not source.exists():
-                    raise UpdateStateConflict()
-                self._run_operation(
-                    f"metadata:backup:{item.path}",
-                    lambda source=source, target=target: os.replace(source, target),
-                )
+        return tuple(pending)
 
-    def _install_host(self, paths: TransactionPaths, plan: OwnershipPlan) -> None:
-        self.hooks.before_live_phase(JournalPhase.HOST_INSTALLED, paths, plan)
-        internal = paths.staged_host / "_internal"
-        if internal.exists():
-            self._run_operation(
-                "host:install:_internal",
-                lambda: os.replace(internal, self.install_root / "_internal"),
+    def _run_move_phase(self, rows: tuple[_MoveRow, ...]) -> None:
+        pending = self._preflight_phase(rows)
+        for row in pending:
+            def move(row=row):
+                row.destination.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(row.source, row.destination)
+
+            self._run_operation(row.label, move)
+        if self._preflight_phase(rows):
+            raise UpdateStateConflict()
+
+    def _resume_host_backup(
+        self,
+        journal: UpdateJournal,
+        plan: OwnershipPlan,
+        paths: TransactionPaths,
+    ) -> None:
+        self.hooks.before_live_phase(JournalPhase.HOST_BACKED_UP, paths, plan)
+        rows: list[_MoveRow] = []
+        for item in plan.prior_metadata_files:
+            rows.append(
+                _MoveRow(
+                    self.install_root / item.path,
+                    paths.metadata_backup / item.path,
+                    (item,),
+                    False,
+                    f"backup-metadata:{item.path}",
+                )
             )
-        flat = [
-            item
-            for item in plan.host_files
-            if "/" not in item.path and item.path != "dh_native_host.exe"
-        ]
-        flat.sort()
-        for item in flat:
-            source = paths.staged_host / item.path
-            target = self.install_root / item.path
-            self._run_operation(
-                f"host:install:{item.path}",
-                lambda source=source, target=target: os.replace(source, target),
+        flat = {
+            item.path: item
+            for item in plan.prior_host_files
+            if "/" not in item.path
+        }
+        executable = flat.pop("dh_native_host.exe", None)
+        if executable is not None:
+            rows.append(
+                _MoveRow(
+                    self.install_root / executable.path,
+                    paths.host_backup / executable.path,
+                    (executable,),
+                    False,
+                    "backup-host:dh_native_host.exe",
+                )
             )
-        executable = next(
-            item for item in plan.host_files if item.path == "dh_native_host.exe"
+        internal = tuple(
+            FileDigest(item.path.removeprefix("_internal/"), item.sha256)
+            for item in plan.prior_host_files
+            if item.path.startswith("_internal/")
         )
-        self._run_operation(
-            "host:install:dh_native_host.exe",
-            lambda: os.replace(
+        if internal:
+            rows.append(
+                _MoveRow(
+                    self.install_root / "_internal",
+                    paths.host_backup / "_internal",
+                    internal,
+                    True,
+                    "backup-host:_internal",
+                )
+            )
+        for name in sorted(flat):
+            item = flat[name]
+            rows.append(
+                _MoveRow(
+                    self.install_root / item.path,
+                    paths.host_backup / item.path,
+                    (item,),
+                    False,
+                    f"backup-host:{item.path}",
+                )
+            )
+        self._run_move_phase(tuple(rows))
+
+    def _resume_host_install(
+        self,
+        journal: UpdateJournal,
+        plan: OwnershipPlan,
+        paths: TransactionPaths,
+    ) -> None:
+        self.hooks.before_live_phase(JournalPhase.HOST_INSTALLED, paths, plan)
+        rows: list[_MoveRow] = []
+        internal = tuple(
+            FileDigest(item.path.removeprefix("_internal/"), item.sha256)
+            for item in plan.host_files
+            if item.path.startswith("_internal/")
+        )
+        if internal:
+            rows.append(
+                _MoveRow(
+                    paths.staged_host / "_internal",
+                    self.install_root / "_internal",
+                    internal,
+                    True,
+                    "install-host:_internal",
+                )
+            )
+        flat = {
+            item.path: item for item in plan.host_files if "/" not in item.path
+        }
+        executable = flat.pop("dh_native_host.exe")
+        for name in sorted(flat):
+            item = flat[name]
+            rows.append(
+                _MoveRow(
+                    paths.staged_host / item.path,
+                    self.install_root / item.path,
+                    (item,),
+                    False,
+                    f"install-host:{item.path}",
+                )
+            )
+        rows.append(
+            _MoveRow(
                 paths.staged_host / executable.path,
                 self.install_root / executable.path,
-            ),
+                (executable,),
+                False,
+                "install-host:dh_native_host.exe",
+            )
         )
+        self._run_move_phase(tuple(rows))
 
-    def _backup_extension(self, paths: TransactionPaths, plan: OwnershipPlan) -> None:
+    def _resume_extension_backup(
+        self,
+        journal: UpdateJournal,
+        plan: OwnershipPlan,
+        paths: TransactionPaths,
+    ) -> None:
         self.hooks.before_live_phase(JournalPhase.EXTENSION_BACKED_UP, paths, plan)
         live = self.install_root / "extension"
         backup = paths.extension_backup
         if plan.extension_was_present:
-            if backup.exists() and not live.exists():
-                return
-            if backup.exists() or not live.exists():
-                raise UpdateStateConflict()
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            self._run_operation(
-                "extension:backup",
-                lambda: os.replace(live, backup),
+            self._run_move_phase(
+                (
+                    _MoveRow(
+                        live,
+                        backup,
+                        plan.prior_extension_files,
+                        True,
+                        "backup-extension",
+                    ),
+                )
             )
-        elif live.exists() or backup.exists():
+        elif not self._path_is_absent(live) or not self._path_is_absent(backup):
             raise UpdateStateConflict()
 
-    def _install_extension_and_seed(
+    def _resume_extension_install(
         self,
-        paths: TransactionPaths,
         journal: UpdateJournal,
         plan: OwnershipPlan,
+        paths: TransactionPaths,
     ) -> None:
         self.hooks.before_live_phase(JournalPhase.EXTENSION_INSTALLED, paths, plan)
         staged_extension = paths.staged_extension
         live_extension = self.install_root / "extension"
-        if staged_extension.exists() and not live_extension.exists():
-            self._run_operation(
-                "extension:install",
-                lambda: os.replace(staged_extension, live_extension),
+        self._run_move_phase(
+            (
+                _MoveRow(
+                    staged_extension,
+                    live_extension,
+                    plan.extension_files,
+                    True,
+                    "install-extension",
+                ),
             )
-        elif staged_extension.exists() or not live_extension.exists():
-            raise UpdateStateConflict()
+        )
 
         if not plan.seed_files or journal.seed_receipt is not None:
             return
@@ -622,15 +1003,18 @@ class UpdateEngine:
         staged = paths.staged_host / seed.path
         live = self.install_root / seed.path
         seed_installed = False
-        if staged.exists() and not live.exists():
+        staged_state = self._classify_file(staged, seed.sha256)
+        if staged_state is PathState.MISMATCH:
+            raise UpdateStateConflict()
+        if staged_state is PathState.EXACT and not live.exists():
             self._run_operation(
                 f"install-seed:{seed.path}",
                 lambda: os.replace(staged, live),
             )
             seed_installed = True
-        elif staged.exists() and live.exists():
+        elif staged_state is PathState.EXACT and live.exists():
             seed_installed = False
-        elif not staged.exists():
+        elif staged_state is PathState.ABSENT:
             seed_installed = True
         else:
             raise UpdateStateConflict()
@@ -646,6 +1030,7 @@ class UpdateEngine:
             "journal:record-seed-receipt",
             lambda: write_journal_atomic(paths.journal, updated),
         )
+        self.hooks.after_journal_transition(updated.phase)
 
     def _copy_file_replace(self, source: Path, target: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -665,29 +1050,79 @@ class UpdateEngine:
             temporary.unlink(missing_ok=True)
             raise
 
-    def _install_metadata(self, paths: TransactionPaths, plan: OwnershipPlan) -> None:
+    def _resume_metadata_install(
+        self,
+        journal: UpdateJournal,
+        plan: OwnershipPlan,
+        paths: TransactionPaths,
+    ) -> None:
         self.hooks.before_live_phase(JournalPhase.METADATA_INSTALLED, paths, plan)
         # Validate both sources before replacing either live file.
-        for item in plan.metadata_files:
+        metadata = tuple(
+            sorted(
+                plan.metadata_files,
+                key=lambda item: (item.path != "release-integrity.json", item.path),
+            )
+        )
+        pending = []
+        for item in metadata:
             source = paths.staged_host / item.path
-            if not source.exists() or sha256_file(source) != item.sha256:
-                raise UpdateStateConflict()
             live = self.install_root / item.path
-            if live.exists() and sha256_file(live) != item.sha256:
+            source_state = self._classify_file(source, item.sha256)
+            live_state = self._classify_file(live, item.sha256)
+            if source_state is PathState.MISMATCH or live_state is PathState.MISMATCH:
                 raise UpdateStateConflict()
-        for item in plan.metadata_files:
+            if source_state is PathState.ABSENT and live_state is PathState.ABSENT:
+                raise UpdateStateConflict()
+            if source_state is PathState.EXACT and live_state is PathState.ABSENT:
+                pending.append(item)
+        for item in pending:
             source = paths.staged_host / item.path
             live = self.install_root / item.path
-            if live.exists():
-                continue
             self._run_operation(
-                f"metadata:install:{item.path}",
+                f"install-metadata:{item.path}",
                 lambda source=source, live=live: self._copy_file_replace(
                     source, live
                 ),
             )
-        for item in plan.metadata_files:
+        for item in metadata:
             if sha256_file(self.install_root / item.path) != item.sha256:
+                raise UpdateStateConflict()
+
+    def _resume_probe(
+        self,
+        journal: UpdateJournal,
+        plan: OwnershipPlan,
+        paths: TransactionPaths,
+    ) -> None:
+        self.hooks.probe_installed_product(self.install_root, plan)
+        self._verify_live_product(plan)
+
+    def _verify_live_product(self, plan: OwnershipPlan) -> None:
+        internal = tuple(
+            FileDigest(item.path.removeprefix("_internal/"), item.sha256)
+            for item in plan.host_files
+            if item.path.startswith("_internal/")
+        )
+        if internal and self._classify_tree(
+            self.install_root / "_internal", internal
+        ) is not PathState.EXACT:
+            raise UpdateStateConflict()
+        for item in plan.host_files:
+            if "/" in item.path:
+                continue
+            if self._classify_file(
+                self.install_root / item.path, item.sha256
+            ) is not PathState.EXACT:
+                raise UpdateStateConflict()
+        if self._classify_tree(
+            self.install_root / "extension", plan.extension_files
+        ) is not PathState.EXACT:
+            raise UpdateStateConflict()
+        for item in plan.metadata_files:
+            if self._classify_file(
+                self.install_root / item.path, item.sha256
+            ) is not PathState.EXACT:
                 raise UpdateStateConflict()
 
     def _classify_file(self, path: Path, expected_sha256: str) -> PathState:
@@ -973,6 +1408,22 @@ class UpdateEngine:
         metadata.sort(key=lambda row: row.restore_label, reverse=True)
         return tuple(remove), tuple((*host, *extension, *metadata))
 
+    def _preflight_remove_new(
+        self,
+        paths: TransactionPaths,
+        plan: OwnershipPlan,
+    ) -> tuple[_RollbackRow, ...]:
+        remove, _restore = self._plan_rollback_operations(paths, plan)
+        return remove
+
+    def _preflight_restore_prior(
+        self,
+        paths: TransactionPaths,
+        plan: OwnershipPlan,
+    ) -> tuple[_RollbackRow, ...]:
+        _remove, restore = self._plan_rollback_operations(paths, plan)
+        return restore
+
     def _move_rollback_row(
         self,
         row: _RollbackRow,
@@ -989,15 +1440,39 @@ class UpdateEngine:
 
         self._run_operation(label, move)
 
-    def _resume_rollback_products(
+    def _resume_rollback(
         self,
+        journal: UpdateJournal,
         paths: TransactionPaths,
         plan: OwnershipPlan,
     ) -> None:
-        remove, restore = self._plan_rollback_operations(paths, plan)
-        for row in remove:
+        remove = self._preflight_remove_new(paths, plan)
+        restore = self._preflight_restore_prior(paths, plan)
+        metadata_remove = [
+            row for row in remove if row.remove_label.startswith("remove-new-metadata:")
+        ]
+        extension_remove = [
+            row for row in remove if row.remove_label == "remove-new-extension"
+        ]
+        host_remove = [
+            row for row in remove if row.remove_label.startswith("remove-new-host:")
+        ]
+        extension_restore = [
+            row for row in restore if row.restore_label == "restore-extension"
+        ]
+        host_restore = [
+            row for row in restore if row.restore_label.startswith("restore-host:")
+        ]
+        metadata_restore = [
+            row for row in restore if row.restore_label.startswith("restore-metadata:")
+        ]
+        for row in (*metadata_remove, *extension_remove):
             self._move_rollback_row(row, restore=False)
-        for row in restore:
+        for row in extension_restore:
+            self._move_rollback_row(row, restore=True)
+        for row in host_remove:
+            self._move_rollback_row(row, restore=False)
+        for row in (*host_restore, *metadata_restore):
             self._move_rollback_row(row, restore=True)
         pending_remove, pending_restore = self._plan_rollback_operations(paths, plan)
         if pending_remove or pending_restore:
@@ -1027,7 +1502,7 @@ class UpdateEngine:
             write_journal_atomic(paths.journal, rolling)
             self.hooks.after_journal_transition(rolling.phase)
         try:
-            self._resume_rollback_products(paths, plan)
+            self._resume_rollback(rolling, paths, plan)
             rolled_back = transition(rolling, JournalPhase.ROLLED_BACK)
             write_journal_atomic(paths.journal, rolled_back)
             self.hooks.after_journal_transition(rolled_back.phase)
@@ -1084,13 +1559,37 @@ class UpdateEngine:
             return self._rollback_locked(paths, journal, plan, failure_code)
 
     def finalize_terminal_evidence(self, transaction_id: str) -> bool:
-        paths = self._paths(transaction_id)
+        tx = parse_transaction_id(transaction_id)
+        paths = self._paths(tx)
         with self._mutex_factory(self.install_root):
-            if not paths.active.exists() and not paths.transaction_root.exists():
+            active_exists = paths.active.exists()
+            workspace_exists = paths.transaction_root.exists()
+            if not active_exists and not workspace_exists:
                 return False
-            paths, journal, _plan = self._load_authority(transaction_id)
+            if active_exists and not workspace_exists:
+                raise UpdateStateConflict()
+            if active_exists:
+                paths, journal, _plan = self._load_authority(tx)
+            else:
+                journal, _plan = self._load_transaction_authority(paths, tx)
             if journal.phase not in (JournalPhase.COMMITTED, JournalPhase.ROLLED_BACK):
                 raise UpdateStateConflict()
-            paths.active.unlink()
-            shutil.rmtree(paths.transaction_root)
+            return self._finalize_terminal_evidence(paths, active_exists)
+
+    def _finalize_terminal_evidence(
+        self,
+        paths: TransactionPaths,
+        active_exists: bool,
+    ) -> bool:
+            try:
+                if active_exists:
+                    self._run_operation("active:remove", paths.active.unlink)
+                self._run_operation(
+                    "workspace:remove-terminal",
+                    lambda: shutil.rmtree(paths.transaction_root),
+                )
+            except UpdateEngineError:
+                raise
+            except Exception as error:
+                raise UpdateEngineError() from error
             return True
