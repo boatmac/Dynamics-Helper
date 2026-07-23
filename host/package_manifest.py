@@ -863,7 +863,7 @@ def generate_release_documents(
 
 
 def _write_sibling_replace(path: Path, payload: bytes) -> None:
-    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    temporary = path.with_name(f".tmp-{uuid.uuid4().hex[:8]}")
     try:
         with temporary.open("xb") as stream:
             stream.write(payload)

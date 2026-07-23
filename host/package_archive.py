@@ -157,7 +157,7 @@ def write_deterministic_archive(stage_root: Path, archive_path: Path) -> None:
         sorted(_iter_stage_files(validated.stage_root), key=lambda item: item[0])
     )
     archive_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = archive_path.with_name(f".{archive_path.name}.{uuid.uuid4().hex}.tmp")
+    temporary = archive_path.with_name(f".zip-{uuid.uuid4().hex[:8]}")
     try:
         with zipfile.ZipFile(
             temporary,
@@ -234,7 +234,7 @@ def stage_and_validate_archive(
 ) -> ValidatedPackage:
     if stage_root.exists() or stage_root.is_symlink():
         raise FileExistsError(stage_root)
-    temporary = stage_root.with_name(f".{stage_root.name}.{uuid.uuid4().hex}.tmp")
+    temporary = stage_root.with_name(f".ext-{uuid.uuid4().hex[:8]}")
     try:
         with zipfile.ZipFile(archive_path, "r") as archive:
             entries = _preflight_zip_infos(archive.infolist())

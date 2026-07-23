@@ -120,6 +120,21 @@ class TestReleaseStaging(unittest.TestCase):
         self.assertEqual(first_path, second_path)
         self.assertEqual(first_bytes, second_path.read_bytes())
 
+    def test_create_zip_supports_long_isolated_temp_root(self):
+        long_root = self.root / ("isolated-" + "x" * 72)
+        source = long_root / "source"
+        output = long_root / "out"
+        shutil.copytree(self.source, source)
+        archive = Path(
+            release_helper.create_zip(
+                "2.0.74-beta.4",
+                source_root=source,
+                output_dir=output,
+            )
+        )
+        self.assertEqual(archive.name, "DynamicsHelper_v2.0.74-beta.4.zip")
+        self.assertTrue(archive.is_file())
+
     def test_historical_updater_bootstraps_both_metadata_files(self):
         release_helper.stage_release(
             self.source,

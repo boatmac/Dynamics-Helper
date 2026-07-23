@@ -209,7 +209,7 @@ def stage_release(source_root: Path, stage_root: Path, version: str) -> Path:
             raise FileNotFoundError(path)
     if stage_root.exists():
         raise FileExistsError(stage_root)
-    temporary = stage_root.with_name(f".{stage_root.name}.{uuid.uuid4().hex}.tmp")
+    temporary = stage_root.with_name(f".stg-{uuid.uuid4().hex[:8]}")
     try:
         shutil.copytree(required[0], temporary / "extension")
         shutil.copytree(required[1], temporary / "host")
@@ -240,7 +240,7 @@ def create_zip(
     output = (output_dir or source / "releases").resolve()
     output.mkdir(parents=True, exist_ok=True)
     archive = output / f"DynamicsHelper_v{version}.zip"
-    stage = output / f".DynamicsHelper_v{version}.{uuid.uuid4().hex}.stage"
+    stage = output / f".pkg-{uuid.uuid4().hex[:8]}"
     try:
         stage_release(source, stage, version)
         write_deterministic_archive(stage, archive)
