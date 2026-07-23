@@ -1,4 +1,5 @@
 import ast
+import contextlib
 import io
 import inspect
 import shutil
@@ -163,22 +164,68 @@ class EntrypointFixture:
             dependencies_factory=self.deps_factory,
         )
 
-    def assert_invalid(self, executable, argv, *, source_runtime=False):
-        self.stderr = io.BytesIO()
-        exploding = mock.Mock(side_effect=AssertionError("factory_called"))
-        with mock.patch(
-            "update_entrypoint.sys.stderr",
-            SimpleNamespace(buffer=self.stderr),
-        ):
-            result = dispatch_early_mode(
-                str(executable),
-                argv,
-                source_runtime=source_runtime,
-                dependencies_factory=exploding,
+    @staticmethod
+    def construction_sentinels(exploding):
+        return tuple(
+            mock.patch(target, exploding)
+            for target in (
+                "update_entrypoint.production_early_mode_dependencies",
+                "update_entrypoint.EarlyModeDependencies",
+                "update_entrypoint.WindowsRegistryBackend",
+                "update_entrypoint.create_production_recovery_controller",
+                "update_entrypoint.RecoveryController",
+                "update_entrypoint.InitiatingProcessIdentity",
+                "update_entrypoint.register_main_host",
+                "update_entrypoint.serve_status_host",
+                "update_recovery.RecoveryController",
+                "update_recovery.RecoveryDependencies",
+                "update_recovery.RecoveryDiagnostics",
+                "update_recovery.CtypesWin32ProcessApi",
+                "update_recovery.WindowsProcessAdapter",
+                "update_recovery.SubprocessProbeAdapter",
+                "update_recovery.TemporaryStagedProbeWorkspace",
+                "update_recovery.WindowsRunOnceStore",
+                "update_recovery.SystemClock",
+                "update_recovery.create_windows_mutation_mutex",
+                "update_platform.CtypesWin32ProcessApi",
+                "update_platform.WindowsProcessAdapter",
+                "update_platform.SubprocessProbeAdapter",
+                "update_platform.WindowsRunOnceStore",
+                "update_platform.SystemClock",
+                "update_mutex.create_windows_mutation_mutex",
             )
-        self.assertEqual(result, EXIT_INVALID_ARGUMENTS)
-        self.assertEqual(self.stderr.getvalue(), INVALID_EARLY_INVOCATION)
-        exploding.assert_not_called()
+        )
+
+    def assert_invalid(self, executable, argv, *, source_runtime=False):
+        for production_path in (False, True):
+            with self.subTest(production_path=production_path):
+                stdout = io.BytesIO()
+                stderr = io.BytesIO()
+                exploding = mock.Mock(
+                    side_effect=AssertionError("dependency_constructed")
+                )
+                dependencies_factory = None if production_path else exploding
+                with contextlib.ExitStack() as stack:
+                    stack.enter_context(mock.patch(
+                        "update_entrypoint.sys.stdout",
+                        SimpleNamespace(buffer=stdout),
+                    ))
+                    stack.enter_context(mock.patch(
+                        "update_entrypoint.sys.stderr",
+                        SimpleNamespace(buffer=stderr),
+                    ))
+                    for sentinel in self.construction_sentinels(exploding):
+                        stack.enter_context(sentinel)
+                    result = dispatch_early_mode(
+                        str(executable),
+                        argv,
+                        source_runtime=source_runtime,
+                        dependencies_factory=dependencies_factory,
+                    )
+                self.assertEqual(result, EXIT_INVALID_ARGUMENTS)
+                self.assertEqual(stdout.getvalue(), b"")
+                self.assertEqual(stderr.getvalue(), INVALID_EARLY_INVOCATION)
+                exploding.assert_not_called()
 
 
 class EntrypointSelectionTests(EntrypointFixture, unittest.TestCase):
@@ -437,10 +484,13 @@ class EntrypointDispatchTests(EntrypointFixture, unittest.TestCase):
 
     def test_malformed_modes_never_construct_dependencies(self):
         invalid = (
+            (self.main, ["--register", "extra"]),
+            (self.main, ["--install-package"]),
             (self.runner, ["--complete-update"]),
             (self.runner, ["--complete-update", TX, "0", "win-create-time-1"]),
             (self.runner, ["--complete-update", "F" * 32, "77", "win-create-time-1"]),
             (self.runner, ["--recover-active", TX]),
+            (self.runner, ["--recover-update"]),
             (self.status, []),
             (self.status, [ALLOWED_ORIGINS[0], "--parent-window=-1"]),
             (self.runner, ["--register"]),
@@ -538,6 +588,61 @@ class EntrypointDispatchTests(EntrypointFixture, unittest.TestCase):
             )
         delegate.assert_called_once_with((str(self.main), "--update-probe"))
         factory.assert_not_called()
+
+    def test_probe_wrong_role_uses_canonical_failure_without_probe_or_factories(self):
+        for executable, source_runtime in (
+            (self.source, True),
+            (self.runner, False),
+            (self.status, False),
+        ):
+            for production_path in (False, True):
+                with self.subTest(
+                    executable=executable.name,
+                    production_path=production_path,
+                ):
+                    stdout = io.BytesIO()
+                    stderr = io.BytesIO()
+                    exploding = mock.Mock(
+                        side_effect=AssertionError("dependency_or_probe_called")
+                    )
+                    dependencies_factory = None if production_path else exploding
+                    plan_a_dispatch = __import__("early_cli").dispatch_early_cli
+                    with contextlib.ExitStack() as stack:
+                        stack.enter_context(mock.patch(
+                            "update_entrypoint.sys.stdout",
+                            SimpleNamespace(buffer=stdout),
+                        ))
+                        stack.enter_context(mock.patch(
+                            "update_entrypoint.sys.stderr",
+                            SimpleNamespace(buffer=stderr),
+                        ))
+                        for sentinel in self.construction_sentinels(exploding):
+                            stack.enter_context(sentinel)
+                        delegate = stack.enter_context(mock.patch(
+                            "update_entrypoint.dispatch_early_cli",
+                            wraps=plan_a_dispatch,
+                        ))
+                        stack.enter_context(
+                            mock.patch("early_cli.run_update_probe", exploding)
+                        )
+                        self.assertEqual(
+                            dispatch_early_mode(
+                                str(executable),
+                                ["--update-probe", str(self.manifest)],
+                                source_runtime=source_runtime,
+                                dependencies_factory=dependencies_factory,
+                            ),
+                            EXIT_INVALID_ARGUMENTS,
+                        )
+                    delegate.assert_called_once_with(
+                        (str(executable.absolute()), "--update-probe")
+                    )
+                    self.assertEqual(
+                        stdout.getvalue(),
+                        b'{"error_code":"package_probe_failed","status":"error"}\n',
+                    )
+                    self.assertEqual(stderr.getvalue(), b"")
+                    exploding.assert_not_called()
 
     def test_post_validation_internal_and_contention_exit_categories_are_fixed(self):
         with mock.patch(

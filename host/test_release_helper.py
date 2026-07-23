@@ -339,12 +339,17 @@ class PlanCPackagingTests(unittest.TestCase):
     def test_spec_is_ignored_without_creating_it(self):
         text = Path(".gitignore").read_text(encoding="utf-8").splitlines()
         self.assertIn("*.spec", text)
+        spec = Path("dh_native_host.spec")
+        existed_before = spec.exists()
+        bytes_before = spec.read_bytes() if existed_before else None
         completed = __import__("subprocess").run(
             ["git", "check-ignore", "-q", "dh_native_host.spec"],
             check=False,
         )
         self.assertEqual(completed.returncode, 0)
-        self.assertFalse(Path("dh_native_host.spec").exists())
+        self.assertEqual(spec.exists(), existed_before)
+        if existed_before:
+            self.assertEqual(spec.read_bytes(), bytes_before)
 
     def test_normal_plan_a_release_stage_remains_manifest_valid(self):
         source = self.root / "source"

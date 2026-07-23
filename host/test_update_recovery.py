@@ -1193,6 +1193,24 @@ class TerminalFixture:
             mutex_factory=lambda _root: self.mutex,
         )
 
+    def create_next_terminal(self, transaction_id):
+        engine = UpdateEngine(
+            self.install,
+            mutex_factory=lambda _root: self.mutex,
+        )
+        engine.create_prepared(
+            self.package,
+            transaction_id,
+            expected_version=None,
+            prior_version=VERSION,
+            initiator=UpdateInitiator.INSTALLER,
+        )
+        engine.activate_prepared(transaction_id, None)
+        terminal = engine.resume(transaction_id)
+        if terminal.phase is not JournalPhase.COMMITTED:
+            raise AssertionError(terminal)
+        return terminal
+
     def finalize(self):
         return finalize_update_status(
             self.install,
@@ -1327,13 +1345,130 @@ class FinalizationTests(unittest.TestCase):
         self.assertFalse(fixture.paths.transaction_root.exists())
         self.assertEqual(fixture.finalize_factory_calls, [fixture.install])
 
-    def test_lost_finalize_response_replays_same_receipt_without_second_source(self):
+    def test_cursor_precedes_receipt_unregister_and_engine_cleanup(self):
+        fixture = self.make_terminal()
+        events = []
+
+        class RecordingFilesystem(OSFinalizationFilesystem):
+            publication = None
+
+            def atomic_write(self, path, value):
+                if path.name == "finalization-cursor.json":
+                    self.publication = f"cursor-{value['state']}:dir-fsync"
+                else:
+                    self.publication = "receipt:dir-fsync"
+                try:
+                    super().atomic_write(path, value)
+                finally:
+                    self.publication = None
+
+            def fsync_directory(self, path):
+                super().fsync_directory(path)
+                if self.publication is not None:
+                    events.append(self.publication)
+
+        def engine_factory(root):
+            engine = fixture.engine_factory(root)
+
+            class RecordingEngine:
+                def finalize_terminal_evidence(self, transaction_id):
+                    result = engine.finalize_terminal_evidence(transaction_id)
+                    events.append("engine:finalize-terminal-evidence")
+                    return result
+
+            return RecordingEngine()
+
+        def unregister(registry, name):
+            __import__("native_registration").unregister_host(registry, name)
+            events.append("status:unregister")
+
+        with (
+            mock.patch(
+                "update_recovery.unregister_host",
+                side_effect=unregister,
+            ),
+        ):
+            finalize_update_status(
+                fixture.install,
+                TX,
+                fixture.registry,
+                engine_factory,
+                filesystem=RecordingFilesystem(),
+                mutex_factory=fixture.mutex_factory,
+            )
+
+        self.assertEqual(
+            events,
+            [
+                "cursor-reserved:dir-fsync",
+                "receipt:dir-fsync",
+                "cursor-receipt-ready:dir-fsync",
+                "status:unregister",
+                "engine:finalize-terminal-evidence",
+            ],
+        )
+        self.assertFalse(fixture.paths.active.exists())
+        self.assertFalse(fixture.paths.transaction_root.exists())
+
+    def test_lost_finalize_response_replays_stable_receipt_after_engine_cleanup(self):
         fixture = self.make_terminal()
         first = fixture.finalize()
-        first_bytes = fixture.receipt_path.read_bytes()
+        receipt_bytes = fixture.receipt_path.read_bytes()
+
         second = fixture.finalize()
+
         self.assertEqual(second, first)
-        self.assertEqual(fixture.receipt_path.read_bytes(), first_bytes)
+        self.assertEqual(fixture.receipt_path.read_bytes(), receipt_bytes)
+        self.assertEqual(
+            fixture.finalize_factory_calls,
+            [fixture.install, fixture.install],
+        )
+        self.assertFalse(fixture.paths.active.exists())
+        self.assertFalse(fixture.paths.transaction_root.exists())
+
+    def test_same_id_finalize_replays_cursor_without_second_receipt(self):
+        fixture = self.make_terminal()
+        receipt = receipt_from_terminal_journal(fixture.terminal)
+        filesystem = OSFinalizationFilesystem()
+        filesystem.atomic_write(
+            fixture.cursor_path,
+            FinalizationCursor(
+                TX,
+                receipt.outcome,
+                receipt.terminal_version,
+                "reserved",
+            ).to_dict(),
+        )
+        fixture.receipt_path.parent.mkdir()
+        filesystem.atomic_write(fixture.receipt_path, receipt.to_dict())
+        receipt_bytes = fixture.receipt_path.read_bytes()
+        real_atomic_write = filesystem.atomic_write
+        writes = []
+
+        def record_write(path, value):
+            writes.append(path)
+            real_atomic_write(path, value)
+
+        with mock.patch.object(
+            filesystem,
+            "atomic_write",
+            side_effect=record_write,
+        ):
+            second = finalize_update_status(
+                fixture.install,
+                TX,
+                fixture.registry,
+                fixture.engine_factory,
+                filesystem=filesystem,
+                mutex_factory=fixture.mutex_factory,
+            )
+        self.assertEqual(second, receipt)
+        self.assertEqual(fixture.receipt_path.read_bytes(), receipt_bytes)
+        self.assertEqual(writes, [fixture.cursor_path])
+        self.assertEqual(
+            load_finalization_cursor(fixture.cursor_path, filesystem).state,
+            "receipt-ready",
+        )
 
     def test_different_transaction_is_blocked_while_cursor_pending(self):
         fixture = self.make_terminal()
@@ -1546,6 +1681,62 @@ class FinalizationTests(unittest.TestCase):
             load_finalization_receipt(fixture.receipt_path, TX, fs), receipt
         )
 
+    def test_same_id_replay_receipt_error_retains_preexisting_cursor(self):
+        fixture = self.make_terminal()
+        filesystem = OSFinalizationFilesystem()
+        real_atomic_write = filesystem.atomic_write
+        crash_after_reserved = True
+        fail_receipt = False
+
+        def faulting_write(path, value):
+            nonlocal crash_after_reserved
+            if fail_receipt and path == fixture.receipt_path:
+                raise OSError("injected receipt creation failure")
+            real_atomic_write(path, value)
+            if (
+                crash_after_reserved
+                and path == fixture.cursor_path
+                and value["state"] == "reserved"
+            ):
+                crash_after_reserved = False
+                raise InjectedCrash()
+
+        with mock.patch.object(
+            filesystem,
+            "atomic_write",
+            side_effect=faulting_write,
+        ):
+            with self.assertRaises(InjectedCrash):
+                finalize_update_status(
+                    fixture.install,
+                    TX,
+                    fixture.registry,
+                    fixture.engine_factory,
+                    filesystem=filesystem,
+                    mutex_factory=fixture.mutex_factory,
+                )
+        cursor_bytes = fixture.cursor_path.read_bytes()
+        fail_receipt = True
+        with mock.patch.object(
+            filesystem,
+            "atomic_write",
+            side_effect=faulting_write,
+        ):
+            with self.assertRaisesRegex(
+                FinalizationError, "^invalid_finalization_receipt$"
+            ):
+                finalize_update_status(
+                    fixture.install,
+                    TX,
+                    fixture.registry,
+                    fixture.engine_factory,
+                    filesystem=filesystem,
+                    mutex_factory=fixture.mutex_factory,
+                )
+
+        self.assertEqual(fixture.cursor_path.read_bytes(), cursor_bytes)
+        self.assertFalse(fixture.receipt_path.exists())
+
     def test_cursor_scratch_blocks_start_and_newer_finalization(self):
         fixture = self.make_terminal()
         receipt = receipt_from_terminal_journal(fixture.terminal)
@@ -1699,6 +1890,62 @@ class FinalizationTests(unittest.TestCase):
             load_finalization_ack(fixture.ack_path, fs), old_receipt
         )
 
+    def test_ack_slot_replays_same_id_until_later_transaction_replaces_it(self):
+        fixture = self.make_terminal()
+        old_receipt = fixture.finalize()
+        fixture.acknowledge()
+        old_ack_bytes = fixture.ack_path.read_bytes()
+        self.assertTrue(fixture.acknowledge())
+
+        next_id = "f" * 32
+        newer_terminal = fixture.create_next_terminal(next_id)
+        newer = receipt_from_terminal_journal(newer_terminal)
+        self.assertEqual(
+            finalize_update_status(
+                fixture.install,
+                next_id,
+                fixture.registry,
+                fixture.engine_factory,
+                mutex_factory=fixture.mutex_factory,
+            ),
+            newer,
+        )
+
+        newer_paths = TransactionPaths.for_install(fixture.install, next_id)
+        newer_receipt_path = (
+            newer_paths.updates_root / "receipts" / f"{next_id}.json"
+        )
+        self.assertEqual(fixture.ack_path.read_bytes(), old_ack_bytes)
+        self.assertFalse(fixture.receipt_path.exists())
+        self.assertTrue(newer_receipt_path.exists())
+
+        cursor_bytes = fixture.cursor_path.read_bytes()
+        self.assertTrue(fixture.acknowledge())
+        self.assertEqual(fixture.cursor_path.read_bytes(), cursor_bytes)
+        self.assertFalse(fixture.receipt_path.exists())
+        self.assertEqual(
+            load_finalization_ack(fixture.ack_path, OSFinalizationFilesystem()),
+            old_receipt,
+        )
+
+        self.assertTrue(
+            acknowledge_update_finalization(
+                fixture.install,
+                next_id,
+                mutex_factory=fixture.mutex_factory,
+            )
+        )
+        self.assertFalse(newer_receipt_path.exists())
+        self.assertFalse(fixture.receipt_path.exists())
+        self.assertEqual(
+            load_finalization_ack(fixture.ack_path, OSFinalizationFilesystem()),
+            newer,
+        )
+        with self.assertRaisesRegex(
+            FinalizationError, "^finalization_not_current$"
+        ):
+            fixture.acknowledge()
+
     def test_malformed_old_ack_does_not_block_valid_new_terminal_authority(self):
         fixture = self.make_terminal()
         fixture.ack_path.write_bytes(b"malformed-old-ack")
@@ -1793,6 +2040,7 @@ class FinalizationTests(unittest.TestCase):
                 "InstallerRecoveryTests",
                 "FinalizationTests",
                 "FinalizationWindowsDurabilityTests",
+                "FrozenStagedProbeIntegrationTests",
             },
         )
         source = Path("host/update_recovery.py").read_text(encoding="utf-8")
