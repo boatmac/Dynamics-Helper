@@ -19,6 +19,27 @@ HOST_FILE = HOST_DIR / "product_info.py"
 EXT_DIST_DIR = EXT_DIR / "dist"
 INSTALL_SCRIPT = ROOT_DIR / "installer_core.ps1"
 INSTALL_WRAPPER = ROOT_DIR / "install.bat"
+VENV_PYTHON = (
+    ROOT_DIR / "host" / "venv" / "Scripts" / "python.exe"
+).resolve()
+PYINSTALLER_VERSION = "6.18.0"
+PYINSTALLER_HIDDEN_IMPORTS = (
+    "early_cli",
+    "install_integrity",
+    "native_messaging",
+    "native_registration",
+    "package_archive",
+    "package_manifest",
+    "product_info",
+    "update_engine",
+    "update_entrypoint",
+    "update_journal",
+    "update_mutex",
+    "update_ownership",
+    "update_platform",
+    "update_recovery",
+    "update_status_host",
+)
 
 _HOST_IMPORT_PATH = HOST_DIR.resolve()
 sys.path[:] = [
@@ -144,50 +165,49 @@ def build_extension():
         sys.exit(1)
 
 
+def pyinstaller_build_command() -> list[str]:
+    command = [
+        str(VENV_PYTHON),
+        "-m",
+        "PyInstaller",
+        "--onedir",
+        "--clean",
+        "-y",
+        "--name",
+        "dh_native_host",
+        "--paths",
+        str(HOST_DIR.resolve()),
+    ]
+    for module in PYINSTALLER_HIDDEN_IMPORTS:
+        command.extend(("--hidden-import", module))
+    command.append(str((HOST_DIR / "dh_native_host.py").resolve()))
+    return command
+
+
 def build_host():
     print("\n--- Building Native Host ---")
-    # CRITICAL: must use the venv's pyinstaller, NOT the system one. The venv
-    # pins github-copilot-sdk to the supported version (host/requirements.txt);
-    # the system Python may have a different SDK version installed and will
-    # silently bundle the wrong one, causing ImportError at runtime in user
-    # installations. See docs/sdk-upgrade-2026-05-0.3.0.md § 8.1.
-    venv_pyinstaller = os.path.join(
-        ROOT_DIR, "host", "venv", "Scripts", "pyinstaller.exe"
-    )
-    if not os.path.exists(venv_pyinstaller):
+    if not VENV_PYTHON.is_file():
         print(
-            f"ERROR: venv pyinstaller not found at {venv_pyinstaller}\n"
-            "Run `& host/venv/Scripts/python.exe -m pip install pyinstaller` "
-            "to provision it. Using the system-PATH pyinstaller is unsafe "
-            "because it binds to a Python interpreter with possibly the wrong "
-            "SDK version (see docs/sdk-upgrade-2026-05-0.3.0.md § 8.1)."
+            "ERROR: release virtual-environment Python is unavailable."
         )
         sys.exit(1)
 
     try:
-        # Sanity-check by asking for --version. argv-list form (no shell=True)
-        # avoids quoting issues with the path containing spaces.
-        subprocess.run(
-            [venv_pyinstaller, "--version"],
+        version = subprocess.run(
+            [str(VENV_PYTHON), "-m", "PyInstaller", "--version"],
             check=True,
-            stdout=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
         )
-
-        # Build command: pyinstaller --onedir (avoids WDAC temp extraction blocks)
-        # Output goes to dist/dh_native_host/ folder with exe + DLLs alongside
-        cmd = [
-            venv_pyinstaller,
-            "--onedir",
-            "--clean",
-            "-y",
-            "--name", "dh_native_host",
-            os.path.join("host", "dh_native_host.py"),
-        ]
+        if version.stdout.strip() != PYINSTALLER_VERSION:
+            print("ERROR: required PyInstaller 6.18.0 is unavailable.")
+            sys.exit(1)
+        cmd = pyinstaller_build_command()
         print(f"Executing: {' '.join(cmd)}")
         subprocess.run(cmd, cwd=ROOT_DIR, check=True)
         print("Host build successful.")
-    except subprocess.CalledProcessError as e:
-        print(f"Host build failed: {e}")
+    except subprocess.CalledProcessError:
+        print("ERROR: required PyInstaller 6.18.0 is unavailable.")
         sys.exit(1)
 
 

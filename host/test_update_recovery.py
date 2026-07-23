@@ -15,7 +15,9 @@ from unittest import mock
 
 from install_integrity import UpdateProbeResult
 from package_manifest import load_update_manifest
-from product_info import VERSION
+from package_archive import validate_staged_package
+from product_info import PROVIDED_PROTOCOL_CAPABILITIES, VERSION
+from release_helper import stage_release
 from native_registration import STATUS_HOST_NAME
 from test_native_registration import MemoryRegistryBackend
 from test_update_engine_host import TX, make_package
@@ -31,7 +33,11 @@ from update_journal import (
     read_journal,
     terminal_version,
 )
-from update_platform import RUN_ONCE_VALUE_NAME, RetainedProcessHandle
+from update_platform import (
+    RUN_ONCE_VALUE_NAME,
+    RetainedProcessHandle,
+    SubprocessProbeAdapter,
+)
 from update_ownership import read_ownership_plan
 from update_recovery import (
     FINALIZATION_CURSOR_STATES,
@@ -1933,6 +1939,125 @@ class FinalizationWindowsDurabilityTests(unittest.TestCase):
             fs.atomic_write(ack, {"forbidden": True})
         self.assertFalse(fs.has_atomic_scratch(ack))
 
+
+class FrozenStagedProbeIntegrationTests(unittest.TestCase):
+    class RecordingRealProbe(SubprocessProbeAdapter):
+        def __init__(self):
+            self.calls = []
+
+        def run_probe(self, executable, manifest_path):
+            call = SimpleNamespace(
+                executable=executable,
+                manifest_path=manifest_path,
+                cwd=executable.parent,
+            )
+            self.calls.append(call)
+            return super().run_probe(executable, manifest_path)
+
+    def make_plan_a_package_from_built_onedir(self, onedir: Path):
+        source = self.root / "source"
+        shutil.copytree(onedir, source / "dist/dh_native_host")
+        files = {
+            "extension/dist/manifest.json": (
+                b'{"version":"2.0.74",'
+                b'"version_name":"2.0.74-beta.4"}\n'
+            ),
+            "extension/dist/assets/app.js": b"app",
+            "host/config.json": b"{}\n",
+            "host/system_prompt.md": b"core",
+            "host/register.py": b"register",
+            "installer_core.ps1": b"installer",
+            "install.bat": b"wrapper",
+        }
+        for relative, payload in files.items():
+            path = source.joinpath(*relative.split("/"))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+        stage = self.root / "package"
+        stage_release(source, stage, VERSION)
+        return validate_staged_package(stage, expected_version=VERSION)
+
+    def make_real_prepared_installer_fixture(self, package):
+        install_root = self.root / "install"
+        install_root.mkdir()
+        mutex = FakeMutationMutex()
+        engine = UpdateEngine(
+            install_root,
+            mutex_factory=lambda _root: mutex,
+        )
+        engine.create_prepared(
+            package,
+            TX,
+            expected_version=VERSION,
+            prior_version=None,
+            initiator=UpdateInitiator.INSTALLER,
+        )
+        paths = TransactionPaths.for_install(install_root, TX)
+        probe = self.RecordingRealProbe()
+        run_once = MemoryRunOnceStore()
+        workspace = TemporaryStagedProbeWorkspace()
+        registry = MemoryRegistryBackend()
+        controller = RecoveryController(
+            install_root,
+            RecoveryDependencies(
+                process=NoopProcessAdapter(),
+                probe_process=probe,
+                staged_probe_workspace=workspace,
+                run_once=run_once,
+                clock=NoopClock(),
+                mutex_factory=lambda _root: mutex,
+                set_cwd=lambda _path: None,
+            ),
+        )
+        return SimpleNamespace(
+            install_root=install_root,
+            paths=paths,
+            probe=probe,
+            run_once=run_once,
+            workspace=workspace,
+            registry=registry,
+            controller=controller,
+        )
+
+    def test_complete_built_runtime_starts_and_matches_target_without_live_mutation(self):
+        onedir_text = os.environ.get("DH_PLAN_C_FROZEN_ONEDIR")
+        if not onedir_text:
+            self.skipTest("DH_PLAN_C_FROZEN_ONEDIR not set")
+        onedir = Path(onedir_text)
+        if not onedir.is_absolute():
+            self.fail("DH_PLAN_C_FROZEN_ONEDIR must be absolute")
+        inventory_onedir(onedir.resolve(strict=True))
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        package = self.make_plan_a_package_from_built_onedir(onedir)
+        fixture = self.make_real_prepared_installer_fixture(package)
+        before = snapshot_tree(fixture.install_root)
+
+        result = fixture.controller.preflight_prepared_target(TX)
+
+        self.assertEqual(len(fixture.probe.calls), 1)
+        self.assertEqual(
+            result,
+            UpdateProbeResult(
+                status="success",
+                host_version=VERSION,
+                extension_version=VERSION,
+                capabilities=PROVIDED_PROTOCOL_CAPABILITIES,
+            ),
+        )
+        self.assertEqual(snapshot_tree(fixture.install_root), before)
+        self.assertEqual(
+            read_journal(fixture.paths.journal).phase,
+            JournalPhase.PREPARED,
+        )
+        self.assertEqual(fixture.run_once.write_calls, [])
+        self.assertEqual(fixture.registry.values, {})
+        self.assertEqual(
+            fixture.probe.calls[0].cwd,
+            fixture.probe.calls[0].executable.parent,
+        )
+        self.assertFalse(fixture.probe.calls[0].cwd.exists())
 
 if __name__ == "__main__":
     unittest.main()

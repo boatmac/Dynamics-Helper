@@ -1,3 +1,4 @@
+import inspect
 import os
 import shutil
 import tempfile
@@ -6,9 +7,28 @@ from pathlib import Path
 from unittest.mock import patch
 
 import release_helper
-from package_archive import write_deterministic_archive
-from package_manifest import ManifestError, load_installed_product, sha256_file
+from package_archive import validate_staged_package, write_deterministic_archive
+from package_manifest import ManifestError, load_installed_product, load_update_manifest, sha256_file
 from updater import Updater
+
+
+PLAN_C_EARLY_MODULES = (
+    "early_cli",
+    "install_integrity",
+    "native_messaging",
+    "native_registration",
+    "package_archive",
+    "package_manifest",
+    "product_info",
+    "update_engine",
+    "update_entrypoint",
+    "update_journal",
+    "update_mutex",
+    "update_ownership",
+    "update_platform",
+    "update_recovery",
+    "update_status_host",
+)
 
 
 class TestReleaseStaging(unittest.TestCase):
@@ -226,6 +246,130 @@ class TestReleaseStaging(unittest.TestCase):
             installed.release_integrity_sha256,
         )
         self.assertFalse((install / "update-manifest.json").exists())
+
+
+class PlanCPackagingTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def test_source_build_argv_uses_venv_python_module_and_every_hidden_import(self):
+        with patch("release_helper.subprocess.run") as run:
+            command = release_helper.pyinstaller_build_command()
+        run.assert_not_called()
+        self.assertEqual(Path(command[0]).resolve(), release_helper.VENV_PYTHON)
+        self.assertEqual(command[1:3], ["-m", "PyInstaller"])
+        self.assertEqual(
+            command[3:8],
+            ["--onedir", "--clean", "-y", "--name", "dh_native_host"],
+        )
+        self.assertIn("--paths", command)
+        self.assertEqual(
+            Path(command[command.index("--paths") + 1]).resolve(),
+            release_helper.HOST_DIR.resolve(),
+        )
+        actual_hidden = tuple(
+            command[index + 1]
+            for index, value in enumerate(command)
+            if value == "--hidden-import"
+        )
+        self.assertEqual(actual_hidden, PLAN_C_EARLY_MODULES)
+        self.assertEqual(
+            Path(command[-1]).resolve(),
+            (release_helper.HOST_DIR / "dh_native_host.py").resolve(),
+        )
+        self.assertFalse(any(argument.endswith(".spec") for argument in command))
+        self.assertLess(
+            max(index for index, value in enumerate(command) if value == "--hidden-import"),
+            len(command) - 1,
+        )
+
+    def test_build_host_invokes_exact_cli_command(self):
+        with patch("release_helper.subprocess.run") as run:
+            run.return_value.stdout = "6.18.0\n"
+            release_helper.build_host()
+        self.assertEqual(
+            run.call_args_list[0].args[0],
+            [
+                str(release_helper.VENV_PYTHON),
+                "-m",
+                "PyInstaller",
+                "--version",
+            ],
+        )
+        self.assertTrue(run.call_args_list[0].kwargs["capture_output"])
+        self.assertTrue(run.call_args_list[0].kwargs["text"])
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            release_helper.pyinstaller_build_command(),
+        )
+        self.assertEqual(
+            Path(run.call_args_list[1].kwargs["cwd"]).resolve(),
+            release_helper.ROOT_DIR.resolve(),
+        )
+
+    def test_build_host_never_provisions_or_uses_bare_pyinstaller(self):
+        source = inspect.getsource(release_helper.build_host)
+        self.assertNotIn("ensurepip", source)
+        self.assertNotRegex(source, r"(?i)(?<!PyInstaller)\bpip\b")
+        self.assertNotIn("pyinstaller.exe", source.casefold())
+
+    def test_missing_pyinstaller_module_uses_fixed_error_before_build(self):
+        failure = __import__("subprocess").CalledProcessError(
+            1, [str(release_helper.VENV_PYTHON), "-m", "PyInstaller"]
+        )
+        with (
+            patch("release_helper.subprocess.run", side_effect=failure) as run,
+            patch("builtins.print") as printed,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            release_helper.build_host()
+        self.assertEqual(raised.exception.code, 1)
+        self.assertEqual(run.call_count, 1)
+        printed.assert_any_call(
+            "ERROR: required PyInstaller 6.18.0 is unavailable."
+        )
+
+    def test_no_plan_c_data_is_implicitly_bundled(self):
+        command = release_helper.pyinstaller_build_command()
+        self.assertNotIn("--add-data", command)
+        self.assertNotIn("--collect-data", command)
+
+    def test_spec_is_ignored_without_creating_it(self):
+        text = Path(".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn("*.spec", text)
+        completed = __import__("subprocess").run(
+            ["git", "check-ignore", "-q", "dh_native_host.spec"],
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertFalse(Path("dh_native_host.spec").exists())
+
+    def test_normal_plan_a_release_stage_remains_manifest_valid(self):
+        source = self.root / "source"
+        stage = self.root / "stage"
+        files = {
+            "extension/dist/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+            "extension/dist/assets/app.js": b"app",
+            "dist/dh_native_host/dh_native_host.exe": b"host-exe",
+            "dist/dh_native_host/_internal/python313.dll": b"runtime",
+            "host/config.json": b"{}\n",
+            "host/system_prompt.md": b"core",
+            "host/register.py": b"register",
+            "installer_core.ps1": b"installer",
+            "install.bat": b"wrapper",
+        }
+        for relative, payload in files.items():
+            path = source.joinpath(*relative.split("/"))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+        release_helper.stage_release(source, stage, "2.0.74-beta.4")
+        self.assertFalse((stage / "updates").exists())
+        self.assertEqual(
+            validate_staged_package(stage).manifest.entries,
+            load_update_manifest(stage / "update-manifest.json").entries,
+        )
 
 
 if __name__ == "__main__":
