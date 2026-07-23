@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import struct
@@ -9,6 +10,7 @@ from native_messaging import (
     read_native_message,
     write_message,
 )
+from host.dh_native_host import NativeHost
 
 
 class FlushBytesIO(io.BytesIO):
@@ -121,6 +123,71 @@ class NativeMessagingTests(unittest.TestCase):
             NativeMessageError, "^native_message_must_be_object$"
         ):
             write_message(io.BytesIO(), [])
+
+
+class NativeHostFramingIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    def make_host(self, input_bytes: bytes = b"") -> NativeHost:
+        host = NativeHost.__new__(NativeHost)
+        host.input_queue = asyncio.Queue()
+        host.current_request_id = None
+        host.loop = asyncio.get_running_loop()
+        host.running = True
+        host.send_progress = lambda _message: None
+        host._native_input_stream = io.BytesIO(input_bytes)
+        host._native_output_stream = FlushBytesIO()
+        return host
+
+    async def test_native_host_ping_response_uses_little_endian_frame(self):
+        host = self.make_host()
+        await host.process_message({"action": "ping", "requestId": "host-r1"})
+        raw = host._native_output_stream.getvalue()
+        self.assertEqual(struct.unpack("<I", raw[:4])[0], len(raw[4:]))
+        self.assertEqual(
+            read_native_message(io.BytesIO(raw)),
+            {
+                "requestId": "host-r1",
+                "status": "success",
+                "data": "pong",
+            },
+        )
+        self.assertEqual(host._native_output_stream.flush_count, 1)
+
+    async def test_little_endian_peer_ping_round_trips_through_native_host(self):
+        peer = io.BytesIO()
+        write_message(peer, {"action": "ping", "requestId": "peer-r1"})
+        host = self.make_host(peer.getvalue())
+        host._read_stdin_loop()
+        request = await asyncio.wait_for(host.input_queue.get(), timeout=1.0)
+        self.assertEqual(request, {"action": "ping", "requestId": "peer-r1"})
+        await host.process_message(request)
+        self.assertEqual(
+            read_native_message(
+                io.BytesIO(host._native_output_stream.getvalue())
+            ),
+            {
+                "requestId": "peer-r1",
+                "status": "success",
+                "data": "pong",
+            },
+        )
+
+    async def test_main_host_accepts_analyze_payload_larger_than_one_mib(self):
+        message = {
+            "action": "analyze_error",
+            "requestId": "large-analyze",
+            "payload": {"prompt": "x" * (MAX_MESSAGE_BYTES + 1)},
+        }
+        payload = json.dumps(
+            message,
+            ensure_ascii=True,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        frame = struct.pack("<I", len(payload)) + payload
+        host = self.make_host(frame)
+        host._read_stdin_loop()
+        request = await asyncio.wait_for(host.input_queue.get(), timeout=1.0)
+        self.assertEqual(request, message)
 
 
 if __name__ == "__main__":

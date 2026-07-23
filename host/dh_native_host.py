@@ -1,71 +1,25 @@
-# --- SELF-REGISTRATION MODE ---
-# Must run before stdout redirection to allow printing status to console.
 import sys
+from pathlib import Path
 
-from early_cli import dispatch_early_cli
+from update_entrypoint import dispatch_early_mode  # noqa: E402
 
-_early_exit_code = dispatch_early_cli(sys.argv)
-if _early_exit_code is not None:
-    raise SystemExit(_early_exit_code)
-
-if "--register" in sys.argv:
-    import os
-    import json
-    import winreg
-
-    try:
-        HOST_NAME = "com.dynamics.helper.native"
-        ALLOWED_ORIGINS = [
-            "chrome-extension://aiimcjfjmibedicmckpphgbddankgdln/",
-            "chrome-extension://fkemelmlolmdnldpofiahmnhngmhonno/",
-        ]
-
-        # Determine paths (Self-contained exe)
-        # When running as exe, sys.executable is the path to the exe.
-        # When running as script, it's python.exe.
-        # But --register is mainly for the compiled exe scenario in Prod.
-        exe_path = sys.executable
-        install_dir = os.path.dirname(exe_path)
-
-        # Manifest is strictly "manifest.json" in Prod
-        manifest_path = os.path.join(install_dir, "manifest.json")
-
-        # 1. Write Manifest (UTF-8 No BOM)
-        # Relative path "dh_native_host.exe" ensures portability and avoids encoding issues.
-        manifest_content = {
-            "name": HOST_NAME,
-            "description": "Dynamics Helper Native Host",
-            "path": "dh_native_host.exe",
-            "type": "stdio",
-            "allowed_origins": ALLOWED_ORIGINS,
-        }
-
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest_content, f, indent=2)
-        print(f"Created manifest at: {manifest_path}")
-
-        # 2. Register Keys (Windows Registry)
-        registry_locations = [
-            (winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\NativeMessagingHosts"),
-            (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Edge\NativeMessagingHosts"),
-        ]
-
-        for hkey, subkey in registry_locations:
-            try:
-                host_key_path = f"{subkey}\\{HOST_NAME}"
-                key = winreg.CreateKey(hkey, host_key_path)
-                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, manifest_path)
-                winreg.CloseKey(key)
-                print(f"Registered {HOST_NAME} at {host_key_path}")
-            except Exception as e:
-                print(f"Failed to register at {subkey}: {e}")
-
-        print("Registration completed successfully.")
-        sys.exit(0)
-
-    except Exception as e:
-        print(f"Registration failed: {e}")
-        sys.exit(1)
+_source_runtime = not bool(getattr(sys, "frozen", False))
+_early_entrypoint = (
+    Path(sys.executable).resolve(strict=True)
+    if not _source_runtime
+    else Path(__file__).resolve(strict=True)
+)
+_early_exit = (
+    dispatch_early_mode(
+        str(_early_entrypoint),
+        sys.argv[1:],
+        source_runtime=_source_runtime,
+    )
+    if __name__ == "__main__"
+    else None
+)
+if _early_exit is not None:
+    raise SystemExit(_early_exit)
 
 # --- STDOUT PROTECTION ---
 # Native Messaging requires STDOUT to be exclusively used for length-prefixed JSON.
@@ -119,7 +73,7 @@ except Exception as e:
 import asyncio
 import copy
 import threading
-import struct
+from native_messaging import read_native_message, write_message
 import json
 import logging
 import logging.handlers
@@ -2113,26 +2067,19 @@ class NativeHost:
 
     def _read_stdin_loop(self):
         """Blocking loop that reads Native Messaging format from stdin."""
-        while self.running and self.loop:
+        while self.running:
             try:
-                # Read 4 bytes length
-                # sys.stdin.buffer.read is blocking
-                raw_length = sys.stdin.buffer.read(4)
-                if len(raw_length) == 0:
+                input_stream = getattr(
+                    self, "_native_input_stream", sys.stdin.buffer
+                )
+                message = read_native_message(
+                    input_stream, max_payload_bytes=None
+                )
+                if message is None:
                     logger.info("Stdin closed. Stopping.")
                     self.running = False
-                    # Signal the main loop to exit
                     self.loop.call_soon_threadsafe(self.input_queue.put_nowait, None)
                     break
-
-                message_length = struct.unpack("@I", raw_length)[0]
-                message_data = sys.stdin.buffer.read(message_length).decode("utf-8")
-
-                if not message_data:
-                    continue
-
-                message = json.loads(message_data)
-                # Thread-safe put into async queue
                 self.loop.call_soon_threadsafe(self.input_queue.put_nowait, message)
 
             except Exception as e:
@@ -2152,12 +2099,10 @@ class NativeHost:
                 message_content.get("error_code"),
                 type(message_content.get("data")).__name__,
             )
-            encoded_content = json.dumps(message_content).encode("utf-8")
-            encoded_length = struct.pack("@I", len(encoded_content))
-
-            NATIVE_STDOUT.write(encoded_length)
-            NATIVE_STDOUT.write(encoded_content)
-            NATIVE_STDOUT.flush()
+            output_stream = getattr(
+                self, "_native_output_stream", NATIVE_STDOUT
+            )
+            write_message(output_stream, message_content)
         except Exception as e:
             logger.error("Error sending Native Messaging response (%s).", type(e).__name__)
 

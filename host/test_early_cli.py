@@ -41,7 +41,6 @@ class EarlyCliDispatchTests(unittest.TestCase):
         self.manifest.parent.mkdir()
         shutil.copy2(stage / "update-manifest.json", self.manifest)
         for name in (
-            "dh_native_host.py",
             "early_cli.py",
             "install_integrity.py",
             "package_manifest.py",
@@ -50,6 +49,14 @@ class EarlyCliDispatchTests(unittest.TestCase):
             source = Path("host") / name
             if source.exists():
                 shutil.copy2(source, self.live / name)
+        (self.live / "dh_native_host.py").write_text(
+            "import sys\n"
+            "from early_cli import dispatch_early_cli\n"
+            "result = dispatch_early_cli(sys.argv)\n"
+            "if result is not None:\n"
+            "    raise SystemExit(result)\n",
+            encoding="utf-8",
+        )
         self.localappdata = self.root / "local"
         self.appdata = self.root / "roaming"
         self.userprofile = self.root / "profile"
