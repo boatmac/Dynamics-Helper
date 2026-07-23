@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 # Configuration
@@ -17,6 +18,14 @@ HOST_FILE = HOST_DIR / "product_info.py"
 EXT_DIST_DIR = EXT_DIR / "dist"
 INSTALL_SCRIPT = ROOT_DIR / "installer_core.ps1"
 INSTALL_WRAPPER = ROOT_DIR / "install.bat"
+
+_HOST_IMPORT_PATH = HOST_DIR.resolve()
+sys.path[:] = [
+    entry
+    for entry in sys.path
+    if Path(entry or os.curdir).resolve() != _HOST_IMPORT_PATH
+]
+sys.path.insert(0, str(_HOST_IMPORT_PATH))
 
 
 def update_json_version(file_path, new_version):
@@ -181,66 +190,64 @@ def build_host():
         sys.exit(1)
 
 
-def create_zip(version):
+def stage_release(source_root: Path, stage_root: Path, version: str) -> Path:
+    from package_archive import validate_staged_package
+    from package_manifest import generate_release_documents, write_release_documents
+
+    source_root = source_root.resolve(strict=True)
+    required = (
+        source_root / "extension" / "dist",
+        source_root / "dist" / "dh_native_host",
+        source_root / "host" / "config.json",
+        source_root / "host" / "system_prompt.md",
+        source_root / "host" / "register.py",
+        source_root / "installer_core.ps1",
+        source_root / "install.bat",
+    )
+    for path in required:
+        if not path.exists():
+            raise FileNotFoundError(path)
+    if stage_root.exists():
+        raise FileExistsError(stage_root)
+    temporary = stage_root.with_name(f".{stage_root.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        shutil.copytree(required[0], temporary / "extension")
+        shutil.copytree(required[1], temporary / "host")
+        for source in required[2:5]:
+            shutil.copy2(source, temporary / "host" / source.name)
+        for source in required[5:]:
+            shutil.copy2(source, temporary / source.name)
+        documents = generate_release_documents(temporary, version)
+        write_release_documents(temporary, documents)
+        validate_staged_package(temporary, expected_version=version)
+        os.replace(temporary, stage_root)
+        return stage_root
+    except Exception:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+
+
+def create_zip(
+    version: str,
+    *,
+    source_root: Path | None = None,
+    output_dir: Path | None = None,
+):
     print("\n--- Creating Release Zip ---")
-    zip_name = f"DynamicsHelper_v{version}"
-    output_dir = os.path.join(ROOT_DIR, "releases")
+    from package_archive import write_deterministic_archive
 
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    # Temporary staging directory for zip content
-    stage_dir = os.path.join(output_dir, "temp_stage")
-    if os.path.exists(stage_dir):
-        shutil.rmtree(stage_dir)
-    os.makedirs(stage_dir)
-
-    # 1. Copy Extension (dist -> extension)
-    print("Copying Extension...")
-    shutil.copytree(EXT_DIST_DIR, os.path.join(stage_dir, "extension"))
-
-    # 2. Copy Host (dist/dh_native_host/ folder contents -> host/)
-    print("Copying Host...")
-    host_stage_dir = os.path.join(stage_dir, "host")
-    os.makedirs(host_stage_dir)
-
-    # PyInstaller --onedir output is in dist/dh_native_host/ (a folder with exe + DLLs)
-    host_onedir_src = os.path.join(ROOT_DIR, "dist", "dh_native_host")
-    if not os.path.isdir(host_onedir_src):
-        print(f"Error: Host build folder not found at {host_onedir_src}")
-        sys.exit(1)
-
-    # Copy all files from the --onedir output (exe + DLLs + bundled modules)
-    for item in os.listdir(host_onedir_src):
-        s = os.path.join(host_onedir_src, item)
-        d = os.path.join(host_stage_dir, item)
-        if os.path.isdir(s):
-            shutil.copytree(s, d)
-        else:
-            shutil.copy2(s, d)
-
-    # Copy other host files (config.json, system_prompt.md, register.py)
-    # They are in host/ source folder
-    shutil.copy2(os.path.join(HOST_DIR, "config.json"), host_stage_dir)
-    shutil.copy2(os.path.join(HOST_DIR, "system_prompt.md"), host_stage_dir)
-    shutil.copy2(os.path.join(HOST_DIR, "register.py"), host_stage_dir)
-
-    # 3. Copy Installer Script
-    print("Copying Installer...")
-    shutil.copy2(INSTALL_SCRIPT, stage_dir)
-    shutil.copy2(INSTALL_WRAPPER, stage_dir)
-
-    # 4. Zip it up
-    zip_file_base = os.path.join(output_dir, zip_name)
-    print(f"Zipping to {zip_file_base}.zip...")
-    shutil.make_archive(zip_file_base, "zip", stage_dir)
-
-    # Cleanup
-    shutil.rmtree(stage_dir)
-
-    zip_file_path = f"{zip_file_base}.zip"
-    print(f"Zip created: {zip_file_path}")
-    return zip_file_path
+    source = (source_root or ROOT_DIR).resolve(strict=True)
+    output = (output_dir or source / "releases").resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    archive = output / f"DynamicsHelper_v{version}.zip"
+    stage = output / f".DynamicsHelper_v{version}.{uuid.uuid4().hex}.stage"
+    try:
+        stage_release(source, stage, version)
+        write_deterministic_archive(stage, archive)
+        print(f"Zip created: {archive}")
+        return str(archive)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
 
 def publish_to_github(version, zip_path, prerelease=False, notes_file=None):
