@@ -94,8 +94,13 @@ This file defines the operational rules, development workflows, and coding stand
 * **Build Executable (PyInstaller):**
 
     ```bash
-    pyinstaller --onedir --clean -y --name dh_native_host host/dh_native_host.py
+    host/venv/Scripts/python.exe -c "import release_helper; release_helper.build_host()"
     ```
+
+  * The release helper requires exact PyInstaller `6.18.0` and invokes it only
+    as `host/venv/Scripts/python.exe -m PyInstaller` with the reviewed hidden
+    imports. It never provisions pip/PyInstaller. Installing or upgrading the
+    toolchain requires separate user approval.
 
 * **Run Tests:**
   * **Run All Tests:**
@@ -195,8 +200,11 @@ This file defines the operational rules, development workflows, and coding stand
   * Catch exceptions in the main loop to prevent the process from crashing.
   * Return error responses to the extension: `{"status": "error", "message": "..."}`.
 * **CLI Flags:**
-  * `--register`: Registers the Native Host manifest and registry keys. Used by the installer.
-  * CLI flags are checked via raw `sys.argv` membership (no `argparse`).
+  * `update_entrypoint.py` owns exact source/frozen main, registration,
+    install-package, probe, detached completion/recovery, and status-host
+    invocation grammars. Do not add raw `sys.argv` membership checks after the
+    early dispatcher.
+  * `--register` remains available in canonical source and frozen main modes.
 
 ## 4. Critical Rules & Safety
 
@@ -300,12 +308,13 @@ This file defines the operational rules, development workflows, and coding stand
   `transactional-update-v1` until the complete Plan D cutover and frozen gates
   pass. `get_capabilities`/`verify_installation` are diagnostics in Plan A, not
   protected-action enforcement.
-* **Dormant Plan B engine:** `host/update_journal.py`,
+* **Dormant transactional routing:** `host/update_journal.py`,
   `host/update_ownership.py`, `host/update_mutex.py`, and
-  `host/update_engine.py` implement the transaction engine but are not routed
-  from `dh_native_host.py`, `updater.py`, the Extension, or the installer yet.
-  The legacy updater above remains the active production path until Plans C/D
-  complete the detached recovery and runtime cutover.
+  `host/update_engine.py` implement the transaction engine, while Plan C's early
+  special modes expose detached recovery primitives. Ordinary update clicks,
+  `updater.py`, the Extension, and the installer do not route through them yet.
+  The legacy updater above remains the active production path until Plan D
+  completes the runtime cutover.
 * **Transaction authority:** IDs are lowercase 32-hex from exactly 16 random
   bytes. Stable authority is `updates/active.json` plus
   `updates/transactions/<id>/journal.json`; `TransactionPaths` intentionally
@@ -331,6 +340,45 @@ This file defines the operational rules, development workflows, and coding stand
   `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP`
   directories before process start. Automated tests never use the real install,
   registry, browser registration, updater network, or release publication.
+* **Dormant Plan C recovery:** `native_messaging.py`, `native_registration.py`,
+  `update_platform.py`, `update_recovery.py`, `update_status_host.py`, and
+  `update_entrypoint.py` provide preflighted detached recovery primitives. They
+  do not route update clicks or advertise `transactional-update-v1`; the legacy
+  updater remains active until Plan D is complete.
+* **Validate before construction:** A special invocation must validate its exact
+  executable role, source/frozen bit, arity, full argv, identity text, fixed
+  executable chain, and path authority before constructing any dependency,
+  registry, controller, process adapter, default root, installer, or status
+  server. Non-probe mismatches are exit `2`, empty stdout, and exact stderr
+  `invalid_early_invocation\n`. Probe mismatches delegate only Plan A's fixed
+  malformed tuple; never add a second probe serializer.
+* **Process identity and launch:** Public Plan C APIs use complete
+  `InitiatingProcessIdentity(pid, creation_token)`, never a bare PID. The
+  injected low-level Win32 `open_process(pid)` seam is the only PID-only layer.
+  Wait on the retained handle; never reopen the PID, use `Popen.close`, or use
+  `subprocess.Popen` for detached recovery. Detached runners use canonical
+  transaction-root `cwd`, `CreateProcessW`, an explicit `NUL` handle allowlist,
+  and close parent thread/process handles exactly once.
+* **Plan B owns transaction state:** Plan C must not write transitions,
+  journals, `updates/active.json`, probe manifests, or transaction workspaces,
+  and must not directly remove active/workspace evidence. Use Plan B readers,
+  `TransactionPaths`, engine methods, and `finalize_terminal_evidence` only.
+* **Preflight and recovery topology:** Before recovery-tree/status/RunOnce/live
+  mutation, materialize and probe the exact combined staged Host, Extension, and
+  metadata view; repeat immediately before activation. Never bypass
+  `prepare_recovery_runtime`, activation-time preflight, or Plan D's required
+  `require_no_pending_finalization` start barrier. `updates/recovery` replacement
+  must preserve sibling `updates/active.json` byte-for-byte.
+* **Bounded finalization:** Reserve the one `finalization-cursor.json`, write at
+  most one matching receipt, advance the cursor to `receipt-ready`, then let Plan
+  B clean terminal evidence. Acknowledgment moves the receipt with one
+  same-volume `os.replace` to fixed `finalization-ack.json` and only then removes
+  the cursor. Never scan receipts, use random scratch names, write a separate ack
+  object, overwrite a pending cursor, or unlink/copy-delete a receipt.
+* **Recovery test safety:** Automated Plan C tests use injected process,
+  registry, probe, clock, filesystem, and mutex adapters only. Do not run a real
+  update/install, registry/AppData mutation, browser registration, PID wait,
+  RunOnce action, publish, tag, or release outside the disposable-VM gate.
 
 ### 8. Secret Field Persistence
 

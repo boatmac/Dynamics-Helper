@@ -598,9 +598,11 @@ advertise `transactional-update-v1`.
 
 ### Dormant Plan B Transaction API
 
-Plan B is implemented but not routed into production. The legacy updater stays
-active until Plans C/D complete their gates. Plan C/D must consume these exact
-interfaces rather than writing journal, active, or workspace paths directly:
+Plan B is implemented and consumed by Plan C special modes, but ordinary update
+clicks remain on the historical Python updater and installation remains on the
+PowerShell installer path until Plan D completes its gates. Plan C/D consume
+these exact interfaces rather than writing journal, active, or workspace paths
+directly:
 
 ```text
 parse_transaction_id(value: object) -> str
@@ -628,8 +630,8 @@ then activates with `None`; it must not open/wait on its own process.
 
 Stable authority is `updates/active.json`, pointing to the exact journal beneath
 `updates/transactions/<id>`. Preparation alone uses `<id>.preparing` and atomic
-promotion. Plan C must consume `TransactionPaths.probe_manifest`, let the engine
-own probing/commit/rollback, and call `finalize_terminal_evidence` only after a
+promotion. Plan C consumes `TransactionPaths.probe_manifest`, lets the engine
+own probing/commit/rollback, and calls `finalize_terminal_evidence` only after a
 durable finalization receipt and status unregister. Recovery retry passes
 `original_failure_code`, never current `rollback_failed`. Receipt serialization
 uses `terminal_version`, including the fresh rollback JSON
@@ -641,6 +643,128 @@ operation-label cases across before-operation fault, after-operation crash, and
 synthesized post-operation state (648 cases), plus 67 journal-transition crash
 cases. Run all Plan B focused tests with `PYTHONPATH=host` and isolated values
 for `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP`.
+
+### Dormant Plan C Detached Recovery API
+
+Plan C exposes recovery/finalization primitives but does not replace the active
+legacy updater. Source and frozen entrypoint identity is exact:
+
+* Source development registers `host/host_manifest.json`; its `path` field is
+  the absolute `host/launch_host.bat` path, and the batch wrapper forwards Chrome
+  argv.
+* Frozen production registers sibling `manifest.json` with relative
+  `dh_native_host.exe`.
+* Source early dispatch receives resolved `Path(__file__)`; frozen dispatch
+  receives resolved `Path(sys.executable)`. Never pass the source interpreter as
+  the entrypoint.
+
+The accepted early invocations are:
+
+```text
+dh_native_host.py [<allowlisted-origin> [--parent-window=<nonnegative-decimal>]]
+dh_native_host.py --register
+dh_native_host.exe [<allowlisted-origin> [--parent-window=<nonnegative-decimal>]]
+dh_native_host.exe --register
+dh_native_host.exe --install-package <absolute-canonical-package-root>
+dh_native_host.exe --update-probe <absolute-canonical-probe-manifest>
+dh_update_runner.exe --complete-update <32-lower-hex-id> <positive-decimal-pid> <win-create-time-ticks>
+dh_update_runner.exe --recover-active
+dh_update_runner.exe --recover-update <absolute-canonical-journal>
+dh_update_status_host.exe <allowlisted-origin> [--parent-window=<nonnegative-decimal>]
+```
+
+Decimal parent window `0` is Chrome's valid sentinel. Every special command
+validates role, runtime bit, arity, identity text, executable chain, and path
+authority before `EarlyModeDependencies`, registry/controller/process adapters,
+default install root, installer callback, or status server is constructed.
+Non-probe mismatch is exit `2`, empty stdout, and exact stderr
+`b"invalid_early_invocation\n"`. Malformed or wrong-role probe also exits `2`,
+but delegates Plan A's fixed malformed tuple and emits exact stdout
+`b'{"error_code":"package_probe_failed","status":"error"}\n'` with empty
+stderr; `run_update_probe` remains uncalled.
+
+`prepare_recovery_runtime(transaction_id, source, registry)` is the only
+Plan-D-facing recovery setup boundary. It preflights the complete staged target,
+rereads the same `PREPARED` authority, installs the exact onedir recovery tree,
+and registers status only for browser mode. Both browser and installer
+activation repeat preflight before RunOnce or `activate_prepared`. Browser mode
+uses a complete `InitiatingProcessIdentity`; installer mode uses `None`.
+
+Finalization crash/replay behavior is bounded:
+
+| Durable/interrupted state | Same-ID recovery | New update start |
+|---|---|---|
+| Reserved stable cursor, no receipt | Recreate/verify one receipt, advance cursor | Blocked |
+| Reserved cursor plus receipt target/scratch | Verify/normalize receipt, advance cursor without a second receipt | Blocked |
+| Receipt-ready cursor plus receipt | Resume cleanup or acknowledgment | Blocked |
+| Crash before receipt-to-ack replace | Replay from source receipt | Blocked while cursor remains |
+| Crash after replace, before cursor removal | Re-fsync/replay from matching fixed ack slot | Blocked |
+| Ack slot plus cursor scratch after lost unlink response | Normalize/remove cursor from matching slot | Blocked until replay completes |
+| Ack slot only | Same ID succeeds read-only until later slot replacement | Allowed |
+| Newer cursor plus older matching ack slot | Older ID replay is read-only and cannot mutate newer state | Newer start already owns cursor |
+| Newer acknowledgment replaces fixed slot | Delayed older ID becomes `finalization_not_current` | Allowed after cursor cleanup |
+| Nonterminal requested journal | Finalize fails `transaction_not_terminal` | Existing authority remains |
+| Requested ID mismatches active/journal/root authority | Finalize fails `active_transaction_mismatch` | No record mutation |
+| Malformed/noncanonical receipt or receipt scratch | `invalid_finalization_receipt` | Cursor/receipt evidence retained |
+| Malformed/noncanonical stable cursor | `invalid_finalization_cursor` | Start remains blocked while cursor evidence exists |
+| Valid cursor scratch matching active terminal authority | Normalize a reserved cursor, create/verify one receipt, then advance | Blocked until replay completes |
+| Cursor scratch with unreadable active authority | `invalid_finalization_cursor` | Scratch retained; start blocked |
+| Cursor scratch whose active ID differs from requested ID | `finalization_ack_pending` | Scratch retained; start blocked |
+| Forbidden ack scratch | `invalid_finalization_acknowledgment` | No cursor/receipt mutation |
+| Malformed old ack plus valid newer terminal authority | Newer finalize may reserve cursor/receipt; acknowledgment later atomically replaces the slot | Blocked only by the newer cursor |
+| Malformed ack without valid requested terminal authority | Preserve and return `invalid_finalization_acknowledgment` | No record mutation |
+| Receipt-ready cursor with absent receipt and mismatched ack | `invalid_finalization_acknowledgment` | Cursor and slot retained |
+| Receipt-ready cursor while Plan B cleanup is incomplete | Acknowledge fails `finalization_cleanup_incomplete` | Receipt and cursor retained |
+| Different requested ID while another cursor/scratch is pending | `finalization_ack_pending` before registry/engine/receipt work | Blocked |
+| Ack ID matches neither current cursor nor fixed slot | `finalization_not_current` | Current records unchanged |
+| Filesystem/registry/engine/durability operation fails | `finalization_cleanup_failed`; retry same ID | Blocked while cursor remains |
+| Cursor/receipt write cannot canonical round-trip | `finalization_record_round_trip_failed` | Preserve bounded evidence for retry |
+
+`require_no_pending_finalization(install_root)` is the Plan D start barrier. It
+must run before ID allocation, runtime marker persistence, package open, or Plan
+B transaction creation at both coordinator `DH_UPDATE_START` and Host
+`UpdateService.prepare` boundaries. The service queue and installation mutex
+must close the check-to-create race; two unrelated sequential checks are not
+atomic. Ordinary Analyze/config/health actions remain available.
+
+Use fresh existing directories for all six profile/temp variables before every
+Python or Node verification process. Focused Host imports set `PYTHONPATH=host`;
+discovery removes it. The plan's `Invoke-IsolatedPython` and
+`Invoke-IsolatedCommand` helpers are the canonical harness.
+
+Frozen build and probe commands are side-effect-free with respect to product
+installation, but they must still use the fresh six-variable helper:
+
+```powershell
+Invoke-IsolatedPython -PythonArgs @("-m", "PyInstaller", "--version")
+Invoke-IsolatedPython -PythonArgs @(
+  "-c", "import release_helper; release_helper.build_host()"
+)
+$env:DH_PLAN_C_FROZEN_ONEDIR = (Resolve-Path "dist/dh_native_host").Path
+try {
+  Invoke-IsolatedPython -PythonArgs @(
+    "-m", "unittest",
+    "host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation",
+    "-v"
+  )
+} finally {
+  Remove-Item Env:DH_PLAN_C_FROZEN_ONEDIR -ErrorAction SilentlyContinue
+}
+```
+
+The version command must report exactly `6.18.0`. Build/spec/dist outputs remain
+ignored and untracked. Do not provision PyInstaller automatically.
+
+Manual recovery commands are exactly:
+
+```text
+%LOCALAPPDATA%\DynamicsHelper\updates\recovery\dh_update_runner.exe --recover-active
+%LOCALAPPDATA%\DynamicsHelper\updates\recovery\dh_update_runner.exe --recover-update <absolute-canonical-journal>
+```
+
+For `recovery-required`, preserve backups and evidence; never advise deleting
+them. Real handle inheritance, RunOnce, registration, forced rollback, browser
+status argv, and interrupted installer resume require a disposable VM.
 
 ### 1. Release Automation
 

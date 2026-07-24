@@ -52,15 +52,34 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Options normalizes omitted team identity to the empty string for every manifest current/response check, so no-team committed/unchanged requests deduplicate while failed/stale/skipped requests remain retryable and old callbacks are ignored after team selection.
 - One shared string-only selector now covers Analyze persistence, Native response normalization, config updates, prompt health, Options warnings, FAB nested errors, and Service Worker immediate paths. Objects, arrays, functions, symbols, and null are never coerced; valid strings and allowlisted metadata are preserved.
 
+## Dormant update recovery hardening
+
+This build includes frozen-tested detached recovery primitives: exact staged
+Host/Extension preflight, identity-safe detached runners, RunOnce recovery, a
+read-only status Native Host, and bounded receipt-backed terminal cleanup. These
+primitives are dormant infrastructure only. Update clicks still use the
+historical Python updater, while installation still uses the historical
+PowerShell installer path. `transactional-update-v1` is not yet advertised.
+
+The first historical upgrade into this build therefore remains nontransactional.
+A complete copy bootstraps integrity metadata; a partial but startable copy is
+reported as `installation_integrity_failed`. Transactional routing is enabled
+only after the remaining Extension-data and runtime-installer plans complete.
+
 ## Verification
 
-- Tenth review product commits: `257f282` and `7979279`; the evidence commit follows them.
-- Isolated Host: **143/143 focused** and **207/207 full** tests passed.
-- Extension: **210/210 focused across 7 files** and **340/340 full across 19 files** passed.
-- Production build passed with **2,218 modules transformed** and **13 artifacts** listed.
-- Isolated source-only compileall, `git diff --check`, static/version scans, and restored break-and-fail mutations passed.
-- Optional authenticated marker smoke was not run because safe model-backed user/session isolation was unavailable; it remains non-gating.
-- The controller broad whole-branch review remains pending after this tenth fix wave.
+- Prompt-scope tenth-wave evidence: isolated Host **143/143 focused** and
+  **207/207 full**; Extension **210/210 focused** and **340/340 full**; production
+  build **2,218 modules / 13 artifacts**.
+- Plan C source-focused command ran 182 tests with 181 passes and one expected
+  environment-gated frozen skip. The same frozen selector passed separately
+  `1/1` against the built runtime.
+- Plan C frozen gate passed exact PyInstaller **6.18.0**, all **15/15** required
+  modules, and an onedir inventory of **73 internal files / 10 directories**.
+- Plan A/B regressions passed **134/134**; full Extension remained **340/340**;
+  isolated compile/static/scope gates and restored break-and-fail mutations
+  passed.
+- Disposable-VM recovery smoke remains required before release and was not run.
 
 ## Upgrade notes
 

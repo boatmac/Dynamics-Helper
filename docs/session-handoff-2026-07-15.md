@@ -557,6 +557,7 @@ Plan B product/test commits:
 - `41d7ccf` (`fix(update): verify installed ownership before mutation`)
 - `2e41229` (`feat(update): preserve rollback failure lineage`)
 - `9ca3fadfb6edabad2285bad42ea95e5fab7a4f73` (`test(update): exhaust journal fault matrix`)
+- `c9fbd94d81dace2b4723dd7c5da8c5167e0090a5` (`fix(update): freeze recovery hook contract`)
 
 Plan B now provides strict transaction IDs/journals, stable
 `updates/active.json`, exact Plan A-linked ownership, one installation mutation
@@ -575,14 +576,102 @@ focused Plan B in 528.913s** and **349/349 full Host in 543.192s**, with no
 skips. Compileall, stale-contract/scope scans, Plan A signature/field probe,
 transaction-writer ownership, and diff checks passed.
 
+Plan C Task 10 review then found one consumed Plan B interface drift:
+`UpdateEngineHooks` had untyped/defaulted first hooks instead of the frozen
+mandatory typed shape. The exact RED exited `1`; `c9fbd94` corrected the shape,
+kept `UpdateEngine(hooks=None)` behavior through explicit internal no-op hooks,
+and the complete Plan B regression set passed `77/77`.
+
 This engine remains dormant. The legacy updater is still the production route;
-`transactional-update-v1` remains unadvertised until Plan D cutover. Plan C must
-consume Plan B's exact readers/paths/API, use `probe_manifest`, retry recovery
-with `original_failure_code`, write its terminal receipt before calling
-`finalize_terminal_evidence`, and serialize terminal identity via
+`transactional-update-v1` remains unadvertised until Plan D cutover. Plan C now
+consumes Plan B's exact readers/paths/API, uses `probe_manifest`, retries recovery
+with `original_failure_code`, and writes its terminal receipt before calling
+`finalize_terminal_evidence`, and serializes terminal identity via
 `terminal_version` (including null version for fresh rollback). No real update,
 installer, registry, AppData installation, network, release, version, tag, push,
 or publish operation occurred.
+
+## Plan C Detached Recovery Addendum - 2026-07-23
+
+Plan C implementation/test head before documentation is
+`c9fbd94d81dace2b4723dd7c5da8c5167e0090a5`. It consumes Plan A head
+`909e08759897d5ab235211e65a72856ce8066dfe` and Plan B head
+`c9fbd94d81dace2b4723dd7c5da8c5167e0090a5`. Its commits are `daf03b6`,
+`bcc1448`, `b18d0bf`, `2632d26`, `7d5763b`, `ff226b8`, `38c0a2f`,
+`2e4c269`, `dff7ed0`, `a0d7409`, `8c8c3bb`, and `c9fbd94`.
+
+Implemented interfaces include shared little-endian Native Messaging framing,
+one source/frozen/status registration service, identity-safe Win32 process and
+RunOnce adapters, staged-target preflight, reusable recovery-tree installation,
+detached browser/installer recovery, read-only status Host, validate-before-all-
+factories early dispatch, and cursor/receipt/fixed-ack finalization. The exact
+role matrix is: normal/register on production or canonical source main;
+install-package/probe on production main only; complete/recover-active/recover-
+update on the detached runner only; status only on the exact status executable.
+Normal Chrome main classification is metadata-independent and accepts
+`--parent-window=0`.
+
+`RecoveryController.prepare_recovery_runtime(transaction_id, source, registry)`
+remains the sole Plan D-facing recovery setup boundary. Browser mode passes a
+complete immutable process identity and registers status; installer mode passes
+`None`, performs no process open/wait, and performs no status registration. Both
+activation paths repeat the staged frozen probe before RunOnce/live mutation,
+while Plan B's installed probe remains the commit gate.
+
+The frozen gate passed with exact PyInstaller `6.18.0`, onedir inventory 73
+internal files and 10 directories, all 15 Plan C hidden modules in the graph,
+and the real frozen staged-target selector `1/1` with no skip. The source Plan C
+focused command ran 182 tests and reported `OK (skipped=1)`: 181 executed tests
+passed and only the ordinary environment-gated frozen selector skipped; the
+same selector passed separately when enabled. Plan
+A/B regressions passed `134/134`; Extension passed `340/340` and production
+build passed. Detailed evidence is in
+`.superpowers/sdd/hardening-c-detached-recovery-report.md`.
+
+Terminal projection remains exactly Plan B's four rows: committed existing
+`{fresh_install:false, version:target}`, committed fresh
+`{fresh_install:true, version:target}`, rolled-back existing
+`{fresh_install:false, version:prior}`, and rolled-back fresh
+`{fresh_install:true, version:null}`. Finalization first publishes a reserved
+cursor, then one receipt, then receipt-ready. Acknowledgment atomically moves
+that receipt to fixed `finalization-ack.json` before cursor removal. Crash before
+the move replays from the receipt; crash after it replays from the slot; slot-
+matching delayed replay remains read-only until a later acknowledgment replaces
+the slot. Any cursor or cursor scratch blocks a newer update start, but an ack
+slot alone does not.
+
+Finalization failures remain fixed and safe: nonterminal authority is
+`transaction_not_terminal`; active/journal/root mismatch is
+`active_transaction_mismatch`; malformed receipt or stable cursor evidence is
+`invalid_finalization_receipt` or `invalid_finalization_cursor`; incomplete Plan
+B cleanup is
+`finalization_cleanup_incomplete`; cursor/receipt round-trip failure is
+`finalization_record_round_trip_failed`; filesystem/registry/engine durability
+failure is `finalization_cleanup_failed`; a different ID behind an old cursor is
+`finalization_ack_pending`; and an ack ID matching neither current cursor nor
+fixed slot is `finalization_not_current`. All retain bounded evidence for same-ID
+retry and expose no raw path or exception.
+
+Cursor/ack handling is state-sensitive rather than one universal corruption
+rule. A valid cursor scratch matching active terminal authority is normalized and
+replayed; unreadable active authority is `invalid_finalization_cursor`, while a
+different active ID is `finalization_ack_pending`. A forbidden ack scratch is
+`invalid_finalization_acknowledgment`. A malformed old ack does not block a valid
+newer terminal authority: newer finalize preserves it until newer acknowledgment
+atomically replaces the fixed slot. A malformed/mismatched slot that is required
+as the current cursor's replay evidence remains
+`invalid_finalization_acknowledgment`.
+
+Plan C does not activate transactional routing. The legacy updater remains the
+production route and only `prompt-scope-v1` is advertised. This is the Plan C
+candidate state; committed-head gates and the documentation/evidence commit must
+complete before Plan E starts. After that gate, the approved sequence continues
+with Plan E before Plan D. Plan D is additionally blocked until both
+coordinator `DH_UPDATE_START` and Host `UpdateService.prepare` call
+`require_no_pending_finalization(install_root)` before ID/runtime/package/Plan B
+authority side effects and close the check-to-create race through their shared
+serialized service boundary. Any interface drift or failed frozen gate forbids
+Plan D activation.
 
 ## Session Identity Contract
 
@@ -812,13 +901,16 @@ Use the following for continuation; update the exact HEAD and status from Git ra
    - docs/superpowers/plans/2026-07-15-dh-prompt-scope-cleanup.md
    - docs/superpowers/plans/2026-07-17-fifth-review-important-fixes.md
    - docs/superpowers/plans/2026-07-17-seventh-review-important-fixes.md
-   - .superpowers/sdd/tenth-final-review-fix-report.md
+   - .superpowers/sdd/hardening-c-detached-recovery-report.md
+   - docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md
    - docs/superpowers/research/2026-07-14-dh-mycaseskit-stage0-instructions-brief.md
    - docs/superpowers/research/2026-07-14-dh-extension-stage0-integration-plan.md
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design，已接受 spec 441d0db、plan 21108d9。第十轮从 b9cb024 开始，产品提交是 257f282 和 7979279：Reset 现在使用独立于 preference mirror action 的显式事务，保存 token/default identity/request+bookmark generation/retry action 和 host-pending|host-committed|sw-pending|local-cleanup-pending|complete phase；Host 一旦 durable commit，同一事务的 Retry cleanup 只重试安全的 SW/local cleanup，不再发送 Host 或 DEFAULT_PREFS，普通 Reset 则明确启动新事务。扩展错误回退统一使用 safeErrorText，覆盖 Analyze、update_config、prompt health、Options、FAB 和 Service Worker reviewed paths，非字符串值不发生 coercion。隔离 Host focused 143/143、full 207/207，Extension focused 210/210（7 files）、full 340/340（19 files），build 2,218 modules / 13 artifacts，compileall/static/mutation 通过；证据见 tenth-final-review-fix-report.md。可选 marker smoke 因无法保证 authenticated model-backed user/session state 完全隔离而跳过；release draft 未选择版本。下一步仍是 controller 重新运行 broad whole-branch review；不要把本轮 focused/self-review 当作 broad review 已通过。
+历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design。Hardening A、B 已完成；Plan C implementation/test head 是 c9fbd94，当前处于 Task 10 documentation/evidence + committed-head gates 候选状态，完整证据见 hardening-c-detached-recovery-report.md。Plan C 已实现 shared little-endian framing、统一 source/frozen/status registration、identity-safe CreateProcessW/RunOnce、staged frozen preflight、detached browser/installer recovery、read-only status Host、validate-before-factory early dispatch，以及 cursor/receipt/fixed-ack finalization；c9fbd94 还修正了 consumed Plan B UpdateEngineHooks 的 mandatory typed contract。PyInstaller 6.18.0、15/15 module graph、73 files/10 dirs onedir inventory 和 real frozen staged probe 1/1 均通过。source focused command Ran 182/OK(skipped=1)，唯一 skip 是未设置环境变量的 frozen selector；单独设置后 1/1 通过。legacy updater 仍是生产路径，只广告 prompt-scope-v1；Plan C 不代表 Plan D runtime routing 已启用。只有 Task 10 文档提交和 committed-head gates 全部通过后，Plan C 才可标记完成。
+
+下一步先完成 Plan C Task 10 committed-head gates；通过后按已批准顺序执行 Plan E，然后才是 Plan D。Plan D 必须先在 coordinator DH_UPDATE_START 和 Host UpdateService.prepare 两处调用 require_no_pending_finalization，并在 ID/runtime/package/Plan-B authority side effect 前关闭 check-to-create race。不要绕过 prepare_recovery_runtime、staged preflight、Plan B ownership 或 finalization cursor barrier。
 
 已实现行为：所有 DH create/resume 都设置 skip_custom_instructions=True；CLI global、AGENTS、path instructions 等自动发现源全部排除。DH 显式注入 Core + 恰好一个可编辑源：Root 为空或 Repository ONLY 关闭时使用 DH-specific Instructions；Root 非空且 Repository ONLY 开启时只使用 <Root>/.github/copilot-instructions.md。Custom User Prompt 仍是每次 Analyze 的 PII-scrubbed user content。使用严格 UTF-8 immutable byte snapshot、framed fingerprint、same-UUID refresh 和 fail-closed errors。Options 区分 explicit empty（清空文件）与 omitted（不写），检查 update_config/config_saved，并保留可选 errorCode 到持久化和本地化显示。
 
@@ -829,5 +921,5 @@ MyCasesKit response commit 675006a 已接受 Form ③ New-Case coordinator 和 S
 
 2026-07-14 research 中“依赖 CLI 自动 workspace instruction discovery”的建议已被 2026-07-15 accepted spec supersede；不要恢复该方案。在正式 MyCases 契约返回前，不要猜测 MyCases 接口，也不要让 DH 直接写 MyCases canonical 文件。
 
-请先简要总结你读取到的状态与 VM 环境差异，然后等待或执行 controller 明确指定的 broad code review；不要重做 Task 8。不要未经明确批准 push 或 publish；任何 release --publish 都必须再次获得我的明确确认。
+请先简要总结你读取到的状态与 VM 环境差异。若 Plan C 文档提交和 committed-head gates 尚未记录为 PASS，先完成它们；通过后从 Plan E 的执行前置条件和 Task 1 开始。不要重做 Plan A/B/C 产品任务。不要未经明确批准 push、publish、tag、改版本或执行真实 update/install/registry/AppData 产品操作；任何 release --publish 都必须再次获得我的明确确认。
 ```

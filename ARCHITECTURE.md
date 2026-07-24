@@ -102,11 +102,12 @@ entries, missing/extra files, and hash/link mismatches. The Host exposes
 metadata disagree. `--update-probe` runs before logging, config, updater, or SDK
 initialization and emits only an allowlisted JSON result.
 
-Plan A remains dormant hardening. Plan B now adds a dormant standard-library
-transaction engine, but the existing extension-first in-place updater, reload
-behavior, and locked-executable fallback above remain active until Plans C/D
-wire and verify detached recovery/runtime cutover. Only `prompt-scope-v1` is
-advertised before that complete cutover.
+Plan A remains package hardening. Plan B adds the standard-library transaction
+engine, and Plan C adds frozen-tested detached recovery special modes. The
+existing extension-first in-place updater, reload behavior, and locked-
+executable fallback above remain active until Plan D wires ordinary update and
+installer routing. Only `prompt-scope-v1` is advertised before that complete
+cutover.
 
 ### Dormant Transaction Engine (Plan B)
 
@@ -148,6 +149,89 @@ Terminal `committed`/`rolled-back` evidence remains until Plan C durably writes
 its receipt and calls `finalize_terminal_evidence`, which removes active before
 the matching workspace. `terminal_version` projects committed target, rolled
 back prior, or `{fresh_install:true, version:null}` for fresh rollback.
+
+### Dormant Detached Recovery (Plan C)
+
+Plan C is implemented and frozen-tested, but ordinary update-click and installer
+routing is still dormant. Update clicks continue through the historical Python
+updater; installation continues through the PowerShell installer path until Plan
+D performs the runtime cutover and advertises the transactional capability.
+
+The stable topology is:
+
+```text
+<install>/updates/
+  active.json
+  transactions/<id>/...
+  recovery/
+    dh_update_runner.exe
+    dh_update_status_host.exe
+    _internal/...
+    status-manifest.json  # browser registration only; absent for installer setup
+  receipts/<id>.json
+  finalization-cursor.json
+  finalization-ack.json
+```
+
+`active.json` and `recovery/` are siblings. Replacing the reusable recovery tree
+cannot move, rewrite, or delete `active.json`. Each detached executable is a
+sibling copy of one preflighted PyInstaller executable beside one byte-exact
+`_internal` tree.
+
+Early dispatch classifies the canonical entrypoint and complete argv before
+constructing dependencies. Normal main classification depends only on the exact
+`dh_native_host.exe`/`dh_native_host.py` role and Chrome argv; missing or partial
+historical metadata proceeds to normal Plan A installation verification.
+
+| Mode | Allowed executable role |
+|---|---|
+| Normal main | production main or canonical source main |
+| `--register` | production main or canonical source main |
+| `--install-package` | production main only |
+| `--update-probe` | production main only |
+| `--complete-update` | detached runner only |
+| `--recover-active` | detached runner only |
+| `--recover-update` | detached runner only |
+| Status Native Host | exact status-host basename only |
+
+Source registration writes `host/host_manifest.json` for the absolute
+`launch_host.bat`; frozen registration writes sibling `manifest.json` for the
+relative `dh_native_host.exe`. Browser and status registration share the same
+registry service.
+
+Before recovery-tree installation and again immediately before activation,
+`RecoveryController` strict-loads Plan B authority, materializes a temporary
+combined staged Host/Extension/metadata root outside the install and transaction
+trees, and invokes its copied `dh_native_host.exe --update-probe` against Plan
+B's read-only probe manifest. Any copy, process, identity, capability,
+revalidation, or cleanup fault is `staged_probe_failed` and leaves `PREPARED`
+inert. Plan B's installed-product probe still runs after live mutation and is
+the only commit gate.
+
+Browser activation opens one immutable `{pid, creation_token}` identity and
+waits on the retained handle, defeating PID reuse. Installer activation passes
+`None` and never opens or waits on a process. Detached launch uses
+`CreateProcessW`, canonical transaction-root `cwd`, only inherited `NUL`
+standard handles, and closes parent handles after capturing the child creation
+token. RunOnce is the fixed HKCU value `DynamicsHelperUpdateRecovery`; it is
+armed/read back before live phases, re-armed for safe nonterminal interruption,
+and removed for terminal or manual-recovery-required states.
+
+The status executable is a read-only Native Host. It accepts only allowlisted
+Chrome origin argv, caps requests at 64 KiB before body read, and projects only
+transaction ID, phase, target version, and current reason. Main Host framing
+remains uncapped on input and both reader/writer use explicit little-endian
+32-bit framing.
+
+Finalization reserves one durable cursor in `reserved`, writes its matching
+canonical receipt, then advances that same cursor to `receipt-ready` before
+status unregister and Plan B cleanup. Acknowledgment atomically moves the exact
+receipt bytes to the one fixed ack slot with `os.replace`, fsyncs the moved file
+and parents where supported, then removes the cursor. A crash before the move
+replays from the receipt; a crash after it replays from the fixed slot. The old
+slot remains read-only replay proof until a later transaction's acknowledgment
+replaces it. A cursor or cursor scratch blocks every newer update start, while
+an ack slot alone does not.
 
 ## 5. Session Persistence Architecture
 
