@@ -126,9 +126,9 @@ def _ignore_probe(_path, _plan):
 
 @dataclass(frozen=True)
 class UpdateEngineHooks:
-    before_live_phase: Callable = _ignore_phase
-    wait_for_initiating_host_exit: Callable = _ignore_wait
-    probe_installed_product: Callable = _ignore_probe
+    before_live_phase: Callable[[JournalPhase, TransactionPaths, OwnershipPlan], None]
+    wait_for_initiating_host_exit: Callable[[InitiatingProcessIdentity], None]
+    probe_installed_product: Callable[[Path, OwnershipPlan], None]
     before_filesystem_operation: Callable[[str], None] = _ignore_operation
     after_filesystem_operation: Callable[[str], None] = _ignore_operation
     after_journal_transition: Callable[[JournalPhase], None] = _ignore_transition
@@ -144,7 +144,11 @@ class UpdateEngine:
     ):
         self.install_root = install_root.resolve(strict=True)
         self._mutex_factory = mutex_factory
-        self.hooks = hooks or UpdateEngineHooks()
+        self.hooks = hooks or UpdateEngineHooks(
+            _ignore_phase,
+            _ignore_wait,
+            _ignore_probe,
+        )
 
     def _paths(self, transaction_id: object) -> TransactionPaths:
         return TransactionPaths.for_install(self.install_root, transaction_id)

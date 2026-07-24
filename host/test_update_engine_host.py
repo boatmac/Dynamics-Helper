@@ -1,7 +1,10 @@
 import shutil
+import inspect
 import tempfile
 import unittest
+import update_engine
 from pathlib import Path
+from typing import Callable, get_type_hints
 
 from package_archive import validate_staged_package
 from package_manifest import generate_release_documents, write_release_documents
@@ -14,7 +17,13 @@ from update_engine import (
     UpdateEngineHooks,
     UpdateStateConflict,
 )
-from update_journal import InitiatingProcessIdentity, JournalPhase, UpdateInitiator
+from update_journal import (
+    InitiatingProcessIdentity,
+    JournalPhase,
+    TransactionPaths,
+    UpdateInitiator,
+)
+from update_ownership import OwnershipPlan
 
 
 TX = "0123456789abcdef0123456789abcdef"
@@ -72,6 +81,66 @@ class ExceptionContractTests(unittest.TestCase):
         self.assertEqual(str(UpdateEngineError()), "update_engine_failed")
         self.assertEqual(str(UpdateStateConflict()), "update_state_conflict")
         self.assertEqual(str(PreparedTransactionConflict()), "update_transaction_conflict")
+
+    def test_update_engine_hooks_consumed_contract_is_exact(self):
+        fields = UpdateEngineHooks.__dataclass_fields__
+        self.assertEqual(
+            tuple(fields),
+            (
+                "before_live_phase",
+                "wait_for_initiating_host_exit",
+                "probe_installed_product",
+                "before_filesystem_operation",
+                "after_filesystem_operation",
+                "after_journal_transition",
+            ),
+        )
+        for name in tuple(fields)[:3]:
+            self.assertIs(fields[name].default, __import__("dataclasses").MISSING)
+        self.assertIs(
+            fields["before_filesystem_operation"].default,
+            update_engine._ignore_operation,
+        )
+        self.assertIs(
+            fields["after_filesystem_operation"].default,
+            update_engine._ignore_operation,
+        )
+        self.assertIs(
+            fields["after_journal_transition"].default,
+            update_engine._ignore_transition,
+        )
+        hints = get_type_hints(UpdateEngineHooks)
+        self.assertEqual(
+            hints["before_live_phase"],
+            Callable[[JournalPhase, TransactionPaths, OwnershipPlan], None],
+        )
+        self.assertEqual(
+            hints["wait_for_initiating_host_exit"],
+            Callable[[InitiatingProcessIdentity], None],
+        )
+        self.assertEqual(
+            hints["probe_installed_product"],
+            Callable[[Path, OwnershipPlan], None],
+        )
+        self.assertEqual(
+            hints["before_filesystem_operation"],
+            Callable[[str], None],
+        )
+        self.assertEqual(
+            hints["after_filesystem_operation"],
+            Callable[[str], None],
+        )
+        self.assertEqual(
+            hints["after_journal_transition"],
+            Callable[[JournalPhase], None],
+        )
+        self.assertTrue(UpdateEngineHooks.__dataclass_params__.frozen)
+        with self.assertRaises(TypeError):
+            UpdateEngineHooks()
+        self.assertEqual(
+            tuple(inspect.signature(UpdateEngineHooks).parameters),
+            tuple(fields),
+        )
 
 
 class MutexOwnershipTests(EngineFixture):

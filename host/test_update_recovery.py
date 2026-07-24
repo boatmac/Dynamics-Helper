@@ -1162,7 +1162,11 @@ class TerminalFixture:
         self.engine = UpdateEngine(
             self.install,
             mutex_factory=lambda _root: self.mutex,
-            hooks=UpdateEngineHooks(probe_installed_product=probe),
+            hooks=UpdateEngineHooks(
+                before_live_phase=lambda _phase, _paths, _plan: None,
+                wait_for_initiating_host_exit=lambda _identity: None,
+                probe_installed_product=probe,
+            ),
         )
         self.engine.create_prepared(
             self.package,
