@@ -329,8 +329,12 @@ def _require_finalization_path(path: Path, *, kind: str) -> Path:
     error_code = _error_for_kind(kind)
     if not isinstance(path, Path) or not path.is_absolute() or ".." in path.parts:
         raise FinalizationError(error_code)
-    parent = path.parent.resolve(strict=False)
     try:
+        lexical_parent = path.parent
+        _require_plain_ancestor_chain(lexical_parent)
+        parent = lexical_parent.resolve(strict=False)
+        if parent != lexical_parent:
+            raise ValueError("noncanonical finalization parent")
         if kind == "receipt":
             transaction_id = parse_transaction_id(path.stem)
             if (
@@ -426,25 +430,32 @@ class OSFinalizationFilesystem:
         self.fsync_directory(target.parent)
 
     def read(self, path: Path) -> bytes:
-        target = _require_finalization_path(
-            path, kind=_finalization_path_kind(path)
-        )
-        _lstat_plain(target, require_directory=False)
-        return target.read_bytes()
+        kind = _finalization_path_kind(path)
+        try:
+            target = _require_finalization_path(path, kind=kind)
+            _lstat_plain(target, require_directory=False)
+            return target.read_bytes()
+        except FinalizationError:
+            raise
+        except (OSError, RecoveryError) as error:
+            raise FinalizationError(_error_for_kind(kind)) from error
 
     def exists(self, path: Path) -> bool:
-        target = _require_finalization_path(
-            path, kind=_finalization_path_kind(path)
-        )
-        if not target.exists() and not target.is_symlink():
-            return False
-        _lstat_plain(target, require_directory=False)
-        return True
+        kind = _finalization_path_kind(path)
+        try:
+            target = _require_finalization_path(path, kind=kind)
+            if not target.exists() and not target.is_symlink():
+                return False
+            _lstat_plain(target, require_directory=False)
+            return True
+        except FinalizationError:
+            raise
+        except (OSError, RecoveryError) as error:
+            raise FinalizationError(_error_for_kind(kind)) from error
 
     def has_atomic_scratch(self, path: Path) -> bool:
-        target = _require_finalization_path(
-            path, kind=_finalization_path_kind(path)
-        )
+        kind = _finalization_path_kind(path)
+        target = _require_finalization_path(path, kind=kind)
         scratch = _scratch_path(target)
         if target.name == "finalization-ack.json":
             if scratch.exists() or scratch.is_symlink():
@@ -452,17 +463,32 @@ class OSFinalizationFilesystem:
             return False
         if not scratch.exists() and not scratch.is_symlink():
             return False
-        _lstat_plain(scratch, require_directory=False)
+        try:
+            _lstat_plain(scratch, require_directory=False)
+        except (OSError, RecoveryError) as error:
+            raise FinalizationError(_error_for_kind(kind)) from error
         return True
 
     def move_receipt_to_ack(self, source: Path, target: Path) -> None:
-        receipt_path = _require_finalization_path(source, kind="receipt")
-        ack_path = _require_finalization_path(target, kind="ack")
-        _lstat_plain(receipt_path, require_directory=False)
-        _lstat_plain(receipt_path.parent, require_directory=True)
-        _lstat_plain(ack_path.parent, require_directory=True)
-        if ack_path.exists() or ack_path.is_symlink():
-            _lstat_plain(ack_path, require_directory=False)
+        try:
+            receipt_path = _require_finalization_path(source, kind="receipt")
+            _lstat_plain(receipt_path, require_directory=False)
+            _lstat_plain(receipt_path.parent, require_directory=True)
+        except FinalizationError:
+            raise
+        except (OSError, RecoveryError) as error:
+            raise FinalizationError("invalid_finalization_receipt") from error
+        try:
+            ack_path = _require_finalization_path(target, kind="ack")
+            _lstat_plain(ack_path.parent, require_directory=True)
+            if ack_path.exists() or ack_path.is_symlink():
+                _lstat_plain(ack_path, require_directory=False)
+        except FinalizationError:
+            raise
+        except (OSError, RecoveryError) as error:
+            raise FinalizationError(
+                "invalid_finalization_acknowledgment"
+            ) from error
         if (
             receipt_path.parent.parent != ack_path.parent
             or not _same_finalization_volume(
@@ -790,6 +816,12 @@ def finalize_update_status(
             try:
                 active = read_active_transaction(paths.active)
             except Exception as error:
+                if fs.exists(ack_path):
+                    prior = load_finalization_ack(ack_path, fs)
+                    if prior.transaction_id != tx:
+                        raise FinalizationError(
+                            "finalization_ack_pending"
+                        ) from error
                 raise FinalizationError("invalid_finalization_cursor") from error
             if active.transaction_id != tx:
                 raise FinalizationError("finalization_ack_pending")
@@ -924,8 +956,12 @@ def acknowledge_update_finalization(
         if fs.exists(receipt_path):
             if load_finalization_receipt(receipt_path, tx, fs) != expected:
                 raise FinalizationError("invalid_finalization_receipt")
+            if fs.has_atomic_scratch(receipt_path):
+                _write_and_verify_receipt(receipt_path, expected, fs)
             try:
                 fs.move_receipt_to_ack(receipt_path, ack_path)
+            except FinalizationError:
+                raise
             except Exception as error:
                 raise FinalizationError("finalization_cleanup_failed") from error
         elif not fs.exists(ack_path):
