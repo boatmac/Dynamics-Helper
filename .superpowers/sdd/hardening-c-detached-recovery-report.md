@@ -7,7 +7,7 @@
 - Consumed Plan B implementation head after exact hook-contract correction:
   `c9fbd94d81dace2b4723dd7c5da8c5167e0090a5`.
 - Plan C implementation/test head after broad-review durability correction:
-  `01b68e6`.
+  `f71ff33`.
 - Scope is detached recovery infrastructure. No update click, installer route,
   capability cutover, real install/update, registry/AppData product mutation,
   publish, push, tag, or version change was performed.
@@ -61,6 +61,7 @@ UpdateEngineHooks: before_live_phase, wait_for_initiating_host_exit, probe_insta
 - `8c8c3bb` `test(update): close recovery verification gaps`
 - `c9fbd94` `fix(update): freeze recovery hook contract`
 - `01b68e6` `fix(update): exhaust finalization crash recovery`
+- `f71ff33` `fix(update): make finalization replay durable`
 
 ## RED Evidence
 
@@ -329,6 +330,20 @@ reviewed with no Critical/Important findings.
   reparse/unsupported entry-type tables assert exact safe errors.
 - Final corrected finalization command: `Ran 54 tests in 110.650s`, `OK` from
   root `dh-plan-c-finalization-final-green-352b18e6df084727bf7f1c7fc0eae7de`.
+- Follow-up broad reviews required additional production semantics at
+  `f71ff33`: fail-fast finalization mutex contention maps to
+  `finalization_ack_pending`, other enter/exit failures map cleanup without
+  swallowing body errors; first `receipts/` creation has before/after/parent-
+  fsync seams and durable parent publication; status unregister resumes after
+  one browser-key deletion; Plan B active-remove and after-cleanup crashes replay
+  from receipt-ready evidence.
+- The final model has 15 finalize events, 12 acknowledge events, 3 receipt-
+  directory events, and 3 external cleanup events. It covers crash and ordinary
+  faults, partial prefixes, both replace/unlink namespace outcomes, exact safe
+  errors, bounded artifacts, deterministic races, and entry-type/path guards.
+- Final pre-commit command: `Ran 59 tests in 119.666s`, `OK`, root
+  `dh-plan-c-process-ec885a3efa4740beb55f1cc1b3400dd2`. The final explicit
+  reviewer verdict was READY with no Critical, Important, or Minor findings.
 - Static plan typo adjudication: `_same_finalization_volume` correctly requires
   `type(source_device) is int`; the plan's final command accidentally asserted
   `is not int`, contrary to its implementation section and durability tests.
@@ -643,9 +658,9 @@ RECOVERY_PREFLIGHT_ORDER=PASS
   inactive until its own implementation/gates. The approved execution sequence
   proceeds through Plan E before Plan D only after the corrective evidence commit
   receives the final clean-HEAD Step 12 rerun.
-- `PLAN_C_PRE_FINALIZATION_FIX_GATE_STATUS=PASS` for source, full Host, compile,
+- `PLAN_C_PRE_F71FF33_GATE_STATUS=PASS` for source, full Host, compile,
   Extension, frozen build/module/probe, interface, static, and scope gates.
-- `PLAN_C_FINAL_CLEAN_HEAD_GATE_STATUS=PENDING` until `01b68e6` receives the
+- `PLAN_C_FINAL_CLEAN_HEAD_GATE_STATUS=PENDING` until `f71ff33` receives the
   full focused/full/frozen/interface/static/scope rerun and a clean broad review.
 
 ## Deferred Disposable-VM Gate

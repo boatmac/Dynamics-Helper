@@ -685,6 +685,17 @@ wrong-ID precedence, and strict entry-type tables. Finalization is `54/54`, but
 Plan C remains pending until the full committed-head and broad-review gates are
 rerun at/after `01b68e6`.
 
+Follow-up broad reviews found additional model and production boundaries. Commit
+`f71ff33` now maps real fail-fast finalization contention to
+`finalization_ack_pending`, preserves body errors while mapping mutex enter/exit
+failures, durably publishes the first receipts directory, resumes partial
+two-browser-key status unregister, and covers Plan B active-remove/after-cleanup
+crashes. The exhaustive model now includes 15 finalize, 12 acknowledge, 3
+receipt-directory, and 3 external cleanup events, ordinary faults, partial
+prefixes, both namespace outcomes, bounded artifacts, and deterministic races.
+Finalization is `59/59` and the explicit review verdict is READY; Plan C remains
+pending only for the final clean-head gates at/after `f71ff33`.
+
 ## Session Identity Contract
 
 - Case session ID is deterministic UUIDv5 derived from the bare 16-digit case number.
@@ -920,7 +931,7 @@ Use the following for continuation; update the exact HEAD and status from Git ra
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design。Hardening A、B 已完成；Plan C product/test head 是 01b68e6。Broad review 在 d3a6ea5 后发现 finalization Important gaps，01b68e6 已完成 receipt-scratch、lexical reparse、cursor-scratch precedence、entry-type safe error 修复，并加入 15+12 crash events、ordinary faults、pre/post namespace、bounded artifacts、双 Plan-B authority concurrency 和 wrong-ID tables；finalization 54/54。此前 source/full/frozen/static gates 均通过，但 01b68e6 仍须重新执行完整 committed-head gates 和 clean broad review；在 PASS 前不要标记 Plan C 完成或开始 Plan E。完整证据见 hardening-c-detached-recovery-report.md。
+历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design。Hardening A、B 已完成；Plan C product/test head 是 f71ff33。Broad review 的全部 finalization findings 已通过 01b68e6 + f71ff33 修复：receipt scratch、lexical reparse、cursor precedence、entry-type safe errors、fail-fast mutex contention、receipts-directory durability、partial status unregister、Plan B cleanup crashes，以及完整 15+12+3+3 event model；finalization 59/59，explicit reviewer verdict READY。此前 source/full/frozen/static gates 均通过，但 f71ff33 仍须重新执行最终 clean-head gates；在 PASS 前不要标记 Plan C 完成或开始 Plan E。完整证据见 hardening-c-detached-recovery-report.md。
 
 下一步先在 corrective evidence commit 后完成最终 clean-HEAD Step 12；通过后按已批准顺序执行 Plan E，然后才是 Plan D。Plan D 必须先在 coordinator DH_UPDATE_START 和 Host UpdateService.prepare 两处调用 require_no_pending_finalization，并在 ID/runtime/package/Plan-B authority side effect 前关闭 check-to-create race。不要绕过 prepare_recovery_runtime、staged preflight、Plan B ownership 或 finalization cursor barrier。
 

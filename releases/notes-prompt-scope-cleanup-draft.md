@@ -86,6 +86,9 @@ only after the remaining Extension-data and runtime-installer plans complete.
   cursor-removal crash boundary, ordinary fault replay, receipt-scratch cleanup,
   lexical reparse rejection, exact entry-type errors, and serialized concurrent
   finalizers. Full committed-head verification is rerun after this correction.
+- Follow-up hardening adds durable first-receipt-directory publication, exact
+  finalization contention errors, crash-resumable partial status unregister,
+  and Plan B cleanup crash replay. These remain dormant until Plan D routing.
 
 ## Upgrade notes
 
