@@ -39,6 +39,7 @@ from update_platform import (
     SubprocessProbeAdapter,
 )
 from update_ownership import read_ownership_plan
+from update_mutex import UpdateAlreadyInProgress
 from update_recovery import (
     FINALIZATION_CURSOR_STATES,
     FINALIZATION_RECEIPT_STATE,
@@ -1271,6 +1272,18 @@ ACKNOWLEDGE_CRASH_EVENTS = (
     "cursor:delete-dir-fsync",
 )
 
+RECEIPTS_DIRECTORY_CRASH_EVENTS = (
+    "receipts-directory:before-create",
+    "receipts-directory:after-create",
+    "receipts-directory:parent-fsync",
+)
+
+EXTERNAL_CLEANUP_CRASH_EVENTS = (
+    "status:unregister",
+    "engine:active-remove",
+    "engine:finalize-terminal-evidence",
+)
+
 
 class CrashBoundaryFinalizationFilesystem(OSFinalizationFilesystem):
     def __init__(self):
@@ -1757,6 +1770,203 @@ class FinalizationTests(unittest.TestCase):
         self.assertFalse(fixture.paths.active.exists())
         self.assertFalse(fixture.paths.transaction_root.exists())
 
+    def test_first_receipt_directory_creation_fsyncs_updates_parent(self):
+        fixture = self.make_terminal()
+        filesystem = OSFinalizationFilesystem()
+        real_fsync = filesystem.fsync_directory
+        calls = []
+
+        def record_fsync(path):
+            calls.append(path)
+            return real_fsync(path)
+
+        with mock.patch.object(
+            filesystem,
+            "fsync_directory",
+            side_effect=record_fsync,
+        ):
+            self.finalize_with(fixture, filesystem)
+
+        self.assertEqual(
+            calls[:4],
+            [
+                fixture.paths.updates_root,
+                fixture.paths.updates_root,
+                fixture.receipt_path.parent,
+                fixture.paths.updates_root,
+            ],
+        )
+
+    def test_receipts_directory_crash_table_replays_without_orphan(self):
+        self.assertEqual(
+            RECEIPTS_DIRECTORY_CRASH_EVENTS,
+            (
+                "receipts-directory:before-create",
+                "receipts-directory:after-create",
+                "receipts-directory:parent-fsync",
+            ),
+        )
+        cases = (
+            ("receipts-directory:before-create", False),
+            ("receipts-directory:after-create", False),
+            ("receipts-directory:after-create", True),
+            ("receipts-directory:parent-fsync", False),
+        )
+        for index, (event, lose_directory) in enumerate(cases):
+            with self.subTest(event=event, lose_directory=lose_directory):
+                fixture = TerminalFixture(
+                    self.root / f"receipts-directory-{index}",
+                    fresh_install=False,
+                    rolled_back=False,
+                )
+
+                def crash(label):
+                    if label == event:
+                        if lose_directory:
+                            fixture.receipt_path.parent.rmdir()
+                        raise InjectedCrash()
+
+                with (
+                    mock.patch(
+                        "update_recovery._after_finalization_event",
+                        side_effect=crash,
+                    ),
+                    self.assertRaises(InjectedCrash),
+                ):
+                    fixture.finalize()
+
+                self.assertTrue(fixture.cursor_path.exists())
+                self.assertEqual(
+                    load_finalization_cursor(
+                        fixture.cursor_path,
+                        OSFinalizationFilesystem(),
+                    ).state,
+                    "reserved",
+                )
+                self.assertFalse(fixture.receipt_path.exists())
+                self.assertFalse(
+                    fixture.receipt_path.with_name(
+                        f".{fixture.receipt_path.name}.tmp"
+                    ).exists()
+                )
+                if event == "receipts-directory:before-create" or lose_directory:
+                    self.assertFalse(fixture.receipt_path.parent.exists())
+                else:
+                    self.assertTrue(fixture.receipt_path.parent.is_dir())
+                replay = fixture.finalize()
+                self.assertEqual(replay.transaction_id, TX)
+                self.assertTrue(fixture.acknowledge())
+
+    def test_external_cleanup_crash_table_replays_receipt_ready_evidence(self):
+        self.assertEqual(
+            EXTERNAL_CLEANUP_CRASH_EVENTS,
+            (
+                "status:unregister",
+                "engine:active-remove",
+                "engine:finalize-terminal-evidence",
+            ),
+        )
+        for index, event in enumerate(EXTERNAL_CLEANUP_CRASH_EVENTS):
+            with self.subTest(event=event):
+                fixture = TerminalFixture(
+                    self.root / f"external-{index}",
+                    fresh_install=False,
+                    rolled_back=False,
+                )
+                filesystem = OSFinalizationFilesystem()
+
+                class CrashAfterFirstDeleteRegistry(MemoryRegistryBackend):
+                    def __init__(self):
+                        super().__init__()
+                        self.crash = event == "status:unregister"
+
+                    def delete_native_host(self, prefix, name):
+                        super().delete_native_host(prefix, name)
+                        if self.crash:
+                            self.crash = False
+                            raise InjectedCrash()
+
+                registry = CrashAfterFirstDeleteRegistry()
+                manifest = fixture.install / "updates/recovery/status-manifest.json"
+                manifest.parent.mkdir(parents=True, exist_ok=True)
+                manifest.write_bytes(b"status-manifest")
+                for prefix in __import__(
+                    "native_registration"
+                ).BROWSER_KEY_PREFIXES:
+                    registry.values[(prefix, STATUS_HOST_NAME)] = manifest
+                fixture.registry = registry
+
+                class CrashingEngine:
+                    def finalize_terminal_evidence(self, transaction_id):
+                        if event == "engine:active-remove":
+                            hooks = UpdateEngineHooks(
+                                before_live_phase=lambda _phase, _paths, _plan: None,
+                                wait_for_initiating_host_exit=lambda _identity: None,
+                                probe_installed_product=lambda _path, _plan: None,
+                                after_filesystem_operation=lambda label: (
+                                    (_ for _ in ()).throw(InjectedCrash())
+                                    if label == "active:remove"
+                                    else None
+                                ),
+                            )
+                            return UpdateEngine(
+                                fixture.install,
+                                mutex_factory=fixture.mutex_factory,
+                                hooks=hooks,
+                            ).finalize_terminal_evidence(transaction_id)
+                        result = fixture.engine_factory(
+                            fixture.install
+                        ).finalize_terminal_evidence(transaction_id)
+                        if event == "engine:finalize-terminal-evidence":
+                            raise InjectedCrash()
+                        return result
+
+                with self.assertRaises(InjectedCrash):
+                    finalize_update_status(
+                        fixture.install,
+                        TX,
+                        fixture.registry,
+                        lambda _root: CrashingEngine(),
+                        filesystem=filesystem,
+                        mutex_factory=fixture.mutex_factory,
+                    )
+
+                self.assertEqual(
+                    load_finalization_cursor(
+                        fixture.cursor_path, filesystem
+                    ).state,
+                    "receipt-ready",
+                )
+                self.assertTrue(fixture.receipt_path.exists())
+                if event == "status:unregister":
+                    values = tuple(
+                        registry.read_native_host(prefix, STATUS_HOST_NAME)
+                        for prefix in __import__(
+                            "native_registration"
+                        ).BROWSER_KEY_PREFIXES
+                    )
+                    self.assertEqual(sum(value is None for value in values), 1)
+                    self.assertTrue(fixture.paths.active.exists())
+                    self.assertTrue(fixture.paths.transaction_root.exists())
+                elif event == "engine:active-remove":
+                    self.assertFalse(fixture.paths.active.exists())
+                    self.assertTrue(fixture.paths.transaction_root.exists())
+                else:
+                    self.assertFalse(fixture.paths.active.exists())
+                    self.assertFalse(fixture.paths.transaction_root.exists())
+                replay = fixture.finalize()
+                self.assertEqual(replay.transaction_id, TX)
+                self.assertTrue(
+                    all(
+                        registry.read_native_host(prefix, STATUS_HOST_NAME)
+                        is None
+                        for prefix in __import__(
+                            "native_registration"
+                        ).BROWSER_KEY_PREFIXES
+                    )
+                )
+                self.assertTrue(fixture.acknowledge())
+
     def test_lost_finalize_response_replays_stable_receipt_after_engine_cleanup(self):
         fixture = self.make_terminal()
         first = fixture.finalize()
@@ -1910,6 +2120,92 @@ class FinalizationTests(unittest.TestCase):
         self.assertLess(
             events.index("filesystem-construct"), events.index("mutex-exit")
         )
+
+    def test_public_finalization_mutex_contention_is_fixed_pending(self):
+        fixture = self.make_terminal()
+
+        class ContendedMutex:
+            def __enter__(self):
+                raise UpdateAlreadyInProgress()
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class EnterFailureMutex:
+            def __enter__(self):
+                raise OSError("injected mutex enter failure")
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        operations = (
+            lambda: finalize_update_status(
+                fixture.install,
+                TX,
+                fixture.registry,
+                fixture.engine_factory,
+                mutex_factory=lambda _root: ContendedMutex(),
+            ),
+            lambda: acknowledge_update_finalization(
+                fixture.install,
+                TX,
+                mutex_factory=lambda _root: ContendedMutex(),
+            ),
+            lambda: require_no_pending_finalization(
+                fixture.install,
+                mutex_factory=lambda _root: ContendedMutex(),
+            ),
+        )
+        for operation in operations:
+            with self.assertRaisesRegex(
+                FinalizationError, "^finalization_ack_pending$"
+            ):
+                operation()
+        with self.assertRaisesRegex(
+            FinalizationError, "^finalization_cleanup_failed$"
+        ):
+            require_no_pending_finalization(
+                fixture.install,
+                mutex_factory=lambda _root: EnterFailureMutex(),
+            )
+
+    def test_finalization_mutex_exit_failure_is_cleanup_and_body_error_is_preserved(self):
+        fixture = self.make_terminal()
+
+        class ExitFailureMutex:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                raise OSError("injected mutex exit failure")
+
+        with self.assertRaisesRegex(
+            FinalizationError, "^finalization_cleanup_failed$"
+        ):
+            require_no_pending_finalization(
+                fixture.install,
+                mutex_factory=lambda _root: ExitFailureMutex(),
+            )
+
+        class PassThroughMutex:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class BodyFailureFilesystem(OSFinalizationFilesystem):
+            def exists(self, path):
+                raise FinalizationError("invalid_finalization_cursor")
+
+        with self.assertRaisesRegex(
+            FinalizationError, "^invalid_finalization_cursor$"
+        ):
+            require_no_pending_finalization(
+                fixture.install,
+                filesystem=BodyFailureFilesystem(),
+                mutex_factory=lambda _root: PassThroughMutex(),
+            )
 
     def test_ack_atomically_moves_receipt_to_fixed_slot_then_opens_barrier(self):
         fixture = self.make_terminal()

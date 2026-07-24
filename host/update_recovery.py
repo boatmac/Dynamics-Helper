@@ -13,7 +13,11 @@ from typing import Protocol
 from ctypes import wintypes
 
 from install_integrity import UpdateProbeResult
-from native_registration import RegistryBackend, register_status_manifest
+from native_registration import (
+    BROWSER_KEY_PREFIXES,
+    RegistryBackend,
+    register_status_manifest,
+)
 from native_registration import STATUS_HOST_NAME, unregister_host
 from package_manifest import (
     OwnershipClass,
@@ -41,7 +45,11 @@ from update_journal import (
     terminal_version,
     terminal_version_to_value,
 )
-from update_mutex import MutationMutex, create_windows_mutation_mutex
+from update_mutex import (
+    MutationMutex,
+    UpdateAlreadyInProgress,
+    create_windows_mutation_mutex,
+)
 from update_ownership import (
     FileDigest,
     OwnershipPlan,
@@ -68,6 +76,10 @@ FINALIZATION_RECEIPT_STATE = "finalized-awaiting-ack"
 FINALIZATION_CURSOR_STATES = frozenset({"reserved", "receipt-ready"})
 MOVEFILE_REPLACE_EXISTING = 0x00000001
 MOVEFILE_WRITE_THROUGH = 0x00000008
+
+
+def _after_finalization_event(_label: str) -> None:
+    return None
 
 
 def _reject_constant(_value: str) -> object:
@@ -660,14 +672,72 @@ def _require_finalization_filesystem(value: object, error_code: str) -> None:
         raise FinalizationError(error_code)
 
 
-def _ensure_receipts_directory(path: Path) -> None:
+class _FinalizationMutexContext:
+    def __init__(
+        self,
+        install_root: Path,
+        mutex_factory: Callable[[Path], MutationMutex],
+    ) -> None:
+        self._install_root = install_root
+        self._mutex_factory = mutex_factory
+        self._mutex = None
+
+    def __enter__(self):
+        try:
+            self._mutex = self._mutex_factory(self._install_root)
+            return self._mutex.__enter__()
+        except UpdateAlreadyInProgress as error:
+            raise FinalizationError("finalization_ack_pending") from error
+        except Exception as error:
+            raise FinalizationError("finalization_cleanup_failed") from error
+
+    def __exit__(self, exc_type, exc, traceback):
+        try:
+            return self._mutex.__exit__(exc_type, exc, traceback)
+        except Exception as error:
+            raise FinalizationError("finalization_cleanup_failed") from error
+
+
+def _finalization_mutex(
+    install_root: Path,
+    mutex_factory: Callable[[Path], MutationMutex],
+) -> _FinalizationMutexContext:
+    return _FinalizationMutexContext(install_root, mutex_factory)
+
+
+def _unregister_status_host_for_finalization(
+    registry: RegistryBackend,
+) -> None:
+    values = tuple(
+        registry.read_native_host(prefix, STATUS_HOST_NAME)
+        for prefix in BROWSER_KEY_PREFIXES
+    )
+    if values[0] == values[1]:
+        unregister_host(registry, STATUS_HOST_NAME)
+        return
+    if sum(value is None for value in values) != 1:
+        raise RuntimeError("native_registration_split_brain")
+    for prefix in BROWSER_KEY_PREFIXES:
+        registry.delete_native_host(prefix, STATUS_HOST_NAME)
+        if registry.read_native_host(prefix, STATUS_HOST_NAME) is not None:
+            raise RuntimeError("native_unregistration_round_trip_failed")
+
+
+def _ensure_receipts_directory(
+    path: Path,
+    fs: FinalizationFilesystem,
+) -> None:
     if path.name != "receipts" or path.parent.name.casefold() != "updates":
         raise FinalizationError("invalid_finalization_receipt")
     try:
         _require_plain_ancestor_chain(path.parent)
         _lstat_plain(path.parent, require_directory=True)
         if not path.exists():
+            _after_finalization_event("receipts-directory:before-create")
             path.mkdir()
+            _after_finalization_event("receipts-directory:after-create")
+            fs.fsync_directory(path.parent)
+            _after_finalization_event("receipts-directory:parent-fsync")
         _lstat_plain(path, require_directory=True)
     except (OSError, RecoveryError) as error:
         raise FinalizationError("invalid_finalization_receipt") from error
@@ -694,7 +764,7 @@ def _write_and_verify_receipt(
     fs: FinalizationFilesystem,
 ) -> None:
     try:
-        _ensure_receipts_directory(path.parent)
+        _ensure_receipts_directory(path.parent, fs)
         fs.atomic_write(path, value.to_dict())
         if load_finalization_receipt(path, value.transaction_id, fs) != value:
             raise FinalizationError("finalization_record_round_trip_failed")
@@ -768,12 +838,8 @@ def finalize_update_status(
     fs = filesystem
     if fs is not None:
         _require_finalization_filesystem(fs, "invalid_finalization_receipt")
-    try:
-        mutex = mutex_factory(paths.install_root)
-    except Exception as error:
-        raise FinalizationError("finalization_cleanup_failed") from error
     acknowledged = False
-    with mutex:
+    with _finalization_mutex(paths.install_root, mutex_factory):
         if fs is None:
             fs = OSFinalizationFilesystem()
         cursor_exists = fs.exists(cursor_path)
@@ -867,7 +933,7 @@ def finalize_update_status(
             )
     if not acknowledged:
         try:
-            unregister_host(registry, STATUS_HOST_NAME)
+            _unregister_status_host_for_finalization(registry)
             engine_factory(paths.install_root).finalize_terminal_evidence(tx)
         except Exception as error:
             raise FinalizationError("finalization_cleanup_failed") from error
@@ -889,11 +955,7 @@ def acknowledge_update_finalization(
         _require_finalization_filesystem(
             fs, "invalid_finalization_acknowledgment"
         )
-    try:
-        mutex = mutex_factory(paths.install_root)
-    except Exception as error:
-        raise FinalizationError("finalization_cleanup_failed") from error
-    with mutex:
+    with _finalization_mutex(paths.install_root, mutex_factory):
         if fs is None:
             fs = OSFinalizationFilesystem()
         if fs.has_atomic_scratch(ack_path):
@@ -1000,11 +1062,7 @@ def require_no_pending_finalization(
     cursor_path = root / "updates" / "finalization-cursor.json"
     if fs is not None:
         _require_finalization_filesystem(fs, "invalid_finalization_cursor")
-    try:
-        mutex = mutex_factory(root)
-    except Exception as error:
-        raise FinalizationError("finalization_cleanup_failed") from error
-    with mutex:
+    with _finalization_mutex(root, mutex_factory):
         if fs is None:
             fs = OSFinalizationFilesystem()
         try:
