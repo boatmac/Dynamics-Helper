@@ -97,6 +97,27 @@ HOOK_CONTRACT_RED_EXIT=1
 
 ## GREEN Evidence
 
+- Final clean product/evidence heads: product/test `f71ff33`, evidence checkpoint
+  `79d6950`.
+- Final focused command at `79d6950`: `Ran 206 tests in 144.962s`,
+  `OK (skipped=1)`. The sole skip was the environment-gated frozen selector;
+  the rebuilt selector passed separately.
+- Final exact Plan A/B command: `Ran 134 tests in 498.253s`, `OK`.
+- Final full Host discovery: `Ran 547 tests in 605.065s`,
+  `OK (skipped=1)` with the same sole frozen skip.
+- Final Extension: 19 files and 340 tests passed in 42.24s; production build
+  transformed 2,218 modules and completed in 10.99s.
+- Final compile exited `0`. The final rebuilt frozen Host retained 73 internal
+  files, 10 directories, and all 15 required modules; the real staged probe ran
+  `1/1` in 13.374s with no skip.
+- Final scoped static/interface/scope gates passed. The broad-review fixes were
+  mutation-sensitive, and the final explicit scoped verdict was READY with no
+  Critical, Important, or Minor findings.
+- Two first-attempt Plan B fault-matrix runs encountered transient Windows
+  `PermissionError` during directory promotion in different subcases. Each exact
+  selector passed in a fresh canonical root, and complete reruns passed
+  `134/134`; no product change was made for those non-reproducible events.
+
 - Committed-head checkpoint: documentation commit `d6d83ff`; product/test head
   `c9fbd94`. Focused Plan C command, exit `0`:
 
@@ -467,6 +488,17 @@ Every Python/Node child received fresh existing `LOCALAPPDATA`, `APPDATA`,
 - Committed canonical frozen probe:
   `dh-plan-c-process-269144baa6014bb19ab4be73c80b1fad`.
 - Committed interface matrix: `dh-plan-c-process-3965f258f5dd44a19c9c92df85a01edf`.
+- Final focused: `dh-plan-c-process-9e0ff4e239a34ecdb159adb2b6445cd2`.
+- Final Plan A/B: `dh-plan-c-process-c228a399825246babcddb13affa45c4a`.
+- Final discovery: `dh-plan-c-process-1b58385070234e43a5beac05cac44895`.
+- Final compile: `dh-plan-c-process-c04d230d7e9249e5aa6af2735c1a9c36`.
+- Final Extension tests: `dh-plan-c-process-8152aa9666ef455284a8d7ace7c3366e`.
+- Final Extension build: `dh-plan-c-process-2d64d56ccce54593b98805f173ef2687`.
+- Final frozen build: `dh-plan-c-process-e3ab6f3fb2984dcd907cbc02f2147a7e`.
+- Final inventory: `dh-plan-c-process-321286057c2646879fee84f346d021a6`.
+- Final graph: `dh-plan-c-process-2d9aaa7deea7407faff408298797d8db`.
+- Final frozen probe: `dh-plan-c-process-b93ad103f48b4ae28e5e4d2caf8656ec`.
+- Final finalization: `dh-plan-c-process-d42aa294f0ba4acab18d21247a3de239`.
 
 Focused imports set `PYTHONPATH=host`; discovery and compile removed it.
 
@@ -655,13 +687,16 @@ RECOVERY_PREFLIGHT_ORDER=PASS
 - Ordinary product actions remain available while the cursor blocks only a new
   update start.
 - Plan C frozen evidence is PASS, but Plan D routing remains intentionally
-  inactive until its own implementation/gates. The approved execution sequence
-  proceeds through Plan E before Plan D only after the corrective evidence commit
-  receives the final clean-HEAD Step 12 rerun.
+  inactive until its own implementation/gates. Plan E remains blocked until the
+  pending post-evidence no-drift rerun and broad branch verdict pass; only then
+  does the approved sequence proceed through Plan E before Plan D.
 - `PLAN_C_PRE_F71FF33_GATE_STATUS=PASS` for source, full Host, compile,
   Extension, frozen build/module/probe, interface, static, and scope gates.
-- `PLAN_C_FINAL_CLEAN_HEAD_GATE_STATUS=PENDING` until `f71ff33` receives the
-  full focused/full/frozen/interface/static/scope rerun and a clean broad review.
+- `PLAN_C_FINAL_CLEAN_HEAD_GATE_STATUS=PASS` at `79d6950` for focused/full,
+  Plan A/B, compile, Extension, rebuilt frozen build/module/probe, interface,
+  static, and scope gates.
+- `PLAN_C_POST_EVIDENCE_NO_DRIFT_STATUS=PENDING` until this final-status
+  evidence commit receives the short post-commit rerun and broad branch verdict.
 
 ## Deferred Disposable-VM Gate
 

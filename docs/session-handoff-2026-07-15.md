@@ -696,6 +696,15 @@ prefixes, both namespace outcomes, bounded artifacts, and deterministic races.
 Finalization is `59/59` and the explicit review verdict is READY; Plan C remains
 pending only for the final clean-head gates at/after `f71ff33`.
 
+Those clean-head gates now pass at evidence checkpoint `79d6950`: focused Plan C
+`206` with one expected frozen skip, Plan A/B `134/134`, full Host `547` with the
+same sole skip, Extension `340/340`, compile, 2,218-module build, rebuilt frozen
+inventory `73/10`, module graph `15/15`, real frozen probe `1/1`, and scoped
+interface/static/scope checks. Two transient Windows promotion errors in first
+Plan A/B attempts were non-reproducible: exact selectors and full reruns passed.
+This final-status evidence commit still requires the short post-commit no-drift
+rerun and broad branch verdict before Plan C is marked complete and Plan E starts.
+
 ## Session Identity Contract
 
 - Case session ID is deterministic UUIDv5 derived from the bare 16-digit case number.
@@ -931,9 +940,9 @@ Use the following for continuation; update the exact HEAD and status from Git ra
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design。Hardening A、B 已完成；Plan C product/test head 是 f71ff33。Broad review 的全部 finalization findings 已通过 01b68e6 + f71ff33 修复：receipt scratch、lexical reparse、cursor precedence、entry-type safe errors、fail-fast mutex contention、receipts-directory durability、partial status unregister、Plan B cleanup crashes，以及完整 15+12+3+3 event model；finalization 59/59，explicit reviewer verdict READY。此前 source/full/frozen/static gates 均通过，但 f71ff33 仍须重新执行最终 clean-head gates；在 PASS 前不要标记 Plan C 完成或开始 Plan E。完整证据见 hardening-c-detached-recovery-report.md。
+历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design。Hardening A、B 已完成；Plan C product/test head 是 f71ff33，evidence checkpoint 是 79d6950。Broad review 的全部 finalization findings 已通过 01b68e6 + f71ff33 修复，finalization 59/59，explicit reviewer verdict READY。79d6950 clean-head gates：focused 206/skip1、Plan A/B 134/134、full Host 547/skip1、Extension 340/340、compile、2218-module build、frozen inventory 73/10、module graph 15/15、real frozen probe 1/1、static/scope 全部 PASS。当前只剩本 final-status evidence commit 后的短 no-drift rerun 和 broad branch verdict；通过前不要开始 Plan E。完整证据见 hardening-c-detached-recovery-report.md。
 
-下一步先在 corrective evidence commit 后完成最终 clean-HEAD Step 12；通过后按已批准顺序执行 Plan E，然后才是 Plan D。Plan D 必须先在 coordinator DH_UPDATE_START 和 Host UpdateService.prepare 两处调用 require_no_pending_finalization，并在 ID/runtime/package/Plan-B authority side effect 前关闭 check-to-create race。不要绕过 prepare_recovery_runtime、staged preflight、Plan B ownership 或 finalization cursor barrier。
+下一步先完成 final-status evidence commit 后的短 no-drift rerun和 broad branch verdict；通过后按已批准顺序执行 Plan E，然后才是 Plan D。Plan D 必须先在 coordinator DH_UPDATE_START 和 Host UpdateService.prepare 两处调用 require_no_pending_finalization，并在 ID/runtime/package/Plan-B authority side effect 前关闭 check-to-create race。不要绕过 prepare_recovery_runtime、staged preflight、Plan B ownership 或 finalization cursor barrier。
 
 已实现行为：所有 DH create/resume 都设置 skip_custom_instructions=True；CLI global、AGENTS、path instructions 等自动发现源全部排除。DH 显式注入 Core + 恰好一个可编辑源：Root 为空或 Repository ONLY 关闭时使用 DH-specific Instructions；Root 非空且 Repository ONLY 开启时只使用 <Root>/.github/copilot-instructions.md。Custom User Prompt 仍是每次 Analyze 的 PII-scrubbed user content。使用严格 UTF-8 immutable byte snapshot、framed fingerprint、same-UUID refresh 和 fail-closed errors。Options 区分 explicit empty（清空文件）与 omitted（不写），检查 update_config/config_saved，并保留可选 errorCode 到持久化和本地化显示。
 
@@ -944,5 +953,5 @@ MyCasesKit response commit 675006a 已接受 Form ③ New-Case coordinator 和 S
 
 2026-07-14 research 中“依赖 CLI 自动 workspace instruction discovery”的建议已被 2026-07-15 accepted spec supersede；不要恢复该方案。在正式 MyCases 契约返回前，不要猜测 MyCases 接口，也不要让 DH 直接写 MyCases canonical 文件。
 
-请先简要总结你读取到的状态与 VM 环境差异，然后从 Plan E 的执行前置条件和 Task 1 开始。不要重做 Plan A/B/C 产品任务。不要未经明确批准 push、publish、tag、改版本或执行真实 update/install/registry/AppData 产品操作；任何 release --publish 都必须再次获得我的明确确认。
+请先简要总结你读取到的状态与 VM 环境差异。若 final-status evidence commit 后的 no-drift rerun 和 broad branch verdict 尚未记录为 PASS，先完成它们；只有 PASS 后才从 Plan E 的执行前置条件和 Task 1 开始。不要重做 Plan A/B/C 产品任务。不要未经明确批准 push、publish、tag、改版本或执行真实 update/install/registry/AppData 产品操作；任何 release --publish 都必须再次获得我的明确确认。
 ```

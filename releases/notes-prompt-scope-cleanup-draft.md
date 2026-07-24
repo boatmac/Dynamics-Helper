@@ -89,6 +89,10 @@ only after the remaining Extension-data and runtime-installer plans complete.
 - Follow-up hardening adds durable first-receipt-directory publication, exact
   finalization contention errors, crash-resumable partial status unregister,
   and Plan B cleanup crash replay. These remain dormant until Plan D routing.
+- Final clean-head verification passed focused **206** (one expected frozen
+  skip), Plan A/B **134/134**, full Host **547** (same sole skip), Extension
+  **340/340**, compile/build/static/scope, and rebuilt frozen probe **1/1**. A
+  final post-evidence no-drift rerun and broad branch verdict remain pending.
 
 ## Upgrade notes
 
