@@ -82,6 +82,10 @@ only after the remaining Extension-data and runtime-installer plans complete.
   isolated compile/static/scope gates and restored break-and-fail mutations
   passed.
 - Disposable-VM recovery smoke remains required before release and was not run.
+- Finalization durability now covers every reserved/receipt/receipt-ready/ack/
+  cursor-removal crash boundary, ordinary fault replay, receipt-scratch cleanup,
+  lexical reparse rejection, exact entry-type errors, and serialized concurrent
+  finalizers. Full committed-head verification is rerun after this correction.
 
 ## Upgrade notes
 

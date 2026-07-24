@@ -6,8 +6,8 @@
 - Consumed Plan A implementation head: `909e08759897d5ab235211e65a72856ce8066dfe`.
 - Consumed Plan B implementation head after exact hook-contract correction:
   `c9fbd94d81dace2b4723dd7c5da8c5167e0090a5`.
-- Plan C implementation/test head before documentation:
-  `c9fbd94d81dace2b4723dd7c5da8c5167e0090a5`.
+- Plan C implementation/test head after broad-review durability correction:
+  `01b68e6`.
 - Scope is detached recovery infrastructure. No update click, installer route,
   capability cutover, real install/update, registry/AppData product mutation,
   publish, push, tag, or version change was performed.
@@ -60,6 +60,7 @@ UpdateEngineHooks: before_live_phase, wait_for_initiating_host_exit, probe_insta
 - `a0d7409` `test(update): strengthen detached recovery gates`
 - `8c8c3bb` `test(update): close recovery verification gaps`
 - `c9fbd94` `fix(update): freeze recovery hook contract`
+- `01b68e6` `fix(update): exhaust finalization crash recovery`
 
 ## RED Evidence
 
@@ -85,6 +86,13 @@ Ran 1 test in 0.001s
 FAILED (failures=1)
 HOOK_CONTRACT_RED_EXIT=1
 ```
+
+- Broad final review RED exposed two production defects: acknowledgment left a
+  receipt scratch behind while opening the start barrier, and receipt authority
+  resolved past a lexical reparse parent. Both exact selectors failed (`2/2`).
+- Follow-up RED exposed cursor-scratch precedence with an older ack slot,
+  record-specific error leaks from receipt/ack entry types, and missing exact
+  error mapping at the public acknowledgment boundary.
 
 ## GREEN Evidence
 
@@ -307,6 +315,20 @@ reviewed with no Critical/Important findings.
   slot replacement tests passed.
 - Production finalization contains no receipt enumeration, random scratch,
   per-transaction ack, separate ack serializer, or direct Plan B cleanup.
+- Broad-review correction at `01b68e6` adds lexical-before-resolve record path
+  validation, record-specific `exists/read/move/scratch` errors, receipt-scratch
+  normalization before the ack move, and cursor-scratch precedence that permits
+  a valid newer active authority while retaining the older pending barrier.
+- Exact crash model now freezes 15 finalize and 12 acknowledgment events. It
+  runs `InjectedCrash` and ordinary `OSError` at every boundary, asserts actual
+  partial prefixes, models both pre/post replace and unlink namespace outcomes,
+  covers acknowledgment-time receipt normalization, and rejects unknown/orphan
+  artifacts.
+- Concurrency tests use deterministic waiter counts and two independent Plan B
+  terminal workspaces. Complete wrong-ID precedence and directory/symlink/
+  reparse/unsupported entry-type tables assert exact safe errors.
+- Final corrected finalization command: `Ran 54 tests in 110.650s`, `OK` from
+  root `dh-plan-c-finalization-final-green-352b18e6df084727bf7f1c7fc0eae7de`.
 - Static plan typo adjudication: `_same_finalization_volume` correctly requires
   `type(source_device) is int`; the plan's final command accidentally asserted
   `is not int`, contrary to its implementation section and durability tests.
@@ -621,10 +643,10 @@ RECOVERY_PREFLIGHT_ORDER=PASS
   inactive until its own implementation/gates. The approved execution sequence
   proceeds through Plan E before Plan D only after the corrective evidence commit
   receives the final clean-HEAD Step 12 rerun.
-- `PLAN_C_PRE_CORRECTIVE_COMMIT_GATE_STATUS=PASS` for source, full Host, compile,
+- `PLAN_C_PRE_FINALIZATION_FIX_GATE_STATUS=PASS` for source, full Host, compile,
   Extension, frozen build/module/probe, interface, static, and scope gates.
-- `PLAN_C_FINAL_CLEAN_HEAD_GATE_STATUS=PENDING` until this corrective evidence
-  commit exists and Step 12 is repeated.
+- `PLAN_C_FINAL_CLEAN_HEAD_GATE_STATUS=PENDING` until `01b68e6` receives the
+  full focused/full/frozen/interface/static/scope rerun and a clean broad review.
 
 ## Deferred Disposable-VM Gate
 

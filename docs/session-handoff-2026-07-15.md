@@ -675,6 +675,16 @@ authority side effects and close the check-to-create race through their shared
 serialized service boundary. Any interface drift or failed frozen gate forbids
 Plan D activation.
 
+Broad review after `d3a6ea5` found three Important finalization gaps. Commit
+`01b68e6` fixes receipt-scratch acknowledgment, lexical reparse-parent authority,
+cursor-scratch/old-slot precedence, and record-specific entry-type errors. It
+also implements the exact 15 finalize + 12 acknowledge crash event model,
+ordinary-fault replay, both namespace persistence outcomes, bounded artifact
+checks, deterministic concurrency with two Plan B terminal workspaces, complete
+wrong-ID precedence, and strict entry-type tables. Finalization is `54/54`, but
+Plan C remains pending until the full committed-head and broad-review gates are
+rerun at/after `01b68e6`.
+
 ## Session Identity Contract
 
 - Case session ID is deterministic UUIDv5 derived from the bare 16-digit case number.
@@ -910,7 +920,7 @@ Use the following for continuation; update the exact HEAD and status from Git ra
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design。Hardening A、B 已完成；Plan C product/test head 是 c9fbd94，Task 10 documentation checkpoint 是 d6d83ff，本次 corrective evidence commit 已记录 pre-commit gate PASS，但仍须在该 commit 后执行最终 clean-HEAD Step 12，完整证据见 hardening-c-detached-recovery-report.md。Plan C 已实现 shared little-endian framing、统一 source/frozen/status registration、identity-safe CreateProcessW/RunOnce、staged frozen preflight、detached browser/installer recovery、read-only status Host、validate-before-factory early dispatch，以及 cursor/receipt/fixed-ack finalization；c9fbd94 还修正了 consumed Plan B UpdateEngineHooks 的 mandatory typed contract。pre-commit source focused Ran 182/OK(skipped=1)，full Host Ran 523/OK(skipped=1)，唯一 skip 是未设置环境变量的 frozen selector；单独设置后 1/1 通过。Plan A/B 134/134、Extension 340/340、compile、PyInstaller 6.18.0、15/15 module graph、73 files/10 dirs onedir inventory、real frozen staged probe 和 static/scope gates 均通过。legacy updater 仍是生产路径，只广告 prompt-scope-v1；在 final clean-HEAD PASS 前不要标记 Plan C 完成或开始 Plan E。
+历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design。Hardening A、B 已完成；Plan C product/test head 是 01b68e6。Broad review 在 d3a6ea5 后发现 finalization Important gaps，01b68e6 已完成 receipt-scratch、lexical reparse、cursor-scratch precedence、entry-type safe error 修复，并加入 15+12 crash events、ordinary faults、pre/post namespace、bounded artifacts、双 Plan-B authority concurrency 和 wrong-ID tables；finalization 54/54。此前 source/full/frozen/static gates 均通过，但 01b68e6 仍须重新执行完整 committed-head gates 和 clean broad review；在 PASS 前不要标记 Plan C 完成或开始 Plan E。完整证据见 hardening-c-detached-recovery-report.md。
 
 下一步先在 corrective evidence commit 后完成最终 clean-HEAD Step 12；通过后按已批准顺序执行 Plan E，然后才是 Plan D。Plan D 必须先在 coordinator DH_UPDATE_START 和 Host UpdateService.prepare 两处调用 require_no_pending_finalization，并在 ID/runtime/package/Plan-B authority side effect 前关闭 check-to-create race。不要绕过 prepare_recovery_runtime、staged preflight、Plan B ownership 或 finalization cursor barrier。
 
