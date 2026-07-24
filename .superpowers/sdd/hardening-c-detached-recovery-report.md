@@ -88,13 +88,14 @@ HOOK_CONTRACT_RED_EXIT=1
 
 ## GREEN Evidence
 
-- Focused Plan C command, exit `0`:
+- Committed-head checkpoint: documentation commit `d6d83ff`; product/test head
+  `c9fbd94`. Focused Plan C command, exit `0`:
 
 ```text
 host/venv/Scripts/python.exe -m unittest host.test_native_messaging host.test_native_registration host.test_update_platform host.test_update_recovery host.test_update_status_host host.test_update_entrypoint host.test_early_update_dispatch host.test_release_helper -v
 ```
 
-- Final focused Plan C command: `Ran 182 tests in 49.635s`, `OK (skipped=1)`.
+- Final focused Plan C command: `Ran 182 tests in 62.450s`, `OK (skipped=1)`.
   The only skip was `FrozenStagedProbeIntegrationTests` with
   `DH_PLAN_C_FROZEN_ONEDIR` unset; the same selector passed separately when set.
 - Exact framing gate, exit `0`, selectors:
@@ -107,7 +108,7 @@ host.test_native_messaging.NativeHostFramingIntegrationTests.test_native_host_pi
 host.test_native_messaging.NativeHostFramingIntegrationTests.test_little_endian_peer_ping_round_trips_through_native_host
 host.test_native_messaging.NativeHostFramingIntegrationTests.test_main_host_accepts_analyze_payload_larger_than_one_mib
 host.test_update_status_host.StatusProtocolTests.test_rejects_more_than_64_kib_before_reading_body
-Ran 7 tests in 0.532s
+Ran 7 tests in 0.693s
 OK
 ```
 
@@ -115,13 +116,13 @@ OK
 
 ```text
 host/venv/Scripts/python.exe -m unittest host.test_product_info host.test_package_manifest host.test_package_archive host.test_install_integrity host.test_early_cli host.test_host_integrity_actions host.test_update_journal host.test_update_ownership host.test_update_mutex host.test_update_engine_host host.test_update_engine_extension host.test_update_engine_rollback host.test_update_engine_resume -v
-Ran 134 tests in 566.661s
+Ran 134 tests in 594.766s
 OK
 ```
 - Full Host discovery command, exit `0` with `PYTHONPATH` removed:
   `host/venv/Scripts/python.exe -m unittest discover host -v`. Result:
-  `Ran 517 tests in 607.046s`, `OK (skipped=1)`. This pre-test-hardening result
-  is baseline only; committed-head discovery is required before completion.
+  `Ran 523 tests in 700.089s`, `OK (skipped=1)`. The only skip was the same
+  environment-gated frozen selector, which passed separately below.
 - Finalization classes after strengthened gates: 35 tests, `OK`.
 - Hook targeted GREEN, exit `0`:
 
@@ -147,9 +148,9 @@ Ran 2 tests in 0.779s
 OK
 ```
 - Extension command `npm.cmd run test:run --prefix extension --
-  --reporter=dot` exited `0`: 19 files and 340 tests passed. Production command
-  `npm.cmd run build --prefix extension` exited `0` and transformed 2,218
-  modules.
+  --reporter=dot` exited `0`: 19 files and 340 tests passed in 50.34s.
+  Production command `npm.cmd run build --prefix extension` exited `0`,
+  transformed 2,218 modules, and built in 16.96s.
 - Source command `host/venv/Scripts/python.exe -m compileall -q -x
   "[\\/]venv[\\/]" host release_helper.py` exited `0` with no diagnostics.
 
@@ -318,11 +319,11 @@ PLAN_C_FROZEN_GATE_STATUS=PASS
 
 - Exact preflight command `host/venv/Scripts/python.exe -m PyInstaller
   --version` exited `0`: `PYINSTALLER_VERSION=6.18.0`.
-- Source argv/hidden-import command, exit `0`:
+- Committed-head source argv/hidden-import command, exit `0`:
 
 ```text
 host/venv/Scripts/python.exe -m unittest host.test_release_helper.PlanCPackagingTests.test_source_build_argv_uses_venv_python_module_and_every_hidden_import -v
-Ran 1 test in 0.008s
+Ran 1 test in 0.010s
 OK
 ```
 
@@ -355,7 +356,12 @@ Plan C module graph complete: 15/15
 - Real frozen command with absolute `DH_PLAN_C_FROZEN_ONEDIR`:
   `host/venv/Scripts/python.exe -m unittest
   host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation -v`.
-  Exit `0`: `Ran 1 test in 13.449s`, `OK`, no skip.
+  Exit `0`: `Ran 1 test in 11.396s`, `OK`, no skip.
+- One diagnostic run used the non-plan prefix
+  `dh-plan-c-committed-frozen-probe-<guid>` and failed during synthetic staging
+  with Windows `WinError 3`. The failure did not reproduce with either a short
+  root or the plan-mandated exact `dh-plan-c-process-<guid>` harness above; the
+  canonical committed frozen gate is the passing result recorded here.
 - `dh_native_host.spec`, `build/`, `dist/`, and `extension/dist/` were ignored;
   generated spec was untracked.
 
@@ -402,6 +408,28 @@ Every Python/Node child received fresh existing `LOCALAPPDATA`, `APPDATA`,
 - Current recovery AST: `dh-plan-c-ast-recovery-8591d301ead8436a9f2d35098c19c200`.
 - Current complete signature probe:
   `dh-plan-c-signature-current-b845eedf2d0445419ce5b0a2f275576d`.
+- Committed focused: `dh-plan-c-committed-focused-a122c348975d4cc2bfda534f08a6494a`.
+- Committed framing: `dh-plan-c-committed-framing-fedd4bbec7fc48e28421779c24d25366`.
+- Committed Plan A/B: `dh-plan-c-committed-ab-f24a7c33bd154da9bbc6079b4a001239`.
+- Committed discovery:
+  `dh-plan-c-committed-discovery-298b018b3d3f4f66b189d0cfdef4603f`.
+- Committed compile: `dh-plan-c-committed-compile-0e7bb27fd4924ebebd886934c25904c3`.
+- Committed Extension tests:
+  `dh-plan-c-committed-extension-test-807bbb0c817e49d3b59cd3c6dfd82dcf`.
+- Committed Extension build:
+  `dh-plan-c-committed-extension-build-b055ea9337294acb9fd5bd36421af613`.
+- Committed source packaging:
+  `dh-plan-c-committed-source-package-eb9ebe12fb3243609fb866ddb71bb434`.
+- Committed PyInstaller preflight:
+  `dh-plan-c-committed-pyinstaller-3576e9a870254711a1b137a0c079fb64`.
+- Committed frozen build:
+  `dh-plan-c-committed-frozen-build-cbba45e0dbc24a53b1e30ef8a8f1f26e`.
+- Committed inventory:
+  `dh-plan-c-committed-inventory-5a88fca7220247b89c55a21aad349a1e`.
+- Committed graph: `dh-plan-c-committed-graph-0f80a087eca54936926709dbeaac8361`.
+- Committed canonical frozen probe:
+  `dh-plan-c-process-269144baa6014bb19ab4be73c80b1fad`.
+- Committed interface matrix: `dh-plan-c-process-3965f258f5dd44a19c9c92df85a01edf`.
 
 Focused imports set `PYTHONPATH=host`; discovery and compile removed it.
 
@@ -569,7 +597,10 @@ RECOVERY_PREFLIGHT_ORDER=PASS
 - The positive `activate_prepared` grep returned exactly two call sites.
 - The required Win32/static symbol loop completed without throwing.
 - Plan C committed production range changed only the documented Host/release
-  files; no Extension/installer/version/checked-spec production drift occurred.
+  files except `c9fbd94`, the reviewed prerequisite correction that makes Plan
+  B's consumed hook interface match its frozen Plan B/C contract. No Extension,
+  installer, version, or checked-spec production drift occurred. The range
+  contained 27 tracked files and ignored only build/spec/dist outputs.
 - Static plan typo adjudication: the plan's broad bare-PID regex matches its own
   required low-level `Win32ProcessApi.open_process(pid: int)` seam. The semantic
   AST gate proved no public `ProcessAdapter`/recovery/entrypoint API accepts a
@@ -588,7 +619,12 @@ RECOVERY_PREFLIGHT_ORDER=PASS
   update start.
 - Plan C frozen evidence is PASS, but Plan D routing remains intentionally
   inactive until its own implementation/gates. The approved execution sequence
-  proceeds through Plan E before Plan D.
+  proceeds through Plan E before Plan D only after the corrective evidence commit
+  receives the final clean-HEAD Step 12 rerun.
+- `PLAN_C_PRE_CORRECTIVE_COMMIT_GATE_STATUS=PASS` for source, full Host, compile,
+  Extension, frozen build/module/probe, interface, static, and scope gates.
+- `PLAN_C_FINAL_CLEAN_HEAD_GATE_STATUS=PENDING` until this corrective evidence
+  commit exists and Step 12 is repeated.
 
 ## Deferred Disposable-VM Gate
 

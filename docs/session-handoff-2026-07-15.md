@@ -618,14 +618,15 @@ complete immutable process identity and registers status; installer mode passes
 activation paths repeat the staged frozen probe before RunOnce/live mutation,
 while Plan B's installed probe remains the commit gate.
 
-The frozen gate passed with exact PyInstaller `6.18.0`, onedir inventory 73
+The committed-head frozen gate passed with exact PyInstaller `6.18.0`, onedir inventory 73
 internal files and 10 directories, all 15 Plan C hidden modules in the graph,
 and the real frozen staged-target selector `1/1` with no skip. The source Plan C
 focused command ran 182 tests and reported `OK (skipped=1)`: 181 executed tests
 passed and only the ordinary environment-gated frozen selector skipped; the
 same selector passed separately when enabled. Plan
-A/B regressions passed `134/134`; Extension passed `340/340` and production
-build passed. Detailed evidence is in
+A/B regressions passed `134/134`; full Host discovery ran `523` with the same
+sole frozen skip; Extension passed `340/340`; compile and the 2,218-module
+production build passed. Detailed evidence is in
 `.superpowers/sdd/hardening-c-detached-recovery-report.md`.
 
 Terminal projection remains exactly Plan B's four rows: committed existing
@@ -663,10 +664,11 @@ as the current cursor's replay evidence remains
 `invalid_finalization_acknowledgment`.
 
 Plan C does not activate transactional routing. The legacy updater remains the
-production route and only `prompt-scope-v1` is advertised. This is the Plan C
-candidate state; committed-head gates and the documentation/evidence commit must
-complete before Plan E starts. After that gate, the approved sequence continues
-with Plan E before Plan D. Plan D is additionally blocked until both
+production route and only `prompt-scope-v1` is advertised. The Task 10
+documentation checkpoint and all committed-head source/full/compile/Extension/
+frozen/interface/static/scope gates passed; the corrective evidence commit that
+contains this paragraph must receive one final clean-HEAD Step 12 rerun before
+Plan C is complete or Plan E starts. Plan D is additionally blocked until both
 coordinator `DH_UPDATE_START` and Host `UpdateService.prepare` call
 `require_no_pending_finalization(install_root)` before ID/runtime/package/Plan B
 authority side effects and close the check-to-create race through their shared
@@ -908,9 +910,9 @@ Use the following for continuation; update the exact HEAD and status from Git ra
 4. 运行并报告：git status --short、当前分支、origin/master...HEAD ahead/behind、最近 8 个提交、当前版本字段。
 5. 检查 VM 本地前置条件：host/venv、Copilot CLI 版本/认证、python dev_switch.py status。不要假设源机器的 DEV/PROD 注册表、AppData 配置、Chrome storage、Copilot session 或 MyCases workspace 会随 Git 迁移。
 
-历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design。Hardening A、B 已完成；Plan C implementation/test head 是 c9fbd94，当前处于 Task 10 documentation/evidence + committed-head gates 候选状态，完整证据见 hardening-c-detached-recovery-report.md。Plan C 已实现 shared little-endian framing、统一 source/frozen/status registration、identity-safe CreateProcessW/RunOnce、staged frozen preflight、detached browser/installer recovery、read-only status Host、validate-before-factory early dispatch，以及 cursor/receipt/fixed-ack finalization；c9fbd94 还修正了 consumed Plan B UpdateEngineHooks 的 mandatory typed contract。PyInstaller 6.18.0、15/15 module graph、73 files/10 dirs onedir inventory 和 real frozen staged probe 1/1 均通过。source focused command Ran 182/OK(skipped=1)，唯一 skip 是未设置环境变量的 frozen selector；单独设置后 1/1 通过。legacy updater 仍是生产路径，只广告 prompt-scope-v1；Plan C 不代表 Plan D runtime routing 已启用。只有 Task 10 文档提交和 committed-head gates 全部通过后，Plan C 才可标记完成。
+历史发布基线是 v2.0.74-beta.4；prompt-scope 分支是 docs/prompt-scope-cleanup-design。Hardening A、B 已完成；Plan C product/test head 是 c9fbd94，Task 10 documentation checkpoint 是 d6d83ff，本次 corrective evidence commit 已记录 pre-commit gate PASS，但仍须在该 commit 后执行最终 clean-HEAD Step 12，完整证据见 hardening-c-detached-recovery-report.md。Plan C 已实现 shared little-endian framing、统一 source/frozen/status registration、identity-safe CreateProcessW/RunOnce、staged frozen preflight、detached browser/installer recovery、read-only status Host、validate-before-factory early dispatch，以及 cursor/receipt/fixed-ack finalization；c9fbd94 还修正了 consumed Plan B UpdateEngineHooks 的 mandatory typed contract。pre-commit source focused Ran 182/OK(skipped=1)，full Host Ran 523/OK(skipped=1)，唯一 skip 是未设置环境变量的 frozen selector；单独设置后 1/1 通过。Plan A/B 134/134、Extension 340/340、compile、PyInstaller 6.18.0、15/15 module graph、73 files/10 dirs onedir inventory、real frozen staged probe 和 static/scope gates 均通过。legacy updater 仍是生产路径，只广告 prompt-scope-v1；在 final clean-HEAD PASS 前不要标记 Plan C 完成或开始 Plan E。
 
-下一步先完成 Plan C Task 10 committed-head gates；通过后按已批准顺序执行 Plan E，然后才是 Plan D。Plan D 必须先在 coordinator DH_UPDATE_START 和 Host UpdateService.prepare 两处调用 require_no_pending_finalization，并在 ID/runtime/package/Plan-B authority side effect 前关闭 check-to-create race。不要绕过 prepare_recovery_runtime、staged preflight、Plan B ownership 或 finalization cursor barrier。
+下一步先在 corrective evidence commit 后完成最终 clean-HEAD Step 12；通过后按已批准顺序执行 Plan E，然后才是 Plan D。Plan D 必须先在 coordinator DH_UPDATE_START 和 Host UpdateService.prepare 两处调用 require_no_pending_finalization，并在 ID/runtime/package/Plan-B authority side effect 前关闭 check-to-create race。不要绕过 prepare_recovery_runtime、staged preflight、Plan B ownership 或 finalization cursor barrier。
 
 已实现行为：所有 DH create/resume 都设置 skip_custom_instructions=True；CLI global、AGENTS、path instructions 等自动发现源全部排除。DH 显式注入 Core + 恰好一个可编辑源：Root 为空或 Repository ONLY 关闭时使用 DH-specific Instructions；Root 非空且 Repository ONLY 开启时只使用 <Root>/.github/copilot-instructions.md。Custom User Prompt 仍是每次 Analyze 的 PII-scrubbed user content。使用严格 UTF-8 immutable byte snapshot、framed fingerprint、same-UUID refresh 和 fail-closed errors。Options 区分 explicit empty（清空文件）与 omitted（不写），检查 update_config/config_saved，并保留可选 errorCode 到持久化和本地化显示。
 
@@ -921,5 +923,5 @@ MyCasesKit response commit 675006a 已接受 Form ③ New-Case coordinator 和 S
 
 2026-07-14 research 中“依赖 CLI 自动 workspace instruction discovery”的建议已被 2026-07-15 accepted spec supersede；不要恢复该方案。在正式 MyCases 契约返回前，不要猜测 MyCases 接口，也不要让 DH 直接写 MyCases canonical 文件。
 
-请先简要总结你读取到的状态与 VM 环境差异。若 Plan C 文档提交和 committed-head gates 尚未记录为 PASS，先完成它们；通过后从 Plan E 的执行前置条件和 Task 1 开始。不要重做 Plan A/B/C 产品任务。不要未经明确批准 push、publish、tag、改版本或执行真实 update/install/registry/AppData 产品操作；任何 release --publish 都必须再次获得我的明确确认。
+请先简要总结你读取到的状态与 VM 环境差异，然后从 Plan E 的执行前置条件和 Task 1 开始。不要重做 Plan A/B/C 产品任务。不要未经明确批准 push、publish、tag、改版本或执行真实 update/install/registry/AppData 产品操作；任何 release --publish 都必须再次获得我的明确确认。
 ```

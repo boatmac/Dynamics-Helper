@@ -74,6 +74,8 @@ only after the remaining Extension-data and runtime-installer plans complete.
 - Plan C source-focused command ran 182 tests with 181 passes and one expected
   environment-gated frozen skip. The same frozen selector passed separately
   `1/1` against the built runtime.
+- Committed-head full Host discovery ran **523** tests with that same sole frozen
+  skip; the separate frozen selector passed.
 - Plan C frozen gate passed exact PyInstaller **6.18.0**, all **15/15** required
   modules, and an onedir inventory of **73 internal files / 10 directories**.
 - Plan A/B regressions passed **134/134**; full Extension remained **340/340**;
