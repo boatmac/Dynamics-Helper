@@ -2,19 +2,8 @@
 // Handles menu state, recursive rendering, and actions
 
 import { useEffect, useRef, useState } from 'react';
-
-export interface MenuItem {
-    type: 'folder' | 'link' | 'markdown' | 'back' | 'unknown';
-    label: string;
-    url?: string;
-    content?: string;
-    children?: MenuItem[];
-    target?: string;
-    icon?: string;
-    collapsed?: boolean;
-    tags?: string[];
-    source?: 'team' | 'personal';
-}
+import type { MenuItem } from '../utils/bookmarkItems';
+export type { MenuItem } from '../utils/bookmarkItems';
 
 /**
  * Flat-merge personal and team items at the top level.

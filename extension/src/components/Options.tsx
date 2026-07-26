@@ -40,6 +40,8 @@ import { trackEvent } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { localizePromptSourceError } from '../utils/promptSourceErrors';
 import { safeErrorText } from '../utils/safeErrorText';
+import { collapseBookmarkFolders } from '../utils/bookmarkItems';
+export { collapseBookmarkFolders } from '../utils/bookmarkItems';
 import {
     acknowledgePromptRevision,
     acknowledgeInstructionRevision,
@@ -112,18 +114,8 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 // initial mount load AND the Reset handler so default folders never appear
 // in a fully-expanded state. Previously inlined inside the mount useEffect,
 // which caused Reset to skip collapsing — see commit log.
-export function collapseFolders(list: MenuItem[]): MenuItem[] {
-    return list.map(item => {
-        if (item.type === 'folder') {
-            return {
-                ...item,
-                collapsed: item.collapsed ?? true,
-                children: item.children ? collapseFolders(item.children) : []
-            };
-        }
-        return item;
-    });
-}
+export const collapseFolders = (items: MenuItem[]) =>
+    collapseBookmarkFolders(items) ?? [];
 
 async function loadItems(): Promise<MenuItem[]> {
     // 1. Try local storage

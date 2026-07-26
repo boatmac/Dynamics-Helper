@@ -219,9 +219,25 @@ const storageGet = vi.fn((keys?: unknown, maybeCallback?: unknown) => {
     ? pendingStorageGets.splice(deferredIndex, 1)[0]
     : undefined
   if (deferred) {
-    const completion = deferred.promise.then(() => result)
+    const fail = (reason: unknown) => {
+      if (!cb) throw reason
+      const runtime = chrome.runtime as typeof chrome.runtime & {
+        lastError?: { message: string }
+      }
+      runtime.lastError = {
+        message: reason instanceof Error ? reason.message : String(reason),
+      }
+      try {
+        cb(undefined)
+      } finally {
+        runtime.lastError = undefined
+      }
+    }
+    const completion = deferred.promise.then(() => result, fail)
     if (cb) {
-      void completion.then(value => cb(value))
+      void completion.then(value => {
+        if (value !== undefined) cb(value)
+      })
       return undefined
     }
     return completion
