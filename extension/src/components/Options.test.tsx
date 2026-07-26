@@ -5106,6 +5106,33 @@ describe('Options bookmark loading and import boundaries', () => {
     }
   })
 
+  it('clears the bookmark repair warning after a valid import', async () => {
+    seedStorage({ dh_items: [{ type: 'link', label: 7 }] })
+    const imported = [{
+      type: 'link',
+      label: 'REPAIRED IMPORT',
+      url: 'https://repaired.test',
+    }]
+    const warning = getTranslation('bookmarkStorageInvalid', 'en')
+    installFileReaderText(JSON.stringify({ items: imported }))
+    try {
+      await hydrateOptions(hostConfig)
+      await openBookmarksSection()
+      expect(await screen.findByText(warning)).toBeInTheDocument()
+
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      fireEvent.change(input, {
+        target: { files: [new File(['ignored'], 'bookmarks.json')] },
+      })
+
+      await waitFor(() => expect(getStorageSnapshot().dh_items).toEqual(imported))
+      expect(document.body.textContent).toContain('REPAIRED IMPORT')
+      expect(screen.queryByText(warning)).toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('rejects a malformed imported schema without changing UI or storage', async () => {
     const initial = [{ type: 'link', label: 'INITIAL', url: 'https://initial.test' }]
     seedStorage({ dh_items: initial })

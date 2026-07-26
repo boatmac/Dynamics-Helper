@@ -650,7 +650,10 @@ const OptionsInner: React.FC = () => {
         void queueBookmarkStorage({
             kind: 'write',
             items: structuredClone(nextItems),
-        }).catch(() => undefined);
+        }).then(
+            () => setBookmarkLoadIssue(null),
+            () => undefined,
+        );
         return generation;
     };
     type StatusMessage = { message: string; type: 'success' | 'error' } | null;
