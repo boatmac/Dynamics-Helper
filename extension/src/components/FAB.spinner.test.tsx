@@ -6,6 +6,14 @@ import { PrefsLanguageProvider } from '../utils/i18n'
 const state = vi.hoisted(() => ({
   hydrationPending: true,
   hydrationRequestId: 'hydrated-A',
+  hydratedPopover: null as null | {
+    isOpen: true
+    status: 'success' | 'error'
+    title: string
+    content: string
+    durationSec?: number
+    identity: { caseNumber: string; requestId: string }
+  },
   analyzeTimeoutSeconds: 1200,
   scanForErrors: vi.fn(),
   trackEvent: vi.fn(),
@@ -42,7 +50,7 @@ vi.mock('../utils/pageReader', () => ({
 
 vi.mock('../hooks/useAnalysisHydration', () => ({
   useAnalysisHydration: () => ({
-    popover: null,
+    popover: state.hydratedPopover,
     pending: state.hydrationPending
       ? { caseNumber: '1234567890123456', requestId: state.hydrationRequestId, startTime: Date.now() }
       : null,
@@ -80,6 +88,7 @@ describe('FAB analyzing source reconciliation', () => {
     installChromeMock()
     state.hydrationPending = true
     state.hydrationRequestId = 'hydrated-A'
+    state.hydratedPopover = null
     state.analyzeTimeoutSeconds = 1200
     state.trackEvent.mockReset()
     state.hashCaseId.mockReset().mockResolvedValue('hash')
@@ -88,6 +97,20 @@ describe('FAB analyzing source reconciliation', () => {
       ticketTitle: 'Fixture',
       errorText: 'Failure body',
     })
+  })
+
+  it('renders hydrated durationSec zero as 0.0s', async () => {
+    state.hydrationPending = false
+    state.hydratedPopover = {
+      isOpen: true,
+      status: 'success',
+      title: 'Analyze',
+      content: 'Body',
+      durationSec: 0,
+      identity: { caseNumber: '1234567890123456', requestId: 'req-zero' },
+    }
+    render(<FAB />)
+    expect(await screen.findByText('0.0s')).toBeInTheDocument()
   })
 
   it('clears a hydrated spinner when a case switch has no matching pending request', async () => {

@@ -12,6 +12,11 @@ import {
   resetChromeMock,
   seedStorage,
 } from '../test/chromeMock'
+import {
+  pendingAnalysisKey,
+  resetAnalysisState,
+  seenAnalysisKey,
+} from '../utils/analysisStore'
 
 installChromeMock()
 
@@ -37,6 +42,59 @@ function deps(overrides: Record<string, unknown> = {}) {
 }
 
 describe('RESET_EXTENSION_STATE response truth', () => {
+  it('clears the latest analysis owner during scoped Reset', async () => {
+    const requestSeenKey = seenAnalysisKey({
+      caseNumber: '1234567890123456',
+      requestId: 'req-A',
+    })
+    seedStorage({
+      keep_me: 'safe',
+      dh_last_analysis: {
+        caseNumber: '1234567890123456',
+        requestId: 'req-A',
+        status: 'success',
+        title: 'Result',
+        content: 'Body',
+        timestamp: 1,
+        seen: false,
+      },
+      dh_pending_analysis: {
+        caseNumber: '1234567890123456',
+        requestId: 'legacy',
+        startTime: 1,
+      },
+      [pendingAnalysisKey('req-A')]: {
+        caseNumber: '1234567890123456',
+        requestId: 'req-A',
+        startTime: 2,
+      },
+      dh_seen_analysis: {
+        caseNumber: '1234567890123456',
+        requestId: 'legacy-seen',
+      },
+      [requestSeenKey]: {
+        caseNumber: '1234567890123456',
+        requestId: 'req-A',
+      },
+      dh_latest_analysis_owner: {
+        caseNumber: '1234567890123456',
+        requestId: 'req-A',
+        startTime: 2,
+      },
+    })
+
+    await expect(handleResetExtensionState({
+      identity,
+      requestGeneration: 6,
+      resetToken: 16,
+    }, deps({ clearAnalysisState: resetAnalysisState }) as any)).resolves.toMatchObject({
+      status: 'success',
+      data: { syncStatus: 'committed' },
+    })
+
+    expect(getStorageSnapshot()).toEqual({ keep_me: 'safe' })
+  })
+
   it('returns committed with the captured identity and token after both clears', async () => {
     const dependencies = deps()
 

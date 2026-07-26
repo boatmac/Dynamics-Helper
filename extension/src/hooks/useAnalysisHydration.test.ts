@@ -30,6 +30,7 @@ import {
     STALE_WINDOW_MS,
     MAX_PENDING_DISPLAY_AGE_MS,
     pendingAnalysisKey,
+    getAnalysisSnapshot,
 } from '../utils/analysisStore'
 import type { LastAnalysis, PendingAnalysis } from '../utils/analysisStore'
 import { useAnalysisHydration } from './useAnalysisHydration'
@@ -40,7 +41,7 @@ const CASE_A = '1234567890123456'
 const CASE_B = '9999999999999999'
 
 function makeLast(overrides: Partial<LastAnalysis> = {}): LastAnalysis {
-    return {
+    const value: LastAnalysis = {
         caseNumber: CASE_A,
         status: 'success',
         title: '🤖 Copilot Analyze',
@@ -51,6 +52,10 @@ function makeLast(overrides: Partial<LastAnalysis> = {}): LastAnalysis {
         savedTo: 'C:\\path\\dh_case_report.md',
         ...overrides,
     }
+    for (const key of ['requestId', 'durationSec', 'savedTo', 'errorCode'] as const) {
+        if (value[key] === undefined) delete value[key]
+    }
+    return value
 }
 
 function makePending(overrides: Partial<PendingAnalysis> = {}): PendingAnalysis {
@@ -234,6 +239,120 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
         expect(result.current.pending?.requestId).toBe('req-new')
     })
 
+    it('selects the same request when pending start times tie in either insertion order', async () => {
+        const smaller = makePending({ requestId: 'req-a', startTime: Date.now() })
+        const larger = makePending({ requestId: 'req-z', startTime: smaller.startTime })
+
+        for (const records of [
+            [smaller, larger],
+            [larger, smaller],
+        ]) {
+            resetChromeMock()
+            installChromeMock()
+            seedStorage(Object.fromEntries(records.map(record => [
+                pendingAnalysisKey(record.requestId),
+                record,
+            ])))
+            await expect(getAnalysisSnapshot(CASE_A)).resolves.toMatchObject({
+                pending: { requestId: 'req-z', startTime: smaller.startTime },
+            })
+        }
+    })
+
+    it('hydrates durationSec zero without dropping it', async () => {
+        seedStorage({ dh_last_analysis: makeLast({ durationSec: 0 }) })
+
+        const { result } = renderHook(() => useAnalysisHydration(CASE_A))
+
+        await waitFor(() => expect(result.current.popover).not.toBeNull())
+        expect(result.current.popover).toMatchObject({ durationSec: 0 })
+    })
+
+    it.each([
+        ['dh_last_analysis', { ...makeLast(), timestamp: { valueOf: vi.fn() } }, false],
+        ['dh_pending_analysis', { ...makePending(), startTime: { valueOf: vi.fn() } }, false],
+        [pendingAnalysisKey('malformed-request'), {
+            ...makePending({ requestId: 'malformed-request' }),
+            startTime: { valueOf: vi.fn() },
+        }, false],
+        ['dh_seen_analysis', { caseNumber: CASE_A, requestId: 1 }, true],
+        [seenAnalysisKey({ caseNumber: CASE_A, requestId: 'req-A' }), {
+            caseNumber: CASE_A,
+            requestId: 1,
+        }, true],
+        ['dh_latest_analysis_owner', {
+            caseNumber: CASE_A,
+            requestId: 'owner',
+            startTime: { valueOf: vi.fn() },
+        }, false],
+    ] as const)(
+        'ignores malformed persisted analysis at %s non-destructively',
+        async (key, malformed, needsLast) => {
+            const rawMarker = 'SECRET MALFORMED ANALYSIS VALUE'
+            const raw = { ...malformed, rawMarker }
+            seedStorage({
+                keep_me: 'safe',
+                ...(needsLast ? { dh_last_analysis: makeLast() } : {}),
+                [key]: raw,
+            })
+
+            const hook = renderHook(() => useAnalysisHydration(CASE_A))
+            await waitFor(() => expect(chromeMockSpies.storageGet).toHaveBeenCalled())
+            await act(async () => { await Promise.resolve() })
+
+            if (needsLast) {
+                expect(hook.result.current.popover?.title).toBe('🤖 Copilot Analyze')
+            } else {
+                expect(hook.result.current.popover).toBeNull()
+            }
+            expect(hook.result.current.isAnalyzing).toBe(false)
+            expect(document.body.textContent).not.toContain(rawMarker)
+            for (const candidate of Object.values(malformed)) {
+                if (candidate && typeof candidate === 'object' && 'valueOf' in candidate) {
+                    expect((candidate as { valueOf: ReturnType<typeof vi.fn> }).valueOf)
+                        .not.toHaveBeenCalled()
+                }
+            }
+            expect(chromeMockSpies.storageRemove).not.toHaveBeenCalled()
+            await expect(chrome.storage.local.get([key, 'keep_me'])).resolves.toMatchObject({
+                keep_me: 'safe',
+                [key]: raw,
+            })
+            hook.unmount()
+        },
+    )
+
+    it('contains a revoked whole-storage callback before key access', async () => {
+        seedStorage({ keep_me: 'safe' })
+        const revoked = Proxy.revocable({}, {})
+        const entries = vi.spyOn(Object, 'entries')
+        chromeMockSpies.storageGet.mockImplementationOnce((
+            _keys: unknown,
+            maybeCallback?: unknown,
+        ) => {
+            const callback = typeof maybeCallback === 'function'
+                ? maybeCallback as (value: unknown) => void
+                : undefined
+            revoked.revoke()
+            if (callback) {
+                queueMicrotask(() => callback(revoked.proxy))
+                return undefined
+            }
+            return Promise.resolve(revoked.proxy)
+        })
+
+        try {
+            await expect(getAnalysisSnapshot(CASE_A)).rejects.toThrow(
+                'Analysis storage read failed',
+            )
+            expect(entries.mock.calls.some(([value]) => value === revoked.proxy)).toBe(false)
+            expect(chromeMockSpies.storageRemove).not.toHaveBeenCalled()
+            expect(getStorageSnapshot()).toEqual({ keep_me: 'safe' })
+        } finally {
+            entries.mockRestore()
+        }
+    })
+
     it('keeps legacy singleton pending read compatibility', async () => {
         seedStorage({ dh_pending_analysis: makePending() })
         const { result } = renderHook(() => useAnalysisHydration(CASE_A))
@@ -368,8 +487,14 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
     it('hydrates last, pending, and seen from one coherent batched snapshot', async () => {
         const lastA = makeLast({ requestId: 'req-A', timestamp: 1 })
         const lastB = makeLast({ requestId: 'req-B', timestamp: Date.now() })
-        chromeMockSpies.storageGet
-            .mockResolvedValueOnce({
+        chromeMockSpies.storageGet.mockImplementationOnce((
+            _keys: unknown,
+            maybeCallback?: unknown,
+        ) => {
+            const callback = typeof maybeCallback === 'function'
+                ? maybeCallback as (value: unknown) => void
+                : undefined
+            queueMicrotask(() => callback?.({
                 dh_last_analysis: lastB,
                 dh_pending_analysis: makePending({ requestId: 'req-B' }),
                 dh_seen_analysis: {
@@ -377,13 +502,18 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
                     requestId: 'req-A',
                     timestamp: 1,
                 },
-            })
+            }))
+            return undefined
+        })
 
         const hook = renderHook(() => useAnalysisHydration(CASE_A))
         await waitFor(() => expect(hook.result.current.popover?.identity.requestId).toBe('req-B'))
         expect(hook.result.current.isAnalyzing).toBe(true)
         expect(chromeMockSpies.storageGet).toHaveBeenCalledTimes(1)
-        expect(chromeMockSpies.storageGet).toHaveBeenCalledWith(null)
+        expect(chromeMockSpies.storageGet).toHaveBeenCalledWith(
+            null,
+            expect.any(Function),
+        )
     })
 
     it('serializes A conditional clear with a newer B pending write', async () => {

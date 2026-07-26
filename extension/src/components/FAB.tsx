@@ -343,6 +343,9 @@ const FAB: React.FC = () => {
             content: hydration.popover.content,
             errorCode: hydration.popover.errorCode,
             path: hydration.popover.savedTo,
+            duration: hydration.popover.durationSec === undefined
+                ? undefined
+                : hydration.popover.durationSec.toFixed(1) + 's',
             identity: hydration.popover.identity,
         });
         popoverIsAnalyze.current = true;
