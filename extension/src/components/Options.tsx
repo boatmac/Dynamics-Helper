@@ -50,6 +50,8 @@ import {
     loadBookmarkItems,
     parseBookmarkDocument,
     parseOwnBookmarkItems,
+    readDefaultItems,
+    writeStoredItems,
 } from '../utils/bookmarkItems';
 export { collapseBookmarkFolders } from '../utils/bookmarkItems';
 import {
@@ -92,6 +94,12 @@ type ResetTransaction = Readonly<{
     bookmarkGeneration: number;
     phase: ResetPhase;
     retryAction: ResetRetryAction;
+}>;
+
+type BookmarkWriteIntent = Readonly<{
+    id: number;
+    ownerGeneration: number;
+    items: MenuItem[];
 }>;
 
 type PrefsMirrorAction = Readonly<{
@@ -546,17 +554,7 @@ const OptionsInner: React.FC = () => {
     const bookmarkGenerationRef = useRef(0);
     const bookmarkStorageIntentRef = useRef(0);
     const bookmarkStorageQueueRef = useRef<Promise<void>>(Promise.resolve());
-    const latestBookmarkStorageIntentRef = useRef<Readonly<{
-        id: number;
-        operation: Readonly<
-            | {
-                  kind: 'write';
-                  items: MenuItem[];
-                  ownerGeneration?: number;
-              }
-            | { kind: 'remove' }
-        >;
-    }> | null>(null);
+    const latestBookmarkStorageIntentRef = useRef<BookmarkWriteIntent | null>(null);
     const [bookmarkPersistenceIssue, setBookmarkPersistenceIssue] = useState(false);
     const [bookmarkLoadIssue, setBookmarkLoadIssue] = useState<BookmarkLoadIssue>(null);
     const bookmarkPersistenceIssueRef = useRef(false);
@@ -573,85 +571,62 @@ const OptionsInner: React.FC = () => {
     };
 
     const queueBookmarkStorage = (
-        operation: Readonly<
-            | {
-                  kind: 'write';
-                  items: MenuItem[];
-                  ownerGeneration?: number;
-              }
-            | { kind: 'remove' }
-        >,
-    ): Promise<void> => {
-        const intent = Object.freeze({
+        items: MenuItem[],
+        ownerGeneration = bookmarkGenerationRef.current,
+    ): Promise<'committed' | 'stale'> => {
+        const intent: BookmarkWriteIntent = Object.freeze({
             id: ++bookmarkStorageIntentRef.current,
-            operation,
+            ownerGeneration,
+            items: structuredClone(items),
         });
         latestBookmarkStorageIntentRef.current = intent;
-        const run = () => new Promise<void>((resolve, reject) => {
-            if (
-                intent.operation.kind === 'write'
-                && intent.operation.ownerGeneration !== undefined
-                && bookmarkGenerationRef.current
-                    !== intent.operation.ownerGeneration
-            ) {
-                resolve();
-                return;
+        const run = async (): Promise<'committed' | 'stale'> => {
+            if (bookmarkGenerationRef.current !== intent.ownerGeneration) {
+                return 'stale';
             }
-            const callback = () => {
-                const storageError = chrome.runtime.lastError;
-                if (storageError) {
-                    reject(new Error(safeErrorText(
-                        [storageError.message],
-                        'Bookmark storage mutation failed',
-                    )));
-                    return;
-                }
-                resolve();
-            };
-            if (intent.operation.kind === 'remove') {
-                chrome.storage.local.remove('dh_items', callback);
-            } else {
-                chrome.storage.local.set({
-                    dh_items: intent.operation.items,
-                }, callback);
-            }
-        });
+            return writeStoredItems(
+                intent.items,
+                () => bookmarkGenerationRef.current === intent.ownerGeneration
+                    && latestBookmarkStorageIntentRef.current !== null
+                    && latestBookmarkStorageIntentRef.current.id === intent.id,
+            );
+        };
         const queued = bookmarkStorageQueueRef.current.then(run, run);
-        bookmarkStorageQueueRef.current = queued.catch(() => undefined);
+        bookmarkStorageQueueRef.current = queued.then(() => undefined, () => undefined);
         return queued.then(
-            () => {
+            result => {
                 if (latestBookmarkStorageIntentRef.current?.id === intent.id) {
                     latestBookmarkStorageIntentRef.current = null;
                     setBookmarkPersistenceFailed(false);
                 }
+                return result;
             },
             error => {
-                // Keep the newest full snapshot/removal intent available for
-                // the next mutation or Reset retry. Older failures never
-                // replace a newer queued intent.
-                setBookmarkPersistenceFailed(true);
+                // Keep a rejected current snapshot available for retry. An
+                // older failure cannot replace a newer intent or its warning.
+                if (latestBookmarkStorageIntentRef.current?.id === intent.id) {
+                    setBookmarkPersistenceFailed(true);
+                }
                 throw error;
             },
         );
     };
 
     // The only entry point for personal bookmark edits and Reset intent.
-    // Captured snapshots enter the same queue as Reset removal, so an already
-    // started remove always finishes before a newer edit is durably written.
     const mutatePersonalItems = (
         update?: React.SetStateAction<MenuItem[]>,
     ): number => {
         const generation = ++bookmarkGenerationRef.current;
+        onBookmarkGenerationAdvanced();
         if (update === undefined) return generation;
         const nextItems = typeof update === 'function'
             ? update(itemsRef.current)
             : update;
         applyItemsSnapshot(nextItems);
-        void queueBookmarkStorage({
-            kind: 'write',
-            items: structuredClone(nextItems),
-        }).then(
-            () => setBookmarkLoadIssue(null),
+        void queueBookmarkStorage(nextItems, generation).then(
+            result => {
+                if (result === 'committed') setBookmarkLoadIssue(null);
+            },
             () => undefined,
         );
         return generation;
@@ -1743,11 +1718,10 @@ const OptionsInner: React.FC = () => {
             if (!collapsedItems || !isCurrent()) return;
             setBookmarkLoadIssue(null);
             applyItemsSnapshot(collapsedItems);
-            void queueBookmarkStorage({
-                kind: 'write',
-                items: structuredClone(collapsedItems),
-                ownerGeneration: itemsLoadGeneration,
-            }).catch(() => undefined);
+            void queueBookmarkStorage(
+                collapsedItems,
+                itemsLoadGeneration,
+            ).catch(() => undefined);
         });
 
         // Restore team-folder collapse state independently from team cache
@@ -1967,7 +1941,18 @@ const OptionsInner: React.FC = () => {
         transaction: ResetTransaction,
         retryAction: Exclude<ResetRetryAction, null>,
     ) {
-        if (resetTransactionRef.current?.token !== transaction.token) return;
+        const current = resetTransactionRef.current;
+        if (!current || current.token !== transaction.token) return;
+
+        if (retryAction === 'local-cleanup') {
+            const scope = resetBookmarkScope(transaction);
+            if (scope === 'not-owner') return;
+            if (scope === 'superseded') {
+                supersedeResetLocalCleanup(transaction);
+                return;
+            }
+        }
+
         updateResetTransaction(transaction.token, {
             phase: retryAction === 'sw'
                 ? 'sw-pending'
@@ -1975,6 +1960,39 @@ const OptionsInner: React.FC = () => {
             retryAction,
         });
         setResetIncomplete(true);
+    }
+
+    type ResetBookmarkScope = 'current' | 'superseded' | 'not-owner';
+
+    function resetBookmarkScope(
+        transaction: ResetTransaction,
+    ): ResetBookmarkScope {
+        const current = resetTransactionRef.current;
+        if (!current || current.token !== transaction.token) {
+            return 'not-owner';
+        }
+        return bookmarkGenerationRef.current === transaction.bookmarkGeneration
+            ? 'current'
+            : 'superseded';
+    }
+
+    function supersedeResetLocalCleanup(transaction: ResetTransaction): void {
+        const current = resetTransactionRef.current;
+        if (
+            !current
+            || current.token !== transaction.token
+            || current.phase !== 'local-cleanup-pending'
+            || bookmarkGenerationRef.current === current.bookmarkGeneration
+        ) return;
+        resetTransactionRef.current = null;
+        setResetIncomplete(false);
+    }
+
+    function onBookmarkGenerationAdvanced(): void {
+        const current = resetTransactionRef.current;
+        if (current && current.phase === 'local-cleanup-pending') {
+            supersedeResetLocalCleanup(current);
+        }
     }
 
     function resetTeamScopeIsCurrent(transaction: ResetTransaction): boolean {
@@ -1985,8 +2003,9 @@ const OptionsInner: React.FC = () => {
     }
 
     function resetBookmarkScopeIsCurrent(transaction: ResetTransaction): boolean {
-        return resetTransactionRef.current?.token === transaction.token
-            && bookmarkGenerationRef.current === transaction.bookmarkGeneration;
+        const scope = resetBookmarkScope(transaction);
+        if (scope === 'superseded') supersedeResetLocalCleanup(transaction);
+        return scope === 'current';
     }
 
     function resetDefaultsAreCurrent(): boolean {
@@ -1994,7 +2013,10 @@ const OptionsInner: React.FC = () => {
             .every(key => prefsRef.current[key] === DEFAULT_PREFS[key]);
     }
 
-    function completeResetCleanup(transaction: ResetTransaction) {
+    function completeResetCleanup(
+        transaction: ResetTransaction,
+        completion: 'full-reset' | 'newer-bookmarks-preserved' = 'full-reset',
+    ) {
         if (resetTransactionRef.current?.token !== transaction.token) return;
         updateResetTransaction(transaction.token, {
             phase: 'complete',
@@ -2002,7 +2024,11 @@ const OptionsInner: React.FC = () => {
         });
         setResetIncomplete(false);
         showSuccess(
-            t(resetDefaultsAreCurrent() ? 'resetComplete' : 'resetCleanupComplete'),
+            t(completion === 'newer-bookmarks-preserved'
+                ? 'resetCleanupComplete'
+                : (resetDefaultsAreCurrent()
+                    ? 'resetComplete'
+                    : 'resetCleanupComplete')),
             2000,
         );
     }
@@ -2014,60 +2040,77 @@ const OptionsInner: React.FC = () => {
         });
         if (!pending) return;
 
-        const continueWithBookmarks = () => {
-            if (!resetBookmarkScopeIsCurrent(pending)) {
-                retainResetRetry(pending, 'local-cleanup');
-                return;
-            }
-            queueBookmarkStorage({ kind: 'remove' }).then(() => {
-                if (!resetBookmarkScopeIsCurrent(pending)) {
-                    retainResetRetry(pending, 'local-cleanup');
+        void (async () => {
+            try {
+                const defaultsResult = await readDefaultItems();
+                if (defaultsResult.kind === 'failed') {
+                    if (resetBookmarkScopeIsCurrent(pending)) {
+                        retainResetRetry(pending, 'local-cleanup');
+                    }
                     return;
                 }
-                loadBookmarkItems().then(loadedResult => {
-                    if (!resetBookmarkScopeIsCurrent(pending)) {
+                if (!resetBookmarkScopeIsCurrent(pending)) return;
+                const defaults = collapseBookmarkFolders(
+                    defaultsResult.items,
+                    () => resetBookmarkScopeIsCurrent(pending),
+                );
+                if (!defaults) {
+                    if (resetBookmarkScopeIsCurrent(pending)) {
                         retainResetRetry(pending, 'local-cleanup');
+                    }
+                    return;
+                }
+
+                if (resetTeamScopeIsCurrent(pending)) {
+                    try {
+                        await new Promise<void>((resolve, reject) => {
+                            try {
+                                chrome.storage.local.remove(
+                                    'dh_team_collapsed_labels',
+                                    () => {
+                                        if (chrome.runtime.lastError) {
+                                            reject(new Error(
+                                                'Reset team collapse cleanup failed',
+                                            ));
+                                            return;
+                                        }
+                                        resolve();
+                                    },
+                                );
+                            } catch {
+                                reject(new Error(
+                                    'Reset team collapse cleanup failed',
+                                ));
+                            }
+                        });
+                        setTeamItems([]);
+                        setTeamSynced("");
+                        setTeamCollapsedLabels(new Set());
+                    } catch {
+                        if (resetBookmarkScopeIsCurrent(pending)) {
+                            retainResetRetry(pending, 'local-cleanup');
+                        }
                         return;
                     }
-                    const defaults = collapseFolders(
-                        loadedResult.kind === 'loaded'
-                            ? loadedResult.items
-                            : [],
-                    );
-                    applyItemsSnapshot(defaults);
-                    queueBookmarkStorage({
-                        kind: 'write',
-                        items: structuredClone(defaults),
-                    }).then(() => {
-                        if (!resetBookmarkScopeIsCurrent(pending)) {
-                            retainResetRetry(pending, 'local-cleanup');
-                            return;
-                        }
-                        completeResetCleanup(pending);
-                    }).catch(() => retainResetRetry(pending, 'local-cleanup'));
-                });
-            }).catch(() => retainResetRetry(pending, 'local-cleanup'));
-        };
+                }
 
-        if (!resetTeamScopeIsCurrent(pending)) {
-            // A newer Team Catalog identity owns its collapse state. Personal
-            // bookmarks remain independently safe when their generation matches.
-            continueWithBookmarks();
-            return;
-        }
-
-        chrome.storage.local.remove('dh_team_collapsed_labels', () => {
-            if (chrome.runtime.lastError) {
-                retainResetRetry(pending, 'local-cleanup');
-                return;
+                const writeResult = await queueBookmarkStorage(
+                    defaults,
+                    pending.bookmarkGeneration,
+                );
+                if (writeResult !== 'committed') {
+                    resetBookmarkScopeIsCurrent(pending);
+                    return;
+                }
+                if (!resetBookmarkScopeIsCurrent(pending)) return;
+                applyItemsSnapshot(defaults);
+                completeResetCleanup(pending);
+            } catch {
+                if (resetBookmarkScopeIsCurrent(pending)) {
+                    retainResetRetry(pending, 'local-cleanup');
+                }
             }
-            if (resetTeamScopeIsCurrent(pending)) {
-                setTeamItems([]);
-                setTeamSynced("");
-                setTeamCollapsedLabels(new Set());
-            }
-            continueWithBookmarks();
-        });
+        })();
     }
 
     function dispatchResetServiceWorker(transaction: ResetTransaction) {
@@ -2110,8 +2153,45 @@ const OptionsInner: React.FC = () => {
                 retryAction: 'local-cleanup',
             });
             if (!localPending) return;
-            if (userTouchedRevisionRef.current !== userRevisionAtDispatch) {
+            const bookmarksSuperseded = bookmarkGenerationRef.current
+                !== pending.bookmarkGeneration;
+            if (
+                userTouchedRevisionRef.current !== userRevisionAtDispatch
+                && !bookmarksSuperseded
+            ) {
                 setResetIncomplete(true);
+                return;
+            }
+            if (bookmarksSuperseded) {
+                if (!resetTeamScopeIsCurrent(localPending)) {
+                    completeResetCleanup(
+                        localPending,
+                        'newer-bookmarks-preserved',
+                    );
+                    return;
+                }
+                try {
+                    chrome.storage.local.remove(
+                        'dh_team_collapsed_labels',
+                        () => {
+                            if (chrome.runtime.lastError) {
+                                retainResetRetry(localPending, 'local-cleanup');
+                                return;
+                            }
+                            if (resetTeamScopeIsCurrent(localPending)) {
+                                setTeamItems([]);
+                                setTeamSynced("");
+                                setTeamCollapsedLabels(new Set());
+                            }
+                            completeResetCleanup(
+                                localPending,
+                                'newer-bookmarks-preserved',
+                            );
+                        },
+                    );
+                } catch {
+                    retainResetRetry(localPending, 'local-cleanup');
+                }
                 return;
             }
             runResetLocalCleanup(localPending);

@@ -954,6 +954,10 @@ describe('Options selected-team refresh generation', () => {
     const response = deferNextResponse('SYNC_TEAM_CATALOG')
     const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ items: [] }),
+    } as Response)
     try {
       await hydrateTeamOptions()
       seedStorage({
@@ -990,6 +994,7 @@ describe('Options selected-team refresh generation', () => {
         call => (call[0] as any)?.type === 'RESET_EXTENSION_STATE',
       )).toBe(true)
     } finally {
+      fetchMock.mockRestore()
       confirm.mockRestore()
     }
   })
@@ -1205,6 +1210,10 @@ describe('Options selected-team refresh generation', () => {
     const hostUpdate = deferNextResponse('update_config')
     const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ items: [] }),
+    } as Response)
     try {
       await hydrateTeamOptions()
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
@@ -1228,6 +1237,7 @@ describe('Options selected-team refresh generation', () => {
       expect(screen.getByRole('alert')).toHaveTextContent(/saved/i)
       expect(screen.getByRole('alert')).not.toHaveTextContent(/reset did not complete/i)
     } finally {
+      fetchMock.mockRestore()
       confirm.mockRestore()
     }
   })
@@ -1238,6 +1248,10 @@ describe('Options selected-team refresh generation', () => {
     const retryReset = deferNextResponse('RESET_EXTENSION_STATE')
     const editUpdate = deferNextResponse('update_config')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ items: [] }),
+    } as Response)
     try {
       await hydrateTeamOptions()
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
@@ -1285,6 +1299,7 @@ describe('Options selected-team refresh generation', () => {
       expect(language.value).toBe('en')
       expect((getStorageSnapshot().dh_prefs as any).language).toBe('en')
     } finally {
+      fetchMock.mockRestore()
       confirm.mockRestore()
     }
   })
@@ -1294,6 +1309,10 @@ describe('Options selected-team refresh generation', () => {
     const firstReset = deferNextResponse('RESET_EXTENSION_STATE')
     const editUpdate = deferNextResponse('update_config')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ items: [] }),
+    } as Response)
     try {
       await hydrateTeamOptions()
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
@@ -1337,6 +1356,7 @@ describe('Options selected-team refresh generation', () => {
       expect(countPrefsWrites()).toBe(prefsWritesBeforeRetry)
       expect(screen.queryByRole('alert')).toBeNull()
     } finally {
+      fetchMock.mockRestore()
       confirm.mockRestore()
     }
   })
@@ -2170,6 +2190,29 @@ describe('Options personal bookmark Reset generation', () => {
     dndMock.dropSpecs = []
   })
 
+  const defaultItemsResponse = (
+    items: Array<Record<string, unknown>>,
+  ) => ({
+    ok: true,
+    text: async () => JSON.stringify({ items }),
+  } as Response)
+
+  const prepareResetBookmarks = async (
+    items: Array<Record<string, unknown>>,
+    extraStorage: Record<string, unknown> = {},
+  ) => {
+    seedStorage(extraStorage)
+    await hydrateBookmarkOptions(items)
+    await waitFor(() => expect(dhItemSetCalls().length).toBeGreaterThan(0))
+    chromeMockSpies.storageSet.mockClear()
+    chromeMockSpies.storageRemove.mockClear()
+  }
+
+  const addRootBookmark = async () => {
+    fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
+    await waitFor(() => expect(document.body.textContent).toContain('New Item'))
+  }
+
   it.each([
     ['add', async () => {
       fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
@@ -2224,11 +2267,10 @@ describe('Options personal bookmark Reset generation', () => {
         })).toBe(false)
         if (expectedLabel) expect(document.body.textContent).toContain(expectedLabel)
         else expect(document.body.textContent).not.toContain('Seed folder')
-        expect(screen.queryByText('Reset complete.')).toBeNull()
-        expect(await screen.findByRole('alert')).toHaveTextContent(/reset did not complete/i)
-        expect(screen.getByRole('alert')).toHaveTextContent(
-          /some state may already be cleared/i,
+        expect(await screen.findByRole('status')).toHaveTextContent(
+          'Reset cleanup complete',
         )
+        expect(screen.queryByRole('alert')).toBeNull()
       } finally {
         confirmReset.mockRestore()
       }
@@ -2269,45 +2311,23 @@ describe('Options personal bookmark Reset generation', () => {
     }
   })
 
-  it('serializes delayed Reset removal before a newer bookmark write', async () => {
-    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
-    const delayedRemove = deferNextStorageRemove('dh_items')
-    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    try {
-      await hydrateBookmarkOptions([
-        { type: 'link', label: 'Before reset', url: 'https://before.test' },
-      ])
-      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
-      await resolveCommittedReset(resetResponse)
-
-      fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
-      await waitFor(() => expect(document.body.textContent).toContain('New Item'))
-      await act(async () => delayedRemove.resolve(undefined))
-
-      await waitFor(() => expect(personalItems()?.some(
-        item => item.label === 'New Item',
-      )).toBe(true))
-      expect(document.body.textContent).toContain('New Item')
-      expect(screen.queryByText('Reset complete.')).toBeNull()
-      expect(await screen.findByRole('alert')).toHaveTextContent(/reset did not complete/i)
-    } finally {
-      confirmReset.mockRestore()
-    }
-  })
-
-  it('normal Reset clears personal storage and reloads collapsed defaults', async () => {
+  it('uses one generation-owned Reset write', async () => {
     const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
     const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
-      text: async () => JSON.stringify([{
+      text: async () => JSON.stringify({ items: [{
         type: 'folder',
         label: 'Packaged default',
-        children: [{ type: 'link', label: 'Default child', url: 'https://default.test' }],
-      }]),
+        children: [{
+          type: 'folder',
+          label: 'Nested default',
+          children: [{ type: 'link', label: 'Default child', url: 'https://default.test' }],
+        }],
+      }] }),
     } as Response)
     try {
-      await hydrateBookmarkOptions([
+      await prepareResetBookmarks([
         { type: 'link', label: 'Personal only', url: 'https://personal.test' },
       ])
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
@@ -2317,11 +2337,18 @@ describe('Options personal bookmark Reset generation', () => {
         type: 'folder',
         label: 'Packaged default',
         collapsed: true,
-        children: [{ type: 'link', label: 'Default child', url: 'https://default.test' }],
+        children: [{
+          type: 'folder',
+          label: 'Nested default',
+          collapsed: true,
+          children: [{ type: 'link', label: 'Default child', url: 'https://default.test' }],
+        }],
       }]))
       expect(document.body.textContent).toContain('Packaged default')
-      expect(document.body.textContent).not.toContain('Default child')
+      expect(document.body.textContent).not.toContain('Nested default')
       expect(document.body.textContent).not.toContain('Personal only')
+      expect(dhItemSetCalls()).toHaveLength(1)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
       expect(screen.getByRole('status')).toHaveTextContent('Reset complete')
     } finally {
       fetchMock.mockRestore()
@@ -2349,24 +2376,9 @@ describe('Options personal bookmark Reset generation', () => {
         'Reset complete',
       ))
 
+      fetchMock.mockRejectedValueOnce(new Error('defaults unavailable'))
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
-      const message = await waitFor(() => {
-        const messages = chromeMockSpies.sendMessage.mock.calls
-          .map(call => call[0] as any)
-          .filter(candidate => candidate?.type === 'RESET_EXTENSION_STATE')
-        expect(messages).toHaveLength(2)
-        return messages.at(-1)
-      })
-      fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
-      await act(async () => secondReset.resolve({
-        status: 'success',
-        data: {
-          syncStatus: 'committed',
-          identity: message.payload.identity,
-          requestGeneration: message.payload.requestGeneration,
-          resetToken: message.payload.resetToken,
-        },
-      }))
+      await resolveCommittedReset(secondReset)
 
       expect(await screen.findByRole('alert')).toHaveTextContent(
         /some state may already be cleared/i,
@@ -2415,96 +2427,490 @@ describe('Options personal bookmark Reset generation', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('recovers the newest write after deferred Reset removal and write failure', async () => {
+  it.each([
+    ['HTML', () => Promise.resolve({
+      ok: true,
+      text: async () => '<html>not bookmarks</html>',
+    } as Response)],
+    ['invalid JSON', () => Promise.resolve({
+      ok: true,
+      text: async () => '{not json',
+    } as Response)],
+    ['invalid schema', () => Promise.resolve(defaultItemsResponse([
+      { type: 'link', label: 7 },
+    ]))],
+  ])('validates bookmark defaults before Reset', async (_name, load) => {
     const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
-    const delayedRemove = deferNextStorageRemove('dh_items')
     const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(load)
+    const saved = [{ type: 'link', label: 'Personal remains', url: 'https://personal.test' }]
     try {
-      await hydrateBookmarkOptions([
-        { type: 'link', label: 'Before reset', url: 'https://before.test' },
-      ])
+      await prepareResetBookmarks(saved)
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
       await resolveCommittedReset(resetResponse)
-      await waitFor(() => expect(chromeMockSpies.storageRemove.mock.calls.some(
-        call => call[0] === 'dh_items',
-      )).toBe(true))
 
-      const failedWrite = deferNextStorageSet('dh_items')
-      fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
-      await waitFor(() => expect(document.body.textContent).toContain('New Item'))
-      await act(async () => {
-        delayedRemove.resolve(undefined)
-        await new Promise(resolve => setTimeout(resolve, 0))
-      })
-      await act(async () => {
-        failedWrite.reject(new Error('NEWEST WRITE FAILED'))
-        await new Promise(resolve => setTimeout(resolve, 0))
-      })
-
-      expect(document.body.textContent).toContain('New Item')
-      expect(personalItems()).toBeUndefined()
+      expect(await screen.findByRole('button', { name: /retry cleanup/i })).toBeTruthy()
+      expect(personalItems()).toEqual(saved)
+      expect(document.body.textContent).toContain('Personal remains')
+      expect(dhItemSetCalls()).toHaveLength(0)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
       expect(screen.queryByText('Reset complete.')).toBeNull()
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        /bookmark changes are not saved/i,
-      )
-      expect(screen.getByRole('alert')).toHaveTextContent(/reset did not complete/i)
-
-      const retryWrite = deferNextStorageSet('dh_items')
-      fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
-      await act(async () => {
-        retryWrite.resolve(undefined)
-        await new Promise(resolve => setTimeout(resolve, 0))
-      })
-
-      await waitFor(() => expect(personalItems()?.map(item => item.label)).toEqual([
-        'Before reset',
-        'New Item',
-        'New Item',
-      ]))
-      expect(screen.getByRole('alert')).not.toHaveTextContent(
-        /bookmark changes are not saved/i,
-      )
-      expect(screen.getByRole('alert')).toHaveTextContent(/reset did not complete/i)
     } finally {
+      fetchMock.mockRestore()
       confirmReset.mockRestore()
     }
   })
 
-  it('surfaces failed Reset bookmark removal and recovers on cleanup retry', async () => {
-    const firstReset = deferNextResponse('RESET_EXTENSION_STATE')
-    const failedRemove = deferNextStorageRemove('dh_items')
+  it('keeps bookmarks when Reset defaults fail', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
     const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      text: async () => JSON.stringify([
-        { type: 'link', label: 'Packaged retry', url: 'https://default.test' },
-      ]),
-    } as Response)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      new Error('defaults unavailable'),
+    )
+    const saved = [{ type: 'link', label: 'Personal remains', url: 'https://personal.test' }]
     try {
-      await hydrateBookmarkOptions([
-        { type: 'link', label: 'Before failed remove', url: 'https://before.test' },
+      await prepareResetBookmarks(saved)
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+
+      expect(await screen.findByRole('button', { name: /retry cleanup/i })).toBeTruthy()
+      expect(personalItems()).toEqual(saved)
+      expect(document.body.textContent).toContain('Personal remains')
+      expect(dhItemSetCalls()).toHaveLength(0)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('retries Reset after bookmark defaults become readable', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const defaults = [{ type: 'link', label: 'Retry default', url: 'https://default.test' }]
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('defaults unavailable'))
+      .mockResolvedValue(defaultItemsResponse(defaults))
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
       ])
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
-      await resolveCommittedReset(firstReset)
-      await act(async () => {
-        failedRemove.reject(new Error('BOOKMARK REMOVE FAILED'))
-        await new Promise(resolve => setTimeout(resolve, 0))
-      })
+      await resolveCommittedReset(resetResponse)
 
-      expect(screen.queryByText('Reset complete.')).toBeNull()
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        /bookmark changes are not saved/i,
-      )
-      expect(screen.getByRole('alert')).toHaveTextContent(/reset did not complete/i)
-      expect(personalItems()?.[0]?.label).toBe('Before failed remove')
-
-      fireEvent.click(screen.getByRole('button', { name: /retry cleanup/i }))
-
-      await waitFor(() => expect(personalItems()?.[0]?.label).toBe('Packaged retry'))
-      expect(screen.queryByRole('alert')).toBeNull()
-      expect(screen.getByRole('status')).toHaveTextContent('Reset complete')
+      fireEvent.click(await screen.findByRole('button', { name: /retry cleanup/i }))
+      await waitFor(() => expect(personalItems()).toEqual(defaults))
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(dhItemSetCalls()).toHaveLength(1)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
       expect(extensionResetMessages()).toHaveLength(1)
       expect(resetHostMessages()).toHaveLength(1)
+      expect(screen.getByRole('status')).toHaveTextContent('Reset complete')
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('keeps personal bookmarks when the Reset write fails', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const defaults = [{ type: 'link', label: 'Retry default', url: 'https://default.test' }]
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      defaultItemsResponse(defaults),
+    )
+    const saved = [{ type: 'link', label: 'Personal remains', url: 'https://personal.test' }]
+    try {
+      await prepareResetBookmarks(saved)
+      const failedWrite = deferNextStorageSet('dh_items')
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+      await waitFor(() => expect(dhItemSetCalls()).toHaveLength(1))
+      await act(async () => failedWrite.reject(new Error('RESET WRITE FAILED')))
+
+      expect(await screen.findByRole('button', { name: /retry cleanup/i })).toBeTruthy()
+      expect(personalItems()).toEqual(saved)
+      expect(document.body.textContent).toContain('Personal remains')
+      expect(document.body.textContent).not.toContain('Retry default')
+      expect(dhItemSetCalls()).toHaveLength(1)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+
+      fireEvent.click(screen.getByRole('button', { name: /retry cleanup/i }))
+      await waitFor(() => expect(personalItems()).toEqual(defaults))
+      expect(dhItemSetCalls()).toHaveLength(2)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(screen.getByRole('status')).toHaveTextContent('Reset complete')
+      expect(screen.queryByRole('alert')).toBeNull()
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('newer bookmark edit supersedes Reset local cleanup', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      defaultItemsResponse([
+        { type: 'link', label: 'Stale default', url: 'https://default.test' },
+      ]),
+    )
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+      ])
+      const failedWrite = deferNextStorageSet('dh_items')
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+      await waitFor(() => expect(dhItemSetCalls()).toHaveLength(1))
+      await act(async () => failedWrite.reject(new Error('RESET WRITE FAILED')))
+      const oldRetry = await screen.findByRole('button', { name: /retry cleanup/i })
+
+      await addRootBookmark()
+      await waitFor(() => expect(screen.queryByRole(
+        'button',
+        { name: /retry cleanup/i },
+      )).toBeNull())
+      const edited = structuredClone(personalItems())
+      const writesAfterEdit = dhItemSetCalls().length
+      const readsAfterEdit = fetchMock.mock.calls.length
+
+      fireEvent.click(oldRetry)
+      await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+      expect(personalItems()).toEqual(edited)
+      expect(document.body.textContent).not.toContain('Stale default')
+      expect(dhItemSetCalls()).toHaveLength(writesAfterEdit)
+      expect(fetchMock).toHaveBeenCalledTimes(readsAfterEdit)
+      expect(screen.queryByRole('button', { name: /retry cleanup/i })).toBeNull()
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('abandons Reset defaults that resolve after a newer bookmark edit', async () => {
+    let resolveDefaults!: (response: Response) => void
+    const pendingDefaults = new Promise<Response>(resolve => {
+      resolveDefaults = resolve
+    })
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockReturnValue(pendingDefaults)
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+      ])
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+
+      await addRootBookmark()
+      const edited = structuredClone(personalItems())
+      await act(async () => resolveDefaults(defaultItemsResponse([
+        { type: 'link', label: 'Stale default', url: 'https://default.test' },
+      ])))
+      await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+
+      expect(personalItems()).toEqual(edited)
+      expect(document.body.textContent).not.toContain('Stale default')
+      expect(dhItemSetCalls()).toHaveLength(1)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+      expect(screen.queryByRole('button', { name: /retry cleanup/i })).toBeNull()
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('skips a queued stale Reset write before a newer bookmark edit', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      defaultItemsResponse([
+        { type: 'link', label: 'Stale default', url: 'https://default.test' },
+      ]),
+    )
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+      ])
+      const olderWrite = deferNextStorageSet('dh_items')
+      await addRootBookmark()
+      await waitFor(() => expect(dhItemSetCalls()).toHaveLength(1))
+
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+      await addRootBookmark()
+      const edited = structuredClone(document.body.textContent)
+
+      await act(async () => olderWrite.resolve(undefined))
+      await waitFor(() => expect(personalItems()?.map(item => item.label)).toEqual([
+        'Personal remains',
+        'New Item',
+        'New Item',
+      ]))
+      expect(document.body.textContent).toBe(edited)
+      expect(dhItemSetCalls()).toHaveLength(2)
+      expect(dhItemSetCalls().some(call => JSON.stringify(call[0]).includes(
+        'Stale default',
+      ))).toBe(false)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+      expect(screen.queryByRole('button', { name: /retry cleanup/i })).toBeNull()
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('keeps SW Retry after a newer bookmark edit', async () => {
+    const failedReset = deferNextResponse('RESET_EXTENSION_STATE')
+    const failedRetry = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+      ])
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      const firstMessage = await findResetMessage()
+      await act(async () => failedReset.resolve(resetResponseFor(
+        firstMessage,
+        'failed',
+      )))
+      await screen.findByRole('button', { name: /retry cleanup/i })
+
+      await addRootBookmark()
+      expect(screen.getByRole('button', { name: /retry cleanup/i })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: /retry cleanup/i }))
+      await waitFor(() => expect(extensionResetMessages()).toHaveLength(2))
+      expect(extensionResetMessages()[1].payload.resetToken).toBe(
+        firstMessage.payload.resetToken,
+      )
+      await act(async () => failedRetry.resolve(resetResponseFor(
+        extensionResetMessages()[1],
+        'failed',
+      )))
+
+      expect(screen.getByRole('button', { name: /retry cleanup/i })).toBeTruthy()
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(dhItemSetCalls()).toHaveLength(1)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('completes SW Retry while preserving newer bookmarks', async () => {
+    const failedReset = deferNextResponse('RESET_EXTENSION_STATE')
+    const successfulRetry = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+      ], {
+        dh_team_collapsed_labels: ['team-a\0Folder'],
+      })
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      const firstMessage = await findResetMessage()
+      await act(async () => failedReset.resolve(resetResponseFor(
+        firstMessage,
+        'failed',
+      )))
+      await screen.findByRole('button', { name: /retry cleanup/i })
+
+      await addRootBookmark()
+      await waitFor(() => expect(personalItems()?.at(-1)?.label).toBe('New Item'))
+      const edited = structuredClone(personalItems())
+      fireEvent.click(screen.getByRole('button', { name: /retry cleanup/i }))
+      await waitFor(() => expect(extensionResetMessages()).toHaveLength(2))
+      await act(async () => successfulRetry.resolve(resetResponseFor(
+        extensionResetMessages()[1],
+        'committed',
+      )))
+
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+        'Reset cleanup complete',
+      ))
+      expect(JSON.stringify(personalItems())).toBe(JSON.stringify(edited))
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(dhItemSetCalls()).toHaveLength(1)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+      expect(chromeMockSpies.storageRemove.mock.calls.filter(
+        call => call[0] === 'dh_team_collapsed_labels',
+      )).toHaveLength(1)
+      expect(getStorageSnapshot().dh_team_collapsed_labels).toEqual([])
+      expect(screen.getByRole('status')).not.toHaveTextContent(/^Reset complete/)
+      expect(screen.queryByRole('alert')).toBeNull()
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('does not let an older Reset callback replace the newer transaction', async () => {
+    const oldReset = deferNextResponse('RESET_EXTENSION_STATE')
+    const newerReset = deferNextResponse('RESET_EXTENSION_STATE')
+    const newerRetry = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+      ])
+      const resetButton = screen.getByRole('button', { name: /^reset$/i })
+      fireEvent.click(resetButton)
+      const firstMessage = await findResetMessage()
+
+      fireEvent.click(resetButton)
+      await waitFor(() => expect(extensionResetMessages()).toHaveLength(2))
+      const secondMessage = extensionResetMessages()[1]
+      expect(secondMessage.payload.resetToken).not.toBe(firstMessage.payload.resetToken)
+      await act(async () => newerReset.resolve(resetResponseFor(
+        secondMessage,
+        'failed',
+      )))
+      await screen.findByRole('button', { name: /retry cleanup/i })
+      await act(async () => oldReset.resolve(resetResponseFor(
+        firstMessage,
+        'committed',
+      )))
+
+      expect(screen.getByRole('button', { name: /retry cleanup/i })).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: /retry cleanup/i }))
+      await waitFor(() => expect(extensionResetMessages()).toHaveLength(3))
+      expect(extensionResetMessages()[2].payload.resetToken).toBe(
+        secondMessage.payload.resetToken,
+      )
+      await act(async () => newerRetry.resolve(resetResponseFor(
+        extensionResetMessages()[2],
+        'failed',
+      )))
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(dhItemSetCalls()).toHaveLength(0)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('keeps Reset retryable when team collapse removal reports lastError', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const defaults = [{ type: 'link', label: 'Reset default', url: 'https://default.test' }]
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      defaultItemsResponse(defaults),
+    )
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+      ], {
+        dh_team_collapsed_labels: ['team-a\0Folder'],
+      })
+      chromeMockSpies.storageRemove.mockImplementationOnce((_keys, callback) => {
+        ;(chrome.runtime as any).lastError = { message: 'TEAM COLLAPSE FAILED' }
+        try {
+          ;(callback as () => void)()
+        } finally {
+          ;(chrome.runtime as any).lastError = undefined
+        }
+        return undefined
+      })
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+
+      expect(await screen.findByRole('button', { name: /retry cleanup/i })).toBeTruthy()
+      expect(fetchMock).toHaveBeenCalledOnce()
+      expect(personalItems()?.[0]?.label).toBe('Personal remains')
+      expect(getStorageSnapshot().dh_team_collapsed_labels).toEqual(['team-a\0Folder'])
+      expect(dhItemSetCalls()).toHaveLength(0)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+
+      fireEvent.click(screen.getByRole('button', { name: /retry cleanup/i }))
+      await waitFor(() => expect(personalItems()).toEqual(defaults))
+      expect(dhItemSetCalls()).toHaveLength(1)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+      expect(screen.getByRole('status')).toHaveTextContent('Reset complete')
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it.each(['wrapper rejection', 'synchronous throw'] as const)(
+    'keeps Reset retryable when team collapse removal rejects',
+    async failureMode => {
+      const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+      const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      const defaults = [{ type: 'link', label: 'Reset default', url: 'https://default.test' }]
+      const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        defaultItemsResponse(defaults),
+      )
+      const failedRemove = failureMode === 'wrapper rejection'
+        ? deferNextStorageRemove('dh_team_collapsed_labels')
+        : null
+      try {
+        await prepareResetBookmarks([
+          { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+        ], {
+          dh_team_collapsed_labels: ['team-a\0Folder'],
+        })
+        if (failureMode === 'synchronous throw') {
+          chromeMockSpies.storageRemove.mockImplementationOnce(() => {
+            throw new Error('TEAM COLLAPSE THREW')
+          })
+        }
+        fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+        await resolveCommittedReset(resetResponse)
+        if (failedRemove) {
+          await waitFor(() => expect(chromeMockSpies.storageRemove).toHaveBeenCalled())
+          await act(async () => failedRemove.reject(new Error('TEAM COLLAPSE REJECTED')))
+        }
+
+        expect(await screen.findByRole('button', { name: /retry cleanup/i })).toBeTruthy()
+        expect(fetchMock).toHaveBeenCalledOnce()
+        expect(personalItems()?.[0]?.label).toBe('Personal remains')
+        expect(getStorageSnapshot().dh_team_collapsed_labels).toEqual(['team-a\0Folder'])
+        expect(dhItemSetCalls()).toHaveLength(0)
+        expect(dhItemRemoveCalls()).toHaveLength(0)
+
+        fireEvent.click(screen.getByRole('button', { name: /retry cleanup/i }))
+        await waitFor(() => expect(personalItems()).toEqual(defaults))
+        expect(dhItemSetCalls()).toHaveLength(1)
+        expect(dhItemRemoveCalls()).toHaveLength(0)
+        expect(screen.getByRole('status')).toHaveTextContent('Reset complete')
+      } finally {
+        fetchMock.mockRestore()
+        confirmReset.mockRestore()
+      }
+    },
+  )
+
+  it('commits an authoritative empty Reset default file', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      defaultItemsResponse([]),
+    )
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+      ])
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+
+      await waitFor(() => expect(personalItems()).toEqual([]))
+      expect(document.body.textContent).toContain('No bookmarks yet')
+      expect(document.body.textContent).not.toContain('Personal remains')
+      expect(screen.queryByRole('button', { name: 'Favorites' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'About' })).toBeNull()
+      expect(dhItemSetCalls()).toHaveLength(1)
+      expect(dhItemSetCalls()[0][0]).toEqual({ dh_items: [] })
+      expect(dhItemRemoveCalls()).toHaveLength(0)
     } finally {
       fetchMock.mockRestore()
       confirmReset.mockRestore()
@@ -4453,16 +4859,23 @@ describe('Options prompt health and inspected sparse writes', () => {
   })
 
   it('keeps a post-reset instruction edit when cleanup finishes late', async () => {
-    const cleanup = deferNextStorageRemove('dh_items')
     const resetUpdate = deferNextResponse('update_config')
     const editUpdate = deferNextResponse('update_config')
     const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    seedStorage({
+      dh_items: [{ type: 'link', label: 'Before reset' }],
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ items: [] }),
+    } as Response)
     await hydrateOptions({
       root_path: '',
       _user_instructions_raw: 'before-reset',
       prompt_source_status: { status: 'ok' },
       extension_preferences: { use_workspace_only: false },
     })
+    const cleanup = deferNextStorageSet('dh_items')
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     try {
       fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
@@ -4497,7 +4910,11 @@ describe('Options prompt health and inspected sparse writes', () => {
       expect(updateCalls.at(-1).payload.payload.user_instructions).toBe(
         'after-reset',
       )
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Reset cleanup complete',
+      )
     } finally {
+      fetchMock.mockRestore()
       confirmSpy.mockRestore()
     }
   })
