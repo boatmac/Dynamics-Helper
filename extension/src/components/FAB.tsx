@@ -537,7 +537,20 @@ const FAB: React.FC = () => {
     const [lastDuration, setLastDuration] = useState<string | null>(null);
 
     // Menu Logic
-    const { currentItems, canGoBack, navigateTo, navigateBack } = useMenuLogic();
+    const {
+        currentItems,
+        canGoBack,
+        navigateTo,
+        navigateBack,
+        bookmarkLoadIssue,
+    } = useMenuLogic();
+    const bookmarkLoadWarning = bookmarkLoadIssue === 'bookmark_storage_read_failed'
+        ? t('bookmarkStorageReadFailed')
+        : bookmarkLoadIssue === 'bookmark_storage_invalid'
+            ? t('bookmarkStorageInvalid')
+            : bookmarkLoadIssue === 'bookmark_defaults_unreadable'
+                ? t('bookmarkDefaultsUnreadable')
+                : '';
 
     // Helper to check if text is already a formatted template
     const isFormattedTemplate = (text: string) => {
@@ -1248,6 +1261,20 @@ const FAB: React.FC = () => {
 
                     {/* Menu Items */}
                     <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                        {bookmarkLoadWarning && (
+                            <div
+                                role="alert"
+                                style={{
+                                    padding: '10px 12px',
+                                    color: '#92400E',
+                                    backgroundColor: '#FFFBEB',
+                                    borderBottom: '1px solid #FDE68A',
+                                    fontSize: '12px',
+                                }}
+                            >
+                                {bookmarkLoadWarning}
+                            </div>
+                        )}
                         {/* Update Banner */}
                         {updateAvailable && (
                             <button

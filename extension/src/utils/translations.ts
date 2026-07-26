@@ -301,6 +301,18 @@ export const translations: TranslationDictionary = {
         en: "Bookmark changes are not saved. Make another bookmark change to retry.",
         zh: "书签更改尚未保存。请再次更改书签以重试。",
     },
+    bookmarkStorageReadFailed: {
+        en: "Bookmarks could not be read. Your saved data was not changed; retry.",
+        zh: "无法读取书签。已保存的数据未被更改；请重试。",
+    },
+    bookmarkStorageInvalid: {
+        en: "Saved bookmarks are invalid. Import a valid backup or Reset to repair them.",
+        zh: "已保存的书签无效。请导入有效备份或重置以修复。",
+    },
+    bookmarkDefaultsUnreadable: {
+        en: "Default bookmarks could not be loaded. Repair or reinstall the extension, then retry.",
+        zh: "无法加载默认书签。请修复或重新安装扩展，然后重试。",
+    },
     importSuccess: { en: "Imported successfully!", zh: "导入成功！" },
     availableForUpdate: { en: "available for update", zh: "可更新" },
     checkFailed: { en: "Check failed", zh: "检查失败" },

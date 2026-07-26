@@ -4,6 +4,7 @@ import type {
     TeamManifest,
     TeamSyncIdentity,
 } from '../utils/teamCatalog'
+import { parseOwnBookmarkItems } from '../utils/bookmarkItems'
 
 interface ManifestInitialState {
     etag?: string
@@ -121,6 +122,23 @@ export function toSelectedTeamSyncResponse(
     result: SyncResult,
     requestGeneration?: number,
 ): any {
+    const canExposeItems = result.status === 'committed'
+        || result.status === 'unchanged'
+    const parsedItems = canExposeItems
+        ? parseOwnBookmarkItems(result, 'items')
+        : null
+    if (canExposeItems && !parsedItems) {
+        return {
+            status: 'error',
+            error: 'Bookmark schema validation failed',
+            errorKind: 'parse',
+            data: {
+                syncStatus: 'failed',
+                identity: result.identity,
+                ...(requestGeneration === undefined ? {} : { requestGeneration }),
+            },
+        }
+    }
     const data = {
         syncStatus: result.status,
         identity: result.identity,
@@ -130,7 +148,7 @@ export function toSelectedTeamSyncResponse(
                 || result.status === 'stale'
                 || result.status === 'failed'
                 ? {}
-                : { items: result.items }
+                : { items: parsedItems! }
         ),
         ...(result.status !== 'failed' && result.syncedAt
             ? { syncedAt: result.syncedAt }

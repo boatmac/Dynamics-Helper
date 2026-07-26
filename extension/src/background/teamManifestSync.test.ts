@@ -315,7 +315,7 @@ describe('selected-team sync response boundary', () => {
 
   it('does not expose stale items to Service Worker callers', () => {
     expect(toSelectedTeamSyncResponse(
-      { status: 'stale', identity, items: [{ label: 'STALE ITEM' }] },
+      { status: 'stale', identity, items: [{ type: 'link', label: 'STALE ITEM' }] },
     )).toEqual({
       status: 'success',
       data: { syncStatus: 'stale', identity },
@@ -326,7 +326,7 @@ describe('selected-team sync response boundary', () => {
     expect(toSelectedTeamSyncResponse({
       status,
       identity,
-      items: [{ label: 'MUST NOT ESCAPE' }],
+      items: [{ type: 'link', label: 'MUST NOT ESCAPE' }],
     })).toEqual({
       status: 'success',
       data: { syncStatus: status, identity },
@@ -334,7 +334,7 @@ describe('selected-team sync response boundary', () => {
   })
 
   it.each(['committed', 'unchanged'] as const)('preserves valid %s status and items', status => {
-    const items = [{ label: 'Current item' }]
+    const items = [{ type: 'link' as const, label: 'Current item' }]
     expect(toSelectedTeamSyncResponse(
       { status, identity, items, syncedAt: '2026-07-17T00:00:00.000Z' },
     )).toEqual({
@@ -348,11 +348,58 @@ describe('selected-team sync response boundary', () => {
     })
   })
 
+  it.each([
+    ['malformed', {
+      status: 'committed' as const,
+      identity,
+      items: [{ type: 'link', label: 7 }],
+    }],
+    ['accessor', (() => {
+      const getter = vi.fn(() => [{ type: 'link', label: 'MUST NOT ESCAPE' }])
+      const result: Record<string, unknown> = {
+        status: 'unchanged',
+        identity,
+      }
+      Object.defineProperty(result, 'items', {
+        enumerable: true,
+        get: getter,
+      })
+      return Object.assign(result, { getter })
+    })()],
+    ['revoked', (() => {
+      const items = Proxy.revocable([{
+        type: 'link' as const,
+        label: 'MUST NOT ESCAPE',
+      }], {})
+      const result = {
+        status: 'committed' as const,
+        identity,
+        items: items.proxy,
+      }
+      items.revoke()
+      return result
+    })()],
+  ])('rejects %s SyncResult items at the Worker response seam', (_name, result) => {
+    expect(() => toSelectedTeamSyncResponse(result as any, 17)).not.toThrow()
+    expect(toSelectedTeamSyncResponse(result as any, 17)).toEqual({
+      status: 'error',
+      error: 'Bookmark schema validation failed',
+      errorKind: 'parse',
+      data: {
+        syncStatus: 'failed',
+        identity,
+        requestGeneration: 17,
+      },
+    })
+    const getter = (result as { getter?: ReturnType<typeof vi.fn> }).getter
+    if (getter) expect(getter).not.toHaveBeenCalled()
+  })
+
   it('preserves failed status and captured identity', () => {
     expect(toSelectedTeamSyncResponse({
       status: 'failed',
       identity,
-      items: [{ label: 'Cached item' }],
+      items: [{ type: 'link', label: 'Cached item' }],
       failure: { kind: 'auth', message: 'safe failure' },
       failureStage: 'bookmarks',
       syncedAt: 'MUST NOT ESCAPE',

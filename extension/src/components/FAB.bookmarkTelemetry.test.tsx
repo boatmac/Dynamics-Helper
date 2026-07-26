@@ -9,6 +9,11 @@ const telemetry = vi.hoisted(() => ({
   trackEvent: vi.fn(),
   trackException: vi.fn(),
 }))
+const menuLogic = vi.hoisted(() => ({
+  bookmarkLoadIssue: null as null | 'bookmark_storage_read_failed'
+    | 'bookmark_storage_invalid'
+    | 'bookmark_defaults_unreadable',
+}))
 
 vi.mock('../utils/telemetry', () => ({
   ...telemetry,
@@ -62,6 +67,7 @@ vi.mock('./MenuLogic', () => ({
     canGoBack: false,
     navigateTo: vi.fn(),
     navigateBack: vi.fn(),
+    bookmarkLoadIssue: menuLogic.bookmarkLoadIssue,
   }),
   resolveDynamicUrl: (value: string) => value,
 }))
@@ -73,6 +79,7 @@ describe('FAB bookmark telemetry', () => {
     resetChromeMock()
     installChromeMock()
     telemetry.trackEvent.mockClear()
+    menuLogic.bookmarkLoadIssue = null
   })
 
   it('opens the full signed URL but omits it and thrown URL text from telemetry/logs', async () => {
@@ -107,5 +114,23 @@ describe('FAB bookmark telemetry', () => {
     })
     expect(observable).not.toContain(SECRET)
     expect(observable).not.toContain(SIGNED_URL)
+  })
+
+  it.each([
+    ['bookmark_storage_read_failed', 'Bookmarks could not be read. Your saved data was not changed; retry.'],
+    ['bookmark_storage_invalid', 'Saved bookmarks are invalid. Import a valid backup or Reset to repair them.'],
+    ['bookmark_defaults_unreadable', 'Default bookmarks could not be loaded. Repair or reinstall the extension, then retry.'],
+  ] as const)('renders a safe localized alert for %s inside the opened menu', async (issue, message) => {
+    menuLogic.bookmarkLoadIssue = issue
+    render(
+      <PrefsLanguageProvider language="en">
+        <FAB />
+      </PrefsLanguageProvider>,
+    )
+
+    expect(screen.queryByRole('alert')).toBeNull()
+    fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(message)
   })
 })

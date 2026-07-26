@@ -10,6 +10,7 @@ import {
   writeTeamManifestForUrl,
 } from './teamCatalog'
 import {
+  chromeMockSpies,
   deferNextStorageSet,
   deferNextStorageGet,
   deferNextStorageRemove,
@@ -18,6 +19,7 @@ import {
   resetChromeMock,
   seedStorage,
 } from '../test/chromeMock'
+import type { MenuItem } from './bookmarkItems'
 
 const SECRET_URL =
   'https://catalog.example/manifest.json?sv=2026-01-01&sig=TOP-SECRET-SAS'
@@ -180,6 +182,18 @@ describe('team catalog sync preference commit gate', () => {
   const CACHED_ITEMS = [{ type: 'link', label: 'Cached', source: 'team' }]
   const CHANGED_ITEMS = [{ type: 'link', label: 'Changed', url: 'https://safe.example' }]
 
+  function itemChain(levels: number): MenuItem[] {
+    let current: MenuItem = { type: 'link', label: `Level ${levels}` }
+    for (let level = levels - 1; level >= 1; level -= 1) {
+      current = {
+        type: 'folder',
+        label: `Level ${level}`,
+        children: [current],
+      }
+    }
+    return [current]
+  }
+
   function response(status: number, body?: unknown, etag = '') {
     return {
       status,
@@ -190,15 +204,17 @@ describe('team catalog sync preference commit gate', () => {
     }
   }
 
-  function seedSelectedTeam() {
-    seedStorage({
+  function seedSelectedTeam(
+    cachedItems: unknown = CACHED_ITEMS,
+    includeItems = true,
+  ) {
+    const state: Record<string, unknown> = {
       dh_prefs: {
         teamCatalogEnabled: true,
         teamManifestUrl: SECRET_URL,
         team: 'team-a',
       },
       dh_team: 'team-a',
-      dh_team_items: CACHED_ITEMS,
       dh_team_etag: 'bookmark-old',
       dh_team_synced: '2026-01-01T00:00:00.000Z',
       dh_team_manifest_etag: 'manifest-old',
@@ -207,8 +223,46 @@ describe('team catalog sync preference commit gate', () => {
         version: 1,
         teams: [{ id: 'team-a', label: 'Team A', url: BOOKMARK_URL }],
       },
-    })
+    }
+    if (includeItems) state.dh_team_items = cachedItems
+    seedStorage(state)
   }
+
+  async function storedTeamItemsAre(expected: unknown): Promise<boolean> {
+    return new Promise(resolve => chrome.storage.local.get('dh_team_items', value => {
+      const descriptor = Object.getOwnPropertyDescriptor(value, 'dh_team_items')
+      resolve(Boolean(
+        descriptor
+        && Object.hasOwn(descriptor, 'value')
+        && descriptor.value === expected,
+      ))
+    }))
+  }
+
+  it.each([
+    ['schema', { items: [{ type: 'link', label: 7 }] }],
+    ['cycle', (() => {
+      const item: Record<string, unknown> = {
+        type: 'folder',
+        label: 'Cycle',
+        children: [],
+      }
+      ;(item.children as unknown[]).push(item)
+      return { items: [item] }
+    })()],
+    ['depth 65', { items: itemChain(65) }],
+  ])('rejects malformed downloaded bookmark %s data and preserves cache', async (_name, body) => {
+    seedSelectedTeam()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(200, body, 'new-etag')))
+
+    const result = await fetchTeamBookmarks(BOOKMARK_URL)
+
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { kind: 'parse', message: 'Bookmark schema validation failed' },
+    })
+    expect(getStorageSnapshot().dh_team_items).toEqual(CACHED_ITEMS)
+  })
 
   async function runStaleBookmarkFetch(
     nextPrefs: Record<string, unknown>,
@@ -464,6 +518,264 @@ describe('team catalog sync preference commit gate', () => {
       dh_team_etag: 'bookmark-old',
       dh_team_synced: expect.not.stringMatching(/^2026-01-01/),
     })
+    const teamWrites = chromeMockSpies.storageSet.mock.calls.map(call => call[0])
+    expect(teamWrites).toHaveLength(1)
+    expect(Object.keys(teamWrites[0] as object)).toEqual(['dh_team_synced'])
+  })
+
+  it('returns a parsed plain cache snapshot and updates only time on bookmark 304', async () => {
+    const cached = [{
+      type: 'link',
+      label: 'Cached',
+      source: 'team',
+      future: { values: ['preserved'] },
+    }]
+    seedSelectedTeam(cached)
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(304)))
+
+    const result = await syncTeamBookmarks(SECRET_URL, 'team-a')
+
+    expect(result).toMatchObject({ status: 'unchanged', items: cached })
+    expect(result.items).not.toBe(cached)
+    expect(result.items[0]).not.toBe(cached[0])
+    expect(chromeMockSpies.storageSet.mock.calls.map(call => call[0])).toEqual([
+      { dh_team_synced: expect.any(String) },
+    ])
+  })
+
+  it('keeps an own empty team cache empty and updates only time on bookmark 304', async () => {
+    seedSelectedTeam([])
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(304)))
+
+    const result = await syncTeamBookmarks(SECRET_URL, 'team-a')
+
+    expect(result).toMatchObject({ status: 'unchanged', items: [] })
+    expect(getStorageSnapshot().dh_team_items).toEqual([])
+    expect(chromeMockSpies.storageSet.mock.calls.map(call => call[0])).toEqual([
+      { dh_team_synced: expect.any(String) },
+    ])
+  })
+
+  it('rejects an absent cached bookmark key on 304 without advancing time', async () => {
+    seedSelectedTeam(undefined, false)
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(304)))
+
+    const result = await syncTeamBookmarks(SECRET_URL, 'team-a')
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      items: [],
+      failure: {
+        kind: 'parse',
+        message: 'Cached bookmark schema validation failed',
+      },
+      failureStage: 'bookmarks',
+    })
+    expect(result).not.toHaveProperty('syncedAt')
+    expect(getStorageSnapshot().dh_team_synced).toBe('2026-01-01T00:00:00.000Z')
+    expect(chromeMockSpies.storageSet.mock.calls).toHaveLength(0)
+  })
+
+  it.each([
+    ['malformed', () => [{ type: 'link', label: 7 }]],
+    ['accessor', () => {
+      const getter = vi.fn(() => 'MUST NOT RUN')
+      const item: Record<string, unknown> = { type: 'link' }
+      Object.defineProperty(item, 'label', { enumerable: true, get: getter })
+      return Object.assign([item], { getter })
+    }],
+    ['cyclic', () => {
+      const item: Record<string, unknown> = {
+        type: 'folder', label: 'Cycle', children: [],
+      }
+      ;(item.children as unknown[]).push(item)
+      return [item]
+    }],
+    ['depth-65', () => itemChain(65)],
+    ['revoked', () => {
+      const value = Proxy.revocable([{ type: 'link', label: 'Revoked' }], {})
+      value.revoke()
+      return value.proxy
+    }],
+  ])('rejects malformed cached bookmarks on 304: %s', async (_name, makeCache) => {
+    const rawCache = makeCache()
+    seedSelectedTeam(rawCache)
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(304)))
+
+    const result = await syncTeamBookmarks(SECRET_URL, 'team-a')
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      items: [],
+      failure: {
+        kind: 'parse',
+        message: 'Cached bookmark schema validation failed',
+      },
+      failureStage: 'bookmarks',
+    })
+    expect(result).not.toHaveProperty('syncedAt')
+    expect(await storedTeamItemsAre(rawCache)).toBe(true)
+    expect(chromeMockSpies.storageSet.mock.calls).toHaveLength(0)
+    if (_name === 'accessor') {
+      const getter = (rawCache as unknown as {
+        getter: ReturnType<typeof vi.fn>
+      }).getter
+      expect(getter).not.toHaveBeenCalled()
+    }
+  })
+
+  it('contains a revoked outer cache result before any fetch or member read', async () => {
+    seedSelectedTeam([{ type: 'link', label: 7 }])
+    const originalGet = chromeMockSpies.storageGet.getMockImplementation()!
+    const outer = Proxy.revocable({
+      dh_team: 'team-a',
+      dh_team_items: CACHED_ITEMS,
+      dh_team_manifest_url: SECRET_URL,
+      dh_team_etag: 'bookmark-old',
+      dh_team_manifest_etag: 'manifest-old',
+    }, {})
+    outer.revoke()
+    chromeMockSpies.storageGet.mockImplementationOnce((_keys, callback) => {
+      queueMicrotask(() => (callback as (value: unknown) => void)(outer.proxy))
+      return undefined
+    })
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    try {
+      await expect(syncTeamBookmarks(SECRET_URL, 'team-a')).resolves.toMatchObject({
+        status: 'failed',
+        items: [],
+        failure: { kind: 'parse' },
+      })
+      expect(fetch).not.toHaveBeenCalled()
+      expect(chromeMockSpies.storageSet.mock.calls).toHaveLength(0)
+    } finally {
+      chromeMockSpies.storageGet.mockImplementation(originalGet)
+    }
+  })
+
+  it.each([
+    ['manifest', [response(403)]],
+    ['bookmarks', [response(304), response(403)]],
+  ])('keeps %s network failure primary but never returns malformed cache', async (
+    _name,
+    responses,
+  ) => {
+    seedSelectedTeam([{ type: 'link', label: 7 }])
+    const fetch = vi.fn()
+    responses.forEach(value => fetch.mockResolvedValueOnce(value))
+    vi.stubGlobal('fetch', fetch)
+
+    const result = await syncTeamBookmarks(SECRET_URL, 'team-a')
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      items: [],
+      failure: { kind: 'auth', httpStatus: 403 },
+    })
+  })
+
+  it('reparses changed downloaded items before persisting and returning them', async () => {
+    const downloaded = [{
+      type: 'link',
+      label: 'Changed',
+      source: 'personal',
+      future: { nested: ['preserved'] },
+    }]
+    seedSelectedTeam()
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(response(304))
+      .mockResolvedValueOnce(response(200, { items: downloaded }, 'bookmark-new')))
+
+    const result = await syncTeamBookmarks(SECRET_URL, 'team-a')
+
+    expect(result).toMatchObject({
+      status: 'committed',
+      items: [{
+        ...downloaded[0],
+        source: 'team',
+      }],
+    })
+    expect(result.items).not.toBe(downloaded)
+    expect(getStorageSnapshot().dh_team_items).toEqual(result.items)
+    expect(chromeMockSpies.storageSet.mock.calls.some(call =>
+      Object.hasOwn(call[0] as object, 'dh_team_items'))).toBe(true)
+  })
+
+  it.each([
+    ['malformed items', {
+      ok: true,
+      changed: true,
+      items: [{ type: 'link', label: 7 }],
+      etag: 'forged',
+    }],
+    ['accessor items', (() => {
+      const getter = vi.fn(() => [{ type: 'link', label: 'MUST NOT RUN' }])
+      const value: Record<string, unknown> = {
+        ok: true,
+        changed: true,
+        etag: 'forged',
+      }
+      Object.defineProperty(value, 'items', { enumerable: true, get: getter })
+      return Object.assign(value, { getter })
+    })()],
+    ['revoked items', (() => {
+      const items = Proxy.revocable([
+        ...CHANGED_ITEMS,
+      ], {})
+      const value = {
+        ok: true,
+        changed: true,
+        items: items.proxy,
+        etag: 'forged',
+      }
+      items.revoke()
+      return value
+    })()],
+  ])('rejects a typed-cast fetchTeamBookmarks seam with %s', async (_name, forged) => {
+    seedSelectedTeam()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response(304)))
+    const generation = beginTeamSyncGeneration()
+    const fetchBookmarks = vi.fn().mockResolvedValue(forged)
+    const syncWithSeam = syncTeamBookmarks as unknown as (
+      identity: { enabled: boolean; manifestUrl: string; teamId: string },
+      generation: number,
+      captured: undefined,
+      seam: typeof fetchTeamBookmarks,
+    ) => ReturnType<typeof syncTeamBookmarks>
+
+    const result = await syncWithSeam({
+      enabled: true,
+      manifestUrl: SECRET_URL,
+      teamId: 'team-a',
+    }, generation, undefined, fetchBookmarks as typeof fetchTeamBookmarks)
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      items: [],
+      failure: {
+        kind: 'parse',
+        message: 'Cached bookmark schema validation failed',
+      },
+      failureStage: 'bookmarks',
+    })
+    expect(result).not.toHaveProperty('syncedAt')
+    expect(chromeMockSpies.storageSet.mock.calls.some(call => {
+      const value = call[0] as Record<string, unknown>
+      return Object.hasOwn(value, 'dh_team_items')
+        || Object.hasOwn(value, 'dh_team_etag')
+        || Object.hasOwn(value, 'dh_team_synced')
+    })).toBe(false)
+    const getter = (forged as { getter?: ReturnType<typeof vi.fn> }).getter
+    if (getter) expect(getter).not.toHaveBeenCalled()
   })
 
   it('rejects cached manifest, ETag, and items stamped for another URL', async () => {

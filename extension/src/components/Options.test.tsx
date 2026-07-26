@@ -273,6 +273,28 @@ const hydrateBookmarkOptions = async (items: Array<Record<string, unknown>>) => 
 
 const personalItems = () => getStorageSnapshot().dh_items as Array<any> | undefined
 
+const dhItemSetCalls = () => chromeMockSpies.storageSet.mock.calls.filter(
+  call => Object.hasOwn(call[0] as object, 'dh_items'),
+)
+
+const dhItemRemoveCalls = () => chromeMockSpies.storageRemove.mock.calls.filter(call => {
+  const keys = call[0]
+  return keys === 'dh_items' || (Array.isArray(keys) && keys.includes('dh_items'))
+})
+
+const installFileReaderText = (text: string) => {
+  class MockFileReader {
+    onload: ((event: ProgressEvent<FileReader>) => void) | null = null
+
+    readAsText() {
+      queueMicrotask(() => this.onload?.({
+        target: { result: text },
+      } as unknown as ProgressEvent<FileReader>))
+    }
+  }
+  vi.stubGlobal('FileReader', MockFileReader)
+}
+
 const resetResponseFor = (
   message: any,
   syncStatus: 'committed' | 'stale' | 'failed',
@@ -800,6 +822,7 @@ describe('Options selected-team refresh generation', () => {
 
   async function hydrateTeamOptions() {
     seedStorage({
+      dh_items: [],
       dh_prefs: {
         ...DEFAULT_PREFS,
         teamCatalogEnabled: true,
@@ -2575,6 +2598,7 @@ describe('Options manifest blur retry state', () => {
     resetChromeMock()
     installChromeMock()
     dndMock.dropSpecs = []
+    seedStorage({ dh_items: [] })
   })
 
   const renderManifestOptions = async (team?: string) => {
@@ -2933,6 +2957,7 @@ describe('Options prompt health repair refresh', () => {
   beforeEach(() => {
     resetChromeMock()
     installChromeMock()
+    seedStorage({ dh_items: [] })
   })
 
   it('clears unreadable DH health after a successful instruction replacement', async () => {
@@ -3523,6 +3548,7 @@ describe('Options prompt health and inspected sparse writes', () => {
   beforeEach(() => {
     resetChromeMock()
     installChromeMock()
+    seedStorage({ dh_items: [] })
   })
 
   it('retains mirrored text when modern Host reports unreadable DH file', async () => {
@@ -4797,6 +4823,315 @@ describe('Options prompt health and inspected sparse writes', () => {
       expect(output).not.toContain('SECRET-CONFIG')
     } finally {
       consoleWarn.mockRestore()
+    }
+  })
+})
+
+describe('Options bookmark loading and import boundaries', () => {
+  beforeEach(() => {
+    resetChromeMock()
+    installChromeMock()
+  })
+
+  const hostConfig = {
+    root_path: '',
+    prompt_source_status: { status: 'ok' },
+    extension_preferences: { use_workspace_only: false },
+  }
+
+  it('preserves bookmarks when storage read fails', async () => {
+    const saved = [{ type: 'link', label: 'SAVED', url: 'https://saved.test' }]
+    seedStorage({ dh_items: saved })
+    const failedRead = deferNextStorageGet('dh_items')
+    const getConfig = deferNextResponse('get_config')
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+
+    render(<Options />)
+    await act(async () => getConfig.resolve({ status: 'success', data: hostConfig }))
+    await openBookmarksSection()
+    await act(async () => failedRead.reject(new Error('storage unavailable')))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
+      getTranslation('bookmarkStorageReadFailed', 'en'),
+    ))
+    expect(getStorageSnapshot().dh_items).toEqual(saved)
+    expect(screen.queryByRole('button', { name: 'Favorites' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'About' })).toBeNull()
+    expect(dhItemSetCalls()).toHaveLength(0)
+    expect(dhItemRemoveCalls()).toHaveLength(0)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not replace present malformed bookmarks with valid defaults', async () => {
+    const malformed = [{ type: 'link', label: 7 }]
+    seedStorage({ dh_items: malformed })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify([{
+        type: 'link', label: 'MUST NOT BECOME DEFAULT',
+      }]),
+    } as Response)
+    try {
+      await hydrateOptions(hostConfig)
+      await openBookmarksSection()
+
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
+        getTranslation('bookmarkStorageInvalid', 'en'),
+      ))
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(getStorageSnapshot().dh_items).toEqual(malformed)
+      expect(dhItemSetCalls()).toHaveLength(0)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
+  it('loads collapsed defaults once and persists them when dh_items is absent', async () => {
+    const defaults = [{
+      type: 'folder',
+      label: 'DEFAULT FOLDER',
+      children: [{ type: 'link', label: 'DEFAULT CHILD' }],
+    }]
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ items: defaults }),
+    } as Response)
+    try {
+      await hydrateOptions(hostConfig)
+      await openBookmarksSection()
+      await waitFor(() => expect(document.body.textContent).toContain('DEFAULT FOLDER'))
+
+      expect(document.body.textContent).not.toContain('DEFAULT CHILD')
+      expect(getStorageSnapshot().dh_items).toEqual([{
+        ...defaults[0],
+        collapsed: true,
+      }])
+      expect(dhItemSetCalls()).toHaveLength(1)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
+  it.each([
+    ['fetch', () => Promise.reject(new Error('offline'))],
+    ['HTML', () => Promise.resolve({
+      ok: true,
+      text: async () => '<html>not bookmarks</html>',
+    } as Response)],
+    ['JSON', () => Promise.resolve({
+      ok: true,
+      text: async () => '{not json',
+    } as Response)],
+    ['schema', () => Promise.resolve({
+      ok: true,
+      text: async () => JSON.stringify({ items: [{ type: 'link', label: 7 }] }),
+    } as Response)],
+  ])('does not create bookmarks when absent defaults have a %s failure', async (_name, load) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(load)
+    try {
+      await hydrateOptions(hostConfig)
+      await openBookmarksSection()
+
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(
+        getTranslation('bookmarkDefaultsUnreadable', 'en'),
+      ))
+      expect(getStorageSnapshot()).not.toHaveProperty('dh_items')
+      expect(dhItemSetCalls()).toHaveLength(0)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
+  it('ignores absent defaults that resolve after a bookmark edit', async () => {
+    let resolveDefaults!: (response: Response) => void
+    const pendingDefaults = new Promise<Response>(resolve => {
+      resolveDefaults = resolve
+    })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockReturnValue(pendingDefaults)
+    const getConfig = deferNextResponse('get_config')
+    render(<Options />)
+    await act(async () => getConfig.resolve({ status: 'success', data: hostConfig }))
+    await openBookmarksSection()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+
+    fireEvent.click(screen.getByRole('button', { name: /Add Root Item/i }))
+    await waitFor(() => expect(getStorageSnapshot().dh_items).toEqual([
+      expect.objectContaining({ label: 'New Item' }),
+    ]))
+    await act(async () => resolveDefaults({
+      ok: true,
+      text: async () => JSON.stringify([{
+        type: 'link', label: 'STALE DEFAULT',
+      }]),
+    } as Response))
+
+    await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+    expect(getStorageSnapshot().dh_items).toEqual([
+      expect.objectContaining({ label: 'New Item' }),
+    ])
+    expect(document.body.textContent).toContain('New Item')
+    expect(document.body.textContent).not.toContain('STALE DEFAULT')
+    expect(dhItemSetCalls().some(call => JSON.stringify(call[0]).includes('STALE DEFAULT')))
+      .toBe(false)
+    fetchMock.mockRestore()
+  })
+
+  it('keeps an explicitly saved empty bookmark menu empty', async () => {
+    seedStorage({ dh_items: [] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    try {
+      await hydrateOptions(hostConfig)
+      await openBookmarksSection()
+      await waitFor(() => expect(document.body.textContent).toContain('No bookmarks yet'))
+
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(getStorageSnapshot().dh_items).toEqual([])
+      expect(screen.queryByRole('button', { name: 'Favorites' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'About' })).toBeNull()
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
+  it.each(['malformed', 'accessor'] as const)(
+    'keeps current team UI for %s dh_team_items without exposing raw data',
+    async kind => {
+      const manifestUrl = 'https://example.test/manifest.json'
+      const prefs = {
+        ...DEFAULT_PREFS,
+        teamCatalogEnabled: true,
+        teamManifestUrl: manifestUrl,
+        team: 'team-a',
+      }
+      seedStorage({
+        dh_items: [],
+        dh_prefs: prefs,
+        dh_team_manifest_url: manifestUrl,
+        dh_team: 'team-a',
+        dh_team_items: [{ type: 'link', label: 'CURRENT TEAM ITEM', source: 'team' }],
+        dh_team_synced: '2026-07-17T00:00:00.000Z',
+        dh_team_manifest: {
+          version: 1,
+          teams: [{ id: 'team-a', label: 'Team A', url: 'https://example.test/a.json' }],
+        },
+      })
+      await hydrateOptions({
+        ...hostConfig,
+        extension_preferences: {
+          team_catalog_enabled: true,
+          team_manifest_url: manifestUrl,
+          team: 'team-a',
+          use_workspace_only: false,
+        },
+      })
+      await openBookmarksSection()
+      await waitFor(() => expect(document.body.textContent).toContain('CURRENT TEAM ITEM'))
+
+      const rawSecret = 'RAW TEAM SECRET'
+      const getter = vi.fn(() => [{ type: 'link', label: rawSecret }])
+      const result: Record<string, unknown> = {
+        dh_team_manifest_url: manifestUrl,
+        dh_team: 'team-a',
+        dh_team_synced: '2026-07-18T00:00:00.000Z',
+        dh_team_manifest: {
+          version: 1,
+          teams: [{ id: 'team-a', label: 'Team A', url: 'https://example.test/a.json' }],
+        },
+      }
+      if (kind === 'accessor') {
+        Object.defineProperty(result, 'dh_team_items', {
+          enumerable: true,
+          get: getter,
+        })
+      } else {
+        result.dh_team_items = [{ type: 'link', label: 7 }]
+      }
+      const originalGet = chromeMockSpies.storageGet.getMockImplementation()!
+      chromeMockSpies.storageGet.mockImplementationOnce((_keys, callback) => {
+        queueMicrotask(() => (callback as (value: unknown) => void)(result))
+        return undefined
+      })
+      const logs = [
+        vi.spyOn(console, 'log').mockImplementation(() => undefined),
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined),
+        vi.spyOn(console, 'error').mockImplementation(() => undefined),
+      ]
+      try {
+        act(() => emitStorageChanges({
+          dh_team_synced: {
+            oldValue: '2026-07-17T00:00:00.000Z',
+            newValue: '2026-07-18T00:00:00.000Z',
+          },
+        }))
+        await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+
+        expect(document.body.textContent).toContain('CURRENT TEAM ITEM')
+        expect(document.body.textContent).not.toContain(rawSecret)
+        expect(getter).not.toHaveBeenCalled()
+        expect(JSON.stringify(logs.flatMap(log => log.mock.calls))).not.toContain(rawSecret)
+      } finally {
+        chromeMockSpies.storageGet.mockImplementation(originalGet)
+        logs.forEach(log => log.mockRestore())
+      }
+    },
+  )
+
+  it('imports a wrapped valid snapshot and preserves unknown own data for export', async () => {
+    const initial = [{ type: 'link', label: 'INITIAL' }]
+    seedStorage({ dh_items: initial })
+    const imported = [{
+      type: 'link',
+      label: 'IMPORTED',
+      url: 'https://imported.test',
+      future: { nested: ['preserved'] },
+    }]
+    installFileReaderText(JSON.stringify({ items: imported }))
+    try {
+      await hydrateOptions(hostConfig)
+      await openBookmarksSection()
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      fireEvent.change(input, {
+        target: { files: [new File(['ignored'], 'bookmarks.json')] },
+      })
+
+      await waitFor(() => expect(getStorageSnapshot().dh_items).toEqual(imported))
+      expect(document.body.textContent).toContain('IMPORTED')
+      expect(JSON.stringify(personalItems())).toContain('future')
+      expect(JSON.stringify(personalItems())).toContain('preserved')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('rejects a malformed imported schema without changing UI or storage', async () => {
+    const initial = [{ type: 'link', label: 'INITIAL', url: 'https://initial.test' }]
+    seedStorage({ dh_items: initial })
+    installFileReaderText(JSON.stringify({
+      items: [{ type: 'link', label: 7 }],
+    }))
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
+    try {
+      await hydrateOptions(hostConfig)
+      await openBookmarksSection()
+      const writesBefore = dhItemSetCalls().length
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      fireEvent.change(input, {
+        target: { files: [new File(['ignored'], 'bookmarks.json')] },
+      })
+
+      await waitFor(() => expect(alert).toHaveBeenCalledWith(
+        getTranslation('parseJsonFailed', 'en'),
+      ))
+      expect(getStorageSnapshot().dh_items).toEqual(initial)
+      expect(document.body.textContent).toContain('INITIAL')
+      expect(dhItemSetCalls()).toHaveLength(writesBefore)
+      expect(dhItemRemoveCalls()).toHaveLength(0)
+    } finally {
+      alert.mockRestore()
+      vi.unstubAllGlobals()
     }
   })
 })

@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
+  chromeMockSpies,
   deferNextStorageGet,
   emitStorageChanges,
+  getStorageSnapshot,
   installChromeMock,
   resetChromeMock,
   seedStorage,
@@ -137,6 +139,196 @@ describe('MenuLogic latest team load ownership', () => {
       expect(fetchMock).not.toHaveBeenCalled()
     } finally {
       fetchMock.mockRestore()
+    }
+  })
+
+  it('preserves the accepted menu when a later storage read fails', async () => {
+    seedStorage({ dh_items: [personal] })
+    const hook = renderHook(() => useMenuLogic())
+    await waitFor(() => expect(hook.result.current.currentItems).toEqual([personal]))
+    const failedRead = deferNextStorageGet('dh_items')
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+
+    await act(async () => {
+      emitStorageChanges({
+        dh_items: { oldValue: [personal], newValue: [personal] },
+      })
+      await failedRead.reject(new Error('storage unavailable'))
+    })
+
+    await waitFor(() => expect(hook.result.current.bookmarkLoadIssue)
+      .toBe('bookmark_storage_read_failed'))
+    expect(hook.result.current.currentItems).toEqual([personal])
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('distinguishes malformed saved bookmarks without loading defaults', async () => {
+    seedStorage({ dh_items: [{ type: 'link', label: 7 }] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify([{ type: 'link', label: 'DEFAULT' }]),
+    } as Response)
+    try {
+      const hook = renderHook(() => useMenuLogic())
+      await waitFor(() => expect(hook.result.current.bookmarkLoadIssue)
+        .toBe('bookmark_storage_invalid'))
+      expect(hook.result.current.currentItems).toEqual([])
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(chromeMockSpies.storageSet.mock.calls.some(
+        call => Object.hasOwn(call[0] as object, 'dh_items'),
+      )).toBe(false)
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
+  it('loads, collapses, and persists defaults only when storage is absent', async () => {
+    const defaults = [{
+      type: 'folder' as const,
+      label: 'DEFAULTS',
+      children: [{ type: 'link' as const, label: 'CHILD' }],
+    }]
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ items: defaults }),
+    } as Response)
+    try {
+      const hook = renderHook(() => useMenuLogic())
+      await waitFor(() => expect(hook.result.current.currentItems).toEqual([{
+        ...defaults[0],
+        collapsed: true,
+      }]))
+      expect(hook.result.current.bookmarkLoadIssue).toBeNull()
+      expect(fetchMock).toHaveBeenCalledOnce()
+      expect(getStorageSnapshot().dh_items).toEqual([{
+        ...defaults[0],
+        collapsed: true,
+      }])
+      expect(chromeMockSpies.storageSet.mock.calls.filter(
+        call => Object.hasOwn(call[0] as object, 'dh_items'),
+      )).toHaveLength(1)
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
+  it.each([
+    ['fetch', () => Promise.reject(new Error('offline'))],
+    ['HTML', () => Promise.resolve({
+      ok: true,
+      text: async () => '<html>not bookmarks</html>',
+    } as Response)],
+    ['JSON', () => Promise.resolve({
+      ok: true,
+      text: async () => '{not json',
+    } as Response)],
+    ['schema', () => Promise.resolve({
+      ok: true,
+      text: async () => JSON.stringify({ items: [{ type: 'link', label: 7 }] }),
+    } as Response)],
+  ])('reports unreadable defaults for an absent key with %s failure', async (_name, load) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(load)
+    try {
+      const hook = renderHook(() => useMenuLogic())
+      await waitFor(() => expect(hook.result.current.bookmarkLoadIssue)
+        .toBe('bookmark_defaults_unreadable'))
+      expect(hook.result.current.currentItems).toEqual([])
+      expect(hook.result.current.currentItems.map(item => item.label))
+        .not.toEqual(expect.arrayContaining(['Favorites', 'About']))
+      expect(chromeMockSpies.storageSet.mock.calls.some(
+        call => Object.hasOwn(call[0] as object, 'dh_items'),
+      )).toBe(false)
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
+  it('reports no issue or fallback for an explicitly saved empty menu', async () => {
+    seedStorage({ dh_items: [] })
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    try {
+      const hook = renderHook(() => useMenuLogic())
+      await waitFor(() => expect(hook.result.current.bookmarkLoadIssue).toBeNull())
+      expect(hook.result.current.currentItems).toEqual([])
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
+  it.each([
+    ['malformed items', () => ({
+      dh_prefs: {
+        teamCatalogEnabled: true,
+        teamManifestUrl: manifestUrl,
+        team: 'team-a',
+      },
+      dh_team_manifest_url: manifestUrl,
+      dh_team: 'team-a',
+      dh_team_items: [{ type: 'link', label: 7 }],
+    })],
+    ['accessor items', (getter: ReturnType<typeof vi.fn>) => {
+      const result: Record<string, unknown> = {
+        dh_prefs: {
+          teamCatalogEnabled: true,
+          teamManifestUrl: manifestUrl,
+          team: 'team-a',
+        },
+        dh_team_manifest_url: manifestUrl,
+        dh_team: 'team-a',
+      }
+      Object.defineProperty(result, 'dh_team_items', {
+        enumerable: true,
+        get: getter,
+      })
+      return result
+    }],
+    ['revoked outer result', () => {
+      const result = Proxy.revocable({
+        dh_prefs: {
+          teamCatalogEnabled: true,
+          teamManifestUrl: manifestUrl,
+          team: 'team-a',
+        },
+        dh_team_manifest_url: manifestUrl,
+        dh_team: 'team-a',
+        dh_team_items: [{ type: 'link', label: 'MUST NOT ESCAPE' }],
+      }, {})
+      result.revoke()
+      return result.proxy
+    }],
+  ])('ignores hostile current-team cache data: %s', async (_name, makeResult) => {
+    seedStorage({ dh_items: [personal] })
+    const getter = vi.fn(() => [{ type: 'link', label: 'MUST NOT ESCAPE' }])
+    const originalGet = chromeMockSpies.storageGet.getMockImplementation()!
+    let intercepted = false
+    chromeMockSpies.storageGet.mockImplementation((keys?: unknown, callback?: unknown) => {
+      if (
+        !intercepted
+        && Array.isArray(keys)
+        && keys.includes('dh_team_items')
+        && typeof callback === 'function'
+      ) {
+        intercepted = true
+        queueMicrotask(() => (callback as (value: unknown) => void)(makeResult(getter)))
+        return undefined
+      }
+      return originalGet(keys, callback)
+    })
+    const logs = [
+      vi.spyOn(console, 'log').mockImplementation(() => undefined),
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined),
+      vi.spyOn(console, 'error').mockImplementation(() => undefined),
+    ]
+    try {
+      const hook = renderHook(() => useMenuLogic())
+      await waitFor(() => expect(hook.result.current.currentItems).toEqual([personal]))
+      expect(getter).not.toHaveBeenCalled()
+      expect(JSON.stringify(logs.flatMap(log => log.mock.calls)))
+        .not.toContain('MUST NOT ESCAPE')
+    } finally {
+      chromeMockSpies.storageGet.mockImplementation(originalGet)
+      logs.forEach(log => log.mockRestore())
     }
   })
 })

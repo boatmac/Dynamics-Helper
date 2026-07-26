@@ -10,6 +10,13 @@
 
 // --- Types ---
 
+import {
+    parseBookmarkDocument,
+    parseBookmarkItems,
+    parseOwnBookmarkItems,
+    type MenuItem,
+} from './bookmarkItems';
+
 export interface TeamManifestEntry {
     id: string;
     label: string;
@@ -24,7 +31,7 @@ export interface TeamManifest {
 export interface TeamCatalogFile {
     version: number;
     team: string;
-    items: any[]; // MenuItem[] — kept as `any` to avoid circular dependency
+    items: MenuItem[];
 }
 
 /**
@@ -71,11 +78,13 @@ function warnFetchFailure(stage: 'manifest' | 'bookmarks', failure: FetchFailure
 /**
  * Recursively stamp all items with `source: 'team'`.
  */
-function stampTeamSource(items: any[]): any[] {
+function stampTeamSource(items: MenuItem[]): MenuItem[] {
     return items.map(item => ({
         ...item,
         source: 'team' as const,
-        children: item.children ? stampTeamSource(item.children) : undefined,
+        ...(item.children === undefined
+            ? {}
+            : { children: stampTeamSource(item.children) }),
     }));
 }
 
@@ -163,7 +172,7 @@ export async function fetchManifest(
  *   - `null`                                       — url was empty
  */
 export type TeamBookmarksFetchResult =
-    | { ok: true; changed: true; items: any[]; etag: string }
+    | { ok: true; changed: true; items: MenuItem[]; etag: string }
     | { ok: true; changed: false; etag: string }
     | { ok: false; failure: FetchFailure };
 
@@ -188,7 +197,7 @@ export async function fetchTeamBookmarks(
             return { ok: false, failure };
         }
 
-        let data: any;
+        let data: unknown;
         try {
             data = await res.json();
         } catch {
@@ -197,19 +206,16 @@ export async function fetchTeamBookmarks(
             return { ok: false, failure };
         }
         const etag = res.headers.get('ETag') || res.headers.get('etag') || '';
-        // Accept two shapes:
-        //   - Wrapped: { version, team, items: [...] }  (spec-canonical)
-        //   - Raw array: [...]                         (matches DH's own export
-        //     format - see handleExport in Options.tsx which writes plain
-        //     JSON.stringify(items))
-        // The wrapped form is preferred for new manifests because it carries
-        // a version field for forward compatibility, but team admins frequently
-        // host a DH-exported backup directly. Accept either to keep the user
-        // experience friction-free.
-        const rawItems = Array.isArray(data)
-            ? data
-            : (Array.isArray(data?.items) ? data.items : []);
-        const items = stampTeamSource(rawItems);
+        const parsed = parseBookmarkDocument(data);
+        if (!parsed) {
+            const failure: FetchFailure = {
+                kind: 'parse',
+                message: 'Bookmark schema validation failed',
+            };
+            warnFetchFailure('bookmarks', failure);
+            return { ok: false, failure };
+        }
+        const items = stampTeamSource(parsed);
 
         return { ok: true, changed: true, items, etag };
     } catch {
@@ -243,10 +249,42 @@ export interface TeamSyncIdentity {
 export interface SyncResult {
     status: SyncStatus;
     identity: TeamSyncIdentity;
-    items: any[];
+    items: MenuItem[];
     syncedAt?: string;
     failure?: FetchFailure;
     failureStage?: 'manifest' | 'bookmarks';
+}
+
+type CachedTeamItemsResult =
+    | { kind: 'loaded'; items: MenuItem[] }
+    | { kind: 'absent' }
+    | { kind: 'invalid' };
+
+function parseCachedTeamItems(
+    cache: unknown,
+    teamId: string,
+): CachedTeamItemsResult {
+    try {
+        if (
+            typeof cache !== 'object'
+            || cache === null
+            || Array.isArray(cache)
+        ) return { kind: 'invalid' };
+        const team = Object.getOwnPropertyDescriptor(cache, 'dh_team');
+        if (!team || !Object.hasOwn(team, 'value') || team.value !== teamId) {
+            return { kind: 'absent' };
+        }
+        const itemsDescriptor = Object.getOwnPropertyDescriptor(
+            cache,
+            'dh_team_items',
+        );
+        if (!itemsDescriptor) return { kind: 'absent' };
+        if (!Object.hasOwn(itemsDescriptor, 'value')) return { kind: 'invalid' };
+        const items = parseBookmarkItems(itemsDescriptor.value);
+        return items ? { kind: 'loaded', items } : { kind: 'invalid' };
+    } catch {
+        return { kind: 'invalid' };
+    }
 }
 
 export const TEAM_CACHE_KEYS = [
@@ -314,6 +352,19 @@ function storageFailureResult(
             message: 'Team catalog storage mutation failed',
         },
         failureStage,
+    };
+}
+
+function bookmarkParseFailureResult(identity: TeamSyncIdentity): SyncResult {
+    return {
+        status: 'failed',
+        identity,
+        items: [],
+        failure: {
+            kind: 'parse',
+            message: 'Cached bookmark schema validation failed',
+        },
+        failureStage: 'bookmarks',
     };
 }
 
@@ -413,6 +464,7 @@ export async function syncTeamBookmarks(
     identityOrUrl: TeamSyncIdentity | string,
     teamIdOrGeneration?: string | number,
     capturedGeneration?: number,
+    fetchBookmarks: typeof fetchTeamBookmarks = fetchTeamBookmarks,
 ): Promise<SyncResult> {
     const identity: TeamSyncIdentity = typeof identityOrUrl === 'string'
         ? {
@@ -426,7 +478,7 @@ export async function syncTeamBookmarks(
     const { manifestUrl, teamId } = identity;
     if (!manifestUrl || !teamId) return { status: 'skipped', identity, items: [] };
 
-    const cache = await new Promise<any>((resolve) => {
+    const cacheRead = await new Promise<{ value: unknown }>((resolve) => {
         chrome.storage.local.get(
             [
                 'dh_team_items',
@@ -435,28 +487,43 @@ export async function syncTeamBookmarks(
                 'dh_team_manifest_url',
                 'dh_team',
             ],
-            resolve,
+            value => resolve({ value }),
         );
     });
+    const cache = cacheRead.value;
+    const cachedItems = parseCachedTeamItems(cache, teamId);
+    const safeCachedItems = cachedItems.kind === 'loaded' ? cachedItems.items : [];
     if (!teamSyncGenerationIsCurrent(generation)) {
         return { status: 'stale', identity, items: [] };
     }
     if (!await currentTeamIdentityMatches(identity, generation)) {
         return { status: 'stale', identity, items: [] };
     }
-    const cacheMatchesUrl = cache.dh_team_manifest_url === manifestUrl;
-
-    const cachedItemsForTeam = (): any[] =>
-        cache.dh_team === teamId && Array.isArray(cache.dh_team_items)
-            ? cache.dh_team_items
-            : [];
+    let cacheMatchesUrl: boolean;
+    let cachedManifestEtag: string | undefined;
+    let cachedTeam: unknown;
+    let cachedTeamEtag: string | undefined;
+    try {
+        const data = cache as {
+            dh_team_manifest_url?: unknown;
+            dh_team_manifest_etag?: string;
+            dh_team?: unknown;
+            dh_team_etag?: string;
+        };
+        cacheMatchesUrl = data.dh_team_manifest_url === manifestUrl;
+        cachedManifestEtag = data.dh_team_manifest_etag;
+        cachedTeam = data.dh_team;
+        cachedTeamEtag = data.dh_team_etag;
+    } catch {
+        return bookmarkParseFailureResult(identity);
+    }
     const staleResult = (): SyncResult => ({ status: 'stale', identity, items: [] });
     const preferencesStillMatch = () => currentTeamIdentityMatches(identity, generation);
 
     // Step 1: refresh the manifest
     const manifestResult = await fetchManifest(
         manifestUrl,
-        cacheMatchesUrl ? cache.dh_team_manifest_etag : undefined,
+        cacheMatchesUrl ? cachedManifestEtag : undefined,
     );
     let manifest: TeamManifest | null = null;
 
@@ -465,7 +532,7 @@ export async function syncTeamBookmarks(
         return {
             status: 'skipped',
             identity,
-            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
+            items: cacheMatchesUrl ? safeCachedItems : [],
         };
     }
     if (!await preferencesStillMatch()) return staleResult();
@@ -474,7 +541,7 @@ export async function syncTeamBookmarks(
         return {
             status: 'failed',
             identity,
-            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
+            items: cacheMatchesUrl ? safeCachedItems : [],
             failure: manifestResult.failure,
             failureStage: 'manifest',
         };
@@ -510,7 +577,7 @@ export async function syncTeamBookmarks(
         return {
             status: 'skipped',
             identity,
-            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
+            items: cacheMatchesUrl ? safeCachedItems : [],
         };
     }
 
@@ -521,23 +588,24 @@ export async function syncTeamBookmarks(
         return {
             status: 'skipped',
             identity,
-            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
+            items: cacheMatchesUrl ? safeCachedItems : [],
         };
     }
 
     // Step 3: fetch the team's bookmark JSON
     // If we switched team since last sync, ignore old ETag
-    const currentEtag = cacheMatchesUrl && cache.dh_team === teamId
-        ? cache.dh_team_etag
+    const currentEtag = cacheMatchesUrl
+        && cachedTeam === teamId
+        ? cachedTeamEtag
         : undefined;
-    const bookmarksResult = await fetchTeamBookmarks(entry.url, currentEtag);
+    const bookmarksResult = await fetchBookmarks(entry.url, currentEtag);
     if (!await preferencesStillMatch()) return staleResult();
 
     if (bookmarksResult === null) {
         return {
             status: 'skipped',
             identity,
-            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
+            items: cacheMatchesUrl ? safeCachedItems : [],
         };
     }
     if (!bookmarksResult.ok) {
@@ -545,13 +613,16 @@ export async function syncTeamBookmarks(
         return {
             status: 'failed',
             identity,
-            items: cacheMatchesUrl ? cachedItemsForTeam() : [],
+            items: cacheMatchesUrl ? safeCachedItems : [],
             failure: bookmarksResult.failure,
             failureStage: 'bookmarks',
         };
     }
 
     if (!bookmarksResult.changed) {
+        if (cachedItems.kind !== 'loaded' || !cacheMatchesUrl) {
+            return bookmarkParseFailureResult(identity);
+        }
         // 304 — refresh sync timestamp only
         const syncedAt = new Date().toISOString();
         try {
@@ -564,19 +635,19 @@ export async function syncTeamBookmarks(
         return {
             status: 'unchanged',
             identity,
-            items: cacheMatchesUrl && Array.isArray(cache.dh_team_items)
-                ? cache.dh_team_items
-                : [],
+            items: safeCachedItems,
             syncedAt,
         };
     }
 
     // New bookmarks — persist
+    const parsedItems = parseOwnBookmarkItems(bookmarksResult, 'items');
+    if (!parsedItems) return bookmarkParseFailureResult(identity);
     const syncedAt = new Date().toISOString();
     try {
         if (!await commitForIdentity(identity, generation, {
             dh_team: teamId,
-            dh_team_items: bookmarksResult.items,
+            dh_team_items: parsedItems,
             dh_team_etag: bookmarksResult.etag,
             dh_team_synced: syncedAt,
         })) return staleResult();
@@ -587,7 +658,7 @@ export async function syncTeamBookmarks(
     return {
         status: 'committed',
         identity,
-        items: bookmarksResult.items,
+        items: parsedItems,
         syncedAt,
     };
 }

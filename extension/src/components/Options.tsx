@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { mergeMenus, MenuItem, teamCacheIsCurrent } from './MenuLogic';
+import {
+    mergeMenus,
+    MenuItem,
+    teamCacheIsCurrent,
+    type BookmarkLoadIssue,
+} from './MenuLogic';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { 
@@ -40,7 +45,12 @@ import { trackEvent } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { localizePromptSourceError } from '../utils/promptSourceErrors';
 import { safeErrorText } from '../utils/safeErrorText';
-import { collapseBookmarkFolders } from '../utils/bookmarkItems';
+import {
+    collapseBookmarkFolders,
+    loadBookmarkItems,
+    parseBookmarkDocument,
+    parseOwnBookmarkItems,
+} from '../utils/bookmarkItems';
 export { collapseBookmarkFolders } from '../utils/bookmarkItems';
 import {
     acknowledgePromptRevision,
@@ -116,35 +126,6 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 // which caused Reset to skip collapsing — see commit log.
 export const collapseFolders = (items: MenuItem[]) =>
     collapseBookmarkFolders(items) ?? [];
-
-async function loadItems(): Promise<MenuItem[]> {
-    // 1. Try local storage
-    try {
-        if (chrome?.storage?.local) {
-            const obj = await new Promise<{ dh_items?: MenuItem[] }>((resolve) => {
-                chrome.storage.local.get("dh_items", (items) => resolve(items as { dh_items?: MenuItem[] }));
-            });
-            if (Array.isArray(obj.dh_items)) return obj.dh_items;
-        }
-    } catch (_) { }
-
-    // 2. Fallback to items.json (packaged)
-    try {
-        const url = chrome.runtime.getURL("items.json");
-        const res = await fetch(url);
-        if (res.ok) {
-            const text = await res.text();
-            if (text.trim().startsWith("<")) {
-                throw new Error("Received HTML instead of JSON");
-            }
-            const data = JSON.parse(text);
-            return Array.isArray(data) ? data : (data.items || []);
-        }
-    } catch (e) {
-        console.warn("[DH] Failed to load items.json", e);
-    }
-    return [];
-}
 
 const ItemEditor: React.FC<{
     item: MenuItem;
@@ -568,11 +549,16 @@ const OptionsInner: React.FC = () => {
     const latestBookmarkStorageIntentRef = useRef<Readonly<{
         id: number;
         operation: Readonly<
-            | { kind: 'write'; items: MenuItem[] }
+            | {
+                  kind: 'write';
+                  items: MenuItem[];
+                  ownerGeneration?: number;
+              }
             | { kind: 'remove' }
         >;
     }> | null>(null);
     const [bookmarkPersistenceIssue, setBookmarkPersistenceIssue] = useState(false);
+    const [bookmarkLoadIssue, setBookmarkLoadIssue] = useState<BookmarkLoadIssue>(null);
     const bookmarkPersistenceIssueRef = useRef(false);
 
     const setBookmarkPersistenceFailed = (failed: boolean) => {
@@ -588,7 +574,11 @@ const OptionsInner: React.FC = () => {
 
     const queueBookmarkStorage = (
         operation: Readonly<
-            | { kind: 'write'; items: MenuItem[] }
+            | {
+                  kind: 'write';
+                  items: MenuItem[];
+                  ownerGeneration?: number;
+              }
             | { kind: 'remove' }
         >,
     ): Promise<void> => {
@@ -598,6 +588,15 @@ const OptionsInner: React.FC = () => {
         });
         latestBookmarkStorageIntentRef.current = intent;
         const run = () => new Promise<void>((resolve, reject) => {
+            if (
+                intent.operation.kind === 'write'
+                && intent.operation.ownerGeneration !== undefined
+                && bookmarkGenerationRef.current
+                    !== intent.operation.ownerGeneration
+            ) {
+                resolve();
+                return;
+            }
             const callback = () => {
                 const storageError = chrome.runtime.lastError;
                 if (storageError) {
@@ -667,6 +666,7 @@ const OptionsInner: React.FC = () => {
     }>>(null);
     const teamRefreshGenerationRef = useRef(0);
     const teamUiLoadGenerationRef = useRef(0);
+    const teamUiRequestedIdentityRef = useRef<TeamMirrorIdentity | null>(null);
 
     // Hydration guard: prefs state is fully populated only AFTER the host
     // get_config response merges its fields into state (see mount useEffect
@@ -887,11 +887,21 @@ const OptionsInner: React.FC = () => {
     const loadTeamUiSnapshot = (candidate: Readonly<Preferences>) => {
         const identity = teamUiIdentity(candidate);
         const generation = ++teamUiLoadGenerationRef.current;
-        setTeamItems([]);
-        setTeamSynced('');
+        const previousIdentity = teamUiRequestedIdentityRef.current;
+        const identityChanged = !previousIdentity
+            || previousIdentity.enabled !== identity.enabled
+            || previousIdentity.manifestUrl !== identity.manifestUrl
+            || previousIdentity.teamId !== identity.teamId;
+        teamUiRequestedIdentityRef.current = identity;
+        if (identityChanged) {
+            setTeamItems([]);
+            setTeamSynced('');
+        }
         setTeamFetchError(null);
         if (!identity.enabled || !identity.manifestUrl) {
             setTeamList([]);
+            setTeamItems([]);
+            setTeamSynced('');
             return;
         }
         chrome.storage.local.get([
@@ -905,6 +915,10 @@ const OptionsInner: React.FC = () => {
                 generation !== teamUiLoadGenerationRef.current
                 || !teamUiIdentityIsCurrent(identity)
             ) return;
+            const parsedTeamItems = parseOwnBookmarkItems(
+                data,
+                'dh_team_items',
+            );
             const manifest = data.dh_team_manifest as {
                 teams?: Array<{ id: string; label: string }>;
             } | undefined;
@@ -919,7 +933,13 @@ const OptionsInner: React.FC = () => {
                     : [],
             );
             const current = {
-                ...data,
+                dh_team_manifest_url:
+                    typeof data.dh_team_manifest_url === 'string'
+                        ? data.dh_team_manifest_url
+                        : undefined,
+                dh_team: typeof data.dh_team === 'string'
+                    ? data.dh_team
+                    : undefined,
                 dh_prefs: {
                     teamCatalogEnabled: identity.enabled,
                     teamManifestUrl: identity.manifestUrl,
@@ -927,16 +947,16 @@ const OptionsInner: React.FC = () => {
                 },
             };
             if (teamCacheIsCurrent(current)) {
-                setTeamItems(
-                    Array.isArray(data.dh_team_items)
-                        ? data.dh_team_items
-                        : [],
-                );
+                if (!parsedTeamItems) return;
+                setTeamItems(parsedTeamItems);
                 setTeamSynced(
                     typeof data.dh_team_synced === 'string'
                         ? data.dh_team_synced
                         : '',
                 );
+            } else {
+                setTeamItems([]);
+                setTeamSynced('');
             }
         });
     };
@@ -1705,13 +1725,25 @@ const OptionsInner: React.FC = () => {
         // Load Items and ensure collapsed by default. collapseFolders is the
         // module-level helper so handleReset can reuse it.
         const itemsLoadGeneration = bookmarkGenerationRef.current;
-        loadItems().then(loadedItems => {
-            if (bookmarkGenerationRef.current !== itemsLoadGeneration) return;
-            const collapsedItems = collapseFolders(loadedItems);
+        void loadBookmarkItems().then(loaded => {
+            const isCurrent = () => bookmarkGenerationRef.current
+                === itemsLoadGeneration;
+            if (!isCurrent()) return;
+            if (loaded.kind !== 'loaded') {
+                setBookmarkLoadIssue(loaded.code);
+                return;
+            }
+            const collapsedItems = collapseBookmarkFolders(
+                loaded.items,
+                isCurrent,
+            );
+            if (!collapsedItems || !isCurrent()) return;
+            setBookmarkLoadIssue(null);
             applyItemsSnapshot(collapsedItems);
             void queueBookmarkStorage({
                 kind: 'write',
                 items: structuredClone(collapsedItems),
+                ownerGeneration: itemsLoadGeneration,
             }).catch(() => undefined);
         });
 
@@ -1989,12 +2021,16 @@ const OptionsInner: React.FC = () => {
                     retainResetRetry(pending, 'local-cleanup');
                     return;
                 }
-                loadItems().then(loaded => {
+                loadBookmarkItems().then(loadedResult => {
                     if (!resetBookmarkScopeIsCurrent(pending)) {
                         retainResetRetry(pending, 'local-cleanup');
                         return;
                     }
-                    const defaults = collapseFolders(loaded);
+                    const defaults = collapseFolders(
+                        loadedResult.kind === 'loaded'
+                            ? loadedResult.items
+                            : [],
+                    );
                     applyItemsSnapshot(defaults);
                     queueBookmarkStorage({
                         kind: 'write',
@@ -2740,8 +2776,8 @@ const OptionsInner: React.FC = () => {
         reader.onload = (ev) => {
             try {
                 const text = ev.target?.result as string;
-                const json = JSON.parse(text);
-                const newItems = Array.isArray(json) ? json : (json.items || []);
+                const newItems = parseBookmarkDocument(JSON.parse(text));
+                if (!newItems) throw new Error('Bookmark schema validation failed');
                 mutatePersonalItems(newItems);
                 showSuccess(t('importSuccess'), 2000);
             } catch (err) {
@@ -2812,10 +2848,22 @@ const OptionsInner: React.FC = () => {
     const bookmarkIssue = bookmarkPersistenceIssue
         ? t('bookmarkPersistenceWarning')
         : '';
+    const bookmarkLoadWarning = bookmarkLoadIssue === 'bookmark_storage_read_failed'
+        ? t('bookmarkStorageReadFailed')
+        : bookmarkLoadIssue === 'bookmark_storage_invalid'
+            ? t('bookmarkStorageInvalid')
+            : bookmarkLoadIssue === 'bookmark_defaults_unreadable'
+                ? t('bookmarkDefaultsUnreadable')
+                : '';
     const configIssue = activeIssue
         ? `${issuePrefix}${issuePrefix && issueDetail ? ' ' : ''}${issueDetail}`
         : '';
-    const persistenceWarning = [resetIssue, bookmarkIssue, configIssue]
+    const persistenceWarning = [
+        resetIssue,
+        bookmarkIssue,
+        bookmarkLoadWarning,
+        configIssue,
+    ]
         .filter(Boolean)
         .join(' ');
 
