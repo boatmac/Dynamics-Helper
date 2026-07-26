@@ -85,7 +85,7 @@ type ResetPhase =
     | 'local-cleanup-pending'
     | 'complete';
 
-type ResetRetryAction = 'sw' | 'local-cleanup' | null;
+type ResetRetryAction = 'sw' | 'local-cleanup' | 'team-cleanup' | null;
 
 type ResetTransaction = Readonly<{
     token: number;
@@ -94,6 +94,11 @@ type ResetTransaction = Readonly<{
     bookmarkGeneration: number;
     phase: ResetPhase;
     retryAction: ResetRetryAction;
+}>;
+
+type ResetCleanupAttempt = Readonly<{
+    id: number;
+    token: number;
 }>;
 
 type BookmarkWriteIntent = Readonly<{
@@ -696,6 +701,8 @@ const OptionsInner: React.FC = () => {
     const latestPrefsMirrorIntentRef = useRef<PrefsMirrorIntent | null>(null);
     const resetTokenRef = useRef(0);
     const resetTransactionRef = useRef<ResetTransaction | null>(null);
+    const resetCleanupAttemptIdRef = useRef(0);
+    const resetCleanupAttemptRef = useRef<ResetCleanupAttempt | null>(null);
     const prefsRef = useRef<Preferences>(DEFAULT_PREFS);
     const userTouchedRevisionRef = useRef(0);
     const [catchUpRevision, setCatchUpRevision] = useState(0);
@@ -1243,7 +1250,10 @@ const OptionsInner: React.FC = () => {
                     phase: 'host-committed',
                     retryAction: 'sw',
                 });
-                if (committed) dispatchResetServiceWorker(committed);
+                if (committed) {
+                    const attempt = beginResetCleanupAttempt(committed.token);
+                    if (attempt) dispatchResetServiceWorker(committed, attempt);
+                }
             },
         });
     };
@@ -1937,12 +1947,47 @@ const OptionsInner: React.FC = () => {
         return next;
     }
 
+    function beginResetCleanupAttempt(token: number): ResetCleanupAttempt | null {
+        const transaction = resetTransactionRef.current;
+        if (
+            !transaction
+            || transaction.token !== token
+            || transaction.phase === 'complete'
+        ) return null;
+        if (resetCleanupAttemptRef.current?.token === token) return null;
+        const attempt = Object.freeze({
+            id: ++resetCleanupAttemptIdRef.current,
+            token,
+        });
+        resetCleanupAttemptRef.current = attempt;
+        return attempt;
+    }
+
+    function resetCleanupAttemptIsCurrent(
+        attempt: ResetCleanupAttempt,
+    ): boolean {
+        return resetCleanupAttemptRef.current?.id === attempt.id
+            && resetCleanupAttemptRef.current.token === attempt.token
+            && resetTransactionRef.current?.token === attempt.token
+            && resetTransactionRef.current.phase !== 'complete';
+    }
+
+    function finishResetCleanupAttempt(attempt: ResetCleanupAttempt): void {
+        if (resetCleanupAttemptRef.current?.id === attempt.id) {
+            resetCleanupAttemptRef.current = null;
+        }
+    }
+
     function retainResetRetry(
         transaction: ResetTransaction,
         retryAction: Exclude<ResetRetryAction, null>,
     ) {
         const current = resetTransactionRef.current;
-        if (!current || current.token !== transaction.token) return;
+        if (
+            !current
+            || current.token !== transaction.token
+            || current.phase === 'complete'
+        ) return;
 
         if (retryAction === 'local-cleanup') {
             const scope = resetBookmarkScope(transaction);
@@ -1982,9 +2027,11 @@ const OptionsInner: React.FC = () => {
             !current
             || current.token !== transaction.token
             || current.phase !== 'local-cleanup-pending'
+            || current.retryAction !== 'local-cleanup'
             || bookmarkGenerationRef.current === current.bookmarkGeneration
         ) return;
         resetTransactionRef.current = null;
+        resetCleanupAttemptRef.current = null;
         setResetIncomplete(false);
     }
 
@@ -2022,6 +2069,7 @@ const OptionsInner: React.FC = () => {
             phase: 'complete',
             retryAction: null,
         });
+        resetCleanupAttemptRef.current = null;
         setResetIncomplete(false);
         showSuccess(
             t(completion === 'newer-bookmarks-preserved'
@@ -2033,7 +2081,69 @@ const OptionsInner: React.FC = () => {
         );
     }
 
-    function runResetLocalCleanup(transaction: ResetTransaction) {
+    function runResetTeamCleanupAfterBookmarkSupersession(
+        transaction: ResetTransaction,
+        attempt: ResetCleanupAttempt,
+    ) {
+        if (!resetCleanupAttemptIsCurrent(attempt)) return;
+        const pending = updateResetTransaction(transaction.token, {
+            phase: 'local-cleanup-pending',
+            retryAction: 'team-cleanup',
+        });
+        if (!pending) {
+            finishResetCleanupAttempt(attempt);
+            return;
+        }
+        if (!resetTeamScopeIsCurrent(pending)) {
+            finishResetCleanupAttempt(attempt);
+            completeResetCleanup(pending, 'newer-bookmarks-preserved');
+            return;
+        }
+        try {
+            chrome.storage.local.remove(
+                'dh_team_collapsed_labels',
+                () => {
+                    if (!resetCleanupAttemptIsCurrent(attempt)) return;
+                    if (chrome.runtime.lastError) {
+                        finishResetCleanupAttempt(attempt);
+                        if (resetTeamScopeIsCurrent(pending)) {
+                            retainResetRetry(pending, 'team-cleanup');
+                        } else {
+                            completeResetCleanup(
+                                pending,
+                                'newer-bookmarks-preserved',
+                            );
+                        }
+                        return;
+                    }
+                    if (resetTeamScopeIsCurrent(pending)) {
+                        setTeamItems([]);
+                        setTeamSynced("");
+                        setTeamCollapsedLabels(new Set());
+                    }
+                    finishResetCleanupAttempt(attempt);
+                    completeResetCleanup(
+                        pending,
+                        'newer-bookmarks-preserved',
+                    );
+                },
+            );
+        } catch {
+            if (!resetCleanupAttemptIsCurrent(attempt)) return;
+            finishResetCleanupAttempt(attempt);
+            if (resetTeamScopeIsCurrent(pending)) {
+                retainResetRetry(pending, 'team-cleanup');
+            } else {
+                completeResetCleanup(pending, 'newer-bookmarks-preserved');
+            }
+        }
+    }
+
+    function runResetLocalCleanup(
+        transaction: ResetTransaction,
+        attempt: ResetCleanupAttempt,
+    ) {
+        if (!resetCleanupAttemptIsCurrent(attempt)) return;
         const pending = updateResetTransaction(transaction.token, {
             phase: 'local-cleanup-pending',
             retryAction: 'local-cleanup',
@@ -2043,8 +2153,10 @@ const OptionsInner: React.FC = () => {
         void (async () => {
             try {
                 const defaultsResult = await readDefaultItems();
+                if (!resetCleanupAttemptIsCurrent(attempt)) return;
                 if (defaultsResult.kind === 'failed') {
                     if (resetBookmarkScopeIsCurrent(pending)) {
+                        finishResetCleanupAttempt(attempt);
                         retainResetRetry(pending, 'local-cleanup');
                     }
                     return;
@@ -2056,6 +2168,7 @@ const OptionsInner: React.FC = () => {
                 );
                 if (!defaults) {
                     if (resetBookmarkScopeIsCurrent(pending)) {
+                        finishResetCleanupAttempt(attempt);
                         retainResetRetry(pending, 'local-cleanup');
                     }
                     return;
@@ -2083,11 +2196,16 @@ const OptionsInner: React.FC = () => {
                                 ));
                             }
                         });
-                        setTeamItems([]);
-                        setTeamSynced("");
-                        setTeamCollapsedLabels(new Set());
+                        if (!resetCleanupAttemptIsCurrent(attempt)) return;
+                        if (resetTeamScopeIsCurrent(pending)) {
+                            setTeamItems([]);
+                            setTeamSynced("");
+                            setTeamCollapsedLabels(new Set());
+                        }
                     } catch {
+                        if (!resetCleanupAttemptIsCurrent(attempt)) return;
                         if (resetBookmarkScopeIsCurrent(pending)) {
+                            finishResetCleanupAttempt(attempt);
                             retainResetRetry(pending, 'local-cleanup');
                         }
                         return;
@@ -2098,22 +2216,31 @@ const OptionsInner: React.FC = () => {
                     defaults,
                     pending.bookmarkGeneration,
                 );
+                if (!resetCleanupAttemptIsCurrent(attempt)) return;
                 if (writeResult !== 'committed') {
+                    finishResetCleanupAttempt(attempt);
                     resetBookmarkScopeIsCurrent(pending);
                     return;
                 }
                 if (!resetBookmarkScopeIsCurrent(pending)) return;
                 applyItemsSnapshot(defaults);
+                finishResetCleanupAttempt(attempt);
                 completeResetCleanup(pending);
             } catch {
+                if (!resetCleanupAttemptIsCurrent(attempt)) return;
                 if (resetBookmarkScopeIsCurrent(pending)) {
+                    finishResetCleanupAttempt(attempt);
                     retainResetRetry(pending, 'local-cleanup');
                 }
             }
         })();
     }
 
-    function dispatchResetServiceWorker(transaction: ResetTransaction) {
+    function dispatchResetServiceWorker(
+        transaction: ResetTransaction,
+        attempt: ResetCleanupAttempt,
+    ) {
+        if (!resetCleanupAttemptIsCurrent(attempt)) return;
         const pending = updateResetTransaction(transaction.token, {
             phase: 'sw-pending',
             retryAction: 'sw',
@@ -2131,7 +2258,7 @@ const OptionsInner: React.FC = () => {
                 resetToken: pending.token,
             },
         }, (response) => {
-            if (resetTransactionRef.current?.token !== pending.token) return;
+            if (!resetCleanupAttemptIsCurrent(attempt)) return;
             const responseIdentity = response?.data?.identity;
             const responseMatches = response?.data?.resetToken === pending.token
                 && response?.data?.requestGeneration === pending.requestGeneration
@@ -2144,6 +2271,7 @@ const OptionsInner: React.FC = () => {
                 || response?.data?.syncStatus !== 'committed'
                 || !responseMatches
             ) {
+                finishResetCleanupAttempt(attempt);
                 retainResetRetry(pending, 'sw');
                 return;
             }
@@ -2159,53 +2287,35 @@ const OptionsInner: React.FC = () => {
                 userTouchedRevisionRef.current !== userRevisionAtDispatch
                 && !bookmarksSuperseded
             ) {
+                finishResetCleanupAttempt(attempt);
                 setResetIncomplete(true);
                 return;
             }
             if (bookmarksSuperseded) {
-                if (!resetTeamScopeIsCurrent(localPending)) {
-                    completeResetCleanup(
-                        localPending,
-                        'newer-bookmarks-preserved',
-                    );
-                    return;
-                }
-                try {
-                    chrome.storage.local.remove(
-                        'dh_team_collapsed_labels',
-                        () => {
-                            if (chrome.runtime.lastError) {
-                                retainResetRetry(localPending, 'local-cleanup');
-                                return;
-                            }
-                            if (resetTeamScopeIsCurrent(localPending)) {
-                                setTeamItems([]);
-                                setTeamSynced("");
-                                setTeamCollapsedLabels(new Set());
-                            }
-                            completeResetCleanup(
-                                localPending,
-                                'newer-bookmarks-preserved',
-                            );
-                        },
-                    );
-                } catch {
-                    retainResetRetry(localPending, 'local-cleanup');
-                }
+                runResetTeamCleanupAfterBookmarkSupersession(
+                    localPending,
+                    attempt,
+                );
                 return;
             }
-            runResetLocalCleanup(localPending);
+            runResetLocalCleanup(localPending, attempt);
         });
     }
 
     const handleResetCleanupRetry = () => {
-        clearStatus();
         const transaction = resetTransactionRef.current;
         if (!transaction) return;
+        const attempt = beginResetCleanupAttempt(transaction.token);
+        if (!attempt) return;
+        clearStatus();
         if (transaction.retryAction === 'sw') {
-            dispatchResetServiceWorker(transaction);
+            dispatchResetServiceWorker(transaction, attempt);
         } else if (transaction.retryAction === 'local-cleanup') {
-            runResetLocalCleanup(transaction);
+            runResetLocalCleanup(transaction, attempt);
+        } else if (transaction.retryAction === 'team-cleanup') {
+            runResetTeamCleanupAfterBookmarkSupersession(transaction, attempt);
+        } else {
+            finishResetCleanupAttempt(attempt);
         }
     };
 
@@ -2235,6 +2345,7 @@ const OptionsInner: React.FC = () => {
                 teamId: '',
             };
             const resetToken = ++resetTokenRef.current;
+            resetCleanupAttemptRef.current = null;
             const bookmarkResetGeneration = mutatePersonalItems();
             const transaction = Object.freeze({
                 token: resetToken,

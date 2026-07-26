@@ -2751,6 +2751,155 @@ describe('Options personal bookmark Reset generation', () => {
     }
   })
 
+  it('keeps cleanup Retry when Team removal fails after bookmarks were superseded', async () => {
+    const failedReset = deferNextResponse('RESET_EXTENSION_STATE')
+    const successfulRetry = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+      ], {
+        dh_team_collapsed_labels: ['team-a\0Folder'],
+      })
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      const firstMessage = await findResetMessage()
+      await act(async () => failedReset.resolve(resetResponseFor(
+        firstMessage,
+        'failed',
+      )))
+      await screen.findByRole('button', { name: /retry cleanup/i })
+
+      await addRootBookmark()
+      await waitFor(() => expect(personalItems()?.at(-1)?.label).toBe('New Item'))
+      const edited = structuredClone(personalItems())
+      const bookmarkWrites = dhItemSetCalls().length
+      const failedTeamRemoval = deferNextStorageRemove('dh_team_collapsed_labels')
+
+      fireEvent.click(screen.getByRole('button', { name: /retry cleanup/i }))
+      await waitFor(() => expect(extensionResetMessages()).toHaveLength(2))
+      await act(async () => successfulRetry.resolve(resetResponseFor(
+        extensionResetMessages()[1],
+        'committed',
+      )))
+      await waitFor(() => expect(chromeMockSpies.storageRemove.mock.calls.filter(
+        call => call[0] === 'dh_team_collapsed_labels',
+      )).toHaveLength(1))
+      await act(async () => failedTeamRemoval.reject(new Error('TEAM REMOVE FAILED')))
+
+      expect(screen.getByRole('button', { name: /retry cleanup/i })).toBeTruthy()
+      expect(JSON.stringify(personalItems())).toBe(JSON.stringify(edited))
+      expect(dhItemSetCalls()).toHaveLength(bookmarkWrites)
+      expect(fetchMock).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByRole('button', { name: /retry cleanup/i }))
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+        'Reset cleanup complete',
+      ))
+      expect(JSON.stringify(personalItems())).toBe(JSON.stringify(edited))
+      expect(dhItemSetCalls()).toHaveLength(bookmarkWrites)
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(chromeMockSpies.storageRemove.mock.calls.filter(
+        call => call[0] === 'dh_team_collapsed_labels',
+      )).toHaveLength(2)
+      expect(screen.queryByRole('alert')).toBeNull()
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('does not clear a newer Team after Reset removal resolves late', async () => {
+    const manifestUrl = 'https://example.com/manifest.json'
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      defaultItemsResponse([]),
+    )
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+      ], {
+        dh_team_collapsed_labels: ['old-team\0Folder'],
+        dh_team_manifest_url: manifestUrl,
+        dh_team: 'team-b',
+        dh_team_items: [{ type: 'link', label: 'NEWER TEAM B', source: 'team' }],
+        dh_team_synced: '2026-07-26T00:00:00.000Z',
+        dh_team_manifest: {
+          version: 1,
+          teams: [{ id: 'team-b', label: 'Team B', url: 'https://example.com/b.json' }],
+        },
+      })
+      const delayedRemoval = deferNextStorageRemove('dh_team_collapsed_labels')
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+      await waitFor(() => expect(chromeMockSpies.storageRemove.mock.calls.filter(
+        call => call[0] === 'dh_team_collapsed_labels',
+      )).toHaveLength(1))
+
+      fireEvent.click(document.querySelector('[data-section="team"]') as HTMLButtonElement)
+      fireEvent.click(screen.getByRole('checkbox', { name: /Enable Team Catalog/i }))
+      const manifestInput = await screen.findByPlaceholderText(
+        'https://example.com/team-manifest.json',
+      ) as HTMLInputElement
+      fireEvent.change(manifestInput, { target: { value: manifestUrl } })
+      const teamSelect = await screen.findByRole('combobox')
+      await waitFor(() => expect(teamSelect).toHaveTextContent('Team B'))
+      fireEvent.change(teamSelect, { target: { value: 'team-b' } })
+      await waitFor(() => expect(document.body.textContent).toContain('(1 items)'))
+      await openBookmarksSection()
+      await waitFor(() => expect(document.body.textContent).toContain('NEWER TEAM B'))
+
+      await act(async () => delayedRemoval.resolve(undefined))
+
+      expect(document.body.textContent).toContain('NEWER TEAM B')
+      expect(await screen.findByRole('status')).toHaveTextContent(
+        'Reset cleanup complete',
+      )
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
+  it('coalesces concurrent Reset cleanup retries for one token', async () => {
+    const resetResponse = deferNextResponse('RESET_EXTENSION_STATE')
+    const confirmReset = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const defaults = [{ type: 'link', label: 'Retry default', url: 'https://default.test' }]
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('defaults unavailable'))
+      .mockResolvedValue(defaultItemsResponse(defaults))
+    try {
+      await prepareResetBookmarks([
+        { type: 'link', label: 'Personal remains', url: 'https://personal.test' },
+      ])
+      fireEvent.click(screen.getByRole('button', { name: /^reset$/i }))
+      await resolveCommittedReset(resetResponse)
+      const retry = await screen.findByRole('button', { name: /retry cleanup/i })
+      const delayedWrite = deferNextStorageSet('dh_items')
+      const lateWrite = deferNextStorageSet('dh_items')
+
+      fireEvent.click(retry)
+      await waitFor(() => expect(dhItemSetCalls()).toHaveLength(1))
+      fireEvent.click(retry)
+
+      await act(async () => delayedWrite.resolve(undefined))
+      await act(async () => new Promise(resolve => setTimeout(resolve, 0)))
+      if (dhItemSetCalls().length > 1) {
+        await act(async () => lateWrite.reject(new Error('LATE RESET WRITE FAILED')))
+      }
+
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(dhItemSetCalls()).toHaveLength(1)
+      expect(personalItems()).toEqual(defaults)
+      expect(screen.getByRole('status')).toHaveTextContent('Reset complete')
+      expect(screen.queryByRole('button', { name: /retry cleanup/i })).toBeNull()
+    } finally {
+      fetchMock.mockRestore()
+      confirmReset.mockRestore()
+    }
+  })
+
   it('does not let an older Reset callback replace the newer transaction', async () => {
     const oldReset = deferNextResponse('RESET_EXTENSION_STATE')
     const newerReset = deferNextResponse('RESET_EXTENSION_STATE')
