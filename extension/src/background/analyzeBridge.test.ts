@@ -826,6 +826,140 @@ describe('handleAnalyzeForward persistence outcomes', () => {
         }
     })
 
+    it('preserves every Host outcome across real persistence failures', async () => {
+        const outcomes = [
+            {
+                name: 'success',
+                send: async () => HOST_SUCCESS,
+                expected: {
+                    status: 'success',
+                    data: { markdown: '# Report', saved_to: 'report.md' },
+                },
+            },
+            {
+                name: 'Host error',
+                send: async () => HOST_ERROR,
+                expected: {
+                    status: 'error',
+                    error: 'Host analysis failed',
+                    error_code: 'repository_instructions_missing',
+                    errorKind: 'unavailable',
+                    httpStatus: 503,
+                },
+            },
+            {
+                name: 'send rejection',
+                send: async () => {
+                    throw new Error('Native Host disconnected unexpectedly')
+                },
+                expected: {
+                    status: 'error',
+                    error: 'Native Host disconnected unexpectedly',
+                },
+            },
+        ] as const
+        const failures = [
+            {
+                name: 'result-only',
+                result: true,
+                cleanup: false,
+                warnings: [
+                    'analysis_result_not_persisted',
+                ] satisfies AnalysisPersistenceWarning[],
+            },
+            {
+                name: 'cleanup-only',
+                result: false,
+                cleanup: true,
+                warnings: [
+                    'analysis_pending_cleanup_failed',
+                ] satisfies AnalysisPersistenceWarning[],
+            },
+            {
+                name: 'both',
+                result: true,
+                cleanup: true,
+                warnings: [
+                    'analysis_result_not_persisted',
+                    'analysis_pending_cleanup_failed',
+                ] satisfies AnalysisPersistenceWarning[],
+            },
+        ] as const
+
+        for (const outcome of outcomes) {
+            for (const failure of failures) {
+                resetChromeMock()
+                const resultWrite = failure.result
+                    ? deferNextStorageSet('dh_last_analysis')
+                    : null
+                const cleanupRemoves = failure.cleanup
+                    ? [
+                          deferNextStorageRemove(
+                              'dh_pending_analysis:request-1',
+                          ),
+                          deferNextStorageRemove(
+                              'dh_pending_analysis:request-1',
+                          ),
+                          deferNextStorageRemove(
+                              'dh_pending_analysis:request-1',
+                          ),
+                      ]
+                    : []
+                const delays: number[] = []
+                const cleanupAttempts: number[] = []
+                const send = vi.fn(outcome.send)
+                const running = handleAnalyzeForward(FORWARDED, CTX, {
+                    send,
+                    persistence: {
+                        now: () => 10,
+                        delay: async milliseconds => {
+                            delays.push(milliseconds)
+                        },
+                        logCleanupFailure: attempt => {
+                            cleanupAttempts.push(attempt)
+                        },
+                    },
+                })
+
+                if (resultWrite) {
+                    await vi.waitFor(() => expect(chromeMockSpies.storageSet)
+                        .toHaveBeenCalledTimes(2))
+                    resultWrite.reject(new Error(
+                        `SECRET ${outcome.name} RESULT WRITE`,
+                    ))
+                }
+                for (let index = 0; index < cleanupRemoves.length; index += 1) {
+                    await vi.waitFor(() => expect(chromeMockSpies.storageRemove)
+                        .toHaveBeenCalledTimes(index + 1))
+                    cleanupRemoves[index].reject(new Error(
+                        `SECRET ${outcome.name} CLEANUP ${index + 1}`,
+                    ))
+                }
+
+                await expect(
+                    running,
+                    `${outcome.name} with ${failure.name} persistence failure`,
+                ).resolves.toEqual({
+                    ...outcome.expected,
+                    extension_warnings: failure.warnings,
+                })
+                expect(send).toHaveBeenCalledTimes(1)
+                expect(send).toHaveBeenCalledWith(FORWARDED)
+                expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(2)
+                expect(chromeMockSpies.storageGet).toHaveBeenCalledTimes(
+                    failure.cleanup ? 4 : 2,
+                )
+                expect(chromeMockSpies.storageRemove).toHaveBeenCalledTimes(
+                    failure.cleanup ? 3 : 1,
+                )
+                expect(delays).toEqual(failure.cleanup ? [50, 200] : [])
+                expect(cleanupAttempts).toEqual(
+                    failure.cleanup ? [1, 2, 3] : [],
+                )
+            }
+        }
+    })
+
     it.each([
         ['success', HOST_SUCCESS, {
             status: 'success',
