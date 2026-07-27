@@ -163,10 +163,7 @@ describe('FAB analyzing source reconciliation', () => {
 
     await act(async () => response.resolve({
       status: 'success',
-      data: {
-        status: 'success',
-        data: { markdown: 'complete', saved_to: 'report.md' },
-      },
+      data: { markdown: 'complete', saved_to: 'report.md' },
     }))
     await waitFor(() => expect(screen.getByText('complete')).toBeInTheDocument())
     fireEvent.click(screen.getByTitle('Close'))
@@ -198,10 +195,7 @@ describe('FAB analyzing source reconciliation', () => {
       )
       await act(async () => response.resolve({
         status: 'success',
-        data: {
-          status: 'success',
-          data: { markdown: 'request A complete', saved_to: 'a.md' },
-        },
+        data: { markdown: 'request A complete', saved_to: 'a.md' },
       }))
 
       await waitFor(() => expect(screen.getByText('request A complete')).toBeInTheDocument())
@@ -225,29 +219,7 @@ describe('FAB analyzing source reconciliation', () => {
     }
   })
 
-  it.each([
-    [
-      'analysis result',
-      (unsafe: unknown) => ({
-        status: 'success',
-        data: { status: 'success', data: { error: unsafe } },
-      }),
-      /Analysis failed: Unknown analysis error/i,
-    ],
-    [
-      'native wrapper',
-      (unsafe: unknown) => ({
-        status: 'success',
-        data: { status: 'error', error: unsafe },
-      }),
-      /Host Error: Unknown native host error/i,
-    ],
-    [
-      'outer response',
-      (unsafe: unknown) => ({ status: 'error', error: unsafe }),
-      /Error: Unknown error/i,
-    ],
-  ])('uses a safe fallback for a malformed %s error', async (_name, responseFor, expected) => {
+  it('uses a fixed malformed response for a non-string normalized error', async () => {
     state.hydrationPending = false
     const response = deferNextResponse('analyze_error')
     const secret = 'SECRET-FAB-NESTED-ERROR'
@@ -257,14 +229,72 @@ describe('FAB analyzing source reconciliation', () => {
     const { analyze } = await renderOpenFab()
     fireEvent.click(analyze)
 
-    await act(async () => response.resolve(responseFor({ secret, toString })))
+    await act(async () => response.resolve({
+      status: 'error',
+      error: { secret, toString },
+    }))
 
-    expect(await screen.findByText(expected)).toBeInTheDocument()
+    expect(await screen.findByText(
+      'The Native Host returned a malformed Analyze response.',
+    )).toBeInTheDocument()
     expect(document.body.textContent).not.toContain(secret)
     expect(toString).not.toHaveBeenCalled()
   })
 
-  it('preserves a valid nested analysis error string', async () => {
+  it('preserves a valid normalized analysis error string', async () => {
+    state.hydrationPending = false
+    const response = deferNextResponse('analyze_error')
+    const { analyze } = await renderOpenFab()
+    fireEvent.click(analyze)
+
+    await act(async () => response.resolve({
+      status: 'error',
+      error: 'VALID ANALYSIS ERROR',
+    }))
+
+    expect(await screen.findByText(
+      /VALID ANALYSIS ERROR/i,
+    )).toBeInTheDocument()
+  })
+
+  it('rejects malformed normalized success without exposing or coercing its secret', async () => {
+    state.hydrationPending = false
+    const response = deferNextResponse('analyze_error')
+    const secret = 'SECRET-MALFORMED-FAB-SUCCESS'
+    const toString = vi.fn(() => { throw new Error(secret) })
+    const toJSON = vi.fn(() => { throw new Error(secret) })
+    const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { analyze } = await renderOpenFab()
+    fireEvent.click(analyze)
+
+    try {
+      await act(async () => response.resolve({
+        status: 'success',
+        data: { markdown: { secret, toString, toJSON } },
+      }))
+
+      expect(await screen.findByText(
+        'The Native Host returned a malformed Analyze response.',
+      )).toBeInTheDocument()
+      expect(document.body.textContent).not.toContain(secret)
+      expect(toString).not.toHaveBeenCalled()
+      expect(toJSON).not.toHaveBeenCalled()
+      expect(JSON.stringify([
+        ...consoleLog.mock.calls,
+        ...consoleWarn.mock.calls,
+        ...consoleError.mock.calls,
+      ])).not.toContain(secret)
+      expect(state.trackEvent.mock.calls.flat().join(' ')).not.toContain(secret)
+    } finally {
+      consoleLog.mockRestore()
+      consoleWarn.mockRestore()
+      consoleError.mockRestore()
+    }
+  })
+
+  it('rejects normalized success with missing markdown', async () => {
     state.hydrationPending = false
     const response = deferNextResponse('analyze_error')
     const { analyze } = await renderOpenFab()
@@ -272,15 +302,100 @@ describe('FAB analyzing source reconciliation', () => {
 
     await act(async () => response.resolve({
       status: 'success',
-      data: {
-        status: 'success',
-        data: { error: 'VALID ANALYSIS ERROR' },
-      },
+      data: { saved_to: 'report.md' },
     }))
 
     expect(await screen.findByText(
-      /Analysis failed: VALID ANALYSIS ERROR/i,
+      'The Native Host returned a malformed Analyze response.',
     )).toBeInTheDocument()
+    expect(screen.queryByText('report.md')).toBeNull()
+  })
+
+  it('renders valid empty markdown as the normal no-content state', async () => {
+    state.hydrationPending = false
+    const response = deferNextResponse('analyze_error')
+    const { analyze } = await renderOpenFab()
+    fireEvent.click(analyze)
+
+    await act(async () => response.resolve({
+      status: 'success',
+      data: { markdown: '' },
+    }))
+
+    expect(await screen.findByText('No analysis content received.')).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('"markdown"')
+  })
+
+  it('keeps Host success while showing a separate result durability warning', async () => {
+    state.hydrationPending = false
+    const response = deferNextResponse('analyze_error')
+    const { analyze } = await renderOpenFab()
+    fireEvent.click(analyze)
+
+    await act(async () => response.resolve({
+      status: 'success',
+      data: { markdown: '# Durable report', saved_to: 'report.md' },
+      extension_warnings: ['analysis_result_not_persisted'],
+    }))
+
+    expect(await screen.findByText('Durable report')).toBeInTheDocument()
+    expect(screen.getByText(/Copilot Analyze/i)).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Analysis completed, but the result could not be saved for navigation recovery.',
+    )
+  })
+
+  it('keeps the Host error while showing a separate cleanup warning', async () => {
+    state.hydrationPending = false
+    const response = deferNextResponse('analyze_error')
+    const { analyze } = await renderOpenFab()
+    fireEvent.click(analyze)
+
+    await act(async () => response.resolve({
+      status: 'error',
+      error: 'HOST FAILURE BODY',
+      error_code: 'future_code',
+      extension_warnings: ['analysis_pending_cleanup_failed'],
+    }))
+
+    expect(await screen.findByText(/HOST FAILURE BODY/)).toBeInTheDocument()
+    expect(screen.getAllByText(/Analysis Failed/i).length).toBeGreaterThan(0)
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Analysis completed, but result recovery and analyzing-state cleanup may be unavailable until retry or expiry.',
+    )
+  })
+
+  it.each([
+    [
+      'duplicate',
+      ['analysis_result_not_persisted', 'analysis_result_not_persisted'],
+    ],
+    [
+      'reversed',
+      ['analysis_pending_cleanup_failed', 'analysis_result_not_persisted'],
+    ],
+    ['unknown', ['raw_attacker_warning']],
+  ])('rejects a %s Analyze warning order without rendering raw warning values', async (
+    _name,
+    extensionWarnings,
+  ) => {
+    state.hydrationPending = false
+    const response = deferNextResponse('analyze_error')
+    const { analyze } = await renderOpenFab()
+    fireEvent.click(analyze)
+
+    await act(async () => response.resolve({
+      status: 'success',
+      data: { markdown: '# Report' },
+      extension_warnings: extensionWarnings,
+    }))
+
+    expect(await screen.findByText(
+      'The Native Host returned a malformed Analyze response.',
+    )).toBeInTheDocument()
+    for (const warning of extensionWarnings) {
+      expect(document.body.textContent).not.toContain(warning)
+    }
   })
 
   it('keeps request B active when request A resolves and reaches its old timeout', async () => {
@@ -308,10 +423,7 @@ describe('FAB analyzing source reconciliation', () => {
 
       await act(async () => responseA.resolve({
         status: 'success',
-        data: {
-          status: 'success',
-          data: { markdown: 'STALE REQUEST A', saved_to: 'a.md' },
-        },
+        data: { markdown: 'STALE REQUEST A', saved_to: 'a.md' },
       }))
       expect(analyze).toBeDisabled()
       expect(screen.queryByText('STALE REQUEST A')).toBeNull()
@@ -325,10 +437,7 @@ describe('FAB analyzing source reconciliation', () => {
 
       await act(async () => responseB.resolve({
         status: 'success',
-        data: {
-          status: 'success',
-          data: { markdown: 'REQUEST B COMPLETE', saved_to: 'b.md' },
-        },
+        data: { markdown: 'REQUEST B COMPLETE', saved_to: 'b.md' },
       }))
       expect(screen.getByText('REQUEST B COMPLETE')).toBeInTheDocument()
       fireEvent.click(screen.getByTitle('Close'))
@@ -357,10 +466,7 @@ describe('FAB analyzing source reconciliation', () => {
       fireEvent.click(analyze)
       await act(async () => responseA.resolve({
         status: 'success',
-        data: {
-          status: 'success',
-          data: { markdown: 'STALE A HASH RESULT', saved_to: 'a.md' },
-        },
+        data: { markdown: 'STALE A HASH RESULT', saved_to: 'a.md' },
       }))
       await waitFor(() => expect(state.hashCaseId).toHaveBeenCalledTimes(1))
 
@@ -385,10 +491,7 @@ describe('FAB analyzing source reconciliation', () => {
 
       await act(async () => responseB.resolve({
         status: 'success',
-        data: {
-          status: 'success',
-          data: { markdown: 'REQUEST B AFTER HASH', saved_to: 'b.md' },
-        },
+        data: { markdown: 'REQUEST B AFTER HASH', saved_to: 'b.md' },
       }))
       await waitFor(() => expect(screen.getByText('REQUEST B AFTER HASH')).toBeInTheDocument())
       expect(state.trackEvent.mock.calls.filter(call => call[0] === 'Analyze Success')).toHaveLength(1)
@@ -413,10 +516,7 @@ describe('FAB analyzing source reconciliation', () => {
       fireEvent.click(analyze)
       await act(async () => responseA.resolve({
         status: 'success',
-        data: {
-          status: 'success',
-          data: { markdown: 'STALE A HASH ERROR', saved_to: 'a.md' },
-        },
+        data: { markdown: 'STALE A HASH ERROR', saved_to: 'a.md' },
       }))
       await waitFor(() => expect(state.hashCaseId).toHaveBeenCalledTimes(1))
       await act(async () => {
@@ -436,10 +536,7 @@ describe('FAB analyzing source reconciliation', () => {
 
       await act(async () => responseB.resolve({
         status: 'success',
-        data: {
-          status: 'success',
-          data: { markdown: 'REQUEST B AFTER HASH ERROR', saved_to: 'b.md' },
-        },
+        data: { markdown: 'REQUEST B AFTER HASH ERROR', saved_to: 'b.md' },
       }))
       await waitFor(() => expect(screen.getByText('REQUEST B AFTER HASH ERROR')).toBeInTheDocument())
     } finally {

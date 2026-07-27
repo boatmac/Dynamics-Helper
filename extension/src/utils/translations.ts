@@ -193,6 +193,26 @@ export const translations: TranslationDictionary = {
     unknownError: { en: "Unknown error", zh: "未知错误" },
     unknownAnalysisError: { en: "Unknown analysis error", zh: "未知分析错误" },
     unknownNativeHostError: { en: "Unknown native host error", zh: "未知的本机宿主错误" },
+    analysisMalformedResponse: {
+        en: "The Native Host returned a malformed Analyze response.",
+        zh: "本机宿主返回了格式错误的分析响应。",
+    },
+    analysisPersistenceContextInvalid: {
+        en: "Analyze could not start because its persistence context was invalid.",
+        zh: "由于分析持久化上下文无效，无法开始分析。",
+    },
+    analysisPersistenceStartFailed: {
+        en: "Analyze could not start because local recovery state could not be saved.",
+        zh: "由于无法保存本地恢复状态，无法开始分析。",
+    },
+    analysisDurabilityWarning: {
+        en: "Analysis completed, but the result could not be saved for navigation recovery.",
+        zh: "分析已完成，但结果无法保存以供页面导航后恢复。",
+    },
+    analysisDurabilityAndCleanupWarning: {
+        en: "Analysis completed, but result recovery and analyzing-state cleanup may be unavailable until retry or expiry.",
+        zh: "分析已完成，但在重试或状态过期前，结果恢复和分析状态清理可能不可用。",
+    },
     promptErrorDhCoreMissing: {
         en: "DH Core System Prompt is missing. Repair or reinstall Dynamics Helper.",
         zh: "DH 核心系统提示词缺失。请修复或重新安装 Dynamics Helper。",

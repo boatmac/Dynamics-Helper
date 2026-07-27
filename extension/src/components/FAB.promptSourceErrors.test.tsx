@@ -74,7 +74,8 @@ vi.mock('./MenuLogic', () => ({
     resolveDynamicUrl: (value: string) => value,
 }))
 
-import FAB, { ResultPopover } from './FAB'
+import FAB from './FAB'
+import { ResultPopover } from './ResultPopover'
 
 describe('FAB prompt-source error display', () => {
     beforeEach(() => {
@@ -91,6 +92,7 @@ describe('FAB prompt-source error display', () => {
             title: 'Analysis Failed',
             content: 'HOST FALLBACK',
             errorCode: 'repository_instructions_missing',
+            isAnalyze: true,
         }
         const { rerender } = render(
             <PrefsLanguageProvider language="en">

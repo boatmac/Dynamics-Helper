@@ -26,16 +26,18 @@ import {
     type TeamCatalogSyncRequest,
 } from './teamManifestSync';
 import {
-    handleAnalyzeForward,
+    isAnalyzePayload,
     normalizeNativeHostResponse,
     summarizeNativeHostMessage,
+    type AnalyzeForwardResponse,
 } from './analyzeBridge';
+import { resetAnalysisState } from '../utils/analysisStore';
 import {
-    resetAnalysisState,
-    type AnalyzePersistContext,
-} from '../utils/analysisStore';
+    guardNonAnalyzeNativeMessage,
+    handleAnalyzeRequest,
+} from './analyzeRequestHandler';
+import { postNativeMessageWire } from './nativeMessageWire';
 import { handleResetExtensionState } from './resetExtensionState';
-import { safeErrorText } from '../utils/safeErrorText';
 
 const NATIVE_HOST_NAME = "com.dynamics.helper.native";
 
@@ -242,30 +244,34 @@ function connectToNativeHost() {
 }
 
 // Helper to send message via Port
-function sendNativeMessage(message: any): Promise<any> {
+function sendNativeMessage(
+    forwarded: Readonly<Record<string, unknown>>,
+): Promise<unknown> {
     return new Promise((resolve, reject) => {
-        if (!nativePort) {
-            connectToNativeHost();
-        }
-        
-        if (!nativePort) {
-            reject(new Error("Could not establish connection to Native Host"));
+        if (!nativePort) connectToNativeHost()
+        const port = nativePort
+        if (!port) {
+            reject(new Error('Could not establish connection to Native Host'))
             return;
         }
-
-        const requestId = message.requestId || crypto.randomUUID();
-        // Ensure requestId is in the payload for the host to echo back
-        const msgWithId = { ...message, requestId };
-
-        pendingRequests.set(requestId, { resolve, reject });
-        
+        let postAttempted = false
         try {
-            nativePort.postMessage(msgWithId);
-        } catch (e: any) {
-            pendingRequests.delete(requestId);
-            reject(e);
-            // Retry connection next time
-            nativePort = null;
+            postNativeMessageWire(forwarded, {
+                createRequestId: () => crypto.randomUUID(),
+                register: requestId => {
+                    pendingRequests.set(requestId, { resolve, reject })
+                },
+                unregister: requestId => {
+                    pendingRequests.delete(requestId)
+                },
+                postMessage: message => {
+                    postAttempted = true
+                    port.postMessage(message)
+                },
+            })
+        } catch (error) {
+            if (postAttempted) nativePort = null
+            reject(error)
         }
     });
 }
@@ -274,45 +280,28 @@ function sendNativeMessage(message: any): Promise<any> {
 // Listen for messages from Content Script or Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "NATIVE_MSG") {
-        // Extract optional persistence context from the payload. FAB sets
-        // _persist when initiating an analyze_error request so the SW can
-        // mirror the result into chrome.storage.local (see
-        // docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md).
-        // Other actions pass through with ctx=null — no storage writes.
-        const inner = message.payload ?? {};
-        const persistMeta = inner._persist;
-        const isAnalyze = inner.action === 'analyze_error';
-        let ctx: AnalyzePersistContext | null = null;
-        if (isAnalyze && persistMeta && typeof persistMeta === 'object') {
-            ctx = {
-                caseNumber: safeErrorText([persistMeta.caseNumber], ''),
-                requestId: safeErrorText([
-                    inner.requestId,
-                    persistMeta.requestId,
-                ], ''),
-                successTitle: safeErrorText([
-                    persistMeta.successTitle,
-                ], 'Analysis Result'),
-                errorTitle: safeErrorText([
-                    persistMeta.errorTitle,
-                ], 'Analysis Failed'),
-            };
+        const inner = message.payload ?? {}
+        let request: Promise<AnalyzeForwardResponse | unknown>
+        if (isAnalyzePayload(inner)) {
+            request = handleAnalyzeRequest(inner, {
+                acquireAuthorizedTransport: async () => ({
+                    allowed: true,
+                    transport: { send: sendNativeMessage },
+                }),
+            })
+        } else {
+            const guarded = guardNonAnalyzeNativeMessage(inner)
+            request = guarded.ok
+                ? sendNativeMessage(guarded.forwarded)
+                : Promise.resolve(guarded.response)
         }
-        // Strip _persist before forwarding so the native host never sees
-        // extension-internal metadata.
-        const forwarded = { ...inner };
-        delete forwarded._persist;
-
-        handleAnalyzeForward(forwarded, ctx, { send: sendNativeMessage })
-            .then(response => sendResponse(response))
-            .catch(error => sendResponse({
-                status: "error",
-                error: safeErrorText(
-                    [error?.message, error],
-                    'Native Host error',
-                ),
-            }));
-        return true; // Keep channel open for async response
+        request
+            .then(sendResponse)
+            .catch(() => sendResponse({
+                status: 'error',
+                error: 'Native Host error',
+            }))
+        return true
     }
     
     if (message.type === "OPEN_OPTIONS") {

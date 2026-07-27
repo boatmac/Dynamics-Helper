@@ -17,6 +17,12 @@ const TRANSLATION_KEYS: Record<KnownPromptSourceErrorCode, string> = {
     user_prompt_unreadable: 'promptErrorUserPromptUnreadable',
 }
 
+const ANALYZE_ERROR_TRANSLATION_KEYS: Record<string, string> = {
+    malformed_native_response: 'analysisMalformedResponse',
+    invalid_analyze_persistence_context: 'analysisPersistenceContextInvalid',
+    analysis_persistence_start_failed: 'analysisPersistenceStartFailed',
+}
+
 export function normalizeErrorCode(value: unknown): string | undefined {
     return typeof value === 'string' && value.trim() ? value : undefined
 }
@@ -31,4 +37,19 @@ export function localizePromptSourceError(
         return t(TRANSLATION_KEYS[normalized as KnownPromptSourceErrorCode])
     }
     return fallback
+}
+
+export function localizeAnalyzeError(
+    errorCode: unknown,
+    fallback: string,
+    t: (key: string) => string,
+): string {
+    const normalized = normalizeErrorCode(errorCode)
+    if (
+        normalized
+        && Object.hasOwn(ANALYZE_ERROR_TRANSLATION_KEYS, normalized)
+    ) {
+        return t(ANALYZE_ERROR_TRANSLATION_KEYS[normalized])
+    }
+    return localizePromptSourceError(normalized, fallback, t)
 }

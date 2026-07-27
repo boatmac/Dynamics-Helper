@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 import { useTranslation } from '../utils/i18n';
@@ -8,13 +6,15 @@ import { usePrefs, mergeRootPathOverride } from '../utils/prefs';
 import { trackEvent, trackException, hashCaseId } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { useAnalysisHydration } from '../hooks/useAnalysisHydration';
-import type { LastAnalysisIdentity } from '../utils/analysisStore';
-import {
-    localizePromptSourceError,
-    normalizeErrorCode,
-} from '../utils/promptSourceErrors';
+import type {
+    AnalysisPersistenceWarning,
+    LastAnalysisIdentity,
+} from '../utils/analysisStore';
 import { applyCurrentUserPrompt } from '../utils/analysisPrompt';
 import { safeErrorText } from '../utils/safeErrorText';
+import { parseAnalyzeForwardResult } from '../background/analyzeBridge';
+import { ResultPopover } from './ResultPopover';
+export { ResultPopover } from './ResultPopover';
 import { 
     X, 
     Settings, 
@@ -37,201 +37,6 @@ function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
 
-// Non-blocking Result Popover Component
-export const ResultPopover: React.FC<{
-    isOpen: boolean; 
-    onClose: () => void; 
-    title?: string;
-    content: string; 
-    errorCode?: string;
-    filePath?: string;
-    duration?: string;
-}> = ({ isOpen, onClose, title, content, errorCode, filePath, duration }) => {
-    const { t } = useTranslation();
-    const displayContent = localizePromptSourceError(errorCode, content, t);
-    // State for position and dragging
-    const [position, setPosition] = useState({ x: Math.max(0, window.innerWidth - 550), y: 100 });
-    const [isDragging, setIsDragging] = useState(false);
-    const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-
-    // Handle Dragging
-    useEffect(() => {
-        const handleMouseMove = (e: MouseEvent) => {
-            if (isDragging) {
-                setPosition({
-                    x: e.clientX - dragOffset.x,
-                    y: e.clientY - dragOffset.y
-                });
-            }
-        };
-        const handleMouseUp = () => {
-            setIsDragging(false);
-        };
-
-        if (isDragging) {
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('mouseup', handleMouseUp);
-        }
-        return () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
-        };
-    }, [isDragging, dragOffset]);
-
-    const handleMouseDown = (e: React.MouseEvent) => {
-        // Only trigger drag if clicking the header background, not buttons
-        if ((e.target as HTMLElement).tagName === 'BUTTON' || (e.target as HTMLElement).closest('button')) return;
-        
-        setIsDragging(true);
-        setDragOffset({
-            x: e.clientX - position.x,
-            y: e.clientY - position.y
-        });
-    };
-
-    if (!isOpen) return null;
-
-    return (
-        <div style={{
-            position: 'fixed',
-            left: `${position.x}px`,
-            top: `${position.y}px`,
-            width: '450px',
-            height: '600px', // Fixed initial height to support resize
-            minWidth: '320px',
-            minHeight: '200px',
-            maxWidth: '90vw',
-            maxHeight: '90vh',
-            backgroundColor: 'white',
-            borderRadius: '16px',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            zIndex: 2147483647,
-            pointerEvents: 'auto',
-            fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-            resize: 'both',
-            overflow: 'hidden' // Required for resize handle
-        }}>
-            {/* Header - Draggable Area */}
-            <div 
-                onMouseDown={handleMouseDown}
-                style={{ 
-                    padding: '16px 20px', 
-                    borderBottom: '1px solid #F1F5F9', 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
-                    alignItems: 'center',
-                    background: '#F8FAFC',
-                    cursor: isDragging ? 'grabbing' : 'grab',
-                    userSelect: 'none'
-                }}
-            >
-                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: '#0F172A', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {title || `🤖 Copilot ${t('analyze')}`}
-                </h3>
-                <button 
-                    onClick={onClose}
-                    style={{ 
-                        border: 'none', 
-                        background: 'transparent', 
-                        cursor: 'pointer', 
-                        color: '#64748B',
-                        padding: '4px',
-                        borderRadius: '6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                    }}
-                    title={t('close')}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#E2E8F0')}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                >
-                    <X size={18} />
-                </button>
-            </div>
-
-            {/* Content Area */}
-            <div style={{ 
-                padding: '20px', 
-                overflowY: 'auto', 
-                flex: 1, 
-                fontSize: '14px', 
-                lineHeight: '1.6', 
-                color: '#334155',
-            }}>
-                {displayContent ? (
-                    <ReactMarkdown 
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                            h1: ({node, ...props}) => <h1 style={{ fontSize: '1.5em', fontWeight: '700', margin: '0.67em 0', color: '#0F172A' }} {...props} />,
-                            h2: ({node, ...props}) => <h2 style={{ fontSize: '1.25em', fontWeight: '600', margin: '0.5em 0', color: '#1E293B' }} {...props} />,
-                            h3: ({node, ...props}) => <h3 style={{ fontSize: '1.1em', fontWeight: '600', margin: '0.5em 0', color: '#334155' }} {...props} />,
-                            code: ({node, inline, className, children, ...props}: any) => {
-                                const match = /language-(\w+)/.exec(className || '')
-                                return !inline ? (
-                                    <div style={{ background: '#F1F5F9', padding: '12px', borderRadius: '8px', overflowX: 'auto', margin: '12px 0' }}>
-                                        <code style={{ fontFamily: 'monospace', fontSize: '13px' }} {...props}>
-                                            {children}
-                                        </code>
-                                    </div>
-                                ) : (
-                                    <code style={{ background: '#F1F5F9', padding: '2px 4px', borderRadius: '4px', fontFamily: 'monospace', fontSize: '13px' }} {...props}>
-                                        {children}
-                                    </code>
-                                )
-                            },
-                            a: ({node, ...props}) => <a style={{ color: '#0D9488', textDecoration: 'underline' }} {...props} />,
-                            ul: ({node, ...props}) => <ul style={{ paddingLeft: '1.5em', margin: '1em 0' }} {...props} />,
-                            li: ({node, ...props}) => <li style={{ marginBottom: '0.5em' }} {...props} />,
-                            blockquote: ({node, ...props}) => <blockquote style={{ borderLeft: '4px solid #E2E8F0', paddingLeft: '1em', margin: '1em 0', color: '#64748B' }} {...props} />
-                        }}
-                    >
-                        {displayContent}
-                    </ReactMarkdown>
-                ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94A3B8' }}>
-                         <Activity size={48} style={{ opacity: 0.2, marginBottom: '16px' }} />
-                         <p>{t('noContent')}</p>
-                    </div>
-                )}
-            </div>
-
-            {/* Footer with Path */}
-            {(filePath || duration) && (
-                <div style={{ 
-                    padding: '12px 20px', 
-                    background: '#F8FAFC', 
-                    borderTop: '1px solid #F1F5F9', 
-                    fontSize: '12px', 
-                    color: '#64748B',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px'
-                }}>
-                    {duration && (
-                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <Activity size={12} />
-                            <span>{t('analysisTook')}: <b>{duration}</b></span>
-                        </div>
-                    )}
-                    
-                    {filePath && (
-                        <div>
-                            <div style={{ fontWeight: '600', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <Folder size={12} /> {t('savedReport')}:
-                            </div>
-                            <div style={{ wordBreak: 'break-all', fontFamily: 'monospace', background: '#FFFFFF', padding: '6px 8px', borderRadius: '4px', border: '1px solid #E2E8F0' }}>
-                                {filePath}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
-    );
-};
-
 const FAB: React.FC = () => {
     const { t } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
@@ -244,6 +49,7 @@ const FAB: React.FC = () => {
         errorCode?: string;
         path?: string;
         duration?: string;
+        durabilityWarning?: string;
         identity?: LastAnalysisIdentity;
     }>({ isOpen: false, title: '', content: '' });
     // NOTE: legacy `errorMsg` state was removed in v2.0.71 (C2a+). It had
@@ -337,6 +143,7 @@ const FAB: React.FC = () => {
     useEffect(() => {
         if (!hydration.popover) return;
         if (resultPopover.isOpen) return;
+        popoverIsAnalyze.current = true;
         setResultPopover({
             isOpen: true,
             title: hydration.popover.title,
@@ -348,7 +155,6 @@ const FAB: React.FC = () => {
                 : hydration.popover.durationSec.toFixed(1) + 's',
             identity: hydration.popover.identity,
         });
-        popoverIsAnalyze.current = true;
         // Fire-and-forget; dismissPopover only writes the separate seen
         // identity and closes the hook's internal state - both safe to ignore.
         void hydration.dismissPopover(hydration.popover.identity);
@@ -503,20 +309,22 @@ const FAB: React.FC = () => {
         caseNumberOfRun?: string,
         errorCode?: string,
         identity?: LastAnalysisIdentity,
+        durabilityWarning?: string,
     ) => {
         const isStillOnRunCase =
             !caseNumberOfRun ||
             !currentCaseRef.current ||
             currentCaseRef.current === caseNumberOfRun;
         if (isStillOnRunCase) {
+            popoverIsAnalyze.current = true;
             setResultPopover({
                 isOpen: true,
                 title: `❌ ${t('analysisFailed')}`,
                 content: fallback,
                 errorCode,
                 identity,
+                durabilityWarning,
             });
-            popoverIsAnalyze.current = true;
             showStatusBubble(t('analysisFailed'), 'error', 4000);
         } else {
             showStatusBubble(
@@ -845,6 +653,7 @@ const FAB: React.FC = () => {
                 payload: { action: "ping", requestId: crypto.randomUUID() }
             });
             // Show result in popover instead of alert
+            popoverIsAnalyze.current = false;
             setResultPopover({
                 isOpen: true,
                 title: `⚡ ${t('pingResult')}`,
@@ -853,12 +662,22 @@ const FAB: React.FC = () => {
             // Also close menu to show result clearly? Optional.
             // setIsOpen(false); 
         } catch (e: any) {
+            popoverIsAnalyze.current = false;
             setResultPopover({
                 isOpen: true,
                 title: `❌ ${t('pingError')}`,
                 content: `${t('errorLabel')}: ${e.message}`
             });
         }
+    };
+
+    const localizeAnalysisWarnings = (
+        warnings: readonly AnalysisPersistenceWarning[] | undefined,
+    ): string | undefined => {
+        if (!warnings?.length) return undefined;
+        return warnings.includes('analysis_pending_cleanup_failed')
+            ? t('analysisDurabilityAndCleanupWarning')
+            : t('analysisDurabilityWarning');
     };
 
     const handleAnalyze = async (dataToAnalyze: ScrapedData | null = null) => {
@@ -938,18 +757,26 @@ const FAB: React.FC = () => {
                  showStatusBubble(t('analyzing'), 'default', 0);
             }
 
-            const response = await chrome.runtime.sendMessage({
+            const rootPath = typeof effectivePrefs.rootPath === 'string'
+                ? effectivePrefs.rootPath
+                : '';
+            const hostPayload = {
+                text: fullContext,
+                context: targetData.source || 'Unknown Context',
+                timestamp: new Date().toLocaleString(),
+                rootPath,
+                ...(typeof targetData.productCategory === 'string'
+                    ? { product: targetData.productCategory }
+                    : {}),
+                ...(typeof targetData.caseNumber === 'string'
+                    ? { caseNumber: targetData.caseNumber }
+                    : {}),
+            };
+            const response: unknown = await chrome.runtime.sendMessage({
                 type: "NATIVE_MSG",
                 payload: { 
                     action: "analyze_error", 
-                    payload: {
-                        text: fullContext,
-                        context: targetData.source || "Unknown Context",
-                        timestamp: new Date().toLocaleString(),
-                        rootPath: effectivePrefs.rootPath,
-                        product: targetData.productCategory,
-                        caseNumber: targetData.caseNumber
-                    },
+                    payload: hostPayload,
                     requestId: requestId,
                     // C2a+: tell the SW to persist pending/result for re-hydration
                     // after the user navigates away from the case page. SW strips
@@ -969,16 +796,12 @@ const FAB: React.FC = () => {
                 return;
             }
 
-            // Format response to be user friendly
-            if (response.status === 'success') {
-                const nativeResp = response.data;
-                
-                // Check Native Host wrapper status
-                if (nativeResp && nativeResp.status === 'success') {
-                    const analysisData = nativeResp.data;
-                    
-                    // Check Analysis function result
-                    if (analysisData && !analysisData.error) {
+            const parsedResponse = parseAnalyzeForwardResult(response);
+            const durabilityWarning = localizeAnalysisWarnings(
+                parsedResponse.extension_warnings,
+            );
+            if (parsedResponse.status === 'success') {
+                const analysisData = parsedResponse.data;
                         const duration = (Date.now() - startTime) / 1000;
                         const caseNum = targetData.caseNumber || '';
                         const caseHash = await hashCaseId(caseNum);
@@ -1019,10 +842,12 @@ const FAB: React.FC = () => {
                             currentCaseRef.current === caseNumberOfRun;
                         if (isStillOnRunCase) {
                             showStatusBubble(`${t('analysisComplete')} (${duration.toFixed(1)}s)`, 'success', 3000);
+                            popoverIsAnalyze.current = true;
                             setResultPopover({
                                 isOpen: true,
                                 title: `🤖 Copilot ${t('analyze')}`,
-                                content: analysisData.markdown || JSON.stringify(analysisData, null, 2),
+                                content: analysisData.markdown,
+                                durabilityWarning,
                                 path: analysisData.saved_to,
                                 duration: `${duration.toFixed(1)}s`,
                                 identity: {
@@ -1030,7 +855,6 @@ const FAB: React.FC = () => {
                                     caseNumber: caseNumberOfRun,
                                 },
                             });
-                            popoverIsAnalyze.current = true;
                             setIsOpen(false); // Close menu to show result
                         } else {
                             showStatusBubble(
@@ -1039,52 +863,19 @@ const FAB: React.FC = () => {
                                 5000,
                             );
                         }
-                    } else {
-                        const errMsg = safeErrorText(
-                            [analysisData?.error, analysisData?.message],
-                            t('unknownAnalysisError'),
-                        );
-                        const errorCode = normalizeErrorCode(analysisData?.error_code);
-                        showAnalysisError(
-                            `${t('analysisFailed')}: ${errMsg}`,
-                            caseNumberOfRun,
-                            errorCode,
-                            { requestId, caseNumber: caseNumberOfRun },
-                        );
-                        trackEvent('Analyze Failed', {
-                            errorCode: errorCode ?? 'unclassified',
-                        });
-                    }
-                } else {
-                    const hostError = safeErrorText(
-                        [nativeResp?.message, nativeResp?.error],
-                        t('unknownNativeHostError'),
-                    );
-                    const errorCode = normalizeErrorCode(nativeResp?.error_code);
-                    showAnalysisError(
-                        `${t('hostErrorLabel')}: ${hostError}`,
-                        caseNumberOfRun,
-                        errorCode,
-                        { requestId, caseNumber: caseNumberOfRun },
-                    );
-                    trackEvent('Analyze Host Error', {
-                        errorCode: errorCode ?? 'unclassified',
-                    });
-                }
             } else {
-                const errorCode = normalizeErrorCode(response?.error_code);
-                const responseError = safeErrorText(
-                    [response?.error, response?.message],
-                    t('unknownError'),
-                );
                 showAnalysisError(
-                    `${t('errorLabel')}: ${responseError}`,
+                    parsedResponse.error,
                     caseNumberOfRun,
-                    errorCode,
+                    parsedResponse.error_code,
                     requestId
                         ? { requestId, caseNumber: caseNumberOfRun }
                         : undefined,
+                    durabilityWarning,
                 );
+                trackEvent('Analyze Host Error', {
+                    errorCode: parsedResponse.error_code ?? 'unclassified',
+                });
             }
         } catch (e: any) {
             if (latestRequestId.current === requestId) {
@@ -1189,6 +980,7 @@ const FAB: React.FC = () => {
             setIsOpen(false);
         } else if (item.type === 'markdown') {
             trackEvent('Bookmark Note Clicked', { label: item.label });
+            popoverIsAnalyze.current = false;
             // Show markdown content in the result popover
             setResultPopover({
                 isOpen: true,
@@ -1223,6 +1015,8 @@ const FAB: React.FC = () => {
             errorCode={resultPopover.errorCode}
             filePath={resultPopover.path}
             duration={resultPopover.duration}
+            isAnalyze={popoverIsAnalyze.current}
+            durabilityWarning={resultPopover.durabilityWarning}
         />
 
         <div className="dh-container">
