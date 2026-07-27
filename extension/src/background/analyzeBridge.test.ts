@@ -7,10 +7,11 @@ import {
     installChromeMock,
     resetChromeMock,
 } from '../test/chromeMock'
-import type {
-    AnalysisPersistenceWarning,
-    AnalyzeCompletion,
-    AnalyzePersistContext,
+import {
+    ANALYSIS_PERSISTENCE_WARNING_ORDER,
+    type AnalysisPersistenceWarning,
+    type AnalyzeCompletion,
+    type AnalyzePersistContext,
 } from '../utils/analysisStore'
 import {
     handleAnalyzeForward,
@@ -523,6 +524,74 @@ describe('strict Analyze Host outcome parsing', () => {
         })
     })
 
+    it('rejects oversized sparse warning arrays before iteration', () => {
+        const secret = 'SECRET-OVERSIZED-WARNING'
+        const getter = vi.fn(() => secret)
+        const toJSON = vi.fn(() => { throw new Error(secret) })
+        const toString = vi.fn(() => { throw new Error(secret) })
+        const warnings: unknown[] = []
+        Object.defineProperty(warnings, '0', {
+            get: getter,
+            enumerable: true,
+            configurable: true,
+        })
+        warnings.length = 0xffffffff
+
+        const NativeSet = Set
+        let setAdditions = 0
+        class GuardedSet<T> extends NativeSet<T> {
+            override add(value: T): this {
+                setAdditions += 1
+                if (setAdditions > ANALYSIS_PERSISTENCE_WARNING_ORDER.length + 1) {
+                    throw new Error(secret)
+                }
+                return super.add(value)
+            }
+        }
+        const descriptorKeys: PropertyKey[] = []
+        const nativeGetOwnPropertyDescriptor = Reflect.getOwnPropertyDescriptor
+        const descriptorSpy = vi.spyOn(Reflect, 'getOwnPropertyDescriptor')
+            .mockImplementation((target, key) => {
+                descriptorKeys.push(key)
+                return nativeGetOwnPropertyDescriptor(target, key)
+            })
+        const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
+        const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.stubGlobal('Set', GuardedSet)
+        let result: ReturnType<typeof parseAnalyzeForwardResult>
+        try {
+            result = parseAnalyzeForwardResult({
+                status: 'success',
+                data: { markdown: '# Report' },
+                extension_warnings: warnings,
+                unsafe: { secret, toJSON, toString },
+            })
+        } finally {
+            vi.unstubAllGlobals()
+            descriptorSpy.mockRestore()
+            consoleLog.mockRestore()
+            consoleWarn.mockRestore()
+            consoleError.mockRestore()
+        }
+
+        expect(result).toEqual(MALFORMED)
+        expect(setAdditions).toBe(0)
+        expect(descriptorKeys).toEqual(['length'])
+        expect(descriptorKeys.filter(key => (
+            typeof key === 'string' && /^\d+$/.test(key)
+        ))).toEqual([])
+        expect(getter).not.toHaveBeenCalled()
+        expect(toJSON).not.toHaveBeenCalled()
+        expect(toString).not.toHaveBeenCalled()
+        expect(JSON.stringify(result)).not.toContain(secret)
+        expect(JSON.stringify([
+            ...consoleLog.mock.calls,
+            ...consoleWarn.mock.calls,
+            ...consoleError.mock.calls,
+        ])).not.toContain(secret)
+    })
+
     it.each([
         null,
         [],
@@ -675,6 +744,86 @@ describe('handleAnalyzeForward persistence outcomes', () => {
         )
         expect(send).toHaveBeenCalledWith(FORWARDED)
         expect(send.mock.calls[0][0]).not.toHaveProperty('extension_warnings')
+    })
+
+    it('preserves every Host outcome across the persistence failure matrix', async () => {
+        const outcomes = [
+            {
+                name: 'success',
+                send: async () => HOST_SUCCESS,
+                expected: {
+                    status: 'success',
+                    data: { markdown: '# Report', saved_to: 'report.md' },
+                },
+            },
+            {
+                name: 'Host error',
+                send: async () => HOST_ERROR,
+                expected: {
+                    status: 'error',
+                    error: 'Host analysis failed',
+                    error_code: 'repository_instructions_missing',
+                    errorKind: 'unavailable',
+                    httpStatus: 503,
+                },
+            },
+            {
+                name: 'send rejection',
+                send: async () => {
+                    throw new Error('Native Host disconnected unexpectedly')
+                },
+                expected: {
+                    status: 'error',
+                    error: 'Native Host disconnected unexpectedly',
+                },
+            },
+        ] as const
+        const failures: ReadonlyArray<{
+            name: string
+            warnings: AnalysisPersistenceWarning[]
+        }> = [
+            { name: 'none', warnings: [] },
+            {
+                name: 'result-only',
+                warnings: ['analysis_result_not_persisted'],
+            },
+            {
+                name: 'cleanup-only',
+                warnings: ['analysis_pending_cleanup_failed'],
+            },
+            {
+                name: 'both',
+                warnings: [
+                    'analysis_result_not_persisted',
+                    'analysis_pending_cleanup_failed',
+                ],
+            },
+        ]
+
+        for (const outcome of outcomes) {
+            for (const failure of failures) {
+                const result = await handleAnalyzeForward(FORWARDED, CTX, {
+                    send: vi.fn(outcome.send),
+                    recordStart: vi.fn(async () => undefined),
+                    completePersistence: vi.fn(async () => [...failure.warnings]),
+                })
+                const expected = {
+                    ...outcome.expected,
+                    ...(failure.warnings.length > 0
+                        ? { extension_warnings: failure.warnings }
+                        : {}),
+                }
+                expect(
+                    result,
+                    `${outcome.name} with ${failure.name} persistence failure`,
+                ).toEqual(expected)
+                if (failure.warnings.length === 0) {
+                    expect(result).not.toHaveProperty('extension_warnings')
+                } else {
+                    expect(result.extension_warnings).toEqual(failure.warnings)
+                }
+            }
+        }
     })
 
     it.each([

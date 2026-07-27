@@ -394,6 +394,7 @@ function parseWarningArray(value: unknown): AnalysisPersistenceWarning[] | null 
             || typeof length.value !== 'number'
             || !Number.isInteger(length.value)
             || length.value < 0
+            || length.value > ANALYSIS_PERSISTENCE_WARNING_ORDER.length
         ) return null
         const expectedKeys = new Set<string>(['length'])
         for (let index = 0; index < length.value; index += 1) {
