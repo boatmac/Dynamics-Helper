@@ -381,6 +381,70 @@ it('rejects a revoked whole-storage snapshot with fixed text', async () => {
     }
 })
 
+it('contains revoked whole-storage access before key enumeration', async () => {
+    const objectKeys = vi.spyOn(Object, 'keys')
+    const objectEntries = vi.spyOn(Object, 'entries')
+    const revoked = Proxy.revocable({ dh_last_analysis: 'unsafe' }, {})
+    const directGet = vi.fn(() => undefined)
+    const directHas = vi.fn(() => false)
+    const descriptorTrap = vi.fn(() => {
+        throw new Error('SECRET WHOLE STORAGE DESCRIPTOR')
+    })
+    const guarded = new Proxy({}, {
+        ownKeys: () => ['dh_last_analysis'],
+        getOwnPropertyDescriptor: descriptorTrap,
+        get: directGet,
+        has: directHas,
+    })
+    const getSnapshot = analysisStoreExports.getAnalysisSnapshot
+    expect(getSnapshot).toBeTypeOf('function')
+
+    try {
+        chromeMockSpies.storageGet.mockImplementationOnce((
+            _keys: unknown,
+            maybeCallback?: unknown,
+        ) => {
+            const callback = typeof maybeCallback === 'function'
+                ? maybeCallback as (value: unknown) => void
+                : undefined
+            revoked.revoke()
+            queueMicrotask(() => callback?.(revoked.proxy))
+            return undefined
+        })
+        await expect((getSnapshot as () => Promise<unknown>)()).rejects.toThrow(
+            'Analysis storage read failed',
+        )
+
+        chromeMockSpies.storageGet.mockImplementationOnce((
+            _keys: unknown,
+            maybeCallback?: unknown,
+        ) => {
+            const callback = typeof maybeCallback === 'function'
+                ? maybeCallback as (value: unknown) => void
+                : undefined
+            queueMicrotask(() => callback?.(guarded))
+            return undefined
+        })
+        await expect((getSnapshot as () => Promise<unknown>)()).rejects.toThrow(
+            'Analysis storage read failed',
+        )
+
+        expect(objectKeys.mock.calls.some(([value]) => (
+            value === revoked.proxy || value === guarded
+        ))).toBe(false)
+        expect(objectEntries.mock.calls.some(([value]) => (
+            value === revoked.proxy || value === guarded
+        ))).toBe(false)
+        expect(directGet).not.toHaveBeenCalled()
+        expect(directHas).not.toHaveBeenCalled()
+        expect(descriptorTrap).toHaveBeenCalledOnce()
+        expect(chromeMockSpies.storageRemove).not.toHaveBeenCalled()
+    } finally {
+        objectKeys.mockRestore()
+        objectEntries.mockRestore()
+    }
+})
+
 describe('latest-started persistence ownership', () => {
     const context = (
         requestId: string,
@@ -722,6 +786,48 @@ describe('latest-started persistence ownership', () => {
         expect(delays).toEqual([50, 200])
         expect(attempts).toEqual([1, 2, 3])
         expect(chromeMockSpies.storageRemove).toHaveBeenCalledTimes(3)
+    })
+
+    it('default cleanup logging exposes only the fixed attempt', async () => {
+        await requireRecordStart()(CTX, () => 1)
+        const rawFailure = new Error('SECRET RAW CLEANUP FAILURE')
+        const removes = [
+            deferNextStorageRemove('dh_pending_analysis:req-A'),
+            deferNextStorageRemove('dh_pending_analysis:req-A'),
+            deferNextStorageRemove('dh_pending_analysis:req-A'),
+        ]
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+        try {
+            const completing = requireCompletePersistence()(CTX, completion, {
+                delay: async () => undefined,
+            })
+            for (let index = 0; index < removes.length; index += 1) {
+                await vi.waitFor(() => expect(chromeMockSpies.storageRemove)
+                    .toHaveBeenCalledTimes(index + 1))
+                removes[index].reject(rawFailure)
+            }
+
+            await expect(completing).resolves.toEqual([
+                'analysis_pending_cleanup_failed',
+            ])
+            expect(warning.mock.calls).toEqual([
+                ['[DH] Analysis pending cleanup failed', { attempt: 1 }],
+                ['[DH] Analysis pending cleanup failed', { attempt: 2 }],
+                ['[DH] Analysis pending cleanup failed', { attempt: 3 }],
+            ])
+            for (const call of warning.mock.calls) {
+                expect(call).toHaveLength(2)
+                expect(call).not.toContain(rawFailure)
+                expect(Reflect.ownKeys(call[1] as object)).toEqual(['attempt'])
+                const attempt = (call[1] as { attempt: unknown }).attempt
+                expect(Number.isInteger(attempt)).toBe(true)
+                expect([1, 2, 3]).toContain(attempt)
+                expect(JSON.stringify(call)).not.toContain('SECRET RAW CLEANUP FAILURE')
+            }
+        } finally {
+            warning.mockRestore()
+        }
     })
 
     it('retries cleanup read failures with the fixed schedule', async () => {
