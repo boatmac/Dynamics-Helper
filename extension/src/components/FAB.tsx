@@ -74,6 +74,11 @@ const FAB: React.FC = () => {
     const currentCaseNumberRef = React.useRef('');
     const editableContextIdentityRef = React.useRef<PageIdentity | null>(null);
     const pageScanGenerationRef = React.useRef(0);
+    const acceptedContextSnapshotRef = React.useRef<{
+        generation: number;
+        identity: PageIdentity | null;
+        data: ScrapedData;
+    } | null>(null);
     const [hydrationCaseNumber, setHydrationCaseNumber] = useState('');
     const hydrationCaseNumberRef = React.useRef('');
     
@@ -407,28 +412,46 @@ const FAB: React.FC = () => {
         fresh: unknown,
         completedOrigin: PageIdentity | null = null,
         isPostRunScan = false,
-    ): void {
+        generation = pageScanGenerationRef.current,
+        forceReplace = false,
+    ): typeof acceptedContextSnapshotRef.current {
+        if (!scanIsCurrent(generation)) return null;
         const plain = parseScrapedDataSnapshot(fresh);
-        if (!plain) return;
+        if (!plain) return null;
         const parsed = parsePageIdentitySnapshot(plain);
-        if (!parsed) return;
+        if (!parsed) return null;
         const nextIdentity = parsed.identity;
         const previousContextIdentity = editableContextIdentityRef.current;
+        const accepted = { generation, identity: nextIdentity, data: plain };
+        acceptedContextSnapshotRef.current = accepted;
         applyIdentityScan(plain);
         const replaceAfterAnalyze = isPostRunScan && (
             identityChangedDuringAnalyzeRef.current
             || nextIdentity !== completedOrigin
         );
-        if (replaceAfterAnalyze || nextIdentity !== previousContextIdentity) {
+        if (
+            forceReplace
+            || replaceAfterAnalyze
+            || nextIdentity !== previousContextIdentity
+        ) {
             isUserEdited.current = false;
             setHasAutoAnalyzed(false);
             editableContextIdentityRef.current = nextIdentity;
             setScrapedData(plain);
-            return;
+            return accepted;
         }
-        if (isUserEdited.current) return;
+        if (isUserEdited.current) return accepted;
         editableContextIdentityRef.current = nextIdentity;
         setScrapedData(plain);
+        return accepted;
+    }
+
+    function acceptedSnapshotIsCurrent(
+        snapshot: NonNullable<typeof acceptedContextSnapshotRef.current>,
+    ): boolean {
+        return acceptedContextSnapshotRef.current === snapshot
+            && snapshot.generation === pageScanGenerationRef.current
+            && snapshot.identity === currentPageIdentityRef.current;
     }
 
     // Duration Logic
@@ -496,7 +519,7 @@ const FAB: React.FC = () => {
                  const initialScan = await scanCurrentPage('[DH] Page scan failed');
                  if (scanIsCurrent(initialScan.generation) && initialScan.fresh) {
                      if (localAnalyzeRequestIdRef.current) applyIdentityScan(initialScan.fresh);
-                     else applyFullScan(initialScan.fresh);
+                     else applyFullScan(initialScan.fresh, null, false, initialScan.generation);
                  }
              }
 
@@ -504,7 +527,7 @@ const FAB: React.FC = () => {
                  const openScan = await scanCurrentPage('[DH] Page scan failed');
                  if (scanIsCurrent(openScan.generation) && openScan.fresh) {
                      if (localAnalyzeRequestIdRef.current) applyIdentityScan(openScan.fresh);
-                     else applyFullScan(openScan.fresh);
+                     else applyFullScan(openScan.fresh, null, false, openScan.generation);
                  }
              }
         };
@@ -517,7 +540,7 @@ const FAB: React.FC = () => {
         const handleTriggerAnalyze = async (e: any) => {
             const { selectionText, rootPath } = e.detail;
             console.log("[DH] Context Menu Triggered:", { selectionText, rootPath });
-            const expectedIdentity = editableContextIdentityRef.current;
+            let pageSnapshot = acceptedContextSnapshotRef.current;
 
             // If rootPath is provided, ensure our prefs are consistent
             if (rootPath && rootPath !== effectivePrefs.rootPath) {
@@ -525,23 +548,24 @@ const FAB: React.FC = () => {
             }
 
             if (selectionText) {
-                if (expectedIdentity !== currentPageIdentityRef.current) return;
+                if (pageSnapshot && !acceptedSnapshotIsCurrent(pageSnapshot)) return;
                 // We need to merge the selection with the current page context (Case Number, Product, etc.)
                 // so the analysis file is saved in the correct folder.
-                let baseData = scrapedData;
-                
-                // If we don't have cached data (e.g. menu never opened), scan now
-                if (!baseData) {
-                    baseData = await PageReader.scanForErrors();
+                if (!pageSnapshot) {
+                    const scan = await scanCurrentPage('[DH] Page scan failed');
+                    if (!scanIsCurrent(scan.generation) || !scan.fresh) return;
+                    pageSnapshot = applyFullScan(
+                        scan.fresh,
+                        null,
+                        false,
+                        scan.generation,
+                    );
                 }
-                if (
-                    expectedIdentity !== currentPageIdentityRef.current
-                    || expectedIdentity !== editableContextIdentityRef.current
-                ) return;
+                if (!pageSnapshot || !acceptedSnapshotIsCurrent(pageSnapshot)) return;
 
                 // Construct the data object for analysis
                 const dataToAnalyze: ScrapedData = {
-                    ...(baseData || {}),
+                    ...pageSnapshot.data,
                     errorText: selectionText, // The selection becomes the primary text to analyze
                     source: "Context Menu Selection"
                 };
@@ -589,7 +613,7 @@ const FAB: React.FC = () => {
                 }
                 return;
             }
-            applyFullScan(scan.fresh);
+            applyFullScan(scan.fresh, null, false, scan.generation);
         };
 
         // MutationObserver to detect DOM changes
@@ -705,10 +729,8 @@ const FAB: React.FC = () => {
             if (localAnalyzeRequestIdRef.current) {
                 applyIdentityScan(scan.fresh);
             } else {
-                // Explicit refresh — user wants fresh data, so reset the edit flag
-                isUserEdited.current = false;
-                setHasAutoAnalyzed(false);
-                applyFullScan(scan.fresh);
+                // Explicit refresh replaces edits only after the scrape validates.
+                applyFullScan(scan.fresh, null, false, scan.generation, true);
             }
         }
     };
@@ -757,7 +779,7 @@ const FAB: React.FC = () => {
         const scan = await scanCurrentPage('[DH] Post-analysis page scan failed');
         if (!scanIsCurrent(scan.generation)) return;
         if (scan.fresh && analyzeOriginRef.current?.requestId === requestId) {
-            applyFullScan(scan.fresh, origin, true);
+            applyFullScan(scan.fresh, origin, true, scan.generation);
         }
         if (analyzeOriginRef.current?.requestId === requestId) {
             analyzeOriginRef.current = null;

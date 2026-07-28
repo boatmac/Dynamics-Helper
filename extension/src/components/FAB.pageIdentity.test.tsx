@@ -380,6 +380,132 @@ describe('FAB live page identity during Analyze', () => {
             .toHaveLength(1)
     })
 
+    it('orders overlapping context-menu fallback scans by generation', async () => {
+        const initialScan = deferredValue<unknown>()
+        const olderFallback = deferredValue<unknown>()
+        const newerFallback = deferredValue<unknown>()
+        const getter = vi.fn(() => 'STALE RAW PRODUCT')
+        const rawA = Object.defineProperty(
+            { ...A },
+            'unsupportedGetter',
+            { enumerable: true, get: getter },
+        )
+        state.scanForErrors
+            .mockReset()
+            .mockImplementationOnce(() => initialScan.promise)
+            .mockImplementationOnce(() => olderFallback.promise)
+            .mockImplementationOnce(() => newerFallback.promise)
+
+        render(
+            <PrefsLanguageProvider language="en">
+                <FAB />
+            </PrefsLanguageProvider>,
+        )
+        await flushReact()
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('dh-trigger-analyze', {
+                detail: { selectionText: 'OLDER FALLBACK SELECTION' },
+            }))
+            window.dispatchEvent(new CustomEvent('dh-trigger-analyze', {
+                detail: { selectionText: 'NEWER FALLBACK SELECTION' },
+            }))
+            await Promise.resolve()
+        })
+        expect(state.scanForErrors).toHaveBeenCalledTimes(3)
+
+        await act(async () => newerFallback.resolve(B))
+        await flushReact()
+        await act(async () => olderFallback.resolve(rawA))
+        await flushReact()
+
+        const analyzeMessages = getMessageLog()
+            .filter(entry => entry.action === 'analyze_error')
+        expect(analyzeMessages).toHaveLength(1)
+        expect(analyzeMessages[0].payload).toMatchObject({
+            payload: {
+                payload: {
+                    caseNumber: B.caseNumber,
+                    text: expect.stringContaining('NEW CASE B BODY'),
+                },
+                _persist: { caseNumber: B.caseNumber },
+            },
+        })
+        expect(getter).not.toHaveBeenCalled()
+        expect(state.hydrationCaseNumbers.at(-1)).toBe(B.caseNumber)
+    })
+
+    it('binds context-menu identity and data from one accepted snapshot', async () => {
+        await renderOpenFab()
+        fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+        await flushReact()
+
+        const bScan = deferredValue<unknown>()
+        state.scanForErrors.mockReset().mockImplementationOnce(() => bScan.promise)
+        const callback = state.observerCallback
+        expect(callback).not.toBeNull()
+        await act(async () => {
+            callback!([], {} as MutationObserver)
+            await vi.advanceTimersByTimeAsync(2000)
+            await Promise.resolve()
+        })
+
+        await act(async () => {
+            bScan.resolve(B)
+            await Promise.resolve()
+            await Promise.resolve()
+            await Promise.resolve()
+            window.dispatchEvent(new CustomEvent('dh-trigger-analyze', {
+                detail: { selectionText: 'ATOMIC B SELECTION' },
+            }))
+            await Promise.resolve()
+        })
+
+        const analyzeMessages = getMessageLog()
+            .filter(entry => entry.action === 'analyze_error')
+        expect(analyzeMessages).toHaveLength(1)
+        expect(analyzeMessages[0].payload).toMatchObject({
+            payload: {
+                payload: {
+                    caseNumber: B.caseNumber,
+                    text: expect.stringContaining('NEW CASE B BODY'),
+                },
+                _persist: { caseNumber: B.caseNumber },
+            },
+        })
+        expect(JSON.stringify(analyzeMessages[0].payload))
+            .not.toContain('OLD CASE A BODY')
+    })
+
+    it('keeps edit protection when explicit refresh is malformed', async () => {
+        await renderOpenFab()
+        const textarea = expandContext()
+        fireEvent.change(textarea, { target: { value: 'MANUAL A REFRESH EDIT' } })
+
+        state.scanValue = {
+            caseNumber: A.caseNumber,
+            ticketTitle: A.ticketTitle,
+            errorText: 7,
+        }
+        fireEvent.click(screen.getByTitle('Refresh Context (Re-scan page)'))
+        await flushReact()
+
+        fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+        state.scanValue = {
+            ...A,
+            errorText: 'VALID A ENRICHMENT',
+            description: 'VALID A ENRICHMENT',
+        }
+        await triggerMutation()
+        openFab()
+        await flushReact()
+
+        expect((screen.getByRole('textbox') as HTMLTextAreaElement).value)
+            .toBe('MANUAL A REFRESH EDIT')
+        expect(getMessageLog().filter(entry => entry.action === 'analyze_error'))
+            .toHaveLength(0)
+    })
+
     it('does not run a delayed A auto-analysis after a full B scan', async () => {
         const longA = {
             ...A,
