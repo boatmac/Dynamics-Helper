@@ -386,6 +386,16 @@ const FAB: React.FC = () => {
             showStatusBubble(`${t('updateAvailable')}: ${e.detail.version}`, 'success', 10000); 
         };
 
+        const handleUpdateError = (event: Event) => {
+            const candidate = ownDataProperty(
+                (event as CustomEvent<unknown>).detail,
+                'error',
+            );
+            showStatusBubble(safeErrorText([
+                candidate.kind === 'value' ? candidate.value : undefined,
+            ], t('updateCheckFailed')), 'error', 5000);
+        };
+
         const handleNotification = (e: any) => {
             const { text, type } = e.detail;
             // Don't override analyze-flow bubble (see isAnalyzingRef comment).
@@ -409,12 +419,14 @@ const FAB: React.FC = () => {
 
         window.addEventListener('dh-native-progress', handleProgress);
         window.addEventListener('dh-update-available', handleUpdate);
+        window.addEventListener('dh-update-error', handleUpdateError);
         window.addEventListener('DH_NOTIFICATION', handleNotification);
         window.addEventListener('DH_TOAST', handleToast);
         
         return () => {
             window.removeEventListener('dh-native-progress', handleProgress);
             window.removeEventListener('dh-update-available', handleUpdate);
+            window.removeEventListener('dh-update-error', handleUpdateError);
             window.removeEventListener('DH_NOTIFICATION', handleNotification);
             window.removeEventListener('DH_TOAST', handleToast);
         };

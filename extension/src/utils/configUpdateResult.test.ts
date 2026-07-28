@@ -9,30 +9,267 @@ import {
 } from './configUpdateResult'
 
 describe('config update results', () => {
-  it('classifies inner success as acknowledged', () => {
-    expect(classifyConfigUpdateResponse({
-      status: 'success',
-      data: { success: true, config_saved: true },
-    })).toEqual({ acknowledged: true, issue: null })
+  const innerIssue = (
+    configSaved: boolean,
+    fallback = '',
+    errorCode?: string,
+  ) => ({
+    configSaved,
+    errorCode,
+    fallback,
   })
 
-  it('classifies saved refresh failure and preserves code', () => {
-    expect(classifyConfigUpdateResponse({
-      status: 'success',
-      data: {
+  it.each([
+    {
+      result: { success: true },
+      expected: { acknowledged: true, issue: null },
+    },
+    {
+      result: { success: true, config_saved: true },
+      expected: { acknowledged: true, issue: null },
+    },
+    {
+      result: {
+        success: true,
+        config_saved: false,
+        error: 'contradictory response',
+      },
+      expected: {
+        acknowledged: false,
+        issue: innerIssue(false, 'contradictory response'),
+      },
+    },
+    {
+      result: {
         success: false,
         config_saved: true,
         error_code: 'repository_instructions_missing',
         error: 'safe fallback',
       },
+      expected: {
+        acknowledged: true,
+        issue: innerIssue(
+          true,
+          'safe fallback',
+          'repository_instructions_missing',
+        ),
+      },
+    },
+    {
+      result: { success: false },
+      expected: {
+        acknowledged: false,
+        issue: innerIssue(false),
+      },
+    },
+    {
+      result: { success: false, config_saved: false },
+      expected: {
+        acknowledged: false,
+        issue: innerIssue(false),
+      },
+    },
+    {
+      result: {},
+      expected: {
+        acknowledged: false,
+        issue: innerIssue(false),
+      },
+    },
+    {
+      result: { config_saved: true },
+      expected: {
+        acknowledged: false,
+        issue: innerIssue(false),
+      },
+    },
+    {
+      result: { config_saved: false },
+      expected: {
+        acknowledged: false,
+        issue: innerIssue(false),
+      },
+    },
+    {
+      result: { success: 'true' },
+      expected: {
+        acknowledged: false,
+        issue: innerIssue(false),
+      },
+    },
+    {
+      result: { success: 1, config_saved: true },
+      expected: {
+        acknowledged: false,
+        issue: innerIssue(false),
+      },
+    },
+  ])('classifies the config_saved property-presence matrix', ({
+    result,
+    expected,
+  }) => {
+    expect(classifyConfigUpdateResponse({
+      status: 'success',
+      data: result,
+    })).toEqual(expected)
+  })
+
+  it('acknowledges the legacy Host response without config_saved', () => {
+    expect(classifyConfigUpdateResponse({
+      status: 'success',
+      data: { success: true },
+    })).toEqual({ acknowledged: true, issue: null })
+  })
+
+  it('rejects present null config_saved', () => {
+    expect(classifyConfigUpdateResponse({
+      status: 'success',
+      data: { success: true, config_saved: null },
     })).toEqual({
-      acknowledged: true,
-      issue: {
-        configSaved: true,
-        errorCode: 'repository_instructions_missing',
-        fallback: 'safe fallback',
+      acknowledged: false,
+      issue: innerIssue(false),
+    })
+  })
+
+  it.each(['true', 1, 0, [], {}, Symbol('x')])(
+    'rejects present malformed config_saved',
+    configSaved => {
+      expect(classifyConfigUpdateResponse({
+        status: 'success',
+        data: { success: true, config_saved: configSaved },
+      })).toEqual({
+        acknowledged: false,
+        issue: innerIssue(false),
+      })
+    },
+  )
+
+  it.each([
+    [{ error: 'safe error', message: 'safe message' }, 'safe error'],
+    [{ error: { secret: true }, message: 'safe message' }, 'safe message'],
+    [{ error: { secret: true }, message: [] }, ''],
+  ])('uses safe contradictory response fallback precedence', (
+    fields,
+    fallback,
+  ) => {
+    expect(classifyConfigUpdateResponse({
+      status: 'success',
+      data: {
+        success: true,
+        config_saved: false,
+        ...fields,
+      },
+    })).toEqual({
+      acknowledged: false,
+      issue: innerIssue(false, fallback),
+    })
+  })
+
+  it('contains invalid config_saved descriptors without conversion or logging', () => {
+    const secret = 'SECRET-CONFIG-SAVED-DESCRIPTOR'
+    const getter = vi.fn(() => secret)
+    const toString = vi.fn(() => secret)
+    const accessorResult = { success: true, toString }
+    Object.defineProperty(accessorResult, 'config_saved', {
+      enumerable: true,
+      get: getter,
+    })
+    const descriptor = vi.fn((target: object, key: PropertyKey) => {
+      if (key === 'config_saved') throw new Error(secret)
+      return Reflect.getOwnPropertyDescriptor(target, key)
+    })
+    const proxyResult = new Proxy({ success: true, toString }, {
+      getOwnPropertyDescriptor: descriptor,
+    })
+    const consoleSpies = [
+      vi.spyOn(console, 'log').mockImplementation(() => undefined),
+      vi.spyOn(console, 'info').mockImplementation(() => undefined),
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined),
+      vi.spyOn(console, 'error').mockImplementation(() => undefined),
+      vi.spyOn(console, 'debug').mockImplementation(() => undefined),
+    ]
+
+    try {
+      for (const result of [accessorResult, proxyResult]) {
+        expect(() => classifyConfigUpdateResponse({
+          status: 'success',
+          data: result,
+        })).not.toThrow()
+        expect(classifyConfigUpdateResponse({
+          status: 'success',
+          data: result,
+        })).toEqual({
+          acknowledged: false,
+          issue: { configSaved: false },
+        })
+      }
+      expect(getter).not.toHaveBeenCalled()
+      expect(toString).not.toHaveBeenCalled()
+      expect(consoleSpies.every(spy => spy.mock.calls.length === 0)).toBe(true)
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('contains malformed outer status and data without inspecting raw errors', () => {
+    const secret = 'SECRET-OUTER-CONFIG-RESPONSE'
+    const getter = vi.fn(() => secret)
+    const toString = vi.fn(() => secret)
+    const statusAccessor = { error: { secret, toString } }
+    Object.defineProperty(statusAccessor, 'status', {
+      enumerable: true,
+      get: getter,
+    })
+    const dataAccessor = { status: 'success', error: { secret, toString } }
+    Object.defineProperty(dataAccessor, 'data', {
+      enumerable: true,
+      get: getter,
+    })
+    const statusTrap = new Proxy({ error: { secret, toString } }, {
+      getOwnPropertyDescriptor: () => {
+        throw new Error(secret)
       },
     })
+    const consoleSpies = [
+      vi.spyOn(console, 'log').mockImplementation(() => undefined),
+      vi.spyOn(console, 'info').mockImplementation(() => undefined),
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined),
+      vi.spyOn(console, 'error').mockImplementation(() => undefined),
+      vi.spyOn(console, 'debug').mockImplementation(() => undefined),
+    ]
+
+    try {
+      for (const response of [statusAccessor, dataAccessor, statusTrap]) {
+        expect(() => classifyConfigUpdateResponse(response)).not.toThrow()
+        expect(classifyConfigUpdateResponse(response)).toEqual({
+          acknowledged: false,
+          issue: { configSaved: false },
+        })
+      }
+      expect(getter).not.toHaveBeenCalled()
+      expect(toString).not.toHaveBeenCalled()
+      expect(consoleSpies.every(spy => spy.mock.calls.length === 0)).toBe(true)
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('contains revoked outer and nested config responses', () => {
+    const outer = Proxy.revocable({ status: 'success' }, {})
+    const nested = Proxy.revocable({ success: true }, {})
+    outer.revoke()
+    nested.revoke()
+
+    for (const response of [outer.proxy, {
+      status: 'success',
+      data: nested.proxy,
+    }]) {
+      expect(() => classifyConfigUpdateResponse(response)).not.toThrow()
+      expect(classifyConfigUpdateResponse(response)).toEqual({
+        acknowledged: false,
+        issue: { configSaved: false },
+      })
+    }
   })
 
   it('classifies outer error as not saved', () => {

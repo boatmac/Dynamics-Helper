@@ -336,6 +336,7 @@ export const translations: TranslationDictionary = {
     importSuccess: { en: "Imported successfully!", zh: "导入成功！" },
     availableForUpdate: { en: "available for update", zh: "可更新" },
     checkFailed: { en: "Check failed", zh: "检查失败" },
+    updateCheckFailed: { en: "Update check failed.", zh: "更新检查失败。" },
     edit: { en: "Edit", zh: "编辑" },
     preview: { en: "Preview", zh: "预览" },
     

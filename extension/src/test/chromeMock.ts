@@ -1,4 +1,5 @@
 import { vi } from 'vitest'
+import { ownDataProperty } from '../utils/ownData'
 
 // Hand-rolled chrome.* stub for unit tests.
 //
@@ -33,6 +34,11 @@ type StorageChangeListener = (
   changes: { [key: string]: chrome.storage.StorageChange },
   areaName: string,
 ) => void
+type RuntimeMessageListener = (
+  message: unknown,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: ReturnType<typeof vi.fn>,
+) => unknown
 
 let pendingByAction: PendingMap = new Map()
 let pendingStorageGets: DeferredStorageGet[] = []
@@ -41,6 +47,9 @@ let pendingStorageRemoves: DeferredStorageRemove[] = []
 let storageData: Record<string, unknown> = {}
 let messageLog: Array<{ action: string; payload: unknown }> = []
 let storageChangeListeners = new Set<StorageChangeListener>()
+let runtimeMessageListeners = new Set<RuntimeMessageListener>()
+let activeTabs: Array<{ id?: number }> = []
+let tabMessageLog: Array<{ tabId: number; message: unknown }> = []
 
 function makeDeferred(): DeferredResponse {
   let resolve!: (v: unknown) => void
@@ -60,7 +69,14 @@ export function resetChromeMock(): void {
   storageData = {}
   messageLog = []
   storageChangeListeners = new Set()
+  runtimeMessageListeners = new Set()
+  activeTabs = []
+  tabMessageLog = []
   sendMessage.mockClear()
+  tabsQuery.mockClear()
+  tabsSendMessage.mockClear()
+  runtimeOnMessageAddListener.mockClear()
+  runtimeOnMessageRemoveListener.mockClear()
   storageGet.mockClear()
   storageSet.mockClear()
   storageRemove.mockClear()
@@ -127,18 +143,20 @@ export function getMessageLog(): ReadonlyArray<{ action: string; payload: unknow
   return messageLog
 }
 
+function ownString(value: unknown, key: PropertyKey): string | undefined {
+  const property = ownDataProperty(value, key)
+  return property.kind === 'value' && typeof property.value === 'string'
+    ? property.value
+    : undefined
+}
+
 const sendMessage = vi.fn((payload: unknown, maybeCallback?: unknown) => {
-  const action =
-    payload && typeof payload === 'object' && 'action' in payload
-      ? String((payload as { action: unknown }).action)
-      : payload && typeof payload === 'object' && 'payload' in payload &&
-          (payload as { payload?: unknown }).payload &&
-          typeof (payload as { payload: { action?: unknown } }).payload === 'object' &&
-          'action' in (payload as { payload: { action?: unknown } }).payload
-        ? String((payload as { payload: { action: unknown } }).payload.action)
-        : payload && typeof payload === 'object' && 'type' in payload
-          ? String((payload as { type: unknown }).type)
-          : '<unknown>'
+  const directAction = ownString(payload, 'action')
+  const nestedPayload = ownDataProperty(payload, 'payload')
+  const nestedAction = nestedPayload.kind === 'value'
+    ? ownString(nestedPayload.value, 'action')
+    : undefined
+  const action = directAction ?? nestedAction ?? ownString(payload, 'type') ?? '<unknown>'
   messageLog.push({ action, payload })
 
   const queue = pendingByAction.get(action)
@@ -359,6 +377,66 @@ const storageOnChangedRemoveListener = vi.fn((listener: StorageChangeListener) =
   storageChangeListeners.delete(listener)
 })
 
+const runtimeOnMessageAddListener = vi.fn((listener: RuntimeMessageListener) => {
+  runtimeMessageListeners.add(listener)
+})
+
+const runtimeOnMessageRemoveListener = vi.fn((listener: RuntimeMessageListener) => {
+  runtimeMessageListeners.delete(listener)
+})
+
+const tabsQuery = vi.fn((
+  _queryInfo: chrome.tabs.QueryInfo,
+  maybeCallback?: (tabs: chrome.tabs.Tab[]) => void,
+) => {
+  const result = activeTabs.map(tab => ({ ...tab })) as chrome.tabs.Tab[]
+  if (maybeCallback) {
+    queueMicrotask(() => maybeCallback(result))
+    return undefined
+  }
+  return Promise.resolve(result)
+})
+
+const tabsSendMessage = vi.fn((
+  tabId: number,
+  message: unknown,
+  optionsOrCallback?: unknown,
+  maybeCallback?: unknown,
+) => {
+  tabMessageLog.push({ tabId, message })
+  const callback = typeof optionsOrCallback === 'function'
+    ? optionsOrCallback as (response?: unknown) => void
+    : typeof maybeCallback === 'function'
+      ? maybeCallback as (response?: unknown) => void
+      : undefined
+  if (callback) {
+    queueMicrotask(() => callback())
+    return undefined
+  }
+  return Promise.resolve(undefined)
+})
+
+export function setActiveTabs(tabs: Array<{ id?: number }>): void {
+  activeTabs = tabs.map(tab => ({ ...tab }))
+}
+
+export function emitRuntimeMessage(message: unknown): void {
+  const sender = { id: 'test-extension' } as chrome.runtime.MessageSender
+  for (const listener of [...runtimeMessageListeners]) {
+    listener(message, sender, vi.fn())
+  }
+}
+
+export function emitTabMessage(tabId: number, message: unknown): void {
+  const sender = {
+    id: 'test-extension',
+    tab: { id: tabId } as chrome.tabs.Tab,
+  } as chrome.runtime.MessageSender
+  for (const listener of [...runtimeMessageListeners]) {
+    listener(message, sender, vi.fn())
+  }
+}
+
 export function installChromeMock(): void {
   ;(globalThis as unknown as { chrome: unknown }).chrome = {
     runtime: {
@@ -367,8 +445,8 @@ export function installChromeMock(): void {
       getURL: (path: string) => `chrome-extension://test/${path}`,
       lastError: undefined,
       onMessage: {
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
+        addListener: runtimeOnMessageAddListener,
+        removeListener: runtimeOnMessageRemoveListener,
       },
     },
     storage: {
@@ -382,11 +460,18 @@ export function installChromeMock(): void {
         removeListener: storageOnChangedRemoveListener,
       },
     },
+    tabs: {
+      query: tabsQuery,
+      sendMessage: tabsSendMessage,
+    },
   }
 }
 
 export const chromeMockSpies = {
   sendMessage,
+  runtimeSendMessage: sendMessage,
+  tabsQuery,
+  tabsSendMessage,
   storageGet,
   storageSet,
   storageRemove,

@@ -45,6 +45,7 @@ import { trackEvent } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { localizePromptSourceError } from '../utils/promptSourceErrors';
 import { safeErrorText } from '../utils/safeErrorText';
+import { ownDataProperty } from '../utils/ownData';
 import {
     collapseBookmarkFolders,
     loadBookmarkItems,
@@ -2604,25 +2605,36 @@ const OptionsInner: React.FC = () => {
     }, [t]);
 
     useEffect(() => {
-        const handleRuntimeMsg = (message: any) => {
-            if (message.type === "NATIVE_UPDATE_AVAILABLE") {
+        const handleRuntimeMsg = (message: unknown) => {
+            const type = ownDataProperty(message, 'type');
+            if (type.kind !== 'value') return;
+            if (type.value === "NATIVE_UPDATE_AVAILABLE") {
+                const updateMessage = message as {
+                    payload: { version: string; url: string };
+                };
                 const currentVer = getExtensionVersion();
-                if (message.payload.version === currentVer) {
+                if (updateMessage.payload.version === currentVer) {
                     setUpdateAvailable(null);
                     chrome.storage.local.remove("pending_update");
                     return;
                 }
-                console.log("[Options] Received update available:", message.payload);
-                setUpdateAvailable(message.payload);
-                showSuccess(`${message.payload.version.replace(/^v?/, 'v')} ${tRef.current('availableForUpdate')}`, 5000);
+                console.log("[Options] Received update available:", updateMessage.payload);
+                setUpdateAvailable(updateMessage.payload);
+                showSuccess(`${updateMessage.payload.version.replace(/^v?/, 'v')} ${tRef.current('availableForUpdate')}`, 5000);
             }
             
-            if (message.type === "NATIVE_UPDATE_NOT_AVAILABLE") {
+            if (type.value === "NATIVE_UPDATE_NOT_AVAILABLE") {
                 showSuccess(tRef.current('upToDate'), 3000);
             }
 
-            if (message.type === "NATIVE_UPDATE_ERROR") {
-                showError(`${tRef.current('checkFailed')}: ${message.payload.error}`, 5000);
+            if (type.value === "NATIVE_UPDATE_ERROR") {
+                const payload = ownDataProperty(message, 'payload');
+                const candidate = payload.kind === 'value'
+                    ? ownDataProperty(payload.value, 'error')
+                    : { kind: 'invalid' as const };
+                showError(safeErrorText([
+                    candidate.kind === 'value' ? candidate.value : undefined,
+                ], tRef.current('updateCheckFailed')), 5000);
             }
         };
 

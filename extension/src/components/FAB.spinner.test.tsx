@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { deferNextResponse, installChromeMock, resetChromeMock } from '../test/chromeMock'
 import { PrefsLanguageProvider } from '../utils/i18n'
+import { UPDATE_ERROR_DOM_EVENT } from '../content/updateErrorBridge'
 
 const state = vi.hoisted(() => ({
   hydrationPending: true,
@@ -110,6 +111,52 @@ describe('FAB analyzing source reconciliation', () => {
     }
     render(<FAB />)
     expect(await screen.findByText('0.0s')).toBeInTheDocument()
+  })
+
+  it('defends FAB update error display', async () => {
+    state.hydrationPending = false
+    const secret = 'SECRET-FAB-UPDATE-ERROR'
+    const getter = vi.fn(() => secret)
+    const detail = {}
+    Object.defineProperty(detail, 'error', {
+      enumerable: true,
+      get: getter,
+    })
+    const addEventListener = vi.spyOn(window, 'addEventListener')
+    const removeEventListener = vi.spyOn(window, 'removeEventListener')
+    const view = render(
+      <PrefsLanguageProvider language="en">
+        <FAB />
+      </PrefsLanguageProvider>,
+    )
+
+    try {
+      await waitFor(() => expect(state.scanForErrors).toHaveBeenCalled())
+      act(() => window.dispatchEvent(new CustomEvent(
+        UPDATE_ERROR_DOM_EVENT,
+        { detail },
+      )))
+
+      const bubble = document.querySelector('.dh-status-bubble') as HTMLElement
+      await waitFor(() => expect(bubble).toHaveTextContent('Update check failed.'))
+      expect(bubble).toHaveClass('visible', 'error')
+      expect(bubble.textContent).not.toContain(secret)
+      expect(getter).not.toHaveBeenCalled()
+
+      const registration = addEventListener.mock.calls.find(
+        ([eventName]) => eventName === UPDATE_ERROR_DOM_EVENT,
+      )
+      expect(registration).toBeDefined()
+      view.unmount()
+      expect(removeEventListener).toHaveBeenCalledWith(
+        UPDATE_ERROR_DOM_EVENT,
+        registration![1],
+      )
+    } finally {
+      view.unmount()
+      addEventListener.mockRestore()
+      removeEventListener.mockRestore()
+    }
   })
 
   it('clears a hydrated spinner when a case switch has no matching pending request', async () => {

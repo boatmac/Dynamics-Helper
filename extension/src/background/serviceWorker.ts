@@ -38,8 +38,22 @@ import {
 } from './analyzeRequestHandler';
 import { postNativeMessageWire } from './nativeMessageWire';
 import { handleResetExtensionState } from './resetExtensionState';
+import { ownDataProperty } from '../utils/ownData';
+import {
+    handleNativeUpdateError,
+    type NativeUpdateErrorDeliveryDeps,
+} from '../utils/nativeUpdateError';
 
 const NATIVE_HOST_NAME = "com.dynamics.helper.native";
+
+const productionUpdateErrorDeps: NativeUpdateErrorDeliveryDeps = {
+    sendRuntime: event => chrome.runtime.sendMessage(event),
+    queryActiveTabs: () => chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+    }),
+    sendTab: (tabId, event) => chrome.tabs.sendMessage(tabId, event),
+};
 
 // Initialize Context Menu
 setupContextMenu();
@@ -146,6 +160,12 @@ function connectToNativeHost() {
         nativePort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
         
         nativePort.onMessage.addListener((msg) => {
+            const action = ownDataProperty(msg, 'action')
+            if (action.kind === 'value' && action.value === 'update_error') {
+                void handleNativeUpdateError(msg, productionUpdateErrorDeps)
+                return
+            }
+
             console.log("[DH-SW] Received message from host:", summarizeNativeHostMessage(msg));
             
             // Handle Progress Updates (Streamed)
@@ -190,16 +210,6 @@ function connectToNativeHost() {
                         }).catch(() => {});
                     }
                 });
-                return;
-            }
-
-            // Handle Update Error
-            if (msg.action === "update_error") {
-                console.warn("[DH-SW] Update Check Failed:", msg.payload);
-                chrome.runtime.sendMessage({
-                    type: "NATIVE_UPDATE_ERROR",
-                    payload: msg.payload
-                }).catch(() => {});
                 return;
             }
 

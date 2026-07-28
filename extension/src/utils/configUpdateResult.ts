@@ -1,5 +1,6 @@
 import { normalizeErrorCode } from './promptSourceErrors'
 import { safeErrorText } from './safeErrorText'
+import { ownDataProperty } from './ownData'
 
 export interface ConfigUpdateIssue {
   configSaved: boolean
@@ -82,40 +83,83 @@ export function acknowledgePromptRevision(
 }
 
 export function classifyConfigUpdateResponse(
-  response: any,
+  response: unknown,
 ): ConfigUpdateDecision {
-  if (response?.status !== 'success') {
+  const fixedFailure: ConfigUpdateDecision = {
+    acknowledged: false,
+    issue: { configSaved: false },
+  }
+  const status = ownDataProperty(response, 'status')
+  if (status.kind !== 'value') return fixedFailure
+
+  const issueFrom = (
+    value: unknown,
+    configSaved: boolean,
+  ): ConfigUpdateIssue => {
+    const errorCode = ownDataProperty(value, 'error_code')
+    const error = ownDataProperty(value, 'error')
+    const message = ownDataProperty(value, 'message')
     return {
-      acknowledged: false,
-      issue: {
-        configSaved: false,
-        errorCode: normalizeErrorCode(response?.error_code),
-        fallback: safeErrorText([response?.error, response?.message], ''),
-      },
+      configSaved,
+      errorCode: normalizeErrorCode(
+        errorCode.kind === 'value' ? errorCode.value : undefined,
+      ),
+      fallback: safeErrorText([
+        error.kind === 'value' ? error.value : undefined,
+        message.kind === 'value' ? message.value : undefined,
+      ], ''),
     }
   }
 
-  const result = response.data
-  if (result?.success === true) {
-    return { acknowledged: true, issue: null }
+  if (status.value !== 'success') {
+    if (status.value !== 'error') return fixedFailure
+    return {
+      acknowledged: false,
+      issue: issueFrom(response, false),
+    }
+  }
+
+  const data = ownDataProperty(response, 'data')
+  if (data.kind !== 'value') return fixedFailure
+  const success = ownDataProperty(data.value, 'success')
+  const configSaved = ownDataProperty(data.value, 'config_saved')
+  if (success.kind === 'invalid' || configSaved.kind === 'invalid') {
+    return fixedFailure
   }
   if (
-    result?.success === false
-    || result?.error != null
-    || result?.message != null
+    configSaved.kind === 'value'
+    && typeof configSaved.value !== 'boolean'
   ) {
-    const configSaved = result?.config_saved === true
     return {
-      acknowledged: configSaved,
-      issue: {
-        configSaved,
-        errorCode: normalizeErrorCode(result?.error_code),
-        fallback: safeErrorText([result?.error, result?.message], ''),
-      },
+      acknowledged: false,
+      issue: issueFrom(data.value, false),
+    }
+  }
+  if (
+    success.kind === 'value'
+    && success.value === true
+    && (
+      configSaved.kind === 'absent'
+      || configSaved.value === true
+    )
+  ) {
+    return { acknowledged: true, issue: null }
+  }
+  if (success.kind === 'value' && success.value === true) {
+    return {
+      acknowledged: false,
+      issue: issueFrom(data.value, false),
+    }
+  }
+  if (success.kind === 'value' && success.value === false) {
+    const saved = configSaved.kind === 'value' && configSaved.value === true
+    return {
+      acknowledged: saved,
+      issue: issueFrom(data.value, saved),
     }
   }
   return {
     acknowledged: false,
-    issue: { configSaved: false },
+    issue: issueFrom(data.value, false),
   }
 }

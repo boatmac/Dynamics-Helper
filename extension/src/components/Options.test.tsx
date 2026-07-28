@@ -8,6 +8,7 @@ import {
   deferNextStorageGet,
   deferNextStorageRemove,
   deferNextStorageSet,
+  emitRuntimeMessage,
   emitStorageChanges,
   getStorageSnapshot,
   seedStorage,
@@ -333,6 +334,35 @@ const resolveHostConfig = async (
     })
   })
 }
+
+describe('Options Native update error display', () => {
+  beforeEach(() => {
+    resetChromeMock()
+    installChromeMock()
+  })
+
+  it('defends Options update error display', async () => {
+    deferNextResponse('get_config')
+    const secret = 'SECRET-OPTIONS-UPDATE-ERROR'
+    const getter = vi.fn(() => secret)
+    const payload = {}
+    Object.defineProperty(payload, 'error', {
+      enumerable: true,
+      get: getter,
+    })
+    render(<Options />)
+
+    act(() => emitRuntimeMessage({
+      type: 'NATIVE_UPDATE_ERROR',
+      payload,
+    }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Update check failed.')
+    expect(alert.textContent).not.toContain(secret)
+    expect(getter).not.toHaveBeenCalled()
+  })
+})
 
 // ---------- T-Inv1 ----------
 
@@ -4104,6 +4134,126 @@ describe('Options prompt health and inspected sparse writes', () => {
     resetChromeMock()
     installChromeMock()
     seedStorage({ dh_items: [] })
+  })
+
+  it('keeps contradictory config_saved false instruction revision retryable', async () => {
+    const contradictory = deferNextResponse('update_config')
+    const retry = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'initial',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const editor = await openDhInstructionsEditor()
+    fireEvent.change(editor, { target: { value: 'retry-instruction' } })
+    fireEvent.blur(editor)
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+
+    await act(async () => contradictory.resolve({
+      status: 'success',
+      data: { success: true, config_saved: false },
+    }))
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Settings were not saved.',
+    )
+    expect(chromeMockSpies.sendMessage.mock.calls.filter(call =>
+      (call[0] as any)?.payload?.action === 'get_config',
+    )).toHaveLength(1)
+
+    fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(2))
+    const updates = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(updates.at(-1).payload.payload.user_instructions).toBe(
+      'retry-instruction',
+    )
+    await act(async () => retry.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it('keeps non-boolean config_saved prompt revision retryable', async () => {
+    const malformed = deferNextResponse('update_config')
+    const retry = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: {
+        use_workspace_only: false,
+        user_prompt: 'initial',
+      },
+    })
+    const editor = await openUserPromptEditor()
+    fireEvent.change(editor, { target: { value: 'retry-prompt' } })
+    fireEvent.blur(editor)
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+
+    await act(async () => malformed.resolve({
+      status: 'success',
+      data: { success: true, config_saved: 'true' },
+    }))
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Settings were not saved.',
+    )
+    expect(chromeMockSpies.sendMessage.mock.calls.filter(call =>
+      (call[0] as any)?.payload?.action === 'get_config',
+    )).toHaveLength(1)
+
+    fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(2))
+    const updates = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(updates.at(-1).payload.payload.user_prompt).toBe('retry-prompt')
+    await act(async () => retry.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
+  })
+
+  it('acknowledges the legacy Host response without config_saved', async () => {
+    const legacy = deferNextResponse('update_config')
+    const unrelated = deferNextResponse('update_config')
+    await hydrateOptions({
+      root_path: '',
+      _user_instructions_raw: 'initial',
+      prompt_source_status: { status: 'ok' },
+      extension_preferences: { use_workspace_only: false },
+    })
+    const health = deferNextResponse('get_config')
+    const editor = await openDhInstructionsEditor()
+    fireEvent.change(editor, { target: { value: 'legacy-instruction' } })
+    fireEvent.blur(editor)
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(1))
+
+    await act(async () => legacy.resolve({
+      status: 'success',
+      data: { success: true },
+    }))
+    await waitFor(() => expect(chromeMockSpies.sendMessage.mock.calls.filter(
+      call => (call[0] as any)?.payload?.action === 'get_config',
+    )).toHaveLength(2))
+    await act(async () => health.resolve({
+      status: 'success',
+      data: { prompt_source_status: { status: 'ok' } },
+    }))
+
+    fireEvent.change(await findLanguageSelect(), { target: { value: 'en' } })
+    await waitFor(() => expect(countUpdateConfigCalls()).toBe(2))
+    const updates = chromeMockSpies.sendMessage.mock.calls
+      .map(call => call[0] as any)
+      .filter(message => message?.payload?.action === 'update_config')
+    expect(Object.hasOwn(
+      updates.at(-1).payload.payload,
+      'user_instructions',
+    )).toBe(false)
+    await act(async () => unrelated.resolve({
+      status: 'success',
+      data: { success: true, config_saved: true },
+    }))
   })
 
   it('retains mirrored text when modern Host reports unreadable DH file', async () => {
