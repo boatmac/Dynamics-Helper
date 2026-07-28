@@ -79,6 +79,10 @@ const FAB: React.FC = () => {
         identity: PageIdentity | null;
         data: ScrapedData;
     } | null>(null);
+    const editableAnalyzeContextRef = React.useRef<{
+        accepted: NonNullable<typeof acceptedContextSnapshotRef.current>;
+        data: ScrapedData;
+    } | null>(null);
     const [hydrationCaseNumber, setHydrationCaseNumber] = useState('');
     const hydrationCaseNumberRef = React.useRef('');
     
@@ -433,15 +437,22 @@ const FAB: React.FC = () => {
             forceReplace
             || replaceAfterAnalyze
             || nextIdentity !== previousContextIdentity
+            || !editableAnalyzeContextRef.current
         ) {
             isUserEdited.current = false;
             setHasAutoAnalyzed(false);
             editableContextIdentityRef.current = nextIdentity;
+            editableAnalyzeContextRef.current = { accepted, data: plain };
             setScrapedData(plain);
             return accepted;
         }
-        if (isUserEdited.current) return accepted;
+        const editableContext = editableAnalyzeContextRef.current;
+        editableContext.accepted = accepted;
+        if (isUserEdited.current) {
+            return accepted;
+        }
         editableContextIdentityRef.current = nextIdentity;
+        editableContext.data = plain;
         setScrapedData(plain);
         return accepted;
     }
@@ -452,6 +463,13 @@ const FAB: React.FC = () => {
         return acceptedContextSnapshotRef.current === snapshot
             && snapshot.generation === pageScanGenerationRef.current
             && snapshot.identity === currentPageIdentityRef.current;
+    }
+
+    function editableAnalyzeContextIsCurrent(
+        context: NonNullable<typeof editableAnalyzeContextRef.current>,
+    ): boolean {
+        return editableAnalyzeContextRef.current === context
+            && acceptedSnapshotIsCurrent(context.accepted);
     }
 
     // Duration Logic
@@ -498,14 +516,11 @@ const FAB: React.FC = () => {
         return parts.join('\n\n');
     };
 
-    const scheduleAutoAnalyze = (data: ScrapedData) => {
-        const expectedIdentity = editableContextIdentityRef.current;
+    const scheduleAutoAnalyze = (
+        context: NonNullable<typeof editableAnalyzeContextRef.current>,
+    ) => {
         setTimeout(() => {
-            if (
-                expectedIdentity !== currentPageIdentityRef.current
-                || expectedIdentity !== editableContextIdentityRef.current
-            ) return;
-            void handleAnalyze(data);
+            void handleAnalyze(context);
         }, 100);
     };
 
@@ -582,11 +597,12 @@ const FAB: React.FC = () => {
                 }
                 
                 // Update state so the UI reflects what we are analyzing
+                const analyzeContext = { accepted: pageSnapshot, data: dataToAnalyze };
+                editableAnalyzeContextRef.current = analyzeContext;
                 setScrapedData(dataToAnalyze);
                 
                 // Trigger analysis immediately
-                // Note: We use the functional form or pass data directly to avoid stale state issues
-                handleAnalyze(dataToAnalyze);
+                void handleAnalyze(analyzeContext);
             }
         };
 
@@ -651,8 +667,10 @@ const FAB: React.FC = () => {
 
     // Separate effect for Auto Analyze to ensure state (prefs, scrapedData) is current
     useEffect(() => {
-        if (!scrapedData || hasAutoAnalyzed) return;
-        if (editableContextIdentityRef.current !== currentPageIdentityRef.current) return;
+        if (hasAutoAnalyzed) return;
+        const analyzeContext = editableAnalyzeContextRef.current;
+        if (!analyzeContext || !editableAnalyzeContextIsCurrent(analyzeContext)) return;
+        const analyzeData = analyzeContext.data;
 
         // --- Auto Analyze Logic ---
         if (prefs.autoAnalyzeMode === 'always') {
@@ -660,17 +678,17 @@ const FAB: React.FC = () => {
             // For auto-analyze, we construct the template if needed to ensure length check passes
             // We use the helper to get the "full" text that would be analyzed
             const fullText = applyCurrentUserPrompt(
-                constructTemplate(scrapedData),
+                constructTemplate(analyzeData),
                 prefs.userPrompt,
             );
             // Simple check: do we have enough *real* content (description/title)? 
             // The template adds headers, so length > 50 is a safe bet for "non-empty".
             // A safer check might be to look at the raw fields again.
-            const rawContent = scrapedData.errorText || scrapedData.description || scrapedData.ticketTitle || "";
+            const rawContent = analyzeData.errorText || analyzeData.description || analyzeData.ticketTitle || "";
             
             // Check if we have at least a Ticket ID to consider it valid context for AUTO analysis.
             // We strictly require a Ticket ID here to avoid triggering on List Views (e.g. "My Open Cases").
-            const hasValidIdentifier = scrapedData.caseNumber && scrapedData.caseNumber.length > 3; // Relaxed length check for "WO-1" etc
+            const hasValidIdentifier = analyzeData.caseNumber && analyzeData.caseNumber.length > 3; // Relaxed length check for "WO-1" etc
             
             // AND ensure the raw content isn't just whitespace.
             // If we have a valid Ticket ID, we can be more lenient with content length (e.g. short errors like "Access Denied").
@@ -681,41 +699,41 @@ const FAB: React.FC = () => {
             console.log("[DH] Auto-Analyze Check:", { 
                 hasValidIdentifier, 
                 hasEnoughContent, 
-                caseNumber: scrapedData.caseNumber, 
+                caseNumber: analyzeData.caseNumber,
                 contentLength: rawContent.trim().length 
             });
 
             if (hasValidIdentifier && hasEnoughContent) { 
                     setHasAutoAnalyzed(true); // Mark as handled immediately to prevent double-fire
                     showStatusBubble(t('analyzing'), 'default', 0); // Show analyzing status persistently until done
-                    scheduleAutoAnalyze(scrapedData);
+                    scheduleAutoAnalyze(analyzeContext);
             }
         } else if (prefs.autoAnalyzeMode === 'critical') {
             // Critical criteria: Sev 1 OR A, AND Status Reason "Initial contact pending"
-            const isSevCritical = scrapedData.severity?.includes('1') || scrapedData.severity?.toUpperCase().includes('A');
-            const isInitialPending = scrapedData.statusReason?.toLowerCase().includes('initial contact pending');
+            const isSevCritical = analyzeData.severity?.includes('1') || analyzeData.severity?.toUpperCase().includes('A');
+            const isInitialPending = analyzeData.statusReason?.toLowerCase().includes('initial contact pending');
             
-            const rawContent = scrapedData.errorText || scrapedData.description || scrapedData.ticketTitle || "";
+            const rawContent = analyzeData.errorText || analyzeData.description || analyzeData.ticketTitle || "";
             
             // Critical Mode: Same strict check (Case Number required)
-            const hasValidIdentifier = scrapedData.caseNumber && scrapedData.caseNumber.length > 5;
+            const hasValidIdentifier = analyzeData.caseNumber && analyzeData.caseNumber.length > 5;
 
             if (isSevCritical && isInitialPending && hasValidIdentifier && rawContent.length > 20) {
                 setHasAutoAnalyzed(true);
                 showStatusBubble(t('analyzing'), 'default', 0);
-                scheduleAutoAnalyze(scrapedData);
+                scheduleAutoAnalyze(analyzeContext);
             }
         } else if (prefs.autoAnalyzeMode === 'new_cases') {
              // New Cases criteria: Status Reason "Initial contact pending" (regardless of severity)
-             const isInitialPending = scrapedData.statusReason?.toLowerCase().includes('initial contact pending');
+             const isInitialPending = analyzeData.statusReason?.toLowerCase().includes('initial contact pending');
              
-             const rawContent = scrapedData.errorText || scrapedData.description || scrapedData.ticketTitle || "";
-             const hasValidIdentifier = scrapedData.caseNumber && scrapedData.caseNumber.length > 5;
+             const rawContent = analyzeData.errorText || analyzeData.description || analyzeData.ticketTitle || "";
+             const hasValidIdentifier = analyzeData.caseNumber && analyzeData.caseNumber.length > 5;
 
              if (isInitialPending && hasValidIdentifier && rawContent.length > 20) {
                  setHasAutoAnalyzed(true);
                  showStatusBubble(t('analyzing'), 'default', 0);
-                 scheduleAutoAnalyze(scrapedData);
+                 scheduleAutoAnalyze(analyzeContext);
              }
         }
     }, [isOpen, scrapedData, prefs.autoAnalyzeMode, prefs.userPrompt, hasAutoAnalyzed]);
@@ -790,14 +808,12 @@ const FAB: React.FC = () => {
         }
     };
 
-    const handleAnalyze = async (dataToAnalyze: ScrapedData | null = null) => {
-        // Use provided data or fall back to state
-        const targetData = dataToAnalyze || scrapedData;
-
-        if (!targetData) return;
-        if (
-            editableContextIdentityRef.current !== currentPageIdentityRef.current
-        ) return;
+    const handleAnalyze = async (
+        context: NonNullable<typeof editableAnalyzeContextRef.current> | null = null,
+    ) => {
+        const invocation = context || editableAnalyzeContextRef.current;
+        if (!invocation || !editableAnalyzeContextIsCurrent(invocation)) return;
+        const targetData = invocation.data;
         // Check if we have enough info to analyze (either error text OR title)
         const hasContent = targetData.errorText || targetData.description || targetData.ticketTitle;
         if (!hasContent) return;
@@ -1279,6 +1295,13 @@ const FAB: React.FC = () => {
                                         onChange={(e) => {
                                             const newVal = e.target.value;
                                             isUserEdited.current = true;
+                                            const editableContext = editableAnalyzeContextRef.current;
+                                            if (editableContext) {
+                                                editableContext.data = {
+                                                    ...editableContext.data,
+                                                    errorText: newVal,
+                                                };
+                                            }
                                             setScrapedData(prev => {
                                                 if (!prev) return { errorText: newVal }; // Should not happen given render condition
                                                 return { 

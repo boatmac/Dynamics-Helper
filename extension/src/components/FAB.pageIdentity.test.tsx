@@ -477,6 +477,105 @@ describe('FAB live page identity during Analyze', () => {
             .not.toContain('OLD CASE A BODY')
     })
 
+    it('binds manual Analyze to one accepted scan record before React commit', async () => {
+        await renderOpenFab()
+        const analyze = analyzeButton()
+        const bRefresh = deferredValue<unknown>()
+        state.scanForErrors.mockReset().mockImplementationOnce(() => bRefresh.promise)
+        fireEvent.click(screen.getByTitle('Refresh Context (Re-scan page)'))
+        await flushReact()
+
+        await act(async () => {
+            bRefresh.resolve(B)
+            await Promise.resolve()
+            await Promise.resolve()
+            await Promise.resolve()
+            fireEvent.click(analyze)
+            await Promise.resolve()
+        })
+
+        expect(state.hydrationCaseNumbers.at(-1)).toBe(B.caseNumber)
+        const analyzeMessages = getMessageLog()
+            .filter(entry => entry.action === 'analyze_error')
+        for (const message of analyzeMessages) {
+            expect(message.payload).toMatchObject({
+                payload: {
+                    payload: {
+                        caseNumber: B.caseNumber,
+                        text: expect.stringContaining('NEW CASE B BODY'),
+                    },
+                    _persist: { caseNumber: B.caseNumber },
+                },
+            })
+            expect(JSON.stringify(message.payload)).not.toContain('OLD CASE A BODY')
+        }
+    })
+
+    it('rejects an auto Analyze callback after an A to B to A scan cycle', async () => {
+        const firstA = {
+            ...A,
+            caseNumber: 'CASE-A-1234',
+            errorText: 'FIRST A CYCLE BODY WITH ENOUGH AUTO CONTENT',
+            description: 'FIRST A CYCLE BODY WITH ENOUGH AUTO CONTENT',
+        }
+        const middleB = {
+            ...B,
+            caseNumber: 'CASE-B-5678',
+            errorText: 'MIDDLE B CYCLE BODY WITH ENOUGH AUTO CONTENT',
+            description: 'MIDDLE B CYCLE BODY WITH ENOUGH AUTO CONTENT',
+        }
+        const newerA = {
+            ...firstA,
+            errorText: 'NEW A CYCLE BODY WITH ENOUGH AUTO CONTENT',
+            description: 'NEW A CYCLE BODY WITH ENOUGH AUTO CONTENT',
+        }
+        const bScan = deferredValue<unknown>()
+        const newerAScan = deferredValue<unknown>()
+        state.prefs.autoAnalyzeMode = 'always'
+        state.scanForErrors
+            .mockReset()
+            .mockResolvedValueOnce(firstA)
+            .mockImplementationOnce(() => bScan.promise)
+            .mockImplementationOnce(() => newerAScan.promise)
+
+        render(
+            <PrefsLanguageProvider language="en">
+                <FAB />
+            </PrefsLanguageProvider>,
+        )
+        await flushReact()
+
+        openFab()
+        await flushReact()
+        await act(async () => bScan.resolve(middleB))
+        await flushReact()
+
+        openFab()
+        await flushReact()
+        await act(async () => newerAScan.resolve(newerA))
+        await flushReact()
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(100)
+            await Promise.resolve()
+        })
+
+        const analyzeMessages = getMessageLog()
+            .filter(entry => entry.action === 'analyze_error')
+        expect(analyzeMessages).toHaveLength(1)
+        expect(analyzeMessages[0].payload).toMatchObject({
+            payload: {
+                payload: {
+                    caseNumber: newerA.caseNumber,
+                    text: expect.stringContaining('NEW A CYCLE BODY'),
+                },
+                _persist: { caseNumber: newerA.caseNumber },
+            },
+        })
+        expect(JSON.stringify(analyzeMessages[0].payload))
+            .not.toContain('FIRST A CYCLE BODY')
+    })
+
     it('keeps edit protection when explicit refresh is malformed', async () => {
         await renderOpenFab()
         const textarea = expandContext()
@@ -613,15 +712,23 @@ describe('FAB live page identity during Analyze', () => {
     it('replaces a user-edited A textarea with B after busy Analyze completes', async () => {
         await renderOpenFab()
         const textareaA = expandContext()
-        fireEvent.change(textareaA, { target: { value: 'MANUAL EDIT FOR A' } })
-        expect(textareaA.value).toBe('MANUAL EDIT FOR A')
+        const manualEdit = '## Case Number\n\nA\n\nMANUAL EDIT FOR A'
+        fireEvent.change(textareaA, { target: { value: manualEdit } })
+        expect(textareaA.value).toBe(manualEdit)
 
         const response = deferNextResponse('analyze_error')
         fireEvent.click(analyzeButton())
+        expect(getMessageLog().find(entry => entry.action === 'analyze_error')?.payload)
+            .toMatchObject({
+                payload: {
+                    payload: { text: manualEdit },
+                    _persist: { caseNumber: A.caseNumber },
+                },
+            })
         state.scanValue = B
         await triggerMutation()
 
-        expect(textareaA.value).toBe('MANUAL EDIT FOR A')
+        expect(textareaA.value).toBe(manualEdit)
         expect(document.querySelector('.dh-menu')).toBeNull()
         const callsBeforeCompletion = state.scanForErrors.mock.calls.length
 
