@@ -193,7 +193,7 @@ export function seenAnalysisKey(identity: LastAnalysisIdentity): string {
     if (parsed.requestId !== undefined) {
         return `${SEEN_ANALYSIS_KEY_PREFIX}request:${encodedCase}:${encodeURIComponent(parsed.requestId)}`;
     }
-    return `${SEEN_ANALYSIS_KEY_PREFIX}legacy:${encodedCase}:${String(parsed.timestamp)}`;
+    return `${SEEN_ANALYSIS_KEY_PREFIX}legacy:${encodedCase}:${parsed.timestamp}`;
 }
 
 export function pendingAnalysisKey(requestId: string): string {

@@ -387,6 +387,7 @@ export function normalizeAnalyzeHostOutcome(value: unknown): AnalyzeForwardRespo
 function parseWarningArray(value: unknown): AnalysisPersistenceWarning[] | null {
     try {
         if (!Array.isArray(value)) return null
+        const indexKeys = ['0', '1'] as const
         const descriptors = Object.getOwnPropertyDescriptors(value)
         const length = descriptorField(descriptors, 'length')
         if (
@@ -395,10 +396,13 @@ function parseWarningArray(value: unknown): AnalysisPersistenceWarning[] | null 
             || !Number.isInteger(length.value)
             || length.value < 0
             || length.value > ANALYSIS_PERSISTENCE_WARNING_ORDER.length
+            || length.value > indexKeys.length
         ) return null
         const expectedKeys = new Set<string>(['length'])
         for (let index = 0; index < length.value; index += 1) {
-            expectedKeys.add(String(index))
+            const key = indexKeys[index]
+            if (key === undefined) return null
+            expectedKeys.add(key)
         }
         for (const key of Reflect.ownKeys(descriptors)) {
             if (typeof key !== 'string' || !expectedKeys.has(key)) return null
@@ -406,7 +410,9 @@ function parseWarningArray(value: unknown): AnalysisPersistenceWarning[] | null 
         const warnings: AnalysisPersistenceWarning[] = []
         let previousOrder = -1
         for (let index = 0; index < length.value; index += 1) {
-            const field = descriptorField(descriptors, String(index))
+            const key = indexKeys[index]
+            if (key === undefined) return null
+            const field = descriptorField(descriptors, key)
             if (field.kind !== 'value') return null
             const order = ANALYSIS_PERSISTENCE_WARNING_ORDER.indexOf(
                 field.value as AnalysisPersistenceWarning,
