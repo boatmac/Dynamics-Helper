@@ -69,12 +69,14 @@ vi.mock('../utils/analyzeRequest', async importOriginal => {
     const actual = await importOriginal<typeof import('../utils/analyzeRequest')>()
     return {
         ...actual,
-        snapshotAnalyzeRequest: (
-            ...args: Parameters<typeof actual.snapshotAnalyzeRequest>
+        requestMatchesPage: (
+            ...args: Parameters<typeof actual.requestMatchesPage>
         ) => {
-            const request = actual.snapshotAnalyzeRequest(...args)
-            state.requests.push(request)
-            return request
+            const [request] = args
+            if (!state.requests.some(value => value.requestId === request.requestId)) {
+                state.requests.push(request)
+            }
+            return actual.requestMatchesPage(...args)
         },
     }
 })
@@ -544,5 +546,37 @@ describe('FAB Analyze request Root snapshots', () => {
         expect.soft(explicit.rootPathOverrideProvided).toBe(true)
         expect.soft(explicitEmpty.rootPath).toBe('')
         expect.soft(explicitEmpty.rootPathOverrideProvided).toBe(true)
+    })
+
+    it('keeps title-only page ownership when selection supplies a case number', async () => {
+        const titleOnly = {
+            caseNumber: '',
+            ticketTitle: 'Title-only page',
+            errorText: 'TITLE ONLY PAGE BODY',
+            description: 'TITLE ONLY PAGE BODY',
+            source: 'page-scan',
+        }
+        const extractedCase = '2601190030003106'
+        const response = deferNextResponse('analyze_error')
+        await renderFab(titleOnly)
+
+        await dispatchContextMenu({
+            selectionText: `Selected failure for ${extractedCase}`,
+        })
+
+        expect(analyzeMessages()).toHaveLength(1)
+        const message = analyzeMessages()[0]
+        expect.soft(state.requests).toHaveLength(1)
+        expect.soft(state.requests[0]).toMatchObject({
+            pageIdentity: 'title:Title-only page',
+            caseNumber: extractedCase,
+        })
+        expect.soft(Object.isFrozen(state.requests[0])).toBe(true)
+        expect.soft(message.payload.payload.caseNumber).toBe(extractedCase)
+        expect.soft(message.payload._persist.caseNumber).toBe(extractedCase)
+
+        await completeAnalyze(response, 'TITLE ONLY RESULT')
+
+        expect(screen.getByText('TITLE ONLY RESULT')).toBeInTheDocument()
     })
 })

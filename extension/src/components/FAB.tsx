@@ -1285,12 +1285,18 @@ const FAB: React.FC = () => {
         const hasContent = page.errorText || page.description || page.ticketTitle;
         if (!hasContent) return;
 
-        const request = snapshotAnalyzeRequest(
+        const dataRequest = snapshotAnalyzeRequest(
             crypto.randomUUID(),
             page,
             latestPrefsRef.current.rootPath,
             analyzeInvocation,
         );
+        const request = dataRequest.pageIdentity === invocation.accepted.identity
+            ? dataRequest
+            : Object.freeze({
+                ...dataRequest,
+                pageIdentity: invocation.accepted.identity,
+            });
         const {
             requestId,
             pageIdentity,
