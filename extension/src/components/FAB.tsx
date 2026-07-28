@@ -181,6 +181,27 @@ const FAB: React.FC = () => {
     // future remount doesn't re-open the same result (one-shot semantics).
     useEffect(() => {
         if (!hydration.popover) return;
+        const hydrationIdentity = hydration.popover.identity;
+        const hydrationRequestId = hydrationIdentity.requestId;
+        const localPage = localAnalyzePageRef.current;
+        const localCaseNumber = hydrationRequestId !== undefined
+            && localPage !== null
+            && localPage.requestId === hydrationRequestId
+            ? localPage.caseNumber
+            : '';
+        // The SW persists before replying, so local hydration must wait for
+        // this request's terminal page revalidation path.
+        const matchesActiveLocalAnalyze = hydrationRequestId !== undefined
+            && (
+                hydrationRequestId === localAnalyzeRequestIdRef.current
+                || hydrationRequestId === postRunScanOwnerRef.current
+                || hydrationRequestId === analyzeOriginRef.current?.requestId
+            )
+            && (
+                !localCaseNumber
+                || localCaseNumber === hydrationIdentity.caseNumber
+            );
+        if (matchesActiveLocalAnalyze) return;
         const acceptedGeneration = acceptedContextSnapshotRef.current?.generation ?? -1;
         if (hasPendingPageScanNewerThan(acceptedGeneration)) return;
         if (hydration.popover.identity.caseNumber !== currentCaseNumberRef.current) return;

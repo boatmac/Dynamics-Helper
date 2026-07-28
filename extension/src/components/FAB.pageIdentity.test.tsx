@@ -46,6 +46,18 @@ const state = vi.hoisted(() => ({
         requestId: string
         startTime: number
     },
+    hydrationPopover: null as null | {
+        isOpen: true
+        status: 'success' | 'error'
+        title: string
+        content: string
+        identity: {
+            caseNumber: string
+            requestId?: string
+            timestamp?: number
+        }
+    },
+    hydrationDismiss: vi.fn(),
     observerCallback: null as MutationCallback | null,
     trackEvent: vi.fn(),
     hashCaseId: vi.fn(),
@@ -72,11 +84,14 @@ vi.mock('../hooks/useAnalysisHydration', () => ({
         const pending = state.hydrationPending?.caseNumber === caseNumber
             ? state.hydrationPending
             : null
+        const popover = state.hydrationPopover?.identity.caseNumber === caseNumber
+            ? state.hydrationPopover
+            : null
         return {
-            popover: null,
+            popover,
             pending,
             isAnalyzing: Boolean(pending),
-            dismissPopover: vi.fn().mockResolvedValue(undefined),
+            dismissPopover: state.hydrationDismiss,
         }
     },
 }))
@@ -203,6 +218,8 @@ describe('FAB live page identity during Analyze', () => {
         )
         state.hydrationCaseNumbers = []
         state.hydrationPending = null
+        state.hydrationPopover = null
+        state.hydrationDismiss.mockReset().mockResolvedValue(undefined)
         state.observerCallback = null
         state.trackEvent.mockReset()
         state.hashCaseId.mockReset().mockResolvedValue('hash-A')
@@ -374,6 +391,146 @@ describe('FAB live page identity during Analyze', () => {
         expect(state.trackEvent.mock.calls.filter(
             call => call[0] === 'Case Analyzed',
         )).toHaveLength(1)
+    })
+
+    it('does not hydrate the active local Analyze before post-run revalidation', async () => {
+        const requestId = '00000000-0000-4000-8000-00000000000a'
+        const randomUuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
+        try {
+            const view = await renderOpenFab()
+            const response = deferNextResponse('analyze_error')
+            const postRunScan = deferredValue<unknown>()
+            fireEvent.click(analyzeButton())
+
+            state.hydrationPopover = {
+                isOpen: true,
+                status: 'success',
+                title: 'Hydrated Analyze',
+                content: 'HYDRATED ACTIVE LOCAL A',
+                identity: { caseNumber: A.caseNumber, requestId, timestamp: 100 },
+            }
+            view.rerender(
+                <PrefsLanguageProvider language="en">
+                    <FAB />
+                </PrefsLanguageProvider>,
+            )
+            await flushReact()
+
+            expect(document.body).not.toHaveTextContent('HYDRATED ACTIVE LOCAL A')
+            expect(state.hydrationDismiss).not.toHaveBeenCalled()
+
+            state.scanForErrors.mockReset().mockImplementationOnce(
+                () => postRunScan.promise,
+            )
+            await act(async () => response.resolve({
+                status: 'success',
+                data: {
+                    markdown: 'LOCAL A AFTER REVALIDATION',
+                    saved_to: 'A-report.md',
+                },
+            }))
+            await flushReact()
+
+            expect(state.scanForErrors).toHaveBeenCalledTimes(1)
+            expect(document.body).not.toHaveTextContent('LOCAL A AFTER REVALIDATION')
+            expect(state.hydrationDismiss).not.toHaveBeenCalled()
+
+            await act(async () => postRunScan.resolve(A))
+            await flushReact()
+
+            expect(screen.getByText('LOCAL A AFTER REVALIDATION')).toBeInTheDocument()
+            expect(document.body).not.toHaveTextContent('HYDRATED ACTIVE LOCAL A')
+            expect(state.hydrationDismiss).not.toHaveBeenCalled()
+        } finally {
+            randomUuid.mockRestore()
+        }
+    })
+
+    it('does not mark an active local result seen before terminal page ownership is proven', async () => {
+        const requestId = '00000000-0000-4000-8000-00000000000a'
+        const randomUuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
+        try {
+            const view = await renderOpenFab()
+            const response = deferNextResponse('analyze_error')
+            fireEvent.click(analyzeButton())
+
+            state.hydrationPopover = {
+                isOpen: true,
+                status: 'success',
+                title: 'Hydrated Analyze',
+                content: 'HYDRATED A MUST REMAIN UNSEEN',
+                identity: { caseNumber: A.caseNumber, requestId, timestamp: 101 },
+            }
+            view.rerender(
+                <PrefsLanguageProvider language="en">
+                    <FAB />
+                </PrefsLanguageProvider>,
+            )
+            await flushReact()
+
+            expect(document.body).not.toHaveTextContent('HYDRATED A MUST REMAIN UNSEEN')
+            expect(state.hydrationDismiss).not.toHaveBeenCalled()
+
+            state.scanForErrors.mockReset().mockResolvedValue(B)
+            await act(async () => response.resolve({
+                status: 'success',
+                data: {
+                    markdown: 'LOCAL A MUST NOT PUBLISH ON B',
+                    saved_to: 'A-report.md',
+                },
+            }))
+            await flushReact()
+
+            expect(state.scanForErrors).toHaveBeenCalledTimes(1)
+            expect(state.hydrationCaseNumbers.at(-1)).toBe(B.caseNumber)
+            expect(document.body).not.toHaveTextContent('HYDRATED A MUST REMAIN UNSEEN')
+            expect(document.body).not.toHaveTextContent('LOCAL A MUST NOT PUBLISH ON B')
+            expect(state.hydrationDismiss).not.toHaveBeenCalled()
+            expectNoVisibleOutcomeTelemetry()
+
+            view.unmount()
+            state.scanForErrors.mockReset().mockResolvedValue(A)
+            render(
+                <PrefsLanguageProvider language="en">
+                    <FAB />
+                </PrefsLanguageProvider>,
+            )
+            await flushReact()
+
+            expect(screen.getByText('HYDRATED A MUST REMAIN UNSEEN')).toBeInTheDocument()
+            expect(state.hydrationDismiss).toHaveBeenCalledTimes(1)
+            expect(state.hydrationDismiss).toHaveBeenCalledWith(
+                state.hydrationPopover.identity,
+            )
+        } finally {
+            randomUuid.mockRestore()
+        }
+    })
+
+    it('hydrates a non-local legacy persisted result after mount', async () => {
+        state.hydrationPopover = {
+            isOpen: true,
+            status: 'success',
+            title: 'Persisted Analyze',
+            content: 'NON-LOCAL PERSISTED A',
+            identity: {
+                caseNumber: A.caseNumber,
+                timestamp: 102,
+            },
+        }
+
+        render(
+            <PrefsLanguageProvider language="en">
+                <FAB />
+            </PrefsLanguageProvider>,
+        )
+        await flushReact()
+
+        expect(screen.getByText('NON-LOCAL PERSISTED A')).toBeInTheDocument()
+        expect(state.hydrationDismiss).toHaveBeenCalledTimes(1)
+        expect(state.hydrationDismiss).toHaveBeenCalledWith(
+            state.hydrationPopover.identity,
+        )
     })
 
     it.each([
