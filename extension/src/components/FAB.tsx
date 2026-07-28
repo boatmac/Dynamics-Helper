@@ -72,6 +72,8 @@ const FAB: React.FC = () => {
     const currentPageIdentityRef = React.useRef<PageIdentity | null>(null);
     const currentPageIdentityInitializedRef = React.useRef(false);
     const currentCaseNumberRef = React.useRef('');
+    const editableContextIdentityRef = React.useRef<PageIdentity | null>(null);
+    const pageScanGenerationRef = React.useRef(0);
     const [hydrationCaseNumber, setHydrationCaseNumber] = useState('');
     const hydrationCaseNumberRef = React.useRef('');
     
@@ -351,6 +353,26 @@ const FAB: React.FC = () => {
     // Track if auto-analysis has been attempted for the current data to prevent loops/timing issues
     const [hasAutoAnalyzed, setHasAutoAnalyzed] = useState(false);
 
+    async function scanCurrentPage(failureMessage: string): Promise<{
+        generation: number;
+        fresh: unknown;
+    }> {
+        const generation = ++pageScanGenerationRef.current;
+        try {
+            return {
+                generation,
+                fresh: await PageReader.scanForErrors(),
+            };
+        } catch {
+            console.warn(failureMessage);
+            return { generation, fresh: null };
+        }
+    }
+
+    function scanIsCurrent(generation: number): boolean {
+        return generation === pageScanGenerationRef.current;
+    }
+
     function applyIdentityScan(fresh: unknown): void {
         const parsed = parsePageIdentitySnapshot(fresh);
         if (!parsed) return;
@@ -386,30 +408,27 @@ const FAB: React.FC = () => {
         completedOrigin: PageIdentity | null = null,
         isPostRunScan = false,
     ): void {
-        const previousIdentity = currentPageIdentityRef.current;
         const plain = parseScrapedDataSnapshot(fresh);
         if (!plain) return;
         const parsed = parsePageIdentitySnapshot(plain);
         if (!parsed) return;
         const nextIdentity = parsed.identity;
+        const previousContextIdentity = editableContextIdentityRef.current;
         applyIdentityScan(plain);
         const replaceAfterAnalyze = isPostRunScan && (
             identityChangedDuringAnalyzeRef.current
             || nextIdentity !== completedOrigin
         );
-        if (replaceAfterAnalyze) {
+        if (replaceAfterAnalyze || nextIdentity !== previousContextIdentity) {
             isUserEdited.current = false;
             setHasAutoAnalyzed(false);
+            editableContextIdentityRef.current = nextIdentity;
+            setScrapedData(plain);
+            return;
         }
-        setScrapedData(previous => {
-            if (replaceAfterAnalyze || nextIdentity !== previousIdentity) {
-                isUserEdited.current = false;
-                setHasAutoAnalyzed(false);
-                return plain;
-            }
-            if (isUserEdited.current) return previous;
-            return plain;
-        });
+        if (isUserEdited.current) return;
+        editableContextIdentityRef.current = nextIdentity;
+        setScrapedData(plain);
     }
 
     // Duration Logic
@@ -456,33 +475,36 @@ const FAB: React.FC = () => {
         return parts.join('\n\n');
     };
 
+    const scheduleAutoAnalyze = (data: ScrapedData) => {
+        const expectedIdentity = editableContextIdentityRef.current;
+        setTimeout(() => {
+            if (
+                expectedIdentity !== currentPageIdentityRef.current
+                || expectedIdentity !== editableContextIdentityRef.current
+            ) return;
+            void handleAnalyze(data);
+        }, 100);
+    };
+
     // Auto-scan when opening
     useEffect(() => {
         // Wrapper for async scan
         const doScan = async () => {
-             const scan = async () => {
-                 try {
-                     return await PageReader.scanForErrors();
-                 } catch {
-                     console.warn('[DH] Page scan failed');
-                     return null;
-                 }
-             };
              if (!initialScanStartedRef.current) {
                  initialScanStartedRef.current = true;
                  // Initial scan on mount (even if closed) to support auto-analyze without opening
-                 const initialData = await scan();
-                 if (initialData) {
-                     if (localAnalyzeRequestIdRef.current) applyIdentityScan(initialData);
-                     else applyFullScan(initialData);
+                 const initialScan = await scanCurrentPage('[DH] Page scan failed');
+                 if (scanIsCurrent(initialScan.generation) && initialScan.fresh) {
+                     if (localAnalyzeRequestIdRef.current) applyIdentityScan(initialScan.fresh);
+                     else applyFullScan(initialScan.fresh);
                  }
              }
 
              if (isOpen) {
-                 const freshData = await scan();
-                 if (freshData) {
-                     if (localAnalyzeRequestIdRef.current) applyIdentityScan(freshData);
-                     else applyFullScan(freshData);
+                 const openScan = await scanCurrentPage('[DH] Page scan failed');
+                 if (scanIsCurrent(openScan.generation) && openScan.fresh) {
+                     if (localAnalyzeRequestIdRef.current) applyIdentityScan(openScan.fresh);
+                     else applyFullScan(openScan.fresh);
                  }
              }
         };
@@ -495,6 +517,7 @@ const FAB: React.FC = () => {
         const handleTriggerAnalyze = async (e: any) => {
             const { selectionText, rootPath } = e.detail;
             console.log("[DH] Context Menu Triggered:", { selectionText, rootPath });
+            const expectedIdentity = editableContextIdentityRef.current;
 
             // If rootPath is provided, ensure our prefs are consistent
             if (rootPath && rootPath !== effectivePrefs.rootPath) {
@@ -502,6 +525,7 @@ const FAB: React.FC = () => {
             }
 
             if (selectionText) {
+                if (expectedIdentity !== currentPageIdentityRef.current) return;
                 // We need to merge the selection with the current page context (Case Number, Product, etc.)
                 // so the analysis file is saved in the correct folder.
                 let baseData = scrapedData;
@@ -510,6 +534,10 @@ const FAB: React.FC = () => {
                 if (!baseData) {
                     baseData = await PageReader.scanForErrors();
                 }
+                if (
+                    expectedIdentity !== currentPageIdentityRef.current
+                    || expectedIdentity !== editableContextIdentityRef.current
+                ) return;
 
                 // Construct the data object for analysis
                 const dataToAnalyze: ScrapedData = {
@@ -553,21 +581,15 @@ const FAB: React.FC = () => {
             if (document.hidden) return;
 
             // console.log("[DH] Running Lazy Scan..."); 
-            let freshData: ScrapedData | null;
-            try {
-                freshData = await PageReader.scanForErrors();
-            } catch {
-                console.warn('[DH] Page scan failed');
-                return;
-            }
-            if (!freshData) return;
+            const scan = await scanCurrentPage('[DH] Page scan failed');
+            if (!scanIsCurrent(scan.generation) || !scan.fresh) return;
             if (localAnalyzeRequestIdRef.current || isOpen) {
                 if (localAnalyzeRequestIdRef.current) {
-                    applyIdentityScan(freshData);
+                    applyIdentityScan(scan.fresh);
                 }
                 return;
             }
-            applyFullScan(freshData);
+            applyFullScan(scan.fresh);
         };
 
         // MutationObserver to detect DOM changes
@@ -606,6 +628,7 @@ const FAB: React.FC = () => {
     // Separate effect for Auto Analyze to ensure state (prefs, scrapedData) is current
     useEffect(() => {
         if (!scrapedData || hasAutoAnalyzed) return;
+        if (editableContextIdentityRef.current !== currentPageIdentityRef.current) return;
 
         // --- Auto Analyze Logic ---
         if (prefs.autoAnalyzeMode === 'always') {
@@ -641,7 +664,7 @@ const FAB: React.FC = () => {
             if (hasValidIdentifier && hasEnoughContent) { 
                     setHasAutoAnalyzed(true); // Mark as handled immediately to prevent double-fire
                     showStatusBubble(t('analyzing'), 'default', 0); // Show analyzing status persistently until done
-                    setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
+                    scheduleAutoAnalyze(scrapedData);
             }
         } else if (prefs.autoAnalyzeMode === 'critical') {
             // Critical criteria: Sev 1 OR A, AND Status Reason "Initial contact pending"
@@ -656,7 +679,7 @@ const FAB: React.FC = () => {
             if (isSevCritical && isInitialPending && hasValidIdentifier && rawContent.length > 20) {
                 setHasAutoAnalyzed(true);
                 showStatusBubble(t('analyzing'), 'default', 0);
-                setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
+                scheduleAutoAnalyze(scrapedData);
             }
         } else if (prefs.autoAnalyzeMode === 'new_cases') {
              // New Cases criteria: Status Reason "Initial contact pending" (regardless of severity)
@@ -668,29 +691,24 @@ const FAB: React.FC = () => {
              if (isInitialPending && hasValidIdentifier && rawContent.length > 20) {
                  setHasAutoAnalyzed(true);
                  showStatusBubble(t('analyzing'), 'default', 0);
-                 setTimeout(() => handleAnalyze(scrapedData), 100);
+                 scheduleAutoAnalyze(scrapedData);
              }
         }
     }, [isOpen, scrapedData, prefs.autoAnalyzeMode, prefs.userPrompt, hasAutoAnalyzed]);
 
     const handleRefreshContext = async () => {
-        let data: ScrapedData | null;
-        try {
-            data = await PageReader.scanForErrors();
-        } catch {
-            console.warn('[DH] Page scan failed');
-            return;
-        }
+        const scan = await scanCurrentPage('[DH] Page scan failed');
+        if (!scanIsCurrent(scan.generation)) return;
         
         // Ensure data is not null before processing
-        if (data) {
+        if (scan.fresh) {
             if (localAnalyzeRequestIdRef.current) {
-                applyIdentityScan(data);
+                applyIdentityScan(scan.fresh);
             } else {
                 // Explicit refresh — user wants fresh data, so reset the edit flag
                 isUserEdited.current = false;
                 setHasAutoAnalyzed(false);
-                applyFullScan(data);
+                applyFullScan(scan.fresh);
             }
         }
     };
@@ -736,24 +754,17 @@ const FAB: React.FC = () => {
         if (!originRecord || originRecord.requestId !== requestId) return;
         const origin = originRecord.pageIdentity;
         postRunScanOwnerRef.current = null;
-        try {
-            const fresh = await PageReader.scanForErrors();
-            if (
-                fresh
-                && analyzeOriginRef.current?.requestId === requestId
-            ) {
-                applyFullScan(fresh, origin, true);
-            }
-        } catch {
-            console.warn('[DH] Post-analysis page scan failed');
-        } finally {
-            if (analyzeOriginRef.current?.requestId === requestId) {
-                analyzeOriginRef.current = null;
-                identityChangedDuringAnalyzeRef.current = false;
-            }
-            if (localAnalyzePageRef.current?.requestId === requestId) {
-                localAnalyzePageRef.current = null;
-            }
+        const scan = await scanCurrentPage('[DH] Post-analysis page scan failed');
+        if (!scanIsCurrent(scan.generation)) return;
+        if (scan.fresh && analyzeOriginRef.current?.requestId === requestId) {
+            applyFullScan(scan.fresh, origin, true);
+        }
+        if (analyzeOriginRef.current?.requestId === requestId) {
+            analyzeOriginRef.current = null;
+            identityChangedDuringAnalyzeRef.current = false;
+        }
+        if (localAnalyzePageRef.current?.requestId === requestId) {
+            localAnalyzePageRef.current = null;
         }
     };
 
@@ -762,6 +773,9 @@ const FAB: React.FC = () => {
         const targetData = dataToAnalyze || scrapedData;
 
         if (!targetData) return;
+        if (
+            editableContextIdentityRef.current !== currentPageIdentityRef.current
+        ) return;
         // Check if we have enough info to analyze (either error text OR title)
         const hasContent = targetData.errorText || targetData.description || targetData.ticketTitle;
         if (!hasContent) return;
@@ -1271,7 +1285,12 @@ const FAB: React.FC = () => {
                             {/* Analyze Button */}
                             <button 
                                 onClick={() => handleAnalyze()}
-                                disabled={!scrapedData?.errorText || isAnalyzing}
+                                disabled={
+                                    !scrapedData?.errorText
+                                    || isAnalyzing
+                                    || editableContextIdentityRef.current
+                                        !== currentPageIdentityRef.current
+                                }
                                 className="dh-action-btn dh-btn-primary"
                             >
                                 <Zap size={14} fill={isAnalyzing ? "none" : "currentColor"} />

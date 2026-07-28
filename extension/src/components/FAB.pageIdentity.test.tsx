@@ -33,7 +33,7 @@ const state = vi.hoisted(() => ({
         offsetRight: 24,
         userPrompt: '',
         rootPath: '',
-        autoAnalyzeMode: 'disabled' as const,
+        autoAnalyzeMode: 'disabled' as 'disabled' | 'always' | 'critical' | 'new_cases',
         enableStatusBubble: true,
         language: 'en' as const,
         analyzeTimeoutSeconds: 60,
@@ -111,6 +111,12 @@ async function flushReact(): Promise<void> {
     })
 }
 
+function deferredValue<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>(res => { resolve = res })
+    return { promise, resolve }
+}
+
 async function renderOpenFab(initial: unknown = A) {
     state.scanValue = initial
     const view = render(
@@ -137,6 +143,8 @@ function openFab(): void {
 }
 
 function expandContext(): HTMLTextAreaElement {
+    const existing = screen.queryByRole('textbox') as HTMLTextAreaElement | null
+    if (existing) return existing
     fireEvent.click(screen.getByText('Case Context'))
     return screen.getByRole('textbox') as HTMLTextAreaElement
 }
@@ -199,6 +207,7 @@ describe('FAB live page identity during Analyze', () => {
         state.trackEvent.mockReset()
         state.hashCaseId.mockReset().mockResolvedValue('hash-A')
         state.prefs.analyzeTimeoutSeconds = 60
+        state.prefs.autoAnalyzeMode = 'disabled'
         Object.defineProperty(globalThis, 'MutationObserver', {
             configurable: true,
             writable: true,
@@ -226,14 +235,14 @@ describe('FAB live page identity during Analyze', () => {
 
         openFab()
         await flushReact()
-        expect(analyzeButton()).not.toBeDisabled()
+        expect(analyzeButton()).toBeDisabled()
         expectNoVisibleOutcomeForA()
 
         await act(async () => {
             await vi.advanceTimersByTimeAsync(67_999)
         })
         expect(state.trackEvent).not.toHaveBeenCalledWith('Analyze Timeout')
-        expect(analyzeButton()).not.toBeDisabled()
+        expect(analyzeButton()).toBeDisabled()
 
         const callsBeforeCompletion = state.scanForErrors.mock.calls.length
         await resolveSuccess(response)
@@ -252,6 +261,227 @@ describe('FAB live page identity during Analyze', () => {
         const textarea = expandContext()
         expect(textarea.value).toContain('NEW CASE B BODY')
         expect(textarea.value).not.toContain('OLD CASE A BODY')
+        expect(analyzeButton()).not.toBeDisabled()
+    })
+
+    it('ignores an older scan that resolves after a newer page scan', async () => {
+        const olderInitial = deferredValue<unknown>()
+        const newerObserver = deferredValue<unknown>()
+        const heldOpenScan = deferredValue<unknown>()
+        state.scanForErrors
+            .mockReset()
+            .mockImplementationOnce(() => olderInitial.promise)
+            .mockImplementationOnce(() => newerObserver.promise)
+            .mockImplementation(() => heldOpenScan.promise)
+
+        render(
+            <PrefsLanguageProvider language="en">
+                <FAB />
+            </PrefsLanguageProvider>,
+        )
+        await flushReact()
+        expect(state.scanForErrors).toHaveBeenCalledTimes(1)
+
+        await triggerMutation()
+        await act(async () => newerObserver.resolve(B))
+        await flushReact()
+        expect(state.hydrationCaseNumbers.at(-1)).toBe('B')
+
+        await act(async () => olderInitial.resolve(A))
+        await flushReact()
+
+        expect(state.hydrationCaseNumbers.at(-1)).toBe('B')
+        openFab()
+        await flushReact()
+        const textarea = expandContext()
+        expect(textarea.value).toContain('NEW CASE B BODY')
+        expect(textarea.value).not.toContain('OLD CASE A BODY')
+    })
+
+    it('ignores an older post-run scan after a newer observer scan', async () => {
+        await renderOpenFab()
+        const response = deferNextResponse('analyze_error')
+        fireEvent.click(analyzeButton())
+        state.scanValue = B
+        await triggerMutation()
+
+        const olderPostRun = deferredValue<unknown>()
+        const newerObserver = deferredValue<unknown>()
+        state.scanForErrors
+            .mockImplementationOnce(() => olderPostRun.promise)
+            .mockImplementationOnce(() => newerObserver.promise)
+        await act(async () => response.resolve({
+            status: 'success',
+            data: { markdown: 'RESULT FOR A', saved_to: 'A-report.md' },
+        }))
+        await flushReact()
+
+        await triggerMutation()
+        await act(async () => newerObserver.resolve(B))
+        await flushReact()
+        await act(async () => olderPostRun.resolve(A))
+        await flushReact()
+
+        expect(state.hydrationCaseNumbers.at(-1)).toBe('B')
+        openFab()
+        await flushReact()
+        const textarea = expandContext()
+        expect(textarea.value).toContain('NEW CASE B BODY')
+        expect(textarea.value).not.toContain('OLD CASE A BODY')
+        expectNoVisibleOutcomeForA()
+    })
+
+    it('does not analyze stale A context after busy navigation to B', async () => {
+        await renderOpenFab()
+        const response = deferNextResponse('analyze_error')
+        fireEvent.click(analyzeButton())
+        state.scanValue = B
+        await triggerMutation()
+
+        openFab()
+        await flushReact()
+        const staleTextarea = expandContext()
+        expect(staleTextarea.value).toContain('OLD CASE A BODY')
+        const staleAnalyze = analyzeButton()
+        expect(staleAnalyze).toBeDisabled()
+
+        staleAnalyze.disabled = false
+        fireEvent.click(staleAnalyze)
+        expect(getMessageLog().filter(entry => entry.action === 'analyze_error'))
+            .toHaveLength(1)
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('dh-trigger-analyze', {
+                detail: {
+                    selectionText: [
+                        '## Case Number',
+                        '',
+                        'A',
+                        '',
+                        'STALE A CONTEXT MENU SELECTION',
+                    ].join('\n'),
+                },
+            }))
+            await Promise.resolve()
+        })
+        await flushReact()
+        expect(getMessageLog().filter(entry => entry.action === 'analyze_error'))
+            .toHaveLength(1)
+        expect(staleTextarea.value).toContain('OLD CASE A BODY')
+        expect(staleTextarea.value).not.toContain('STALE A CONTEXT MENU SELECTION')
+
+        state.scanValue = B
+        await resolveSuccess(response)
+
+        expect(staleTextarea.value).toContain('NEW CASE B BODY')
+        expect(staleTextarea.value).not.toContain('OLD CASE A BODY')
+        expect(analyzeButton()).not.toBeDisabled()
+        expect(getMessageLog().filter(entry => entry.action === 'analyze_error'))
+            .toHaveLength(1)
+    })
+
+    it('does not run a delayed A auto-analysis after a full B scan', async () => {
+        const longA = {
+            ...A,
+            caseNumber: 'CASE-A-1234',
+            errorText: 'OLD CASE A BODY WITH ENOUGH AUTO CONTENT',
+            description: 'OLD CASE A BODY WITH ENOUGH AUTO CONTENT',
+        }
+        const longB = {
+            ...B,
+            caseNumber: 'CASE-B-5678',
+            errorText: 'NEW CASE B BODY WITH ENOUGH AUTO CONTENT',
+            description: 'NEW CASE B BODY WITH ENOUGH AUTO CONTENT',
+        }
+        const openScan = deferredValue<unknown>()
+        state.prefs.autoAnalyzeMode = 'always'
+        state.scanForErrors
+            .mockReset()
+            .mockResolvedValueOnce(longA)
+            .mockImplementationOnce(() => openScan.promise)
+            .mockResolvedValue(longB)
+
+        render(
+            <PrefsLanguageProvider language="en">
+                <FAB />
+            </PrefsLanguageProvider>,
+        )
+        await flushReact()
+        openFab()
+        await flushReact()
+
+        await act(async () => openScan.resolve(longB))
+        await flushReact()
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(100)
+            await Promise.resolve()
+        })
+
+        const analyzeMessages = getMessageLog()
+            .filter(entry => entry.action === 'analyze_error')
+        expect(analyzeMessages).toHaveLength(1)
+        expect(analyzeMessages[0].payload).toMatchObject({
+            payload: {
+                payload: {
+                    caseNumber: longB.caseNumber,
+                    text: expect.stringContaining('NEW CASE B BODY'),
+                },
+                _persist: { caseNumber: longB.caseNumber },
+            },
+        })
+        expect(state.hydrationCaseNumbers.at(-1)).toBe(longB.caseNumber)
+    })
+
+    it('keeps edit protection when the post-run scan is malformed', async () => {
+        const longA = {
+            ...A,
+            caseNumber: 'CASE-A-1234',
+            errorText: 'OLD CASE A BODY WITH ENOUGH AUTO CONTENT',
+            description: 'OLD CASE A BODY WITH ENOUGH AUTO CONTENT',
+        }
+        state.prefs.autoAnalyzeMode = 'always'
+        const response = deferNextResponse('analyze_error')
+        await renderOpenFab(longA)
+        const textarea = expandContext()
+        fireEvent.change(textarea, {
+            target: { value: 'MANUAL EDIT FOR LONG CASE A' },
+        })
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(100)
+            await Promise.resolve()
+        })
+        expect(getMessageLog().filter(entry => entry.action === 'analyze_error'))
+            .toHaveLength(1)
+
+        state.scanValue = {
+            caseNumber: longA.caseNumber,
+            ticketTitle: longA.ticketTitle,
+            errorText: 7,
+        }
+        await resolveSuccess(response)
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(100)
+            await Promise.resolve()
+        })
+        expect(getMessageLog().filter(entry => entry.action === 'analyze_error'))
+            .toHaveLength(1)
+
+        fireEvent.click(screen.getByTitle('Close'))
+        state.scanValue = {
+            ...longA,
+            errorText: 'SERVER ENRICHMENT MUST NOT REPLACE THE EDIT',
+            description: 'SERVER ENRICHMENT MUST NOT REPLACE THE EDIT',
+        }
+        await triggerMutation()
+        openFab()
+        await flushReact()
+        expandContext()
+        expect((screen.getByRole('textbox') as HTMLTextAreaElement).value)
+            .toBe('MANUAL EDIT FOR LONG CASE A')
+        expect(getMessageLog().filter(entry => entry.action === 'analyze_error'))
+            .toHaveLength(1)
     })
 
     it('replaces a user-edited A textarea with B after busy Analyze completes', async () => {
