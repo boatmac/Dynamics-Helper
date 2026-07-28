@@ -872,25 +872,144 @@ const FAB: React.FC = () => {
             : t('analysisDurabilityWarning');
     };
 
-    const runPostAnalyzeScan = async (requestId: string): Promise<void> => {
+    type AnalyzeTerminalOutcome =
+        | {
+            kind: 'success';
+            markdown: string;
+            savedTo?: string;
+            duration: number;
+            caseHash: string;
+            sap: string;
+            severity: string;
+            durabilityWarning?: string;
+        }
+        | {
+            kind: 'host-error';
+            error: string;
+            errorCode?: string;
+            durabilityWarning?: string;
+        }
+        | { kind: 'exception'; error: string }
+        | { kind: 'timeout' };
+
+    const publishAnalyzeTerminalOutcome = (
+        requestId: string,
+        caseNumber: string,
+        outcome: AnalyzeTerminalOutcome,
+    ) => {
+        if (outcome.kind === 'success') {
+            trackEvent('Analyze Success', {
+                durationSeconds: outcome.duration,
+                caseIdHash: outcome.caseHash,
+                sap: outcome.sap,
+                severity: outcome.severity,
+            });
+            if (outcome.caseHash && !reportedCases.current.has(outcome.caseHash)) {
+                reportedCases.current.add(outcome.caseHash);
+                trackEvent('Case Analyzed', {
+                    caseIdHash: outcome.caseHash,
+                    sap: outcome.sap,
+                    severity: outcome.severity,
+                });
+            }
+            setLastDuration(`${outcome.duration.toFixed(1)}s`);
+            showStatusBubble(
+                `${t('analysisComplete')} (${outcome.duration.toFixed(1)}s)`,
+                'success',
+                3000,
+            );
+            popoverIsAnalyze.current = true;
+            setResultPopover({
+                isOpen: true,
+                title: `🤖 Copilot ${t('analyze')}`,
+                content: outcome.markdown,
+                durabilityWarning: outcome.durabilityWarning,
+                path: outcome.savedTo,
+                duration: `${outcome.duration.toFixed(1)}s`,
+                identity: { requestId, caseNumber },
+            });
+            setIsOpen(false);
+            return;
+        }
+        if (outcome.kind === 'host-error') {
+            showAnalysisError(
+                outcome.error,
+                outcome.errorCode,
+                { requestId, caseNumber },
+                outcome.durabilityWarning,
+            );
+            trackEvent('Analyze Host Error', {
+                errorCode: outcome.errorCode ?? 'unclassified',
+            });
+            return;
+        }
+        if (outcome.kind === 'exception') {
+            showAnalysisError(
+                outcome.error,
+                undefined,
+                { requestId, caseNumber },
+            );
+            trackEvent('Analyze Exception', { errorCode: 'unclassified' });
+            return;
+        }
+        showAnalysisError(
+            t('analysisFailed'),
+            undefined,
+            { requestId, caseNumber },
+        );
+        trackEvent('Analyze Timeout');
+    };
+
+    const finishAnalyzeTerminal = async (
+        requestId: string,
+        invocation: NonNullable<typeof editableAnalyzeContextRef.current>,
+        pageIdentity: PageIdentity | null,
+        acceptedGeneration: number,
+        caseNumber: string,
+        outcome: AnalyzeTerminalOutcome,
+    ): Promise<void> => {
         if (postRunScanOwnerRef.current !== requestId) return;
         const originRecord = analyzeOriginRef.current;
         if (!originRecord || originRecord.requestId !== requestId) return;
         const origin = originRecord.pageIdentity;
         postRunScanOwnerRef.current = null;
+        if (analyzeSafetyTimerRef.current?.requestId === requestId) {
+            clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
+            analyzeSafetyTimerRef.current = null;
+        }
+
         await runPageScan('[DH] Post-analysis page scan failed', scan => {
             if (scan.generation !== pageScanGenerationRef.current) return;
             if (scan.fresh && analyzeOriginRef.current?.requestId === requestId) {
                 applyFullScan(scan.fresh, origin, true, scan.generation);
             }
-            if (analyzeOriginRef.current?.requestId === requestId) {
-                analyzeOriginRef.current = null;
-                identityChangedDuringAnalyzeRef.current = false;
-            }
-            if (localAnalyzePageRef.current?.requestId === requestId) {
-                localAnalyzePageRef.current = null;
-            }
         });
+
+        const ownsTerminalPublication =
+            localAnalyzeRequestIdRef.current === requestId
+            && latestRequestId.current === requestId
+            && analyzeOriginRef.current?.requestId === requestId;
+        if (
+            ownsTerminalPublication
+            && editableAnalyzeContextIsCurrent(invocation)
+            && requestOwnsVisiblePage(pageIdentity, acceptedGeneration)
+        ) {
+            publishAnalyzeTerminalOutcome(requestId, caseNumber, outcome);
+        }
+        if (!ownsTerminalPublication) return;
+
+        localAnalyzeRequestIdRef.current = null;
+        latestRequestId.current = null;
+        if (hydratedPendingRef.current?.requestId === requestId) {
+            hydratedPendingRef.current = null;
+        }
+        analyzeOriginRef.current = null;
+        identityChangedDuringAnalyzeRef.current = false;
+        if (localAnalyzePageRef.current?.requestId === requestId) {
+            localAnalyzePageRef.current = null;
+        }
+        analyzeFlowEndedAtRef.current = Date.now();
+        reconcileVisibleAnalyzingState();
     };
 
     const handleAnalyze = async (
@@ -940,31 +1059,14 @@ const FAB: React.FC = () => {
         const _safetyTimeoutMs = (_analyzeTimeoutSec + 10) * 1000;
         const timeoutId = setTimeout(() => {
             if (localAnalyzeRequestIdRef.current !== requestId) return;
-            const requestStillOwnsVisiblePage = requestOwnsVisiblePage(
+            void finishAnalyzeTerminal(
+                requestId,
+                invocation,
                 pageIdentityOfRun,
                 acceptedGenerationOfRun,
+                caseNumberOfRun,
+                { kind: 'timeout' },
             );
-            if (analyzeSafetyTimerRef.current?.requestId === requestId) {
-                analyzeSafetyTimerRef.current = null;
-            }
-            localAnalyzeRequestIdRef.current = null;
-            if (latestRequestId.current === requestId) {
-                latestRequestId.current = null;
-            }
-            if (hydratedPendingRef.current?.requestId === requestId) {
-                hydratedPendingRef.current = null;
-            }
-            analyzeFlowEndedAtRef.current = Date.now();
-            reconcileVisibleAnalyzingState();
-            if (requestStillOwnsVisiblePage) {
-                showAnalysisError(
-                    t('analysisFailed'),
-                    undefined,
-                    { requestId, caseNumber: caseNumberOfRun },
-                );
-                trackEvent('Analyze Timeout');
-            }
-            void runPostAnalyzeScan(requestId);
         }, _safetyTimeoutMs);
         analyzeSafetyTimerRef.current = { requestId, timeoutId };
 
@@ -1033,103 +1135,63 @@ const FAB: React.FC = () => {
             );
             if (parsedResponse.status === 'success') {
                 const analysisData = parsedResponse.data;
-                        const duration = (Date.now() - startTime) / 1000;
-                        const caseNum = targetData.caseNumber || '';
-                        const caseHash = await hashCaseId(caseNum);
-                        if (latestRequestId.current !== requestId) return;
-                        const sap = targetData.productCategory || 'Unknown';
-                        const severity = targetData.severity || 'Unknown';
-                        const requestStillOwnsVisiblePage = requestOwnsVisiblePage(
-                            pageIdentityOfRun,
-                            acceptedGenerationOfRun,
-                        );
-
-                        if (requestStillOwnsVisiblePage) {
-                            trackEvent('Analyze Success', {
-                                durationSeconds: duration,
-                                caseIdHash: caseHash,
-                                sap,
-                                severity,
-                            });
-
-                            // Fire "Case Analyzed" only once per unique case per session.
-                            if (caseHash && !reportedCases.current.has(caseHash)) {
-                                reportedCases.current.add(caseHash);
-                                trackEvent('Case Analyzed', {
-                                    caseIdHash: caseHash,
-                                    sap,
-                                    severity,
-                                });
-                            }
-                            setLastDuration(`${duration.toFixed(1)}s`);
-                            showStatusBubble(`${t('analysisComplete')} (${duration.toFixed(1)}s)`, 'success', 3000);
-                            popoverIsAnalyze.current = true;
-                            setResultPopover({
-                                isOpen: true,
-                                title: `🤖 Copilot ${t('analyze')}`,
-                                content: analysisData.markdown,
-                                durabilityWarning,
-                                path: analysisData.saved_to,
-                                duration: `${duration.toFixed(1)}s`,
-                                identity: {
-                                    requestId,
-                                    caseNumber: caseNumberOfRun,
-                                },
-                            });
-                            setIsOpen(false); // Close menu to show result
-                        }
-            } else {
-                const requestStillOwnsVisiblePage = requestOwnsVisiblePage(
+                const duration = (Date.now() - startTime) / 1000;
+                const caseHash = await hashCaseId(caseNumberOfRun);
+                if (latestRequestId.current !== requestId) return;
+                await finishAnalyzeTerminal(
+                    requestId,
+                    invocation,
                     pageIdentityOfRun,
                     acceptedGenerationOfRun,
-                );
-                if (requestStillOwnsVisiblePage) {
-                    showAnalysisError(
-                        parsedResponse.error,
-                        parsedResponse.error_code,
-                        { requestId, caseNumber: caseNumberOfRun },
+                    caseNumberOfRun,
+                    {
+                        kind: 'success',
+                        markdown: analysisData.markdown,
+                        savedTo: analysisData.saved_to,
+                        duration,
+                        caseHash,
+                        sap: targetData.productCategory || 'Unknown',
+                        severity: targetData.severity || 'Unknown',
                         durabilityWarning,
-                    );
-                    trackEvent('Analyze Host Error', {
-                        errorCode: parsedResponse.error_code ?? 'unclassified',
-                    });
-                }
+                    },
+                );
+            } else {
+                await finishAnalyzeTerminal(
+                    requestId,
+                    invocation,
+                    pageIdentityOfRun,
+                    acceptedGenerationOfRun,
+                    caseNumberOfRun,
+                    {
+                        kind: 'host-error',
+                        error: parsedResponse.error,
+                        errorCode: parsedResponse.error_code,
+                        durabilityWarning,
+                    },
+                );
             }
         } catch (e: any) {
-            const requestStillOwnsVisiblePage = requestOwnsVisiblePage(
-                pageIdentityOfRun,
-                acceptedGenerationOfRun,
-            );
-            if (latestRequestId.current === requestId && requestStillOwnsVisiblePage) {
-                showAnalysisError(
-                    `${t('errorLabel')}: ${safeErrorText(
+            if (latestRequestId.current === requestId) {
+                await finishAnalyzeTerminal(
+                    requestId,
+                    invocation,
+                    pageIdentityOfRun,
+                    acceptedGenerationOfRun,
+                    caseNumberOfRun,
+                    {
+                        kind: 'exception',
+                        error: `${t('errorLabel')}: ${safeErrorText(
                         [e?.message, e],
                         t('unknownError'),
-                    )}`,
-                    undefined,
-                    { requestId, caseNumber: caseNumberOfRun },
+                        )}`,
+                    },
                 );
-                trackEvent('Analyze Exception', { errorCode: 'unclassified' });
             }
         } finally {
             if (analyzeSafetyTimerRef.current?.requestId === requestId) {
                 clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
                 analyzeSafetyTimerRef.current = null;
             }
-            if (localAnalyzeRequestIdRef.current === requestId) {
-                localAnalyzeRequestIdRef.current = null;
-                if (latestRequestId.current === requestId) {
-                    latestRequestId.current = null;
-                }
-                if (hydratedPendingRef.current?.requestId === requestId) {
-                    hydratedPendingRef.current = null;
-                }
-                analyzeFlowEndedAtRef.current = Date.now();
-                reconcileVisibleAnalyzingState();
-                await runPostAnalyzeScan(requestId);
-            }
-            // Don't clear bubble here immediately if success/error, let the timeout handle it. 
-            // If manual cancel or something else, we might need to check.
         }
     };
 

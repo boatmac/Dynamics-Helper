@@ -340,6 +340,85 @@ describe('FAB live page identity during Analyze', () => {
         })
     })
 
+    it('waits for post-run page revalidation before publishing terminal Analyze UI', async () => {
+        await renderOpenFab()
+        const response = deferNextResponse('analyze_error')
+        const postRunScan = deferredValue<unknown>()
+        fireEvent.click(analyzeButton())
+        state.scanForErrors.mockReset().mockImplementationOnce(() => postRunScan.promise)
+
+        await act(async () => response.resolve({
+            status: 'success',
+            data: {
+                markdown: 'SAME PAGE TERMINAL RESULT',
+                saved_to: 'A-report.md',
+            },
+        }))
+        await flushReact()
+
+        expect(state.scanForErrors).toHaveBeenCalledTimes(1)
+        expect(document.body).not.toHaveTextContent('SAME PAGE TERMINAL RESULT')
+        expect(document.body).not.toHaveTextContent(/Analysis Complete/i)
+        expect(document.body).not.toHaveTextContent(/Analysis took/i)
+        expectNoVisibleOutcomeTelemetry()
+
+        await act(async () => postRunScan.resolve(A))
+        await flushReact()
+
+        expect(screen.getByText('SAME PAGE TERMINAL RESULT')).toBeInTheDocument()
+        expect(document.body).toHaveTextContent(/Analysis Complete/i)
+        expect(document.body).toHaveTextContent(/Analysis took/i)
+        expect(state.trackEvent.mock.calls.filter(
+            call => call[0] === 'Analyze Success',
+        )).toHaveLength(1)
+        expect(state.trackEvent.mock.calls.filter(
+            call => call[0] === 'Case Analyzed',
+        )).toHaveLength(1)
+    })
+
+    it.each([
+        ['success', 'STALE SUCCESS TERMINAL A'],
+        ['host-error', 'STALE HOST ERROR TERMINAL A'],
+        ['exception', 'STALE EXCEPTION TERMINAL A'],
+        ['timeout', 'STALE TIMEOUT TERMINAL A'],
+    ] as const)(
+        'suppresses every terminal A outcome when post-run scan discovers B',
+        async (kind, staleText) => {
+            await renderOpenFab()
+            const response = deferNextResponse('analyze_error')
+            fireEvent.click(analyzeButton())
+            state.scanForErrors.mockReset().mockResolvedValue(B)
+
+            if (kind === 'success') {
+                await act(async () => response.resolve({
+                    status: 'success',
+                    data: { markdown: staleText, saved_to: 'A-report.md' },
+                }))
+            } else if (kind === 'host-error') {
+                await act(async () => response.resolve({
+                    status: 'error',
+                    error: staleText,
+                    error_code: 'future_code',
+                }))
+            } else if (kind === 'exception') {
+                await act(async () => response.reject(new Error(staleText)))
+            } else {
+                await act(async () => {
+                    await vi.advanceTimersByTimeAsync(70_000)
+                    await Promise.resolve()
+                })
+            }
+            await flushReact()
+
+            expect(state.scanForErrors).toHaveBeenCalledTimes(1)
+            expect(document.body).not.toHaveTextContent(staleText)
+            expect(document.body).not.toHaveTextContent(/Analysis Complete/i)
+            expect(document.body).not.toHaveTextContent(/Analysis Failed/i)
+            expect(document.body).not.toHaveTextContent(/Analysis took/i)
+            expectNoVisibleOutcomeTelemetry()
+        },
+    )
+
     it('ignores an older scan that resolves after a newer page scan', async () => {
         const olderInitial = deferredValue<unknown>()
         const newerObserver = deferredValue<unknown>()
@@ -573,6 +652,7 @@ describe('FAB live page identity during Analyze', () => {
         expect(state.hydrationCaseNumbers.at(-1)).toBe(B.caseNumber)
         const analyzeMessages = getMessageLog()
             .filter(entry => entry.action === 'analyze_error')
+        expect(analyzeMessages).toHaveLength(1)
         for (const message of analyzeMessages) {
             expect(message.payload).toMatchObject({
                 payload: {
