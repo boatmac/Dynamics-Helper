@@ -74,6 +74,8 @@ const FAB: React.FC = () => {
     const currentCaseNumberRef = React.useRef('');
     const editableContextIdentityRef = React.useRef<PageIdentity | null>(null);
     const pageScanGenerationRef = React.useRef(0);
+    const pendingPageScanGenerationsRef = React.useRef<Set<number>>(new Set());
+    const [pendingPageScanCount, setPendingPageScanCount] = useState(0);
     const acceptedContextSnapshotRef = React.useRef<{
         generation: number;
         identity: PageIdentity | null;
@@ -111,6 +113,7 @@ const FAB: React.FC = () => {
         requestId: string;
         pageIdentity: PageIdentity | null;
         caseNumber: string;
+        acceptedGeneration: number;
     } | null>(null);
     const postRunScanOwnerRef = React.useRef<string | null>(null);
     const analyzeOriginRef = React.useRef<{
@@ -119,6 +122,10 @@ const FAB: React.FC = () => {
     } | null>(null);
     const identityChangedDuringAnalyzeRef = React.useRef(false);
     const initialScanStartedRef = React.useRef(false);
+    const scheduledAutoAnalyzeRef = React.useRef<{
+        context: NonNullable<typeof editableAnalyzeContextRef.current>;
+        timeoutId: ReturnType<typeof setTimeout>;
+    } | null>(null);
     const analyzeSafetyTimerRef = React.useRef<{
         requestId: string;
         timeoutId: ReturnType<typeof setTimeout>;
@@ -155,12 +162,15 @@ const FAB: React.FC = () => {
             activeRequestId
             && localPage?.requestId === activeRequestId
             && currentIdentity !== null
-            && localPage.pageIdentity === currentIdentity,
+            && localPage.pageIdentity === currentIdentity
+            && !hasPendingPageScanNewerThan(localPage.acceptedGeneration),
         );
         const hydratedPending = hydratedPendingRef.current;
+        const acceptedGeneration = acceptedContextSnapshotRef.current?.generation ?? -1;
         const hydratedVisible = Boolean(
             hydratedPending
-            && hydratedPending.caseNumber === hydrationCaseNumberRef.current,
+            && hydratedPending.caseNumber === hydrationCaseNumberRef.current
+            && !hasPendingPageScanNewerThan(acceptedGeneration),
         );
         setIsAnalyzing(localVisible || hydratedVisible);
         isAnalyzingRef.current = Boolean(activeRequestId);
@@ -171,6 +181,8 @@ const FAB: React.FC = () => {
     // future remount doesn't re-open the same result (one-shot semantics).
     useEffect(() => {
         if (!hydration.popover) return;
+        const acceptedGeneration = acceptedContextSnapshotRef.current?.generation ?? -1;
+        if (hasPendingPageScanNewerThan(acceptedGeneration)) return;
         if (hydration.popover.identity.caseNumber !== currentCaseNumberRef.current) return;
         if (resultPopover.isOpen) return;
         popoverIsAnalyze.current = true;
@@ -188,7 +200,13 @@ const FAB: React.FC = () => {
         // Fire-and-forget; dismissPopover only writes the separate seen
         // identity and closes the hook's internal state - both safe to ignore.
         void hydration.dismissPopover(hydration.popover.identity);
-    }, [hydration.popover, resultPopover.isOpen, hydration, hydrationCaseNumber]);
+    }, [
+        hydration.popover,
+        resultPopover.isOpen,
+        hydration,
+        hydrationCaseNumber,
+        pendingPageScanCount,
+    ]);
 
     // Hydrated pending is a mirror, while a locally-started request owns its
     // own in-flight flag. A disappearing/expired pending marker can clear the
@@ -200,6 +218,7 @@ const FAB: React.FC = () => {
         hydration.pending?.requestId,
         hydration.pending?.caseNumber,
         hydration.pending?.startTime,
+        pendingPageScanCount,
     ]);
 
     useEffect(() => () => {
@@ -251,7 +270,8 @@ const FAB: React.FC = () => {
                 localPage !== null
                 && localPage.requestId === requestId
                 && localPage.pageIdentity !== null
-                && localPage.pageIdentity === currentPageIdentityRef.current,
+                && localPage.pageIdentity === currentPageIdentityRef.current
+                && !hasPendingPageScanNewerThan(localPage.acceptedGeneration),
             );
             
             // Only show progress if it matches our current request
@@ -362,24 +382,45 @@ const FAB: React.FC = () => {
     // Track if auto-analysis has been attempted for the current data to prevent loops/timing issues
     const [hasAutoAnalyzed, setHasAutoAnalyzed] = useState(false);
 
-    async function scanCurrentPage(failureMessage: string): Promise<{
-        generation: number;
-        fresh: unknown;
-    }> {
-        const generation = ++pageScanGenerationRef.current;
-        try {
-            return {
-                generation,
-                fresh: await PageReader.scanForErrors(),
-            };
-        } catch {
-            console.warn(failureMessage);
-            return { generation, fresh: null };
+    function hasPendingPageScanNewerThan(generation: number): boolean {
+        for (const pendingGeneration of pendingPageScanGenerationsRef.current) {
+            if (pendingGeneration > generation) return true;
         }
+        return false;
     }
 
-    function scanIsCurrent(generation: number): boolean {
-        return generation === pageScanGenerationRef.current;
+    async function runPageScan<T>(
+        failureMessage: string,
+        consume: (scan: { generation: number; fresh: unknown }) => T | Promise<T>,
+    ): Promise<T> {
+        const generation = ++pageScanGenerationRef.current;
+        pendingPageScanGenerationsRef.current.add(generation);
+        setPendingPageScanCount(pendingPageScanGenerationsRef.current.size);
+        const localPage = localAnalyzePageRef.current;
+        const scheduledAuto = scheduledAutoAnalyzeRef.current;
+        if (
+            (localPage && generation > localPage.acceptedGeneration)
+            || (
+                scheduledAuto
+                && generation > scheduledAuto.context.accepted.generation
+            )
+        ) {
+            setStatusBubble(previous => ({ ...previous, visible: false }));
+        }
+        reconcileVisibleAnalyzingState();
+        try {
+            let fresh: unknown = null;
+            try {
+                fresh = await PageReader.scanForErrors();
+            } catch {
+                console.warn(failureMessage);
+            }
+            return await consume({ generation, fresh });
+        } finally {
+            pendingPageScanGenerationsRef.current.delete(generation);
+            setPendingPageScanCount(pendingPageScanGenerationsRef.current.size);
+            reconcileVisibleAnalyzingState();
+        }
     }
 
     function applyIdentityScan(fresh: unknown): void {
@@ -419,7 +460,7 @@ const FAB: React.FC = () => {
         generation = pageScanGenerationRef.current,
         forceReplace = false,
     ): typeof acceptedContextSnapshotRef.current {
-        if (!scanIsCurrent(generation)) return null;
+        if (hasPendingPageScanNewerThan(generation)) return null;
         const plain = parseScrapedDataSnapshot(fresh);
         if (!plain) return null;
         const parsed = parsePageIdentitySnapshot(plain);
@@ -461,8 +502,8 @@ const FAB: React.FC = () => {
         snapshot: NonNullable<typeof acceptedContextSnapshotRef.current>,
     ): boolean {
         return acceptedContextSnapshotRef.current === snapshot
-            && snapshot.generation === pageScanGenerationRef.current
-            && snapshot.identity === currentPageIdentityRef.current;
+            && snapshot.identity === currentPageIdentityRef.current
+            && !hasPendingPageScanNewerThan(snapshot.generation);
     }
 
     function editableAnalyzeContextIsCurrent(
@@ -470,6 +511,15 @@ const FAB: React.FC = () => {
     ): boolean {
         return editableAnalyzeContextRef.current === context
             && acceptedSnapshotIsCurrent(context.accepted);
+    }
+
+    function requestOwnsVisiblePage(
+        pageIdentity: PageIdentity | null,
+        acceptedGeneration: number,
+    ): boolean {
+        return pageIdentity !== null
+            && pageIdentity === currentPageIdentityRef.current
+            && !hasPendingPageScanNewerThan(acceptedGeneration);
     }
 
     // Duration Logic
@@ -519,9 +569,22 @@ const FAB: React.FC = () => {
     const scheduleAutoAnalyze = (
         context: NonNullable<typeof editableAnalyzeContextRef.current>,
     ) => {
-        setTimeout(() => {
+        const timeoutId = setTimeout(() => {
+            if (scheduledAutoAnalyzeRef.current?.timeoutId === timeoutId) {
+                scheduledAutoAnalyzeRef.current = null;
+            }
+            if (!editableAnalyzeContextIsCurrent(context)) {
+                if (editableAnalyzeContextRef.current === context) {
+                    setHasAutoAnalyzed(false);
+                    setStatusBubble(previous => previous.type === 'default'
+                        ? { ...previous, visible: false }
+                        : previous);
+                }
+                return;
+            }
             void handleAnalyze(context);
         }, 100);
+        scheduledAutoAnalyzeRef.current = { context, timeoutId };
     };
 
     // Auto-scan when opening
@@ -531,19 +594,25 @@ const FAB: React.FC = () => {
              if (!initialScanStartedRef.current) {
                  initialScanStartedRef.current = true;
                  // Initial scan on mount (even if closed) to support auto-analyze without opening
-                 const initialScan = await scanCurrentPage('[DH] Page scan failed');
-                 if (scanIsCurrent(initialScan.generation) && initialScan.fresh) {
+                 await runPageScan('[DH] Page scan failed', initialScan => {
+                     if (
+                         initialScan.generation !== pageScanGenerationRef.current
+                         || !initialScan.fresh
+                     ) return;
                      if (localAnalyzeRequestIdRef.current) applyIdentityScan(initialScan.fresh);
                      else applyFullScan(initialScan.fresh, null, false, initialScan.generation);
-                 }
+                 });
              }
 
              if (isOpen) {
-                 const openScan = await scanCurrentPage('[DH] Page scan failed');
-                 if (scanIsCurrent(openScan.generation) && openScan.fresh) {
+                 await runPageScan('[DH] Page scan failed', openScan => {
+                     if (
+                         openScan.generation !== pageScanGenerationRef.current
+                         || !openScan.fresh
+                     ) return;
                      if (localAnalyzeRequestIdRef.current) applyIdentityScan(openScan.fresh);
                      else applyFullScan(openScan.fresh, null, false, openScan.generation);
-                 }
+                 });
              }
         };
         
@@ -567,13 +636,20 @@ const FAB: React.FC = () => {
                 // We need to merge the selection with the current page context (Case Number, Product, etc.)
                 // so the analysis file is saved in the correct folder.
                 if (!pageSnapshot) {
-                    const scan = await scanCurrentPage('[DH] Page scan failed');
-                    if (!scanIsCurrent(scan.generation) || !scan.fresh) return;
-                    pageSnapshot = applyFullScan(
-                        scan.fresh,
-                        null,
-                        false,
-                        scan.generation,
+                    pageSnapshot = await runPageScan(
+                        '[DH] Page scan failed',
+                        scan => {
+                            if (
+                                scan.generation !== pageScanGenerationRef.current
+                                || !scan.fresh
+                            ) return null;
+                            return applyFullScan(
+                                scan.fresh,
+                                null,
+                                false,
+                                scan.generation,
+                            );
+                        },
                     );
                 }
                 if (!pageSnapshot || !acceptedSnapshotIsCurrent(pageSnapshot)) return;
@@ -621,15 +697,19 @@ const FAB: React.FC = () => {
             if (document.hidden) return;
 
             // console.log("[DH] Running Lazy Scan..."); 
-            const scan = await scanCurrentPage('[DH] Page scan failed');
-            if (!scanIsCurrent(scan.generation) || !scan.fresh) return;
-            if (localAnalyzeRequestIdRef.current || isOpen) {
-                if (localAnalyzeRequestIdRef.current) {
-                    applyIdentityScan(scan.fresh);
+            await runPageScan('[DH] Page scan failed', scan => {
+                if (
+                    scan.generation !== pageScanGenerationRef.current
+                    || !scan.fresh
+                ) return;
+                if (localAnalyzeRequestIdRef.current || isOpen) {
+                    if (localAnalyzeRequestIdRef.current) {
+                        applyIdentityScan(scan.fresh);
+                    }
+                    return;
                 }
-                return;
-            }
-            applyFullScan(scan.fresh, null, false, scan.generation);
+                applyFullScan(scan.fresh, null, false, scan.generation);
+            });
         };
 
         // MutationObserver to detect DOM changes
@@ -736,21 +816,25 @@ const FAB: React.FC = () => {
                  scheduleAutoAnalyze(analyzeContext);
              }
         }
-    }, [isOpen, scrapedData, prefs.autoAnalyzeMode, prefs.userPrompt, hasAutoAnalyzed]);
+    }, [
+        isOpen,
+        scrapedData,
+        prefs.autoAnalyzeMode,
+        prefs.userPrompt,
+        hasAutoAnalyzed,
+        pendingPageScanCount,
+    ]);
 
     const handleRefreshContext = async () => {
-        const scan = await scanCurrentPage('[DH] Page scan failed');
-        if (!scanIsCurrent(scan.generation)) return;
-        
-        // Ensure data is not null before processing
-        if (scan.fresh) {
+        await runPageScan('[DH] Page scan failed', scan => {
+            if (scan.generation !== pageScanGenerationRef.current || !scan.fresh) return;
             if (localAnalyzeRequestIdRef.current) {
                 applyIdentityScan(scan.fresh);
             } else {
                 // Explicit refresh replaces edits only after the scrape validates.
                 applyFullScan(scan.fresh, null, false, scan.generation, true);
             }
-        }
+        });
     };
 
     const handlePing = async () => {
@@ -794,18 +878,19 @@ const FAB: React.FC = () => {
         if (!originRecord || originRecord.requestId !== requestId) return;
         const origin = originRecord.pageIdentity;
         postRunScanOwnerRef.current = null;
-        const scan = await scanCurrentPage('[DH] Post-analysis page scan failed');
-        if (!scanIsCurrent(scan.generation)) return;
-        if (scan.fresh && analyzeOriginRef.current?.requestId === requestId) {
-            applyFullScan(scan.fresh, origin, true, scan.generation);
-        }
-        if (analyzeOriginRef.current?.requestId === requestId) {
-            analyzeOriginRef.current = null;
-            identityChangedDuringAnalyzeRef.current = false;
-        }
-        if (localAnalyzePageRef.current?.requestId === requestId) {
-            localAnalyzePageRef.current = null;
-        }
+        await runPageScan('[DH] Post-analysis page scan failed', scan => {
+            if (scan.generation !== pageScanGenerationRef.current) return;
+            if (scan.fresh && analyzeOriginRef.current?.requestId === requestId) {
+                applyFullScan(scan.fresh, origin, true, scan.generation);
+            }
+            if (analyzeOriginRef.current?.requestId === requestId) {
+                analyzeOriginRef.current = null;
+                identityChangedDuringAnalyzeRef.current = false;
+            }
+            if (localAnalyzePageRef.current?.requestId === requestId) {
+                localAnalyzePageRef.current = null;
+            }
+        });
     };
 
     const handleAnalyze = async (
@@ -820,6 +905,7 @@ const FAB: React.FC = () => {
 
         const requestId = crypto.randomUUID();
         const pageIdentityOfRun = currentPageIdentityRef.current;
+        const acceptedGenerationOfRun = invocation.accepted.generation;
         const caseNumberOfRun = targetData.caseNumber || '';
         if (analyzeSafetyTimerRef.current) {
             clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
@@ -831,6 +917,7 @@ const FAB: React.FC = () => {
             requestId,
             pageIdentity: pageIdentityOfRun,
             caseNumber: caseNumberOfRun,
+            acceptedGeneration: acceptedGenerationOfRun,
         };
         analyzeOriginRef.current = { requestId, pageIdentity: pageIdentityOfRun };
         identityChangedDuringAnalyzeRef.current = false;
@@ -853,9 +940,10 @@ const FAB: React.FC = () => {
         const _safetyTimeoutMs = (_analyzeTimeoutSec + 10) * 1000;
         const timeoutId = setTimeout(() => {
             if (localAnalyzeRequestIdRef.current !== requestId) return;
-            const requestStillOwnsVisiblePage =
-                pageIdentityOfRun !== null
-                && pageIdentityOfRun === currentPageIdentityRef.current;
+            const requestStillOwnsVisiblePage = requestOwnsVisiblePage(
+                pageIdentityOfRun,
+                acceptedGenerationOfRun,
+            );
             if (analyzeSafetyTimerRef.current?.requestId === requestId) {
                 analyzeSafetyTimerRef.current = null;
             }
@@ -893,7 +981,10 @@ const FAB: React.FC = () => {
             fullContext = applyCurrentUserPrompt(fullContext, prefs.userPrompt);
 
             // Only show bubble if we initiated manually and it wasn't already shown by auto-analyze logic
-            if (!statusBubble.visible && pageIdentityOfRun !== null) {
+            if (
+                !statusBubble.visible
+                && requestOwnsVisiblePage(pageIdentityOfRun, acceptedGenerationOfRun)
+            ) {
                  showStatusBubble(t('analyzing'), 'default', 0);
             }
 
@@ -948,9 +1039,10 @@ const FAB: React.FC = () => {
                         if (latestRequestId.current !== requestId) return;
                         const sap = targetData.productCategory || 'Unknown';
                         const severity = targetData.severity || 'Unknown';
-                        const requestStillOwnsVisiblePage =
-                            pageIdentityOfRun !== null
-                            && pageIdentityOfRun === currentPageIdentityRef.current;
+                        const requestStillOwnsVisiblePage = requestOwnsVisiblePage(
+                            pageIdentityOfRun,
+                            acceptedGenerationOfRun,
+                        );
 
                         if (requestStillOwnsVisiblePage) {
                             trackEvent('Analyze Success', {
@@ -987,9 +1079,10 @@ const FAB: React.FC = () => {
                             setIsOpen(false); // Close menu to show result
                         }
             } else {
-                const requestStillOwnsVisiblePage =
-                    pageIdentityOfRun !== null
-                    && pageIdentityOfRun === currentPageIdentityRef.current;
+                const requestStillOwnsVisiblePage = requestOwnsVisiblePage(
+                    pageIdentityOfRun,
+                    acceptedGenerationOfRun,
+                );
                 if (requestStillOwnsVisiblePage) {
                     showAnalysisError(
                         parsedResponse.error,
@@ -1003,9 +1096,10 @@ const FAB: React.FC = () => {
                 }
             }
         } catch (e: any) {
-            const requestStillOwnsVisiblePage =
-                pageIdentityOfRun !== null
-                && pageIdentityOfRun === currentPageIdentityRef.current;
+            const requestStillOwnsVisiblePage = requestOwnsVisiblePage(
+                pageIdentityOfRun,
+                acceptedGenerationOfRun,
+            );
             if (latestRequestId.current === requestId && requestStillOwnsVisiblePage) {
                 showAnalysisError(
                     `${t('errorLabel')}: ${safeErrorText(

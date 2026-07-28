@@ -264,6 +264,82 @@ describe('FAB live page identity during Analyze', () => {
         expect(analyzeButton()).not.toBeDisabled()
     })
 
+    it('suppresses A completion while a newer page scan is pending', async () => {
+        await renderOpenFab()
+        const response = deferNextResponse('analyze_error')
+        fireEvent.click(analyzeButton())
+
+        const pendingB = deferredValue<unknown>()
+        const pendingPostRun = deferredValue<unknown>()
+        state.scanForErrors
+            .mockReset()
+            .mockImplementationOnce(() => pendingB.promise)
+            .mockImplementationOnce(() => pendingPostRun.promise)
+        const callback = state.observerCallback
+        expect(callback).not.toBeNull()
+        await act(async () => {
+            callback!([], {} as MutationObserver)
+            await vi.advanceTimersByTimeAsync(2000)
+            await Promise.resolve()
+        })
+        expect(state.scanForErrors).toHaveBeenCalledTimes(1)
+
+        await act(async () => response.resolve({
+            status: 'success',
+            data: {
+                markdown: 'A RESULT WHILE B SCAN IS PENDING',
+                saved_to: 'A-report.md',
+            },
+        }))
+        await flushReact()
+
+        expect(document.body).not.toHaveTextContent('A RESULT WHILE B SCAN IS PENDING')
+        expect(document.body).not.toHaveTextContent(/Analysis Complete/i)
+        expectNoVisibleOutcomeTelemetry()
+        expect(state.hashCaseId).toHaveBeenCalledWith(A.caseNumber)
+    })
+
+    it('keeps accepted context usable after an ignored or malformed scan', async () => {
+        await renderOpenFab()
+        const ignoredScan = deferredValue<unknown>()
+        state.scanForErrors
+            .mockReset()
+            .mockImplementationOnce(() => ignoredScan.promise)
+            .mockResolvedValueOnce({
+                caseNumber: A.caseNumber,
+                ticketTitle: A.ticketTitle,
+                errorText: 7,
+            })
+            .mockResolvedValue(A)
+
+        await triggerMutation()
+        await act(async () => ignoredScan.resolve(A))
+        await flushReact()
+
+        fireEvent.click(screen.getByTitle('Refresh Context (Re-scan page)'))
+        await flushReact()
+
+        const bubble = document.querySelector('.dh-status-bubble') as HTMLElement
+        expect(bubble).not.toHaveClass('visible')
+        expect(bubble).not.toHaveTextContent(/^Analyzing$/i)
+
+        deferNextResponse('analyze_error')
+        fireEvent.click(analyzeButton())
+
+        const analyzeMessages = getMessageLog()
+            .filter(entry => entry.action === 'analyze_error')
+        expect(analyzeMessages).toHaveLength(1)
+        expect(analyzeMessages[0].payload).toMatchObject({
+            payload: {
+                payload: {
+                    caseNumber: A.caseNumber,
+                    text: expect.stringContaining('OLD CASE A BODY'),
+                },
+                _persist: { caseNumber: A.caseNumber },
+            },
+        })
+    })
+
     it('ignores an older scan that resolves after a newer page scan', async () => {
         const olderInitial = deferredValue<unknown>()
         const newerObserver = deferredValue<unknown>()
