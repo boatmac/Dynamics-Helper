@@ -534,6 +534,138 @@ describe('FAB live page identity during Analyze', () => {
     })
 
     it.each([
+        ['thrown', () => Promise.reject(new Error('TERMINAL SCAN FAILURE'))],
+        ['null', () => Promise.resolve(null)],
+        ['malformed', () => Promise.resolve({ ...A, errorText: 7 })],
+    ] as const)(
+        'does not publish terminal Analyze UI when post-run revalidation fails',
+        async (_kind, runPostRunScan) => {
+            const requestId = '00000000-0000-4000-8000-00000000000a'
+            const randomUuid = vi.spyOn(crypto, 'randomUUID').mockReturnValue(requestId)
+            try {
+                const view = await renderOpenFab()
+                const response = deferNextResponse('analyze_error')
+                fireEvent.click(analyzeButton())
+
+                state.hydrationPopover = {
+                    isOpen: true,
+                    status: 'success',
+                    title: 'Persisted Analyze',
+                    content: 'RECOVERABLE PERSISTED A',
+                    identity: { caseNumber: A.caseNumber, requestId, timestamp: 103 },
+                }
+                view.rerender(
+                    <PrefsLanguageProvider language="en">
+                        <FAB />
+                    </PrefsLanguageProvider>,
+                )
+                await flushReact()
+                expect(state.hydrationDismiss).not.toHaveBeenCalled()
+
+                state.scanForErrors.mockReset().mockImplementationOnce(runPostRunScan)
+                await act(async () => response.resolve({
+                    status: 'success',
+                    data: {
+                        markdown: 'UNREVALIDATED LOCAL A',
+                        saved_to: 'A-report.md',
+                    },
+                }))
+                await flushReact()
+
+                expect(state.scanForErrors).toHaveBeenCalledTimes(1)
+                expect(document.body).not.toHaveTextContent('UNREVALIDATED LOCAL A')
+                expect(document.body).not.toHaveTextContent('RECOVERABLE PERSISTED A')
+                expect(document.body).not.toHaveTextContent(/Analysis Complete/i)
+                expect(document.body).not.toHaveTextContent(/Analysis Failed/i)
+                expect(document.body).not.toHaveTextContent(/Analysis took/i)
+                expect(document.querySelector('.dh-status-bubble')).not.toHaveClass('visible')
+                expect(state.hydrationDismiss).not.toHaveBeenCalled()
+                expectNoVisibleOutcomeTelemetry()
+                expect(analyzeButton()).not.toBeDisabled()
+
+                view.unmount()
+                state.scanForErrors.mockReset().mockResolvedValue(A)
+                render(
+                    <PrefsLanguageProvider language="en">
+                        <FAB />
+                    </PrefsLanguageProvider>,
+                )
+                await flushReact()
+
+                expect(screen.getByText('RECOVERABLE PERSISTED A')).toBeInTheDocument()
+                expect(state.hydrationDismiss).toHaveBeenCalledTimes(1)
+                expect(state.hydrationDismiss).toHaveBeenCalledWith(
+                    state.hydrationPopover.identity,
+                )
+            } finally {
+                randomUuid.mockRestore()
+            }
+        },
+    )
+
+    it('uses the newest observer scan as terminal full revalidation', async () => {
+        const newerA = {
+            ...A,
+            errorText: 'NEWEST CASE A BODY',
+            description: 'NEWEST CASE A BODY',
+        }
+        await renderOpenFab()
+        const response = deferNextResponse('analyze_error')
+        const mandatoryPostRun = deferredValue<unknown>()
+        const observerB = deferredValue<unknown>()
+        const observerA = deferredValue<unknown>()
+        fireEvent.click(analyzeButton())
+        state.scanForErrors
+            .mockReset()
+            .mockImplementationOnce(() => mandatoryPostRun.promise)
+            .mockImplementationOnce(() => observerB.promise)
+            .mockResolvedValueOnce(B)
+            .mockImplementationOnce(() => observerA.promise)
+
+        await act(async () => response.resolve({
+            status: 'success',
+            data: {
+                markdown: 'STALE PRE-RUN A RESULT',
+                saved_to: 'A-report.md',
+            },
+        }))
+        await flushReact()
+        expect(state.scanForErrors).toHaveBeenCalledTimes(1)
+
+        await triggerMutation()
+        await act(async () => observerB.resolve(B))
+        await flushReact()
+        openFab()
+        await flushReact()
+        expect(state.scanForErrors).toHaveBeenCalledTimes(3)
+        const contextAfterB = expandContext().value
+
+        await triggerMutation()
+        expect(state.scanForErrors).toHaveBeenCalledTimes(4)
+        await act(async () => mandatoryPostRun.resolve(A))
+        await flushReact()
+
+        expect(document.body).not.toHaveTextContent('STALE PRE-RUN A RESULT')
+        expectNoVisibleOutcomeTelemetry()
+
+        await act(async () => observerA.resolve(newerA))
+        await flushReact()
+
+        expect(contextAfterB).toContain('NEW CASE B BODY')
+        expect(contextAfterB).not.toContain('OLD CASE A BODY')
+        openFab()
+        await flushReact()
+        const newestContext = expandContext().value
+        expect(newestContext).toContain('NEWEST CASE A BODY')
+        expect(newestContext).not.toContain('OLD CASE A BODY')
+        expect(document.body).not.toHaveTextContent('STALE PRE-RUN A RESULT')
+        expect(document.body).not.toHaveTextContent(/Analysis Complete/i)
+        expectNoVisibleOutcomeTelemetry()
+        expect(state.hydrationDismiss).not.toHaveBeenCalled()
+        expect(analyzeButton()).not.toBeDisabled()
+    })
+
+    it.each([
         ['success', 'STALE SUCCESS TERMINAL A'],
         ['host-error', 'STALE HOST ERROR TERMINAL A'],
         ['exception', 'STALE EXCEPTION TERMINAL A'],
@@ -1006,11 +1138,17 @@ describe('FAB live page identity during Analyze', () => {
         expect(getMessageLog().filter(entry => entry.action === 'analyze_error'))
             .toHaveLength(1)
 
-        fireEvent.click(screen.getByTitle('Close'))
+        expect(document.body).not.toHaveTextContent(/Analysis Complete/i)
+        expect(document.body).not.toHaveTextContent(/Analysis Failed/i)
+        expectNoVisibleOutcomeTelemetry()
         state.scanValue = {
             ...longA,
             errorText: 'SERVER ENRICHMENT MUST NOT REPLACE THE EDIT',
             description: 'SERVER ENRICHMENT MUST NOT REPLACE THE EDIT',
+        }
+        if (document.querySelector('.dh-menu')) {
+            openFab()
+            await flushReact()
         }
         await triggerMutation()
         openFab()

@@ -42,6 +42,24 @@ function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
 
+type AcceptedContextSnapshot = {
+    generation: number;
+    identity: PageIdentity | null;
+    data: ScrapedData;
+};
+
+type TerminalRevalidationResult = {
+    generation: number;
+    accepted: AcceptedContextSnapshot | null;
+};
+
+type TerminalRevalidationCoordinator = {
+    requestId: string;
+    origin: PageIdentity | null;
+    latestGeneration: number;
+    latestCompletion: Promise<TerminalRevalidationResult> | null;
+};
+
 const FAB: React.FC = () => {
     const { t } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
@@ -76,11 +94,7 @@ const FAB: React.FC = () => {
     const pageScanGenerationRef = React.useRef(0);
     const pendingPageScanGenerationsRef = React.useRef<Set<number>>(new Set());
     const [pendingPageScanCount, setPendingPageScanCount] = useState(0);
-    const acceptedContextSnapshotRef = React.useRef<{
-        generation: number;
-        identity: PageIdentity | null;
-        data: ScrapedData;
-    } | null>(null);
+    const acceptedContextSnapshotRef = React.useRef<AcceptedContextSnapshot | null>(null);
     const editableAnalyzeContextRef = React.useRef<{
         accepted: NonNullable<typeof acceptedContextSnapshotRef.current>;
         data: ScrapedData;
@@ -116,6 +130,11 @@ const FAB: React.FC = () => {
         acceptedGeneration: number;
     } | null>(null);
     const postRunScanOwnerRef = React.useRef<string | null>(null);
+    const terminalRevalidationRef = React.useRef<TerminalRevalidationCoordinator | null>(null);
+    const deferredLocalHydrationRef = React.useRef<{
+        requestId: string;
+        caseNumber: string;
+    } | null>(null);
     const analyzeOriginRef = React.useRef<{
         requestId: string;
         pageIdentity: PageIdentity | null;
@@ -201,7 +220,18 @@ const FAB: React.FC = () => {
                 !localCaseNumber
                 || localCaseNumber === hydrationIdentity.caseNumber
             );
-        if (matchesActiveLocalAnalyze) return;
+        if (matchesActiveLocalAnalyze) {
+            deferredLocalHydrationRef.current = {
+                requestId: hydrationRequestId,
+                caseNumber: hydrationIdentity.caseNumber,
+            };
+            return;
+        }
+        if (
+            hydrationRequestId !== undefined
+            && deferredLocalHydrationRef.current?.requestId === hydrationRequestId
+            && deferredLocalHydrationRef.current.caseNumber === hydrationIdentity.caseNumber
+        ) return;
         const acceptedGeneration = acceptedContextSnapshotRef.current?.generation ?? -1;
         if (hasPendingPageScanNewerThan(acceptedGeneration)) return;
         if (hydration.popover.identity.caseNumber !== currentCaseNumberRef.current) return;
@@ -410,9 +440,10 @@ const FAB: React.FC = () => {
         return false;
     }
 
-    async function runPageScan<T>(
+    function runPageScan<T>(
         failureMessage: string,
         consume: (scan: { generation: number; fresh: unknown }) => T | Promise<T>,
+        onStarted?: (generation: number, completion: Promise<T>) => void,
     ): Promise<T> {
         const generation = ++pageScanGenerationRef.current;
         pendingPageScanGenerationsRef.current.add(generation);
@@ -429,19 +460,23 @@ const FAB: React.FC = () => {
             setStatusBubble(previous => ({ ...previous, visible: false }));
         }
         reconcileVisibleAnalyzingState();
-        try {
-            let fresh: unknown = null;
+        const completion = (async () => {
             try {
-                fresh = await PageReader.scanForErrors();
-            } catch {
-                console.warn(failureMessage);
+                let fresh: unknown = null;
+                try {
+                    fresh = await PageReader.scanForErrors();
+                } catch {
+                    console.warn(failureMessage);
+                }
+                return await consume({ generation, fresh });
+            } finally {
+                pendingPageScanGenerationsRef.current.delete(generation);
+                setPendingPageScanCount(pendingPageScanGenerationsRef.current.size);
+                reconcileVisibleAnalyzingState();
             }
-            return await consume({ generation, fresh });
-        } finally {
-            pendingPageScanGenerationsRef.current.delete(generation);
-            setPendingPageScanCount(pendingPageScanGenerationsRef.current.size);
-            reconcileVisibleAnalyzingState();
-        }
+        })();
+        onStarted?.(generation, completion);
+        return completion;
     }
 
     function applyIdentityScan(fresh: unknown): void {
@@ -451,6 +486,12 @@ const FAB: React.FC = () => {
         const wasInitialized = currentPageIdentityInitializedRef.current;
         const identityChanged = identity !== currentPageIdentityRef.current;
         const caseChanged = caseNumber !== currentCaseNumberRef.current;
+        if (
+            deferredLocalHydrationRef.current
+            && caseNumber !== deferredLocalHydrationRef.current.caseNumber
+        ) {
+            deferredLocalHydrationRef.current = null;
+        }
         currentPageIdentityInitializedRef.current = true;
         if (identityChanged || caseChanged) {
             if (
@@ -541,6 +582,69 @@ const FAB: React.FC = () => {
         return pageIdentity !== null
             && pageIdentity === currentPageIdentityRef.current
             && !hasPendingPageScanNewerThan(acceptedGeneration);
+    }
+
+    function runTerminalRevalidationParticipant(
+        requestId: string,
+        failureMessage: string,
+    ): Promise<TerminalRevalidationResult> {
+        return runPageScan(
+            failureMessage,
+            scan => {
+                const coordinator = terminalRevalidationRef.current;
+                if (
+                    !coordinator
+                    || coordinator.requestId !== requestId
+                    || analyzeOriginRef.current?.requestId !== requestId
+                    || scan.generation !== pageScanGenerationRef.current
+                    || !scan.fresh
+                ) {
+                    return { generation: scan.generation, accepted: null };
+                }
+                return {
+                    generation: scan.generation,
+                    accepted: applyFullScan(
+                        scan.fresh,
+                        coordinator.origin,
+                        true,
+                        scan.generation,
+                    ),
+                };
+            },
+            (generation, completion) => {
+                const coordinator = terminalRevalidationRef.current;
+                if (!coordinator || coordinator.requestId !== requestId) return;
+                coordinator.latestGeneration = generation;
+                coordinator.latestCompletion = completion;
+            },
+        );
+    }
+
+    async function awaitLatestTerminalRevalidation(
+        requestId: string,
+    ): Promise<AcceptedContextSnapshot | null> {
+        while (true) {
+            const coordinator = terminalRevalidationRef.current;
+            if (!coordinator || coordinator.requestId !== requestId) return null;
+            const generation = coordinator.latestGeneration;
+            const completion = coordinator.latestCompletion;
+            if (!completion) return null;
+
+            let result: TerminalRevalidationResult;
+            try {
+                result = await completion;
+            } catch {
+                result = { generation, accepted: null };
+            }
+
+            const latest = terminalRevalidationRef.current;
+            if (!latest || latest.requestId !== requestId) return null;
+            if (
+                latest.latestGeneration !== generation
+                || latest.latestCompletion !== completion
+            ) continue;
+            return result.generation === generation ? result.accepted : null;
+        }
     }
 
     // Duration Logic
@@ -718,6 +822,18 @@ const FAB: React.FC = () => {
             if (document.hidden) return;
 
             // console.log("[DH] Running Lazy Scan..."); 
+            const terminal = terminalRevalidationRef.current;
+            if (
+                terminal
+                && localAnalyzeRequestIdRef.current === terminal.requestId
+            ) {
+                await runTerminalRevalidationParticipant(
+                    terminal.requestId,
+                    '[DH] Page scan failed',
+                );
+                return;
+            }
+
             await runPageScan('[DH] Page scan failed', scan => {
                 if (
                     scan.generation !== pageScanGenerationRef.current
@@ -994,28 +1110,41 @@ const FAB: React.FC = () => {
         if (!originRecord || originRecord.requestId !== requestId) return;
         const origin = originRecord.pageIdentity;
         postRunScanOwnerRef.current = null;
+        terminalRevalidationRef.current = {
+            requestId,
+            origin,
+            latestGeneration: -1,
+            latestCompletion: null,
+        };
         if (analyzeSafetyTimerRef.current?.requestId === requestId) {
             clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
             analyzeSafetyTimerRef.current = null;
         }
 
-        await runPageScan('[DH] Post-analysis page scan failed', scan => {
-            if (scan.generation !== pageScanGenerationRef.current) return;
-            if (scan.fresh && analyzeOriginRef.current?.requestId === requestId) {
-                applyFullScan(scan.fresh, origin, true, scan.generation);
-            }
-        });
+        void runTerminalRevalidationParticipant(
+            requestId,
+            '[DH] Post-analysis page scan failed',
+        );
+        const terminalSnapshot = await awaitLatestTerminalRevalidation(requestId);
 
         const ownsTerminalPublication =
             localAnalyzeRequestIdRef.current === requestId
             && latestRequestId.current === requestId
             && analyzeOriginRef.current?.requestId === requestId;
-        if (
+        const canPublishTerminalOutcome = Boolean(
             ownsTerminalPublication
+            && terminalSnapshot !== null
+            && acceptedSnapshotIsCurrent(terminalSnapshot)
             && editableAnalyzeContextIsCurrent(invocation)
             && requestOwnsVisiblePage(pageIdentity, acceptedGeneration)
-        ) {
+        );
+        if (canPublishTerminalOutcome) {
             publishAnalyzeTerminalOutcome(requestId, caseNumber, outcome);
+        } else if (currentCaseNumberRef.current === caseNumber) {
+            deferredLocalHydrationRef.current = { requestId, caseNumber };
+        }
+        if (terminalRevalidationRef.current?.requestId === requestId) {
+            terminalRevalidationRef.current = null;
         }
         if (!ownsTerminalPublication) return;
 
