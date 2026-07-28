@@ -460,6 +460,8 @@ const FAB: React.FC = () => {
     };
     
     const { prefs } = usePrefs();
+    const latestPrefsRef = React.useRef(prefs);
+    latestPrefsRef.current = prefs;
     
     // UI States
     const [isContextExpanded, setIsContextExpanded] = useState(false);
@@ -1286,7 +1288,7 @@ const FAB: React.FC = () => {
         const request = snapshotAnalyzeRequest(
             crypto.randomUUID(),
             page,
-            prefs.rootPath,
+            latestPrefsRef.current.rootPath,
             analyzeInvocation,
         );
         const {

@@ -127,6 +127,12 @@ async function flushReact(): Promise<void> {
     })
 }
 
+function deferredValue<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>(done => { resolve = done })
+    return { promise, resolve }
+}
+
 async function renderFab(initial: unknown = A) {
     state.scanValue = initial
     const view = render(
@@ -185,13 +191,63 @@ async function triggerMutation(): Promise<void> {
     })
 }
 
+async function runContextMenuFallbackPreferenceRace(
+    detail: unknown,
+): Promise<Record<string, unknown>> {
+    resetChromeMock()
+    installChromeMock()
+    state.prefs = {
+        ...state.prefs,
+        rootPath: 'C:\\Root-A',
+        autoAnalyzeMode: 'disabled',
+    }
+    state.requests = []
+    const initialScan = deferredValue<unknown>()
+    const fallbackScan = deferredValue<unknown>()
+    state.scanForErrors
+        .mockReset()
+        .mockImplementationOnce(() => initialScan.promise)
+        .mockImplementationOnce(() => fallbackScan.promise)
+    deferNextResponse('analyze_error')
+
+    const view = render(
+        <PrefsLanguageProvider language="en">
+            <FAB />
+        </PrefsLanguageProvider>,
+    )
+    await flushReact()
+    await dispatchContextMenu(detail)
+    expect(state.scanForErrors).toHaveBeenCalledTimes(2)
+
+    state.prefs = { ...state.prefs, rootPath: 'C:\\Root-B' }
+    view.rerender(
+        <PrefsLanguageProvider language="en">
+            <FAB />
+        </PrefsLanguageProvider>,
+    )
+    await flushReact()
+    await act(async () => fallbackScan.resolve(A))
+    await flushReact()
+
+    const messages = analyzeMessages()
+    expect(messages).toHaveLength(1)
+    const payload = messages[0].payload.payload
+    await act(async () => initialScan.resolve(A))
+    await flushReact()
+    view.unmount()
+    return payload
+}
+
 describe('FAB Analyze request Root snapshots', () => {
     beforeEach(() => {
         vi.useFakeTimers()
         resetChromeMock()
         installChromeMock()
-        state.prefs.rootPath = 'C:\\Prefs'
-        state.prefs.autoAnalyzeMode = 'disabled'
+        state.prefs = {
+            ...state.prefs,
+            rootPath: 'C:\\Prefs',
+            autoAnalyzeMode: 'disabled',
+        }
         state.scanValue = A
         state.scanForErrors.mockReset().mockImplementation(
             async () => state.scanValue,
@@ -214,7 +270,7 @@ describe('FAB Analyze request Root snapshots', () => {
 
     it('scopes a nonempty context-menu Root to one request', async () => {
         const firstResponse = deferNextResponse('analyze_error')
-        await renderFab()
+        const view = await renderFab()
 
         await dispatchContextMenu({
             selectionText: 'selected context',
@@ -228,7 +284,13 @@ describe('FAB Analyze request Root snapshots', () => {
         })
         await completeAnalyze(firstResponse)
 
-        state.prefs.rootPath = 'C:\\Prefs-Current'
+        state.prefs = { ...state.prefs, rootPath: 'C:\\Prefs-Current' }
+        view.rerender(
+            <PrefsLanguageProvider language="en">
+                <FAB />
+            </PrefsLanguageProvider>,
+        )
+        await flushReact()
         const secondResponse = deferNextResponse('analyze_error')
         await openAndAnalyze()
 
@@ -340,7 +402,7 @@ describe('FAB Analyze request Root snapshots', () => {
         const firstPayload = firstMessage.payload.payload
         const firstRequest = state.requests[0]
 
-        state.prefs.rootPath = 'C:\\New-Prefs'
+        state.prefs = { ...state.prefs, rootPath: 'C:\\New-Prefs' }
         view.rerender(
             <PrefsLanguageProvider language="en">
                 <FAB />
@@ -387,8 +449,11 @@ describe('FAB Analyze request Root snapshots', () => {
     })
 
     it('snapshots current preference Root independently for auto and manual Analyze', async () => {
-        state.prefs.rootPath = 'C:\\Auto-Prefs'
-        state.prefs.autoAnalyzeMode = 'always'
+        state.prefs = {
+            ...state.prefs,
+            rootPath: 'C:\\Auto-Prefs',
+            autoAnalyzeMode: 'always',
+        }
         const autoResponse = deferNextResponse('analyze_error')
         const view = await renderFab()
 
@@ -404,8 +469,11 @@ describe('FAB Analyze request Root snapshots', () => {
         )).toBe(false)
         await completeAnalyze(autoResponse)
 
-        state.prefs.rootPath = 'C:\\Manual-Prefs'
-        state.prefs.autoAnalyzeMode = 'disabled'
+        state.prefs = {
+            ...state.prefs,
+            rootPath: 'C:\\Manual-Prefs',
+            autoAnalyzeMode: 'disabled',
+        }
         view.rerender(
             <PrefsLanguageProvider language="en">
                 <FAB />
@@ -421,5 +489,60 @@ describe('FAB Analyze request Root snapshots', () => {
             'rootPathOverrideProvided',
         )).toBe(false)
         void manualResponse
+    })
+
+    it('uses the latest preference Root when delayed auto Analyze starts', async () => {
+        state.prefs = {
+            ...state.prefs,
+            rootPath: 'C:\\Root-A',
+            autoAnalyzeMode: 'always',
+        }
+        deferNextResponse('analyze_error')
+        const view = await renderFab()
+        expect(analyzeMessages()).toHaveLength(0)
+
+        state.prefs = { ...state.prefs, rootPath: 'C:\\Root-B' }
+        view.rerender(
+            <PrefsLanguageProvider language="en">
+                <FAB />
+            </PrefsLanguageProvider>,
+        )
+        await flushReact()
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(100)
+            await Promise.resolve()
+        })
+
+        expect(analyzeMessages()).toHaveLength(1)
+        const payload = analyzeMessages()[0].payload.payload
+        expect(payload.rootPath).toBe('C:\\Root-B')
+        expect(Object.hasOwn(payload, 'rootPathOverrideProvided')).toBe(false)
+    })
+
+    it('uses the latest preference Root after context-menu fallback scan', async () => {
+        const missing = await runContextMenuFallbackPreferenceRace({
+            selectionText: 'missing Root selection',
+        })
+        const malformed = await runContextMenuFallbackPreferenceRace({
+            selectionText: 'malformed Root selection',
+            rootPath: { malformed: true },
+        })
+        const explicit = await runContextMenuFallbackPreferenceRace({
+            selectionText: 'explicit Root selection',
+            rootPath: 'C:\\Explicit',
+        })
+        const explicitEmpty = await runContextMenuFallbackPreferenceRace({
+            selectionText: 'explicit empty Root selection',
+            rootPath: '',
+        })
+
+        expect.soft(missing.rootPath).toBe('C:\\Root-B')
+        expect.soft(Object.hasOwn(missing, 'rootPathOverrideProvided')).toBe(false)
+        expect.soft(malformed.rootPath).toBe('C:\\Root-B')
+        expect.soft(Object.hasOwn(malformed, 'rootPathOverrideProvided')).toBe(false)
+        expect.soft(explicit.rootPath).toBe('C:\\Explicit')
+        expect.soft(explicit.rootPathOverrideProvided).toBe(true)
+        expect.soft(explicitEmpty.rootPath).toBe('')
+        expect.soft(explicitEmpty.rootPathOverrideProvided).toBe(true)
     })
 })
