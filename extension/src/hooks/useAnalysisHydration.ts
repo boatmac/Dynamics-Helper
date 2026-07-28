@@ -83,6 +83,10 @@ export function useAnalysisHydration(caseNumber: string): HydrationResult {
         let hydrationGeneration = 0
         let pendingExpiryTimer: ReturnType<typeof setTimeout> | null = null
 
+        setPopover(null)
+        setIsAnalyzing(false)
+        setHydratedPending(null)
+
         async function hydrate() {
             const generation = ++hydrationGeneration
             if (!caseNumber) {

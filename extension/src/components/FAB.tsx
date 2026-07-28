@@ -13,6 +13,11 @@ import type {
 import { applyCurrentUserPrompt } from '../utils/analysisPrompt';
 import { safeErrorText } from '../utils/safeErrorText';
 import { parseAnalyzeForwardResult } from '../background/analyzeBridge';
+import {
+    parsePageIdentitySnapshot,
+    parseScrapedDataSnapshot,
+    type PageIdentity,
+} from '../utils/pageIdentity';
 import { ResultPopover } from './ResultPopover';
 export { ResultPopover } from './ResultPopover';
 import { 
@@ -64,14 +69,11 @@ const FAB: React.FC = () => {
     // call markSeen() on close — bookmark popovers have no persisted state.
     const popoverIsAnalyze = React.useRef(false);
 
-    // C2a+: ref-mirror of scrapedData.caseNumber for use inside async closures
-    // (handleAnalyze await + setTimeout callbacks). Plain state would be the
-    // stale snapshot captured when handleAnalyze was invoked. We need the
-    // LATEST case to detect "user navigated to a different case while analyze
-    // was in flight" — D365 internal tab switches don't change URL or
-    // re-mount FAB, so the only signal is scrapedData updating via the
-    // MutationObserver-driven re-scrape.
-    const currentCaseRef = React.useRef<string>('');
+    const currentPageIdentityRef = React.useRef<PageIdentity | null>(null);
+    const currentPageIdentityInitializedRef = React.useRef(false);
+    const currentCaseNumberRef = React.useRef('');
+    const [hydrationCaseNumber, setHydrationCaseNumber] = useState('');
+    const hydrationCaseNumberRef = React.useRef('');
     
     // Status Bubble State
     const [statusBubble, setStatusBubble] = useState<{ 
@@ -94,6 +96,18 @@ const FAB: React.FC = () => {
     // the redundant bubble notification is suppressed.
     const isAnalyzingRef = React.useRef(false);
     const localAnalyzeRequestIdRef = React.useRef<string | null>(null);
+    const localAnalyzePageRef = React.useRef<{
+        requestId: string;
+        pageIdentity: PageIdentity | null;
+        caseNumber: string;
+    } | null>(null);
+    const postRunScanOwnerRef = React.useRef<string | null>(null);
+    const analyzeOriginRef = React.useRef<{
+        requestId: string;
+        pageIdentity: PageIdentity | null;
+    } | null>(null);
+    const identityChangedDuringAnalyzeRef = React.useRef(false);
+    const initialScanStartedRef = React.useRef(false);
     const analyzeSafetyTimerRef = React.useRef<{
         requestId: string;
         timeoutId: ReturnType<typeof setTimeout>;
@@ -119,29 +133,34 @@ const FAB: React.FC = () => {
     // chrome.storage.local and tells us whether to auto-open the popover
     // (matching unseen result inside STALE_WINDOW_MS) or show the spinner
     // (matching pending marker inside MAX_PENDING_DISPLAY_AGE_MS).
-    const hydration = useAnalysisHydration(scrapedData?.caseNumber || '');
+    const hydration = useAnalysisHydration(hydrationCaseNumber);
     const hydratedPendingRef = React.useRef(hydration.pending);
 
-    const reconcileAnalyzingState = () => {
-        const next = Boolean(
-            localAnalyzeRequestIdRef.current || hydratedPendingRef.current,
+    const reconcileVisibleAnalyzingState = () => {
+        const activeRequestId = localAnalyzeRequestIdRef.current;
+        const localPage = localAnalyzePageRef.current;
+        const currentIdentity = currentPageIdentityRef.current;
+        const localVisible = Boolean(
+            activeRequestId
+            && localPage?.requestId === activeRequestId
+            && currentIdentity !== null
+            && localPage.pageIdentity === currentIdentity,
         );
-        setIsAnalyzing(next);
-        isAnalyzingRef.current = next;
+        const hydratedPending = hydratedPendingRef.current;
+        const hydratedVisible = Boolean(
+            hydratedPending
+            && hydratedPending.caseNumber === hydrationCaseNumberRef.current,
+        );
+        setIsAnalyzing(localVisible || hydratedVisible);
+        isAnalyzingRef.current = Boolean(activeRequestId);
     };
-
-    // C2a+: keep currentCaseRef in sync with the latest scrapedData.caseNumber
-    // so async closures inside handleAnalyze (await response, setTimeout) can
-    // detect mid-flight case switches. See ref declaration above.
-    useEffect(() => {
-        currentCaseRef.current = scrapedData?.caseNumber || '';
-    }, [scrapedData?.caseNumber]);
 
     // When the hook surfaces a persisted result and no popover is open, mirror
     // it into local resultPopover state. Then acknowledge its identity so a
     // future remount doesn't re-open the same result (one-shot semantics).
     useEffect(() => {
         if (!hydration.popover) return;
+        if (hydration.popover.identity.caseNumber !== currentCaseNumberRef.current) return;
         if (resultPopover.isOpen) return;
         popoverIsAnalyze.current = true;
         setResultPopover({
@@ -158,14 +177,14 @@ const FAB: React.FC = () => {
         // Fire-and-forget; dismissPopover only writes the separate seen
         // identity and closes the hook's internal state - both safe to ignore.
         void hydration.dismissPopover(hydration.popover.identity);
-    }, [hydration.popover, resultPopover.isOpen, hydration]);
+    }, [hydration.popover, resultPopover.isOpen, hydration, hydrationCaseNumber]);
 
     // Hydrated pending is a mirror, while a locally-started request owns its
     // own in-flight flag. A disappearing/expired pending marker can clear the
     // hydrated spinner but must never clear an active local Analyze.
     useEffect(() => {
         hydratedPendingRef.current = hydration.pending;
-        reconcileAnalyzingState();
+        reconcileVisibleAnalyzingState();
     }, [
         hydration.pending?.requestId,
         hydration.pending?.caseNumber,
@@ -216,9 +235,16 @@ const FAB: React.FC = () => {
     useEffect(() => {
         const handleProgress = (e: any) => {
             const { requestId, payload } = e.detail;
+            const localPage = localAnalyzePageRef.current;
+            const requestOwnsVisiblePage = Boolean(
+                localPage !== null
+                && localPage.requestId === requestId
+                && localPage.pageIdentity !== null
+                && localPage.pageIdentity === currentPageIdentityRef.current,
+            );
             
             // Only show progress if it matches our current request
-            if (latestRequestId.current === requestId) {
+            if (latestRequestId.current === requestId && requestOwnsVisiblePage) {
                  // Update the status bubble with the progress message
                  // Use 'default' type (blue/pulse) but with the new text
                  // Auto-hide is 0 to keep it visible
@@ -298,41 +324,22 @@ const FAB: React.FC = () => {
     // record). The bubble is kept as a brief visual flash; the popover
     // carries the full message and stays until dismissed.
     //
-    // caseNumberOfRun (optional): the case the analyze run was launched on.
-    // When the user has switched to a different D365 tab while the analyze
-    // was in flight, we suppress the popover (it would be visually wrong on
-    // the unrelated case) and instead surface a bubble that names the
-    // originating case. The error is still persisted to dh_last_analysis by
-    // the SW, so navigating back to caseNumberOfRun re-hydrates the popover.
     const showAnalysisError = (
         fallback: string,
-        caseNumberOfRun?: string,
         errorCode?: string,
         identity?: LastAnalysisIdentity,
         durabilityWarning?: string,
     ) => {
-        const isStillOnRunCase =
-            !caseNumberOfRun ||
-            !currentCaseRef.current ||
-            currentCaseRef.current === caseNumberOfRun;
-        if (isStillOnRunCase) {
-            popoverIsAnalyze.current = true;
-            setResultPopover({
-                isOpen: true,
-                title: `❌ ${t('analysisFailed')}`,
-                content: fallback,
-                errorCode,
-                identity,
-                durabilityWarning,
-            });
-            showStatusBubble(t('analysisFailed'), 'error', 4000);
-        } else {
-            showStatusBubble(
-                `${t('analysisFailed')} — Case ${caseNumberOfRun}`,
-                'error',
-                5000,
-            );
-        }
+        popoverIsAnalyze.current = true;
+        setResultPopover({
+            isOpen: true,
+            title: `❌ ${t('analysisFailed')}`,
+            content: fallback,
+            errorCode,
+            identity,
+            durabilityWarning,
+        });
+        showStatusBubble(t('analysisFailed'), 'error', 4000);
     };
     
     const { prefs } = usePrefs();
@@ -343,6 +350,67 @@ const FAB: React.FC = () => {
     const [isContextExpanded, setIsContextExpanded] = useState(false);
     // Track if auto-analysis has been attempted for the current data to prevent loops/timing issues
     const [hasAutoAnalyzed, setHasAutoAnalyzed] = useState(false);
+
+    function applyIdentityScan(fresh: unknown): void {
+        const parsed = parsePageIdentitySnapshot(fresh);
+        if (!parsed) return;
+        const { identity, caseNumber } = parsed;
+        const wasInitialized = currentPageIdentityInitializedRef.current;
+        const identityChanged = identity !== currentPageIdentityRef.current;
+        const caseChanged = caseNumber !== currentCaseNumberRef.current;
+        currentPageIdentityInitializedRef.current = true;
+        if (identityChanged || caseChanged) {
+            if (
+                localAnalyzeRequestIdRef.current
+                && analyzeOriginRef.current?.requestId
+                    === localAnalyzeRequestIdRef.current
+                && identity !== analyzeOriginRef.current.pageIdentity
+            ) {
+                identityChangedDuringAnalyzeRef.current = true;
+            }
+            currentPageIdentityRef.current = identity;
+            currentCaseNumberRef.current = caseNumber;
+            hydrationCaseNumberRef.current = caseNumber;
+            setHydrationCaseNumber(caseNumber);
+            if (identityChanged && wasInitialized) {
+                setResultPopover(previous => ({ ...previous, isOpen: false }));
+                setStatusBubble(previous => ({ ...previous, visible: false }));
+                setIsOpen(false);
+            }
+            reconcileVisibleAnalyzingState();
+        }
+    }
+
+    function applyFullScan(
+        fresh: unknown,
+        completedOrigin: PageIdentity | null = null,
+        isPostRunScan = false,
+    ): void {
+        const previousIdentity = currentPageIdentityRef.current;
+        const plain = parseScrapedDataSnapshot(fresh);
+        if (!plain) return;
+        const parsed = parsePageIdentitySnapshot(plain);
+        if (!parsed) return;
+        const nextIdentity = parsed.identity;
+        applyIdentityScan(plain);
+        const replaceAfterAnalyze = isPostRunScan && (
+            identityChangedDuringAnalyzeRef.current
+            || nextIdentity !== completedOrigin
+        );
+        if (replaceAfterAnalyze) {
+            isUserEdited.current = false;
+            setHasAutoAnalyzed(false);
+        }
+        setScrapedData(previous => {
+            if (replaceAfterAnalyze || nextIdentity !== previousIdentity) {
+                isUserEdited.current = false;
+                setHasAutoAnalyzed(false);
+                return plain;
+            }
+            if (isUserEdited.current) return previous;
+            return plain;
+        });
+    }
 
     // Duration Logic
     const [lastDuration, setLastDuration] = useState<string | null>(null);
@@ -392,29 +460,29 @@ const FAB: React.FC = () => {
     useEffect(() => {
         // Wrapper for async scan
         const doScan = async () => {
-             // Initial scan on mount (even if closed) to support auto-analyze without opening
-             const initialData = await PageReader.scanForErrors();
-             if (initialData && !isUserEdited.current) {
-                  setScrapedData(initialData);
+             const scan = async () => {
+                 try {
+                     return await PageReader.scanForErrors();
+                 } catch {
+                     console.warn('[DH] Page scan failed');
+                     return null;
+                 }
+             };
+             if (!initialScanStartedRef.current) {
+                 initialScanStartedRef.current = true;
+                 // Initial scan on mount (even if closed) to support auto-analyze without opening
+                 const initialData = await scan();
+                 if (initialData) {
+                     if (localAnalyzeRequestIdRef.current) applyIdentityScan(initialData);
+                     else applyFullScan(initialData);
+                 }
              }
 
              if (isOpen) {
-                 const freshData = await PageReader.scanForErrors();
-                 
+                 const freshData = await scan();
                  if (freshData) {
-                     // Determine if this is "new" data worth replacing the current state for
-                     // We check if we have no data, or if key identifiers (Case Number/Title) changed
-                     // This handles SPA navigation where the user moves to a new ticket without refreshing the page
-                     // We compare against the current scrapedData state
-                     const isNewContext = !scrapedData || 
-                                          (freshData.caseNumber && freshData.caseNumber !== scrapedData.caseNumber) ||
-                                          (freshData.ticketTitle && freshData.ticketTitle !== scrapedData.ticketTitle);
-
-                     if (isNewContext) {
-                         isUserEdited.current = false; // New case context — reset edit flag
-                         setScrapedData(freshData);
-                         setHasAutoAnalyzed(false); // Reset to allow auto-analysis for the new context
-                     }
+                     if (localAnalyzeRequestIdRef.current) applyIdentityScan(freshData);
+                     else applyFullScan(freshData);
                  }
              }
         };
@@ -483,51 +551,23 @@ const FAB: React.FC = () => {
         const runScan = async () => {
             // 1. Performance Check: Don't scan if tab is hidden/inactive
             if (document.hidden) return;
-            
-            // 2. State Check: Don't scan if busy or menu open
-            if (isAnalyzing || isOpen) return;
 
             // console.log("[DH] Running Lazy Scan..."); 
-            const freshData = await PageReader.scanForErrors();
-            
-            if (freshData) {
-                 setScrapedData(prev => {
-                     // Check for significant change
-                     const isDataDifferent = !prev || 
-                                     freshData.caseNumber !== prev.caseNumber ||
-                                     freshData.ticketTitle !== prev.ticketTitle ||
-                                     freshData.description !== prev.description ||
-                                     freshData.errorText !== prev.errorText;
-                     
-                     if (isDataDifferent) {
-                         console.log("[DH] Background Scan: Data changed/enriched", freshData);
-                         
-                         // Determine if this is a WHOLE NEW ticket context
-                         const isIdentityChange = !prev || 
-                                                  (freshData.caseNumber && freshData.caseNumber !== prev.caseNumber) ||
-                                                  (freshData.ticketTitle && freshData.ticketTitle !== prev.ticketTitle);
-
-                         if (isIdentityChange) {
-                             console.log("[DH] New Context Detected (Identity Change)");
-                             isUserEdited.current = false; // New case — reset edit flag
-                             setHasAutoAnalyzed(false); // Reset to allow auto-analysis for the new context
-                             latestRequestId.current = null;
-                             setStatusBubble(prev => ({ ...prev, visible: false }));
-                             return freshData;
-                         }
-                         
-                         // Same identity, but data enriched — only update if user hasn't edited
-                         if (!isUserEdited.current) {
-                             console.log("[DH] Context Enriched (Same Identity)");
-                             return freshData;
-                         }
-
-                         console.log("[DH] Context Enriched but user has edited — skipping overwrite");
-                         return prev;
-                     }
-                     return prev;
-                 });
+            let freshData: ScrapedData | null;
+            try {
+                freshData = await PageReader.scanForErrors();
+            } catch {
+                console.warn('[DH] Page scan failed');
+                return;
             }
+            if (!freshData) return;
+            if (localAnalyzeRequestIdRef.current || isOpen) {
+                if (localAnalyzeRequestIdRef.current) {
+                    applyIdentityScan(freshData);
+                }
+                return;
+            }
+            applyFullScan(freshData);
         };
 
         // MutationObserver to detect DOM changes
@@ -561,7 +601,7 @@ const FAB: React.FC = () => {
             clearTimeout(debounceTimer);
             document.removeEventListener("visibilitychange", handleVisibilityChange);
         };
-    }, [isAnalyzing, isOpen]);
+    }, [isOpen]);
 
     // Separate effect for Auto Analyze to ensure state (prefs, scrapedData) is current
     useEffect(() => {
@@ -634,14 +674,24 @@ const FAB: React.FC = () => {
     }, [isOpen, scrapedData, prefs.autoAnalyzeMode, prefs.userPrompt, hasAutoAnalyzed]);
 
     const handleRefreshContext = async () => {
-        const data = await PageReader.scanForErrors();
+        let data: ScrapedData | null;
+        try {
+            data = await PageReader.scanForErrors();
+        } catch {
+            console.warn('[DH] Page scan failed');
+            return;
+        }
         
         // Ensure data is not null before processing
         if (data) {
-             // Explicit refresh — user wants fresh data, so reset the edit flag
-            isUserEdited.current = false;
-            setScrapedData(data);
-            setHasAutoAnalyzed(false); // Reset so auto-analyze can run again if enabled
+            if (localAnalyzeRequestIdRef.current) {
+                applyIdentityScan(data);
+            } else {
+                // Explicit refresh — user wants fresh data, so reset the edit flag
+                isUserEdited.current = false;
+                setHasAutoAnalyzed(false);
+                applyFullScan(data);
+            }
         }
     };
 
@@ -680,6 +730,33 @@ const FAB: React.FC = () => {
             : t('analysisDurabilityWarning');
     };
 
+    const runPostAnalyzeScan = async (requestId: string): Promise<void> => {
+        if (postRunScanOwnerRef.current !== requestId) return;
+        const originRecord = analyzeOriginRef.current;
+        if (!originRecord || originRecord.requestId !== requestId) return;
+        const origin = originRecord.pageIdentity;
+        postRunScanOwnerRef.current = null;
+        try {
+            const fresh = await PageReader.scanForErrors();
+            if (
+                fresh
+                && analyzeOriginRef.current?.requestId === requestId
+            ) {
+                applyFullScan(fresh, origin, true);
+            }
+        } catch {
+            console.warn('[DH] Post-analysis page scan failed');
+        } finally {
+            if (analyzeOriginRef.current?.requestId === requestId) {
+                analyzeOriginRef.current = null;
+                identityChangedDuringAnalyzeRef.current = false;
+            }
+            if (localAnalyzePageRef.current?.requestId === requestId) {
+                localAnalyzePageRef.current = null;
+            }
+        }
+    };
+
     const handleAnalyze = async (dataToAnalyze: ScrapedData | null = null) => {
         // Use provided data or fall back to state
         const targetData = dataToAnalyze || scrapedData;
@@ -690,13 +767,23 @@ const FAB: React.FC = () => {
         if (!hasContent) return;
 
         const requestId = crypto.randomUUID();
+        const pageIdentityOfRun = currentPageIdentityRef.current;
+        const caseNumberOfRun = targetData.caseNumber || '';
         if (analyzeSafetyTimerRef.current) {
             clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
             analyzeSafetyTimerRef.current = null;
         }
         latestRequestId.current = requestId;
         localAnalyzeRequestIdRef.current = requestId;
-        reconcileAnalyzingState();
+        localAnalyzePageRef.current = {
+            requestId,
+            pageIdentity: pageIdentityOfRun,
+            caseNumber: caseNumberOfRun,
+        };
+        analyzeOriginRef.current = { requestId, pageIdentity: pageIdentityOfRun };
+        identityChangedDuringAnalyzeRef.current = false;
+        postRunScanOwnerRef.current = requestId;
+        reconcileVisibleAnalyzingState();
 
         trackEvent('Analyze Clicked', { 
             hasContext: !!targetData.source,
@@ -704,11 +791,6 @@ const FAB: React.FC = () => {
         });
 
         const startTime = Date.now();
-        // Snapshot the case this run was launched on. Used to detect mid-flight
-        // D365 tab switches: if the user moves to a different case, popovers
-        // and bubbles should reference the originating case rather than
-        // visually attach to the unrelated case currently on screen.
-        const caseNumberOfRun = targetData.caseNumber || '';
         
         // Safety timeout to prevent infinite "Analyzing..." state.
         // Derived from prefs.analyzeTimeoutSeconds (C2b-lite, user-
@@ -719,6 +801,9 @@ const FAB: React.FC = () => {
         const _safetyTimeoutMs = (_analyzeTimeoutSec + 10) * 1000;
         const timeoutId = setTimeout(() => {
             if (localAnalyzeRequestIdRef.current !== requestId) return;
+            const requestStillOwnsVisiblePage =
+                pageIdentityOfRun !== null
+                && pageIdentityOfRun === currentPageIdentityRef.current;
             if (analyzeSafetyTimerRef.current?.requestId === requestId) {
                 analyzeSafetyTimerRef.current = null;
             }
@@ -729,14 +814,17 @@ const FAB: React.FC = () => {
             if (hydratedPendingRef.current?.requestId === requestId) {
                 hydratedPendingRef.current = null;
             }
-            reconcileAnalyzingState();
-            showAnalysisError(
-                t('analysisFailed'),
-                caseNumberOfRun,
-                undefined,
-                { requestId, caseNumber: caseNumberOfRun },
-            );
-            trackEvent('Analyze Timeout');
+            analyzeFlowEndedAtRef.current = Date.now();
+            reconcileVisibleAnalyzingState();
+            if (requestStillOwnsVisiblePage) {
+                showAnalysisError(
+                    t('analysisFailed'),
+                    undefined,
+                    { requestId, caseNumber: caseNumberOfRun },
+                );
+                trackEvent('Analyze Timeout');
+            }
+            void runPostAnalyzeScan(requestId);
         }, _safetyTimeoutMs);
         analyzeSafetyTimerRef.current = { requestId, timeoutId };
 
@@ -753,7 +841,7 @@ const FAB: React.FC = () => {
             fullContext = applyCurrentUserPrompt(fullContext, prefs.userPrompt);
 
             // Only show bubble if we initiated manually and it wasn't already shown by auto-analyze logic
-            if (!statusBubble.visible) {
+            if (!statusBubble.visible && pageIdentityOfRun !== null) {
                  showStatusBubble(t('analyzing'), 'default', 0);
             }
 
@@ -808,39 +896,28 @@ const FAB: React.FC = () => {
                         if (latestRequestId.current !== requestId) return;
                         const sap = targetData.productCategory || 'Unknown';
                         const severity = targetData.severity || 'Unknown';
+                        const requestStillOwnsVisiblePage =
+                            pageIdentityOfRun !== null
+                            && pageIdentityOfRun === currentPageIdentityRef.current;
 
-                        trackEvent('Analyze Success', {
-                            durationSeconds: duration,
-                            caseIdHash: caseHash,
-                            sap,
-                            severity,
-                        });
-
-                        // Fire "Case Analyzed" only once per unique case per session.
-                        // This lets us count unique incidents without inflating numbers
-                        // when the same case is re-analyzed multiple times.
-                        if (caseHash && !reportedCases.current.has(caseHash)) {
-                            reportedCases.current.add(caseHash);
-                            trackEvent('Case Analyzed', {
+                        if (requestStillOwnsVisiblePage) {
+                            trackEvent('Analyze Success', {
+                                durationSeconds: duration,
                                 caseIdHash: caseHash,
                                 sap,
                                 severity,
                             });
-                        }
-                        setLastDuration(`${duration.toFixed(1)}s`);
 
-                        // C2a+: cross-case detection — if the user navigated to
-                        // a different D365 tab while this run was in flight,
-                        // suppress the popover (visually misleading on the
-                        // unrelated case) and surface a bubble that names the
-                        // originating case. SW already persisted the result to
-                        // dh_last_analysis; navigating back to caseNumberOfRun
-                        // re-hydrates the popover via useAnalysisHydration.
-                        const isStillOnRunCase =
-                            !caseNumberOfRun ||
-                            !currentCaseRef.current ||
-                            currentCaseRef.current === caseNumberOfRun;
-                        if (isStillOnRunCase) {
+                            // Fire "Case Analyzed" only once per unique case per session.
+                            if (caseHash && !reportedCases.current.has(caseHash)) {
+                                reportedCases.current.add(caseHash);
+                                trackEvent('Case Analyzed', {
+                                    caseIdHash: caseHash,
+                                    sap,
+                                    severity,
+                                });
+                            }
+                            setLastDuration(`${duration.toFixed(1)}s`);
                             showStatusBubble(`${t('analysisComplete')} (${duration.toFixed(1)}s)`, 'success', 3000);
                             popoverIsAnalyze.current = true;
                             setResultPopover({
@@ -856,35 +933,33 @@ const FAB: React.FC = () => {
                                 },
                             });
                             setIsOpen(false); // Close menu to show result
-                        } else {
-                            showStatusBubble(
-                                `${t('analysisComplete')} — Case ${caseNumberOfRun} (${duration.toFixed(1)}s)`,
-                                'success',
-                                5000,
-                            );
                         }
             } else {
-                showAnalysisError(
-                    parsedResponse.error,
-                    caseNumberOfRun,
-                    parsedResponse.error_code,
-                    requestId
-                        ? { requestId, caseNumber: caseNumberOfRun }
-                        : undefined,
-                    durabilityWarning,
-                );
-                trackEvent('Analyze Host Error', {
-                    errorCode: parsedResponse.error_code ?? 'unclassified',
-                });
+                const requestStillOwnsVisiblePage =
+                    pageIdentityOfRun !== null
+                    && pageIdentityOfRun === currentPageIdentityRef.current;
+                if (requestStillOwnsVisiblePage) {
+                    showAnalysisError(
+                        parsedResponse.error,
+                        parsedResponse.error_code,
+                        { requestId, caseNumber: caseNumberOfRun },
+                        durabilityWarning,
+                    );
+                    trackEvent('Analyze Host Error', {
+                        errorCode: parsedResponse.error_code ?? 'unclassified',
+                    });
+                }
             }
         } catch (e: any) {
-            if (latestRequestId.current === requestId) {
+            const requestStillOwnsVisiblePage =
+                pageIdentityOfRun !== null
+                && pageIdentityOfRun === currentPageIdentityRef.current;
+            if (latestRequestId.current === requestId && requestStillOwnsVisiblePage) {
                 showAnalysisError(
                     `${t('errorLabel')}: ${safeErrorText(
                         [e?.message, e],
                         t('unknownError'),
                     )}`,
-                    caseNumberOfRun,
                     undefined,
                     { requestId, caseNumber: caseNumberOfRun },
                 );
@@ -904,8 +979,9 @@ const FAB: React.FC = () => {
                     hydratedPendingRef.current = null;
                 }
                 analyzeFlowEndedAtRef.current = Date.now();
+                reconcileVisibleAnalyzingState();
+                await runPostAnalyzeScan(requestId);
             }
-            reconcileAnalyzingState();
             // Don't clear bubble here immediately if success/error, let the timeout handle it. 
             // If manual cancel or something else, we might need to check.
         }

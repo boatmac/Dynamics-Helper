@@ -700,6 +700,65 @@ describe('useAnalysisHydration — FAB re-hydration', () => {
         })
     })
 
+    it('clears A hydration while deferred B hydration is pending', async () => {
+        const pendingA = makePending({ requestId: 'req-A' })
+        seedStorage({
+            dh_last_analysis: makeLast({ requestId: 'req-A' }),
+            [pendingAnalysisKey(pendingA.requestId)]: pendingA,
+        })
+        const hook = renderHook(
+            ({ caseNumber }) => useAnalysisHydration(caseNumber),
+            { initialProps: { caseNumber: CASE_A } },
+        )
+        await waitFor(() => expect(
+            hook.result.current.popover?.identity.requestId,
+        ).toBe('req-A'))
+        await waitFor(() => expect(
+            hook.result.current.pending?.requestId,
+        ).toBe('req-A'))
+
+        const delayedA = deferNextStorageGet()
+        act(() => emitStorageChanges({
+            [pendingAnalysisKey(pendingA.requestId)]: {
+                oldValue: pendingA,
+                newValue: pendingA,
+            },
+        }))
+        await waitFor(() => expect(chromeMockSpies.storageGet).toHaveBeenCalledTimes(2))
+
+        const pendingB = makePending({
+            caseNumber: CASE_B,
+            requestId: 'req-B',
+            startTime: pendingA.startTime + 1,
+        })
+        seedStorage({
+            dh_last_analysis: makeLast({
+                caseNumber: CASE_B,
+                requestId: 'req-B',
+                timestamp: Date.now() + 1,
+            }),
+            [pendingAnalysisKey(pendingB.requestId)]: pendingB,
+        })
+        const delayedB = deferNextStorageGet()
+        hook.rerender({ caseNumber: CASE_B })
+
+        expect(hook.result.current.popover).toBeNull()
+        expect(hook.result.current.pending).toBeNull()
+        expect(hook.result.current.isAnalyzing).toBe(false)
+
+        await act(async () => delayedA.resolve(undefined))
+        expect(hook.result.current.popover).toBeNull()
+        expect(hook.result.current.pending).toBeNull()
+        expect(hook.result.current.isAnalyzing).toBe(false)
+
+        await act(async () => delayedB.resolve(undefined))
+        await waitFor(() => expect(
+            hook.result.current.popover?.identity.requestId,
+        ).toBe('req-B'))
+        expect(hook.result.current.pending?.requestId).toBe('req-B')
+        expect(hook.result.current.isAnalyzing).toBe(true)
+    })
+
     // Empty caseNumber (FAB before scrape resolves the case ID): hook
     // must not crash and must not open any popover. R-I3 generalized.
     it('empty caseNumber does not open popover', async () => {

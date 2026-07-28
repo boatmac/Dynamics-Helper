@@ -49,12 +49,12 @@ vi.mock('../utils/pageReader', () => ({
 }))
 
 vi.mock('../hooks/useAnalysisHydration', () => ({
-  useAnalysisHydration: () => ({
+  useAnalysisHydration: (caseNumber: string) => ({
     popover: state.hydratedPopover,
-    pending: state.hydrationPending
+    pending: state.hydrationPending && caseNumber === '1234567890123456'
       ? { caseNumber: '1234567890123456', requestId: state.hydrationRequestId, startTime: Date.now() }
       : null,
-    isAnalyzing: state.hydrationPending,
+    isAnalyzing: state.hydrationPending && caseNumber === '1234567890123456',
     dismissPopover: vi.fn().mockResolvedValue(undefined),
   }),
 }))
