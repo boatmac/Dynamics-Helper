@@ -71,7 +71,6 @@ vi.mock('../utils/telemetry', () => ({
 
 vi.mock('../utils/prefs', () => ({
     usePrefs: () => ({ prefs: state.prefs }),
-    mergeRootPathOverride: (value: typeof state.prefs) => value,
 }))
 
 vi.mock('../utils/pageReader', () => ({
