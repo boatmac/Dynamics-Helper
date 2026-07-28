@@ -2193,7 +2193,16 @@ class NativeHost:
             text = self._canonicalize_user_prompt(
                 text if isinstance(text, str) else ""
             )
-            if isinstance(payload_root_value, str) and payload_root_value.strip():
+            payload_root_explicit = (
+                payload.get("rootPathOverrideProvided") is True
+                and isinstance(payload_root_value, str)
+            )
+            if payload_root_explicit:
+                payload_root_path = self._normalize_root_path(payload_root_value)
+                full_config = self._get_session_config(
+                    root_path_override=payload_root_path
+                )
+            elif isinstance(payload_root_value, str) and payload_root_value.strip():
                 payload_root_path = self._normalize_root_path(payload_root_value)
                 full_config = self._get_session_config(
                     root_path_override=payload_root_path

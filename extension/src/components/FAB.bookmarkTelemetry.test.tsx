@@ -35,7 +35,6 @@ vi.mock('../utils/prefs', () => {
   }
   return {
     usePrefs: () => ({ prefs }),
-    mergeRootPathOverride: (value: typeof prefs) => value,
   }
 })
 

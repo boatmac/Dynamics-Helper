@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 import { useTranslation } from '../utils/i18n';
-import { usePrefs, mergeRootPathOverride } from '../utils/prefs';
+import { usePrefs } from '../utils/prefs';
 import { trackEvent, trackException, hashCaseId } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { useAnalysisHydration } from '../hooks/useAnalysisHydration';
@@ -19,6 +19,13 @@ import {
     parseScrapedDataSnapshot,
     type PageIdentity,
 } from '../utils/pageIdentity';
+import {
+    readAnalyzeInvocation,
+    requestMatchesPage,
+    snapshotAnalyzeRequest,
+    type AnalyzeInvocation,
+    type AnalyzeRequestSnapshot,
+} from '../utils/analyzeRequest';
 import { ResultPopover } from './ResultPopover';
 export { ResultPopover } from './ResultPopover';
 import { 
@@ -149,9 +156,7 @@ const FAB: React.FC = () => {
     const isAnalyzingRef = React.useRef(false);
     const localAnalyzeRequestIdRef = React.useRef<string | null>(null);
     const localAnalyzePageRef = React.useRef<{
-        requestId: string;
-        pageIdentity: PageIdentity | null;
-        caseNumber: string;
+        request: AnalyzeRequestSnapshot;
         acceptedGeneration: number;
     } | null>(null);
     const postRunScanOwnerRef = React.useRef<string | null>(null);
@@ -160,10 +165,7 @@ const FAB: React.FC = () => {
         requestId: string;
         caseNumber: string;
     } | null>(null);
-    const analyzeOriginRef = React.useRef<{
-        requestId: string;
-        pageIdentity: PageIdentity | null;
-    } | null>(null);
+    const analyzeOriginRef = React.useRef<AnalyzeRequestSnapshot | null>(null);
     const identityChangedDuringAnalyzeRef = React.useRef(false);
     const initialScanStartedRef = React.useRef(false);
     const scheduledAutoAnalyzeRef = React.useRef<{
@@ -204,9 +206,9 @@ const FAB: React.FC = () => {
         const currentIdentity = currentPageIdentityRef.current;
         const localVisible = Boolean(
             activeRequestId
-            && localPage?.requestId === activeRequestId
+            && localPage?.request.requestId === activeRequestId
             && currentIdentity !== null
-            && localPage.pageIdentity === currentIdentity
+            && requestMatchesPage(localPage.request, currentIdentity)
             && !hasPendingPageScanNewerThan(localPage.acceptedGeneration),
         );
         const hydratedPending = hydratedPendingRef.current;
@@ -230,8 +232,8 @@ const FAB: React.FC = () => {
         const localPage = localAnalyzePageRef.current;
         const localCaseNumber = hydrationRequestId !== undefined
             && localPage !== null
-            && localPage.requestId === hydrationRequestId
-            ? localPage.caseNumber
+            && localPage.request.requestId === hydrationRequestId
+            ? localPage.request.caseNumber
             : '';
         // The SW persists before replying, so local hydration must wait for
         // this request's terminal page revalidation path.
@@ -350,9 +352,11 @@ const FAB: React.FC = () => {
             const localPage = localAnalyzePageRef.current;
             const requestOwnsVisiblePage = Boolean(
                 localPage !== null
-                && localPage.requestId === requestId
-                && localPage.pageIdentity !== null
-                && localPage.pageIdentity === currentPageIdentityRef.current
+                && localPage.request.requestId === requestId
+                && requestMatchesPage(
+                    localPage.request,
+                    currentPageIdentityRef.current,
+                )
                 && !hasPendingPageScanNewerThan(localPage.acceptedGeneration),
             );
             
@@ -456,8 +460,6 @@ const FAB: React.FC = () => {
     };
     
     const { prefs } = usePrefs();
-    const [rootPathOverride, setRootPathOverride] = useState<string | null>(null);
-    const effectivePrefs = mergeRootPathOverride(prefs, rootPathOverride);
     
     // UI States
     const [isContextExpanded, setIsContextExpanded] = useState(false);
@@ -607,11 +609,10 @@ const FAB: React.FC = () => {
     }
 
     function requestOwnsVisiblePage(
-        pageIdentity: PageIdentity | null,
+        request: AnalyzeRequestSnapshot,
         acceptedGeneration: number,
     ): boolean {
-        return pageIdentity !== null
-            && pageIdentity === currentPageIdentityRef.current
+        return requestMatchesPage(request, currentPageIdentityRef.current)
             && !hasPendingPageScanNewerThan(acceptedGeneration);
     }
 
@@ -838,14 +839,14 @@ const FAB: React.FC = () => {
     // Listen for Context Menu triggers (Right-click -> Analyze Error)
     useEffect(() => {
         const handleTriggerAnalyze = async (e: any) => {
-            const { selectionText, rootPath } = e.detail;
-            console.log("[DH] Context Menu Triggered:", { selectionText, rootPath });
+            const selection = ownDataProperty(e.detail, 'selectionText');
+            const selectionText = selection.kind === 'value'
+                && typeof selection.value === 'string'
+                ? selection.value
+                : undefined;
+            const analyzeInvocation = readAnalyzeInvocation(e.detail);
+            console.log("[DH] Context Menu Triggered");
             let pageSnapshot = acceptedContextSnapshotRef.current;
-
-            // If rootPath is provided, ensure our prefs are consistent
-            if (rootPath && rootPath !== effectivePrefs.rootPath) {
-                setRootPathOverride(rootPath);
-            }
 
             if (selectionText) {
                 if (pageSnapshot && !acceptedSnapshotIsCurrent(pageSnapshot)) return;
@@ -904,7 +905,7 @@ const FAB: React.FC = () => {
                 setScrapedData(dataToAnalyze);
                 
                 // Trigger analysis immediately
-                void handleAnalyze(analyzeContext);
+                void handleAnalyze(analyzeContext, analyzeInvocation);
             }
         };
 
@@ -912,7 +913,7 @@ const FAB: React.FC = () => {
         return () => {
             window.removeEventListener('dh-trigger-analyze', handleTriggerAnalyze);
         };
-    }, [effectivePrefs.rootPath, scrapedData]); // Dependencies for the listener
+    }, [prefs.rootPath, scrapedData]); // Dependencies keep the invocation on current prefs.
 
     // Optimized: Use MutationObserver + Debounce instead of fixed interval polling
     useEffect(() => {
@@ -1205,13 +1206,12 @@ const FAB: React.FC = () => {
     };
 
     const finishAnalyzeTerminal = async (
-        requestId: string,
+        request: AnalyzeRequestSnapshot,
         invocation: NonNullable<typeof editableAnalyzeContextRef.current>,
-        pageIdentity: PageIdentity | null,
         acceptedGeneration: number,
-        caseNumber: string,
         outcome: AnalyzeTerminalOutcome,
     ): Promise<void> => {
+        const { requestId, caseNumber } = request;
         if (postRunScanOwnerRef.current !== requestId) return;
         const originRecord = analyzeOriginRef.current;
         if (!originRecord || originRecord.requestId !== requestId) return;
@@ -1246,7 +1246,7 @@ const FAB: React.FC = () => {
             && terminalSnapshot !== null
             && acceptedSnapshotIsCurrent(terminalSnapshot)
             && editableAnalyzeContextIsCurrent(invocation)
-            && requestOwnsVisiblePage(pageIdentity, acceptedGeneration)
+            && requestOwnsVisiblePage(request, acceptedGeneration)
         );
         if (canPublishTerminalOutcome) {
             publishAnalyzeTerminalOutcome(requestId, caseNumber, outcome);
@@ -1263,7 +1263,7 @@ const FAB: React.FC = () => {
         }
         analyzeOriginRef.current = null;
         identityChangedDuringAnalyzeRef.current = false;
-        if (localAnalyzePageRef.current?.requestId === requestId) {
+        if (localAnalyzePageRef.current?.request.requestId === requestId) {
             localAnalyzePageRef.current = null;
         }
         analyzeFlowEndedAtRef.current = Date.now();
@@ -1272,18 +1272,31 @@ const FAB: React.FC = () => {
 
     const handleAnalyze = async (
         context: NonNullable<typeof editableAnalyzeContextRef.current> | null = null,
+        analyzeInvocation?: AnalyzeInvocation,
     ) => {
         const invocation = context || editableAnalyzeContextRef.current;
         if (!invocation || !editableAnalyzeContextIsCurrent(invocation)) return;
         const targetData = invocation.data;
+        const page = parseScrapedDataSnapshot(targetData);
+        if (!page) return;
         // Check if we have enough info to analyze (either error text OR title)
-        const hasContent = targetData.errorText || targetData.description || targetData.ticketTitle;
+        const hasContent = page.errorText || page.description || page.ticketTitle;
         if (!hasContent) return;
 
-        const requestId = crypto.randomUUID();
-        const pageIdentityOfRun = currentPageIdentityRef.current;
+        const request = snapshotAnalyzeRequest(
+            crypto.randomUUID(),
+            page,
+            prefs.rootPath,
+            analyzeInvocation,
+        );
+        const {
+            requestId,
+            pageIdentity,
+            caseNumber,
+            rootPath,
+            rootPathOverrideProvided,
+        } = request;
         const acceptedGenerationOfRun = invocation.accepted.generation;
-        const caseNumberOfRun = targetData.caseNumber || '';
         if (analyzeSafetyTimerRef.current) {
             clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
             analyzeSafetyTimerRef.current = null;
@@ -1291,19 +1304,17 @@ const FAB: React.FC = () => {
         latestRequestId.current = requestId;
         localAnalyzeRequestIdRef.current = requestId;
         localAnalyzePageRef.current = {
-            requestId,
-            pageIdentity: pageIdentityOfRun,
-            caseNumber: caseNumberOfRun,
+            request,
             acceptedGeneration: acceptedGenerationOfRun,
         };
-        analyzeOriginRef.current = { requestId, pageIdentity: pageIdentityOfRun };
+        analyzeOriginRef.current = request;
         identityChangedDuringAnalyzeRef.current = false;
         postRunScanOwnerRef.current = requestId;
         reconcileVisibleAnalyzingState();
 
         trackEvent('Analyze Clicked', { 
-            hasContext: !!targetData.source,
-            sap: targetData.productCategory || 'Unknown'
+            hasContext: !!page.source,
+            sap: page.productCategory || 'Unknown'
         });
 
         const startTime = Date.now();
@@ -1318,11 +1329,9 @@ const FAB: React.FC = () => {
         const timeoutId = setTimeout(() => {
             if (localAnalyzeRequestIdRef.current !== requestId) return;
             void finishAnalyzeTerminal(
-                requestId,
+                request,
                 invocation,
-                pageIdentityOfRun,
                 acceptedGenerationOfRun,
-                caseNumberOfRun,
                 { kind: 'timeout' },
             );
         }, _safetyTimeoutMs);
@@ -1333,34 +1342,34 @@ const FAB: React.FC = () => {
             // If the errorText ALREADY looks like our full markdown template (starts with ## Ticket ID or ## Case Number), use it as is.
             // Otherwise (Auto-Analyze or fresh scan), construct the template.
             let fullContext = "";
-            if (targetData.errorText && (targetData.errorText.startsWith('## Ticket ID') || targetData.errorText.startsWith('## Case Number'))) {
-                fullContext = targetData.errorText;
+            if (page.errorText && (page.errorText.startsWith('## Ticket ID') || page.errorText.startsWith('## Case Number'))) {
+                fullContext = page.errorText;
             } else {
-                fullContext = constructTemplate(targetData);
+                fullContext = constructTemplate(page);
             }
             fullContext = applyCurrentUserPrompt(fullContext, prefs.userPrompt);
 
             // Only show bubble if we initiated manually and it wasn't already shown by auto-analyze logic
             if (
                 !statusBubble.visible
-                && requestOwnsVisiblePage(pageIdentityOfRun, acceptedGenerationOfRun)
+                && requestOwnsVisiblePage(request, acceptedGenerationOfRun)
             ) {
                  showStatusBubble(t('analyzing'), 'default', 0);
             }
 
-            const rootPath = typeof effectivePrefs.rootPath === 'string'
-                ? effectivePrefs.rootPath
-                : '';
             const hostPayload = {
                 text: fullContext,
-                context: targetData.source || 'Unknown Context',
+                context: page.source || 'Unknown Context',
                 timestamp: new Date().toLocaleString(),
                 rootPath,
-                ...(typeof targetData.productCategory === 'string'
-                    ? { product: targetData.productCategory }
+                ...(rootPathOverrideProvided
+                    ? { rootPathOverrideProvided: true as const }
                     : {}),
-                ...(typeof targetData.caseNumber === 'string'
-                    ? { caseNumber: targetData.caseNumber }
+                ...(typeof page.productCategory === 'string'
+                    ? { product: page.productCategory }
+                    : {}),
+                ...(typeof caseNumber === 'string'
+                    ? { caseNumber }
                     : {}),
             };
             const response: unknown = await chrome.runtime.sendMessage({
@@ -1374,7 +1383,7 @@ const FAB: React.FC = () => {
                     // this before forwarding to the host. Titles are pre-translated
                     // here because the SW has no `t()` (spec §3 ctx contract).
                     _persist: {
-                        caseNumber: targetData.caseNumber || '',
+                        caseNumber,
                         successTitle: `🤖 Copilot ${t('analyze')}`,
                         errorTitle: `❌ ${t('analysisFailed')}`,
                     }
@@ -1394,32 +1403,28 @@ const FAB: React.FC = () => {
             if (parsedResponse.status === 'success') {
                 const analysisData = parsedResponse.data;
                 const duration = (Date.now() - startTime) / 1000;
-                const caseHash = await hashCaseId(caseNumberOfRun);
+                const caseHash = await hashCaseId(caseNumber);
                 if (latestRequestId.current !== requestId) return;
                 await finishAnalyzeTerminal(
-                    requestId,
+                    request,
                     invocation,
-                    pageIdentityOfRun,
                     acceptedGenerationOfRun,
-                    caseNumberOfRun,
                     {
                         kind: 'success',
                         markdown: analysisData.markdown,
                         savedTo: analysisData.saved_to,
                         duration,
                         caseHash,
-                        sap: targetData.productCategory || 'Unknown',
-                        severity: targetData.severity || 'Unknown',
+                        sap: page.productCategory || 'Unknown',
+                        severity: page.severity || 'Unknown',
                         durabilityWarning,
                     },
                 );
             } else {
                 await finishAnalyzeTerminal(
-                    requestId,
+                    request,
                     invocation,
-                    pageIdentityOfRun,
                     acceptedGenerationOfRun,
-                    caseNumberOfRun,
                     {
                         kind: 'host-error',
                         error: parsedResponse.error,
@@ -1431,11 +1436,9 @@ const FAB: React.FC = () => {
         } catch (e: unknown) {
             if (latestRequestId.current === requestId) {
                 await finishAnalyzeTerminal(
-                    requestId,
+                    request,
                     invocation,
-                    pageIdentityOfRun,
                     acceptedGenerationOfRun,
-                    caseNumberOfRun,
                     {
                         kind: 'exception',
                         error: `${t('errorLabel')}: ${safeAnalyzeRejectionText(

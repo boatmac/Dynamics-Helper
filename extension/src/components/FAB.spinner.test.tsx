@@ -41,7 +41,6 @@ vi.mock('../utils/prefs', () => ({
       analyzeTimeoutSeconds: state.analyzeTimeoutSeconds,
     },
   }),
-  mergeRootPathOverride: (value: unknown) => value,
 }))
 
 vi.mock('../utils/pageReader', () => ({

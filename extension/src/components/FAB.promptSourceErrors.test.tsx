@@ -28,8 +28,6 @@ vi.mock('../utils/prefs', () => {
     }
     return {
         usePrefs: () => ({ prefs }),
-        mergeRootPathOverride: (value: typeof prefs, override: string | null) =>
-            override === null ? value : { ...value, rootPath: override },
     }
 })
 

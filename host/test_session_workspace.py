@@ -255,6 +255,124 @@ class TestClientWorkspaceInitialization(unittest.IsolatedAsyncioTestCase):
 
 
 class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
+    def _make_root_contract_host(self, configured_root: str):
+        host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
+        host.root_path = configured_root
+        host.current_case_id = None
+        host.current_session_id = None
+        host.current_session_root_path = None
+        host.current_prompt_fingerprint = None
+        host.session = object()
+        host.client = object()
+        host.last_session_error = None
+        host._validate_effective_root = MagicMock()
+        host._resolve_prompt_snapshot = MagicMock(
+            side_effect=lambda root, _only: make_snapshot(root)
+        )
+        host._refresh_session = AsyncMock(return_value=True)
+        host.send_progress = MagicMock()
+        host.scrubber = MagicMock()
+        host.scrubber.scrub.side_effect = lambda value: value
+        host.current_request_id = None
+        return host
+
+    async def test_explicit_empty_analyze_root_overrides_config_for_one_request(self):
+        configured = r'C:\MyWorkbench\MyCases'
+        host = self._make_root_contract_host(configured)
+        config = {
+            '_effective_root': None,
+            '_use_workspace_only': False,
+            'working_directory': os.getcwd(),
+        }
+        def load_explicit_empty(*, root_path_override):
+            self.assertIsNone(root_path_override)
+            host.root_path = None
+            return config
+        host._get_session_config = MagicMock(side_effect=load_explicit_empty)
+        result = await host.handle_analyze_error({
+            'text': None,
+            'caseNumber': '2601190030003106',
+            'rootPath': '',
+            'rootPathOverrideProvided': True,
+        })
+        self.assertEqual(result['error'], 'No text provided for analysis.')
+        host._get_session_config.assert_called_once_with(root_path_override=None)
+        self.assertIsNone(host.root_path)
+
+    async def test_request_after_explicit_empty_without_marker_uses_configured_root(self):
+        configured = r'C:\MyWorkbench\MyCases'
+        host = self._make_root_contract_host(configured)
+        generic = {
+            '_effective_root': None,
+            '_use_workspace_only': False,
+            'working_directory': os.getcwd(),
+        }
+        configured_data = {
+            '_effective_root': configured,
+            '_use_workspace_only': False,
+            'working_directory': configured,
+        }
+        calls = 0
+        sentinel = object()
+        def load_config(*, root_path_override=sentinel):
+            nonlocal calls
+            calls += 1
+            if root_path_override is None:
+                host.root_path = None
+                return generic
+            host.root_path = configured
+            return configured_data
+        host._get_session_config = MagicMock(side_effect=load_config)
+        await host.handle_analyze_error({
+            'text': None, 'caseNumber': '2601190030003106',
+            'rootPath': '', 'rootPathOverrideProvided': True,
+        })
+        await host.handle_analyze_error({
+            'text': None, 'caseNumber': '2601190030003106',
+        })
+        self.assertGreaterEqual(calls, 2)
+        self.assertEqual(host._get_session_config.call_args_list[:2], [
+            unittest.mock.call(root_path_override=None),
+            unittest.mock.call(),
+        ])
+        self.assertEqual(host.root_path, configured)
+
+    async def test_malformed_explicit_marker_uses_legacy_fallback(self):
+        configured = r'C:\MyWorkbench\MyCases'
+        for marker in (False, None, 1, 'true', [], {}):
+            with self.subTest(marker=marker):
+                host = self._make_root_contract_host(configured)
+                host._get_session_config = MagicMock(return_value={
+                    '_effective_root': configured,
+                    '_use_workspace_only': False,
+                    'working_directory': configured,
+                })
+                await host.handle_analyze_error({
+                    'text': None,
+                    'caseNumber': '2601190030003106',
+                    'rootPath': '',
+                    'rootPathOverrideProvided': marker,
+                })
+                host._get_session_config.assert_called_once_with()
+
+    async def test_explicit_marker_with_non_string_root_uses_legacy_fallback(self):
+        configured = r'C:\MyWorkbench\MyCases'
+        host = self._make_root_contract_host(configured)
+        host._get_session_config = MagicMock(return_value={
+            '_effective_root': configured,
+            '_use_workspace_only': False,
+            'working_directory': configured,
+        })
+        await host.handle_analyze_error({
+            'text': None,
+            'caseNumber': '2601190030003106',
+            'rootPath': {'malformed': True},
+            'rootPathOverrideProvided': True,
+        })
+        host._get_session_config.assert_called_once_with()
+        self.assertEqual(host.root_path, configured)
+
     async def test_resume_existing_session_overrides_persisted_cwd_with_root(self):
         case_id = "2601190030003106"
         session_id = NativeHost._case_to_session_id(case_id)
