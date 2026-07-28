@@ -94,6 +94,8 @@ function safeAnalyzeRejectionText(value: unknown, fallback: string): string {
 
 const FAB: React.FC = () => {
     const { t } = useTranslation();
+    const latestTranslationRef = React.useRef(t);
+    latestTranslationRef.current = t;
     const [isOpen, setIsOpen] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
@@ -391,9 +393,11 @@ const FAB: React.FC = () => {
                 (event as CustomEvent<unknown>).detail,
                 'error',
             );
-            showStatusBubble(safeErrorText([
+            const error = safeErrorText([
                 candidate.kind === 'value' ? candidate.value : undefined,
-            ], t('updateCheckFailed')), 'error', 5000);
+            ], latestTranslationRef.current('updateCheckFailed'));
+            if (!latestPrefsRef.current.enableStatusBubble) return;
+            showStatusBubble(error, 'error', 5000);
         };
 
         const handleNotification = (e: any) => {
@@ -434,7 +438,7 @@ const FAB: React.FC = () => {
 
 
     const showStatusBubble = (text: string, type: 'default' | 'success' | 'error' = 'default', autoHideDuration = 3000) => {
-        if (!prefs.enableStatusBubble) return;
+        if (!latestPrefsRef.current.enableStatusBubble) return;
 
         if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
         

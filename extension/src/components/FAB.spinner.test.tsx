@@ -15,7 +15,18 @@ const state = vi.hoisted(() => ({
     durationSec?: number
     identity: { caseNumber: string; requestId: string }
   },
-  analyzeTimeoutSeconds: 1200,
+  prefs: {
+    buttonText: 'DH',
+    primaryColor: '#0D9488',
+    offsetBottom: 24,
+    offsetRight: 24,
+    userPrompt: '',
+    rootPath: '',
+    autoAnalyzeMode: 'disabled',
+    enableStatusBubble: true,
+    language: 'en',
+    analyzeTimeoutSeconds: 1200,
+  },
   scanForErrors: vi.fn(),
   trackEvent: vi.fn(),
   hashCaseId: vi.fn(),
@@ -29,18 +40,7 @@ vi.mock('../utils/telemetry', () => ({
 
 vi.mock('../utils/prefs', () => ({
   usePrefs: () => ({
-    prefs: {
-      buttonText: 'DH',
-      primaryColor: '#0D9488',
-      offsetBottom: 24,
-      offsetRight: 24,
-      userPrompt: '',
-      rootPath: '',
-      autoAnalyzeMode: 'disabled',
-      enableStatusBubble: true,
-      language: 'en',
-      analyzeTimeoutSeconds: state.analyzeTimeoutSeconds,
-    },
+    prefs: state.prefs,
   }),
 }))
 
@@ -89,7 +89,18 @@ describe('FAB analyzing source reconciliation', () => {
     state.hydrationPending = true
     state.hydrationRequestId = 'hydrated-A'
     state.hydratedPopover = null
-    state.analyzeTimeoutSeconds = 1200
+    state.prefs = {
+      buttonText: 'DH',
+      primaryColor: '#0D9488',
+      offsetBottom: 24,
+      offsetRight: 24,
+      userPrompt: '',
+      rootPath: '',
+      autoAnalyzeMode: 'disabled',
+      enableStatusBubble: true,
+      language: 'en',
+      analyzeTimeoutSeconds: 1200,
+    }
     state.trackEvent.mockReset()
     state.hashCaseId.mockReset().mockResolvedValue('hash')
     state.scanForErrors.mockReset().mockResolvedValue({
@@ -151,6 +162,91 @@ describe('FAB analyzing source reconciliation', () => {
       expect(removeEventListener).toHaveBeenCalledWith(
         UPDATE_ERROR_DOM_EVENT,
         registration![1],
+      )
+    } finally {
+      view.unmount()
+      addEventListener.mockRestore()
+      removeEventListener.mockRestore()
+    }
+  })
+
+  it('uses the latest language for FAB update error fallback', async () => {
+    state.hydrationPending = false
+    const addEventListener = vi.spyOn(window, 'addEventListener')
+    const removeEventListener = vi.spyOn(window, 'removeEventListener')
+    const view = render(
+      <PrefsLanguageProvider language="en">
+        <FAB />
+      </PrefsLanguageProvider>,
+    )
+
+    try {
+      await waitFor(() => expect(state.scanForErrors).toHaveBeenCalled())
+      state.prefs = { ...state.prefs, language: 'zh' }
+      view.rerender(
+        <PrefsLanguageProvider language="zh">
+          <FAB />
+        </PrefsLanguageProvider>,
+      )
+      const registrations = addEventListener.mock.calls.filter(
+        ([eventName]) => eventName === UPDATE_ERROR_DOM_EVENT,
+      )
+      expect(registrations).toHaveLength(1)
+
+      act(() => window.dispatchEvent(new CustomEvent(
+        UPDATE_ERROR_DOM_EVENT,
+        { detail: { error: { malformed: true } } },
+      )))
+
+      const bubble = document.querySelector('.dh-status-bubble') as HTMLElement
+      await waitFor(() => expect(bubble).toHaveTextContent('更新检查失败。'))
+      view.unmount()
+      expect(removeEventListener).toHaveBeenCalledWith(
+        UPDATE_ERROR_DOM_EVENT,
+        registrations[0][1],
+      )
+    } finally {
+      view.unmount()
+      addEventListener.mockRestore()
+      removeEventListener.mockRestore()
+    }
+  })
+
+  it('honors the latest status-bubble preference for FAB update errors', async () => {
+    state.hydrationPending = false
+    const addEventListener = vi.spyOn(window, 'addEventListener')
+    const removeEventListener = vi.spyOn(window, 'removeEventListener')
+    const view = render(
+      <PrefsLanguageProvider language="en">
+        <FAB />
+      </PrefsLanguageProvider>,
+    )
+
+    try {
+      await waitFor(() => expect(state.scanForErrors).toHaveBeenCalled())
+      state.prefs = { ...state.prefs, enableStatusBubble: false }
+      view.rerender(
+        <PrefsLanguageProvider language="en">
+          <FAB />
+        </PrefsLanguageProvider>,
+      )
+      const registrations = addEventListener.mock.calls.filter(
+        ([eventName]) => eventName === UPDATE_ERROR_DOM_EVENT,
+      )
+      expect(registrations).toHaveLength(1)
+
+      act(() => window.dispatchEvent(new CustomEvent(
+        UPDATE_ERROR_DOM_EVENT,
+        { detail: { error: { malformed: true } } },
+      )))
+
+      const bubble = document.querySelector('.dh-status-bubble') as HTMLElement
+      expect(bubble).not.toHaveClass('visible')
+      expect(bubble).not.toHaveTextContent('Update check failed.')
+      view.unmount()
+      expect(removeEventListener).toHaveBeenCalledWith(
+        UPDATE_ERROR_DOM_EVENT,
+        registrations[0][1],
       )
     } finally {
       view.unmount()
@@ -446,7 +542,7 @@ describe('FAB analyzing source reconciliation', () => {
 
   it('keeps request B active when request A resolves and reaches its old timeout', async () => {
     state.hydrationPending = false
-    state.analyzeTimeoutSeconds = 60
+    state.prefs = { ...state.prefs, analyzeTimeoutSeconds: 60 }
     const responseA = deferNextResponse('analyze_error')
     const responseB = deferNextResponse('analyze_error')
     const randomUuid = vi.spyOn(crypto, 'randomUUID')

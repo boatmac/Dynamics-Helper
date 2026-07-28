@@ -233,4 +233,69 @@ describe('handleNativeUpdateError', () => {
             vi.restoreAllMocks()
         }
     })
+
+    it('delivers update errors to every active tab despite individual failures', async () => {
+        const secret = {
+            marker: 'SECRET-MULTI-TAB-DELIVERY',
+            toString: vi.fn(() => 'SECRET-MULTI-TAB-DELIVERY'),
+            toJSON: vi.fn(() => 'SECRET-MULTI-TAB-DELIVERY'),
+        }
+        const rawPayload = { error: secret, message: 'safe multi-tab failure' }
+        const runtimeEvents: NativeUpdateErrorEvent[] = []
+        const tabEvents: Array<{
+            tabId: number
+            event: NativeUpdateErrorEvent
+        }> = []
+        const deps: NativeUpdateErrorDeliveryDeps = {
+            sendRuntime: vi.fn(async event => {
+                runtimeEvents.push(event)
+                throw new Error('runtime unavailable')
+            }),
+            queryActiveTabs: vi.fn(async () => [
+                { id: 11 },
+                {},
+                { id: 22 },
+                { id: 33 },
+            ]),
+            sendTab: vi.fn(async (tabId, event) => {
+                tabEvents.push({ tabId, event })
+                if (tabId === 22) throw new Error('tab unavailable')
+            }),
+        }
+        const consoleSpies = {
+            log: vi.spyOn(console, 'log').mockImplementation(() => undefined),
+            info: vi.spyOn(console, 'info').mockImplementation(() => undefined),
+            warn: vi.spyOn(console, 'warn').mockImplementation(() => undefined),
+            error: vi.spyOn(console, 'error').mockImplementation(() => undefined),
+            debug: vi.spyOn(console, 'debug').mockImplementation(() => undefined),
+        }
+        const raw = { action: 'update_error', payload: rawPayload }
+
+        try {
+            await expect(handleNativeUpdateError(raw, deps)).resolves.toBeUndefined()
+            expect(runtimeEvents).toHaveLength(1)
+            expect(tabEvents.map(({ tabId }) => tabId)).toEqual([11, 22, 33])
+            expect(deps.sendTab).toHaveBeenCalledTimes(3)
+            const normalized = runtimeEvents[0]
+            expect(normalized).toEqual({
+                type: 'NATIVE_UPDATE_ERROR',
+                payload: { error: 'safe multi-tab failure' },
+            })
+            expect(tabEvents.every(({ event }) => event === normalized)).toBe(true)
+            expect(normalized).not.toBe(raw)
+            expect(normalized.payload).not.toBe(rawPayload)
+            expect(secret.toString).not.toHaveBeenCalled()
+            expect(secret.toJSON).not.toHaveBeenCalled()
+            expect(consoleSpies.warn).toHaveBeenCalledOnce()
+            expect(consoleSpies.warn).toHaveBeenCalledWith(
+                '[DH-SW] Update check failed',
+            )
+            expect(consoleSpies.log).not.toHaveBeenCalled()
+            expect(consoleSpies.info).not.toHaveBeenCalled()
+            expect(consoleSpies.error).not.toHaveBeenCalled()
+            expect(consoleSpies.debug).not.toHaveBeenCalled()
+        } finally {
+            vi.restoreAllMocks()
+        }
+    })
 })
