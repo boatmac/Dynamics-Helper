@@ -639,21 +639,23 @@ describe('FAB live page identity during Analyze', () => {
         await flushReact()
         expect(state.scanForErrors).toHaveBeenCalledTimes(3)
         const contextAfterB = expandContext().value
+        openFab()
+        await flushReact()
 
         await triggerMutation()
         expect(state.scanForErrors).toHaveBeenCalledTimes(4)
-        await act(async () => mandatoryPostRun.resolve(A))
+        await act(async () => observerA.resolve(newerA))
         await flushReact()
 
         expect(document.body).not.toHaveTextContent('STALE PRE-RUN A RESULT')
         expectNoVisibleOutcomeTelemetry()
 
-        await act(async () => observerA.resolve(newerA))
+        await act(async () => mandatoryPostRun.resolve(A))
         await flushReact()
 
         expect(contextAfterB).toContain('NEW CASE B BODY')
         expect(contextAfterB).not.toContain('OLD CASE A BODY')
-        openFab()
+        if (!document.querySelector('.dh-menu')) openFab()
         await flushReact()
         const newestContext = expandContext().value
         expect(newestContext).toContain('NEWEST CASE A BODY')
@@ -664,6 +666,115 @@ describe('FAB live page identity during Analyze', () => {
         expect(state.hydrationDismiss).not.toHaveBeenCalled()
         expect(analyzeButton()).not.toBeDisabled()
     })
+
+    it('terminal revalidation switches to a newer participant without waiting for the old scan', async () => {
+        const newerA = {
+            ...A,
+            errorText: 'WAKEABLE NEWEST CASE A BODY',
+            description: 'WAKEABLE NEWEST CASE A BODY',
+        }
+        await renderOpenFab()
+        const response = deferNextResponse('analyze_error')
+        const mandatoryPostRun = deferredValue<unknown>()
+        const newerObserver = deferredValue<unknown>()
+        fireEvent.click(analyzeButton())
+        state.scanForErrors
+            .mockReset()
+            .mockImplementationOnce(() => mandatoryPostRun.promise)
+            .mockImplementationOnce(() => newerObserver.promise)
+
+        await act(async () => response.resolve({
+            status: 'success',
+            data: {
+                markdown: 'WAKEABLE TERMINAL RESULT',
+                saved_to: 'A-report.md',
+            },
+        }))
+        await flushReact()
+        expect(state.scanForErrors).toHaveBeenCalledTimes(1)
+
+        await triggerMutation()
+        await act(async () => newerObserver.resolve(newerA))
+        await flushReact()
+
+        expect(screen.getByText('WAKEABLE TERMINAL RESULT')).toBeInTheDocument()
+        expect(state.trackEvent).toHaveBeenCalledWith(
+            'Analyze Success',
+            expect.objectContaining({ caseIdHash: 'hash-A' }),
+        )
+        fireEvent.click(screen.getByTitle('Close'))
+        openFab()
+        await flushReact()
+        const context = expandContext().value
+        expect(context).toContain('WAKEABLE NEWEST CASE A BODY')
+        expect(context).not.toContain('OLD CASE A BODY')
+        expect(analyzeButton()).not.toBeDisabled()
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(6001)
+            window.dispatchEvent(new CustomEvent('DH_TOAST', {
+                detail: { text: 'TERMINAL CLEANUP COMPLETE' },
+            }))
+        })
+        expect(document.body).toHaveTextContent('TERMINAL CLEANUP COMPLETE')
+        expect(document.querySelector('.dh-status-bubble')).toHaveClass('visible')
+    })
+
+    it.each(['open', 'refresh'] as const)(
+        'uses open and refresh scans as terminal full participants',
+        async kind => {
+            await renderOpenFab()
+            const response = deferNextResponse('analyze_error')
+            const mandatoryPostRun = deferredValue<unknown>()
+            const participant = deferredValue<unknown>()
+            fireEvent.click(analyzeButton())
+            if (kind === 'open') {
+                openFab()
+                await flushReact()
+            }
+            state.scanForErrors
+                .mockReset()
+                .mockImplementationOnce(() => mandatoryPostRun.promise)
+                .mockImplementationOnce(() => participant.promise)
+
+            await act(async () => response.resolve({
+                status: 'success',
+                data: {
+                    markdown: `STALE A RESULT BEFORE ${kind.toUpperCase()}`,
+                    saved_to: 'A-report.md',
+                },
+            }))
+            await flushReact()
+            expect(state.scanForErrors).toHaveBeenCalledTimes(1)
+
+            if (kind === 'open') {
+                openFab()
+                await flushReact()
+            } else {
+                fireEvent.click(screen.getByTitle('Refresh Context (Re-scan page)'))
+                await flushReact()
+            }
+            expect(state.scanForErrors).toHaveBeenCalledTimes(2)
+
+            await act(async () => participant.resolve(B))
+            await flushReact()
+            await act(async () => mandatoryPostRun.resolve(A))
+            await flushReact()
+
+            if (!document.querySelector('.dh-menu')) {
+                openFab()
+                await flushReact()
+            }
+            const context = expandContext().value
+            expect(context).toContain('NEW CASE B BODY')
+            expect(context).not.toContain('OLD CASE A BODY')
+            expect(document.body).not.toHaveTextContent(
+                `STALE A RESULT BEFORE ${kind.toUpperCase()}`,
+            )
+            expectNoVisibleOutcomeTelemetry()
+            expect(analyzeButton()).not.toBeDisabled()
+        },
+    )
 
     it.each([
         ['success', 'STALE SUCCESS TERMINAL A'],
@@ -1275,6 +1386,68 @@ describe('FAB live page identity during Analyze', () => {
         expectNoVisibleOutcomeForA()
         expectNoVisibleOutcomeTelemetry()
     })
+
+    it.each(['getter-message', 'revoked', 'descriptor-throwing'] as const)(
+        'contains hostile Analyze rejection before terminal finalization',
+        async kind => {
+            const secret = `SECRET HOSTILE ANALYZE REJECTION ${kind}`
+            let rejection: unknown
+            let rawMessageRead: ReturnType<typeof vi.fn> | null = null
+            let descriptorRead: ReturnType<typeof vi.fn> | null = null
+            if (kind === 'getter-message') {
+                rawMessageRead = vi.fn(() => { throw new Error(secret) })
+                rejection = Object.defineProperty({}, 'message', {
+                    configurable: true,
+                    get: rawMessageRead,
+                })
+            } else if (kind === 'revoked') {
+                const revoked = Proxy.revocable({ message: secret }, {})
+                revoked.revoke()
+                rejection = revoked.proxy
+            } else {
+                rawMessageRead = vi.fn(() => { throw new Error(secret) })
+                descriptorRead = vi.fn(() => { throw new Error(secret) })
+                rejection = new Proxy({}, {
+                    get: rawMessageRead,
+                    getOwnPropertyDescriptor: descriptorRead,
+                })
+            }
+
+            await renderOpenFab()
+            const response = deferNextResponse('analyze_error')
+            fireEvent.click(analyzeButton())
+            state.scanForErrors.mockReset().mockResolvedValue(A)
+            const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
+            const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+            const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+            try {
+                await act(async () => response.reject(rejection))
+                await flushReact()
+
+                expect(state.scanForErrors).toHaveBeenCalledTimes(1)
+                expect(screen.getByText(/Unknown error/i)).toBeInTheDocument()
+                expect(document.body).not.toHaveTextContent(secret)
+                if (rawMessageRead) expect(rawMessageRead).not.toHaveBeenCalled()
+                if (descriptorRead) expect(descriptorRead).toHaveBeenCalledTimes(1)
+                const loggedStrings = [
+                    ...consoleLog.mock.calls,
+                    ...consoleWarn.mock.calls,
+                    ...consoleError.mock.calls,
+                ].flat().filter((value): value is string => typeof value === 'string')
+                expect(loggedStrings.join('\n')).not.toContain(secret)
+                expect(state.trackEvent.mock.calls.filter(
+                    call => call[0] === 'Analyze Exception',
+                )).toHaveLength(1)
+
+                fireEvent.click(screen.getByTitle('Close'))
+                expect(analyzeButton()).not.toBeDisabled()
+            } finally {
+                consoleLog.mockRestore()
+                consoleWarn.mockRestore()
+                consoleError.mockRestore()
+            }
+        },
+    )
 
     it('runs exactly one post-run full scan after timeout and late settlement', async () => {
         await renderOpenFab()

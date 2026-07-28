@@ -12,6 +12,7 @@ import type {
 } from '../utils/analysisStore';
 import { applyCurrentUserPrompt } from '../utils/analysisPrompt';
 import { safeErrorText } from '../utils/safeErrorText';
+import { ownDataProperty } from '../utils/ownData';
 import { parseAnalyzeForwardResult } from '../background/analyzeBridge';
 import {
     parsePageIdentitySnapshot,
@@ -58,7 +59,31 @@ type TerminalRevalidationCoordinator = {
     origin: PageIdentity | null;
     latestGeneration: number;
     latestCompletion: Promise<TerminalRevalidationResult> | null;
+    version: number;
+    changeSignal: TerminalRevalidationChangeSignal;
+    closed: boolean;
 };
+
+type TerminalRevalidationChangeSignal = {
+    promise: Promise<void>;
+    resolve: () => void;
+};
+
+function createTerminalRevalidationChangeSignal(): TerminalRevalidationChangeSignal {
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    return { promise, resolve };
+}
+
+function safeAnalyzeRejectionText(value: unknown, fallback: string): string {
+    const direct = typeof value === 'string' ? value : undefined;
+    const messageProperty = ownDataProperty(value, 'message');
+    const message = messageProperty.kind === 'value'
+        && typeof messageProperty.value === 'string'
+        ? messageProperty.value
+        : undefined;
+    return safeErrorText([message, direct], fallback);
+}
 
 const FAB: React.FC = () => {
     const { t } = useTranslation();
@@ -275,6 +300,12 @@ const FAB: React.FC = () => {
     useEffect(() => () => {
         if (analyzeSafetyTimerRef.current) {
             clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
+        }
+        const coordinator = terminalRevalidationRef.current;
+        if (coordinator) {
+            coordinator.closed = true;
+            coordinator.changeSignal.resolve();
+            terminalRevalidationRef.current = null;
         }
     }, []);
 
@@ -587,8 +618,10 @@ const FAB: React.FC = () => {
     function runTerminalRevalidationParticipant(
         requestId: string,
         failureMessage: string,
+        forceReplace = false,
     ): Promise<TerminalRevalidationResult> {
-        return runPageScan(
+        let containedCompletion: Promise<TerminalRevalidationResult> | null = null;
+        const rawCompletion = runPageScan(
             failureMessage,
             scan => {
                 const coordinator = terminalRevalidationRef.current;
@@ -608,16 +641,42 @@ const FAB: React.FC = () => {
                         coordinator.origin,
                         true,
                         scan.generation,
+                        forceReplace,
                     ),
                 };
             },
             (generation, completion) => {
                 const coordinator = terminalRevalidationRef.current;
-                if (!coordinator || coordinator.requestId !== requestId) return;
+                const contained = completion.catch(() => ({
+                    generation,
+                    accepted: null,
+                }));
+                containedCompletion = contained;
+                if (
+                    !coordinator
+                    || coordinator.requestId !== requestId
+                    || coordinator.closed
+                ) return;
+                const previousSignal = coordinator.changeSignal;
+                if (coordinator.latestGeneration >= 0) {
+                    pendingPageScanGenerationsRef.current.delete(
+                        coordinator.latestGeneration,
+                    );
+                    setPendingPageScanCount(
+                        pendingPageScanGenerationsRef.current.size,
+                    );
+                }
                 coordinator.latestGeneration = generation;
-                coordinator.latestCompletion = completion;
+                coordinator.latestCompletion = contained;
+                coordinator.version += 1;
+                coordinator.changeSignal = createTerminalRevalidationChangeSignal();
+                previousSignal.resolve();
             },
         );
+        return containedCompletion ?? rawCompletion.catch(() => ({
+            generation: pageScanGenerationRef.current,
+            accepted: null,
+        }));
     }
 
     async function awaitLatestTerminalRevalidation(
@@ -629,22 +688,46 @@ const FAB: React.FC = () => {
             const generation = coordinator.latestGeneration;
             const completion = coordinator.latestCompletion;
             if (!completion) return null;
-
-            let result: TerminalRevalidationResult;
-            try {
-                result = await completion;
-            } catch {
-                result = { generation, accepted: null };
-            }
+            const version = coordinator.version;
+            const changeSignal = coordinator.changeSignal.promise;
+            const settled = await Promise.race([
+                completion.then(result => ({ kind: 'completed' as const, result })),
+                changeSignal.then(() => ({ kind: 'changed' as const })),
+            ]);
+            if (settled.kind === 'changed') continue;
 
             const latest = terminalRevalidationRef.current;
-            if (!latest || latest.requestId !== requestId) return null;
             if (
-                latest.latestGeneration !== generation
+                !latest
+                || latest.requestId !== requestId
+                || latest.closed
+            ) return null;
+            if (
+                latest.version !== version
+                || latest.latestGeneration !== generation
                 || latest.latestCompletion !== completion
             ) continue;
-            return result.generation === generation ? result.accepted : null;
+            return settled.result.generation === generation
+                ? settled.result.accepted
+                : null;
         }
+    }
+
+    function activeTerminalRevalidationRequestId(): string | null {
+        const coordinator = terminalRevalidationRef.current;
+        return coordinator
+            && !coordinator.closed
+            && localAnalyzeRequestIdRef.current === coordinator.requestId
+            ? coordinator.requestId
+            : null;
+    }
+
+    function closeTerminalRevalidation(requestId: string): void {
+        const coordinator = terminalRevalidationRef.current;
+        if (!coordinator || coordinator.requestId !== requestId) return;
+        coordinator.closed = true;
+        coordinator.changeSignal.resolve();
+        terminalRevalidationRef.current = null;
     }
 
     // Duration Logic
@@ -730,6 +813,14 @@ const FAB: React.FC = () => {
              }
 
              if (isOpen) {
+                 const terminalRequestId = activeTerminalRevalidationRequestId();
+                 if (terminalRequestId) {
+                     await runTerminalRevalidationParticipant(
+                         terminalRequestId,
+                         '[DH] Page scan failed',
+                     );
+                     return;
+                 }
                  await runPageScan('[DH] Page scan failed', openScan => {
                      if (
                          openScan.generation !== pageScanGenerationRef.current
@@ -761,21 +852,31 @@ const FAB: React.FC = () => {
                 // We need to merge the selection with the current page context (Case Number, Product, etc.)
                 // so the analysis file is saved in the correct folder.
                 if (!pageSnapshot) {
-                    pageSnapshot = await runPageScan(
-                        '[DH] Page scan failed',
-                        scan => {
-                            if (
-                                scan.generation !== pageScanGenerationRef.current
-                                || !scan.fresh
-                            ) return null;
-                            return applyFullScan(
-                                scan.fresh,
-                                null,
-                                false,
-                                scan.generation,
-                            );
-                        },
-                    );
+                    const terminalRequestId = activeTerminalRevalidationRequestId();
+                    if (terminalRequestId) {
+                        pageSnapshot = (
+                            await runTerminalRevalidationParticipant(
+                                terminalRequestId,
+                                '[DH] Page scan failed',
+                            )
+                        ).accepted;
+                    } else {
+                        pageSnapshot = await runPageScan(
+                            '[DH] Page scan failed',
+                            scan => {
+                                if (
+                                    scan.generation !== pageScanGenerationRef.current
+                                    || !scan.fresh
+                                ) return null;
+                                return applyFullScan(
+                                    scan.fresh,
+                                    null,
+                                    false,
+                                    scan.generation,
+                                );
+                            },
+                        );
+                    }
                 }
                 if (!pageSnapshot || !acceptedSnapshotIsCurrent(pageSnapshot)) return;
 
@@ -822,13 +923,10 @@ const FAB: React.FC = () => {
             if (document.hidden) return;
 
             // console.log("[DH] Running Lazy Scan..."); 
-            const terminal = terminalRevalidationRef.current;
-            if (
-                terminal
-                && localAnalyzeRequestIdRef.current === terminal.requestId
-            ) {
+            const terminalRequestId = activeTerminalRevalidationRequestId();
+            if (terminalRequestId) {
                 await runTerminalRevalidationParticipant(
-                    terminal.requestId,
+                    terminalRequestId,
                     '[DH] Page scan failed',
                 );
                 return;
@@ -963,6 +1061,15 @@ const FAB: React.FC = () => {
     ]);
 
     const handleRefreshContext = async () => {
+        const terminalRequestId = activeTerminalRevalidationRequestId();
+        if (terminalRequestId) {
+            await runTerminalRevalidationParticipant(
+                terminalRequestId,
+                '[DH] Page scan failed',
+                true,
+            );
+            return;
+        }
         await runPageScan('[DH] Page scan failed', scan => {
             if (scan.generation !== pageScanGenerationRef.current || !scan.fresh) return;
             if (localAnalyzeRequestIdRef.current) {
@@ -1115,6 +1222,9 @@ const FAB: React.FC = () => {
             origin,
             latestGeneration: -1,
             latestCompletion: null,
+            version: 0,
+            changeSignal: createTerminalRevalidationChangeSignal(),
+            closed: false,
         };
         if (analyzeSafetyTimerRef.current?.requestId === requestId) {
             clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
@@ -1143,9 +1253,7 @@ const FAB: React.FC = () => {
         } else if (currentCaseNumberRef.current === caseNumber) {
             deferredLocalHydrationRef.current = { requestId, caseNumber };
         }
-        if (terminalRevalidationRef.current?.requestId === requestId) {
-            terminalRevalidationRef.current = null;
-        }
+        closeTerminalRevalidation(requestId);
         if (!ownsTerminalPublication) return;
 
         localAnalyzeRequestIdRef.current = null;
@@ -1320,7 +1428,7 @@ const FAB: React.FC = () => {
                     },
                 );
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             if (latestRequestId.current === requestId) {
                 await finishAnalyzeTerminal(
                     requestId,
@@ -1330,9 +1438,9 @@ const FAB: React.FC = () => {
                     caseNumberOfRun,
                     {
                         kind: 'exception',
-                        error: `${t('errorLabel')}: ${safeErrorText(
-                        [e?.message, e],
-                        t('unknownError'),
+                        error: `${t('errorLabel')}: ${safeAnalyzeRejectionText(
+                            e,
+                            t('unknownError'),
                         )}`,
                     },
                 );
