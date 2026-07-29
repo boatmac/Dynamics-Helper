@@ -693,7 +693,7 @@ describe('latest-started persistence ownership', () => {
         expect(chromeMockSpies.storageSet).not.toHaveBeenCalled()
     })
 
-    it('rejects storage reads with fixed text without coercing raw errors', async () => {
+    it('owner read failure still retries request cleanup in finally', async () => {
         await requireRecordStart()(CTX, () => 1)
         const raw = new Error('SECRET READ ERROR')
         raw.toString = vi.fn(() => 'SECRET READ ERROR')
@@ -702,9 +702,19 @@ describe('latest-started persistence ownership', () => {
         await vi.waitFor(() => expect(chromeMockSpies.storageGet).toHaveBeenCalled())
         await read.reject(raw)
 
-        await expect(completing).rejects.toThrow('Analysis storage read failed')
+        const outcome = await completing.then(
+            warnings => ({ warnings }),
+            error => ({ error }),
+        )
+        expect.soft(outcome).toEqual({ warnings: [] })
         expect(raw.toString).not.toHaveBeenCalled()
-        expect(chromeMockSpies.storageRemove).not.toHaveBeenCalled()
+        expect.soft(chromeMockSpies.storageGet).toHaveBeenCalledTimes(2)
+        expect.soft(chromeMockSpies.storageSet).toHaveBeenCalledTimes(1)
+        expect.soft(chromeMockSpies.storageRemove).toHaveBeenCalledOnce()
+        expect.soft(getStorageSnapshot()).not.toHaveProperty('dh_last_analysis')
+        expect.soft(getStorageSnapshot()).not.toHaveProperty(
+            'dh_pending_analysis:req-A',
+        )
     })
 
     it('rejects malformed completion before any completion storage operation', async () => {

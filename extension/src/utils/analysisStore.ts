@@ -701,15 +701,20 @@ export async function completeAnalyzePersistence(
 
     return queueAnalysisMutation(async () => {
         const observed = new Set<AnalysisPersistenceWarning>();
-        const ownerStored = (await getAnalysisStorage(
-            LATEST_ANALYSIS_OWNER_KEY,
-        )).value;
-        const owner = parseLatestAnalysisOwner(analysisStorageValue(
-            ownerStored,
-            LATEST_ANALYSIS_OWNER_KEY,
-        ));
 
         try {
+            let owner: LatestAnalysisOwner | null = null;
+            try {
+                const ownerStored = (await getAnalysisStorage(
+                    LATEST_ANALYSIS_OWNER_KEY,
+                )).value;
+                owner = parseLatestAnalysisOwner(analysisStorageValue(
+                    ownerStored,
+                    LATEST_ANALYSIS_OWNER_KEY,
+                ));
+            } catch {
+                // An unreadable owner cannot authorize a singleton result write.
+            }
             if (
                 owner?.requestId === capturedContext.requestId
                 && owner.caseNumber === capturedContext.caseNumber
@@ -760,33 +765,6 @@ export async function completeAnalyzePersistence(
         return ANALYSIS_PERSISTENCE_WARNING_ORDER.filter(warning => (
             observed.has(warning)
         ));
-    });
-}
-
-// Task 5 migrates the Analyze wire to the warning-bearing completion API.
-export async function recordAnalyzeSuccess(
-    ctx: AnalyzePersistContext,
-    hostData: { markdown?: string; saved_to?: string },
-): Promise<void> {
-    await completeAnalyzePersistence(ctx, {
-        status: 'success',
-        markdown: typeof hostData?.markdown === 'string' ? hostData.markdown : '',
-        ...(typeof hostData?.saved_to === 'string'
-            ? { savedTo: hostData.saved_to }
-            : {}),
-    });
-}
-
-// Task 5 migrates the Analyze wire to the warning-bearing completion API.
-export async function recordAnalyzeError(
-    ctx: AnalyzePersistContext,
-    errorMessage: string,
-    errorCode?: string,
-): Promise<void> {
-    await completeAnalyzePersistence(ctx, {
-        status: 'error',
-        error: errorMessage,
-        ...(errorCode === undefined ? {} : { errorCode }),
     });
 }
 

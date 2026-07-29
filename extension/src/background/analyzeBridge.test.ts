@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
     chromeMockSpies,
+    deferNextStorageGet,
     deferNextStorageRemove,
     deferNextStorageSet,
     getStorageSnapshot,
@@ -1101,6 +1102,42 @@ describe('handleAnalyzeForward persistence outcomes', () => {
             data: { markdown: '# Report', saved_to: 'report.md' },
             extension_warnings: ['analysis_result_not_persisted'],
         })
+    })
+
+    it('Host outcome survives real owner-read failure with pending cleanup', async () => {
+        const ownerRead = deferNextStorageGet('dh_latest_analysis_owner')
+        const firstCleanup = deferNextStorageRemove(
+            'dh_pending_analysis:request-1',
+        )
+        const delays: number[] = []
+        const cleanupAttempts: number[] = []
+        const running = handleAnalyzeForward(FORWARDED, CTX, {
+            send: vi.fn(async () => HOST_SUCCESS),
+            persistence: {
+                now: () => 10,
+                delay: async milliseconds => { delays.push(milliseconds) },
+                logCleanupFailure: attempt => { cleanupAttempts.push(attempt) },
+            },
+        })
+        await vi.waitFor(() => expect(chromeMockSpies.storageGet).toHaveBeenCalledOnce())
+        ownerRead.reject(new Error('SECRET OWNER READ'))
+        await vi.waitFor(() => expect(chromeMockSpies.storageRemove).toHaveBeenCalledOnce())
+        firstCleanup.reject(new Error('SECRET FIRST CLEANUP'))
+
+        const result = await running
+        expect.soft(result).toEqual({
+            status: 'success',
+            data: { markdown: '# Report', saved_to: 'report.md' },
+        })
+        expect.soft(chromeMockSpies.storageSet).toHaveBeenCalledTimes(1)
+        expect.soft(chromeMockSpies.storageGet).toHaveBeenCalledTimes(3)
+        expect.soft(chromeMockSpies.storageRemove).toHaveBeenCalledTimes(2)
+        expect.soft(delays).toEqual([50])
+        expect.soft(cleanupAttempts).toEqual([1])
+        expect.soft(getStorageSnapshot()).not.toHaveProperty('dh_last_analysis')
+        expect.soft(getStorageSnapshot()).not.toHaveProperty(
+            'dh_pending_analysis:request-1',
+        )
     })
 
     it('Host error survives all cleanup failures', async () => {
