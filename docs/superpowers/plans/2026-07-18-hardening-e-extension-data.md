@@ -10,9 +10,9 @@
 
 ## Global Constraints
 
-- Work only in `C:\Users\zhaobo\AppData\Local\Temp\opencode\Dynamics-Helper-prompt-scope-spec`. Execution order is frozen: `A -> B -> C -> E -> D`.
+- Work only in `C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Execution order is frozen: `A -> B -> C -> E -> D`.
 - Plan E precondition: reviewed committed Plans A-C are HEAD ancestors; Plan D has not started and none of `extension/src/background/nativePortClient.ts`, `hostGate.ts`, `updateProtocol.ts`, `updateCoordinator.ts`, or `serviceWorker.update.test.ts` exists. Stop on any mismatch; no alternate order is supported.
-- Implement only authoritative spec sections 6-10, 11, and 13 Plan E plus the approved correction `docs/superpowers/specs/2026-07-24-plan-e-boundary-correction-design.md`. The correction governs every conflict in this plan. Do not activate/recreate Plan D behavior; Plan D later consumes the frozen Plan E interfaces.
+- Implement only authoritative spec sections 6-10, 11, and 13 Plan E plus the approved corrections `docs/superpowers/specs/2026-07-24-plan-e-boundary-correction-design.md` and `docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md`. The corrections govern every conflict in this plan. Do not activate/recreate Plan D behavior; Plan D later consumes the frozen Plan E interfaces.
 - Use TDD for every production change. Capture each named RED failure before implementation, then the matching GREEN output and restored mutation proof in the final evidence report.
 - Parsers must not use `String`, template interpolation, `JSON.stringify`, `toString`, or custom conversion hooks on rejected values. Catch throwing property access and never log rejected raw values.
 - Preserve the exact current `MenuItem` storage schema: no ID, no migration, empty labels allowed, valid item types are `folder|link|markdown|back|unknown`, and safe unknown own data remains round-trippable.
@@ -24,7 +24,8 @@
 - Plan E retains current baseline direct-port behavior only long enough to normalize update errors and Analyze forwarding safely. Plan D later removes direct-port/UI update ownership while preserving Plan E parser/ordering contracts.
 - Automated tests must not touch real user Chrome storage, the registry, installed Extension files, `%LOCALAPPDATA%\DynamicsHelper`, update/publish paths, or authenticated model sessions. Host tests use a fresh temporary `LOCALAPPDATA`; update tests use injected temporary trees only.
 - Do not change product versions, package dependencies, release assets, registry state, installed files, MyCases, or real update state. Do not push, tag, publish, or install.
-- Each task ends in one independently reviewable commit. Immediately before every Task 1-8 commit, compare the complete staged path set against that task's literal allowlist and stop on any missing or extra path. Do not stage unrelated worktree changes.
+- Authorized Task 9 product/test exception: `docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md` permits only `host/update_engine.py` and `host/test_update_engine_resume.py` to change, with the exact bounded Windows promotion retry contract. Task 9 also creates only the ignored evidence artifacts and forced evidence report listed below. No other Plan A-C or Plan D behavior may change.
+- Tasks 1-8 each end in one independently reviewable commit. Task 9 deliberately uses the already-required plan commit, one test-only RED commit, its direct one-path production child, and one final evidence-only commit; this is the sole multi-commit task exception. Immediately before every Task 1-8 commit and each Task 9 commit, compare the complete staged path set against that step's literal allowlist and stop on any missing or extra path. Do not stage unrelated worktree changes.
 - Every standalone TypeScript command runs with tool working directory `extension/` as `npm exec tsc -- --noEmit -p tsconfig.json`. This authored command was verified to exit 0; do not use root-level `npm --prefix extension exec ... -p tsconfig.json`, which resolves the project path incorrectly.
 - Every filtered Vitest command uses `--reporter=verbose`, titles declared verbatim in the preceding test-writing step, and explicit expected exit handling. “No tests found,” zero matched tests, or unrelated import/configuration failure is never evidence.
 - Missing-module import failure is acceptable exactly once as the isolated first RED for each of these six new production modules: `extension/src/utils/ownData.ts`, `extension/src/utils/bookmarkItems.ts`, `extension/src/background/analyzeRequestHandler.ts`, `extension/src/utils/pageIdentity.ts`, `extension/src/utils/analyzeRequest.ts`, and `extension/src/utils/nativeUpdateError.ts`. No other missing module/export is valid RED. After each first import RED, create the task's specified compile-only shell or implementation before any behavioral/multi-file RED; every subsequent RED must import successfully, execute the named test, and fail its assertion. `extension/src/background/nativeMessageWire.ts`, `extension/src/components/ResultPopover.tsx`, and `extension/src/content/updateErrorBridge.ts` are deliberately created as compile-only shells before their first test runs, so their imports may never be used as RED evidence.
@@ -43,12 +44,11 @@ $declaredBase='0dbb4852931b50153fb898b03129ae0092c46404'
 if ($LASTEXITCODE -ne 0) { throw 'Declared Plan E base is not a commit' }
 & git merge-base --is-ancestor $declaredBase HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Declared Plan E base is not a HEAD ancestor' }
-$requiredABC=@(
+$unchangedABC=@(
     'host/package_archive.py',
-    'host/update_engine.py',
     'host/update_recovery.py'
 )
-foreach ($path in $requiredABC) {
+foreach ($path in $unchangedABC) {
     & git cat-file -e "$declaredBase`:$path"
     if ($LASTEXITCODE -ne 0) {
         throw "Reviewed A-C prerequisite is absent at declared base: $path"
@@ -60,6 +60,39 @@ foreach ($path in $requiredABC) {
     & git diff --quiet HEAD -- $path
     if ($LASTEXITCODE -ne 0) {
         throw "Reviewed A-C prerequisite is dirty: $path"
+    }
+}
+& git cat-file -e "$declaredBase`:host/update_engine.py"
+if ($LASTEXITCODE -ne 0) {
+    throw 'Reviewed Plan B update engine is absent at declared base'
+}
+& git diff --quiet HEAD -- 'host/update_engine.py'
+if ($LASTEXITCODE -ne 0) { throw 'Plan B update engine is dirty' }
+$promotionRetrySpec='docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md'
+if (Test-Path -LiteralPath $promotionRetrySpec) {
+    $acceptedPromotionSpec='249b1a3750b50db1336fb39661db9306355a1a18'
+    & git cat-file -e "HEAD:$promotionRetrySpec"
+    if ($LASTEXITCODE -ne 0) { throw 'Windows promotion retry authorization is not committed' }
+    $promotionSpecHead=@(& git log -1 --format=%H HEAD -- $promotionRetrySpec)
+    if (
+        $LASTEXITCODE -ne 0 -or
+        $promotionSpecHead.Count -ne 1 -or
+        $promotionSpecHead[0].Trim() -cne $acceptedPromotionSpec
+    ) { throw 'Windows promotion retry authorization is not the accepted commit' }
+    & git diff --quiet $acceptedPromotionSpec HEAD -- $promotionRetrySpec
+    if ($LASTEXITCODE -ne 0) { throw 'Windows promotion retry spec changed after acceptance' }
+    $authorizedDelta=@(& git diff --name-only --no-renames "$declaredBase..HEAD" -- 'host/update_engine.py' 'host/test_update_engine_resume.py')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect authorized promotion delta' }
+    if (
+        $authorizedDelta.Count -ne 0 -and
+        ($authorizedDelta.Count -ne 2 -or
+            $authorizedDelta -cnotcontains 'host/update_engine.py' -or
+            $authorizedDelta -cnotcontains 'host/test_update_engine_resume.py')
+    ) { throw 'Authorized promotion delta is not the exact two-path set' }
+} else {
+    & git diff --quiet "$declaredBase..HEAD" -- 'host/update_engine.py'
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Reviewed Plan B update engine changed without authorization'
     }
 }
 $prerequisiteReports=[ordered]@{
@@ -105,6 +138,7 @@ foreach ($path in $planDSentinels) {
 }
 $planningDocs=@(
     'docs/superpowers/specs/2026-07-24-plan-e-boundary-correction-design.md',
+    'docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md',
     'docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md'
 )
 foreach ($path in $planningDocs) {
@@ -171,7 +205,8 @@ $planEProductPaths=@(
     'extension/src/utils/configUpdateResult.test.ts'
 )
 $expectedPlanningCommits=@(
-    'd606f4f9468ba8757bb1894368f2326c8183890d'
+    'd606f4f9468ba8757bb1894368f2326c8183890d',
+    '249b1a3750b50db1336fb39661db9306355a1a18'
 )
 foreach ($commit in $expectedPlanningCommits) {
     & git merge-base --is-ancestor $commit HEAD
@@ -241,6 +276,17 @@ The controller confirms the human review/signoff for the three printed evidence 
 - `.superpowers/sdd/original-whole-branch-interim-review-package.txt`: ignored original-base range/stat/log/path package through the committed Plan E head.
 - `.superpowers/sdd/original-whole-branch-interim-review.diff`: ignored full-index/binary original-base-to-Plan-E-head diff.
 - `.superpowers/sdd/original-whole-branch-interim-review-findings.md`: ignored separate interim whole-branch findings; never represented as the final post-Plan-D branch review.
+- `.superpowers/sdd/invoke-promotion-test.ps1`: ignored exact per-selector RED/GREEN/mutation executor extracted from the committed plan.
+- `.superpowers/sdd/run-promotion-mutations.ps1`: ignored exact five-row promotion mutation runner extracted from the committed plan.
+- `.superpowers/sdd/promotion-executor.sha256`, `.superpowers/sdd/promotion-mutation-runner.sha256`: ignored script integrity records.
+- `.superpowers/sdd/promotion-red-source.sha256`, `.superpowers/sdd/promotion-green-source.sha256`, `.superpowers/sdd/promotion-mutation-source.sha256`: ignored phase source-blob chronology records.
+- `.superpowers/sdd/promotion-red.sha256.json`, `.superpowers/sdd/promotion-green.sha256.json`, `.superpowers/sdd/promotion-mutation.sha256.json`, `.superpowers/sdd/promotion-transcripts.sha256.json`: ignored canonical transcript maps.
+- `.superpowers/sdd/promotion-transcripts/red/<eight exact method names>.txt`, `.superpowers/sdd/promotion-transcripts/green/<eight exact method names>.txt`, and `.superpowers/sdd/promotion-transcripts/mutation-<classification|bound|initial|pre-sleep|post-sleep>/<mapped method>.{txt,restored-green.txt}`: the exact 26 ignored transcript leaves generated and enumerated in Task 9 Step 0.
+- `.superpowers/sdd/promotion-observed.json`, `.superpowers/sdd/promotion-ledger.json`, `.superpowers/sdd/promotion-ast.sha256`: ignored canonical observed values, aggregation, and AST/source integrity evidence.
+- `.superpowers/sdd/focused-extension-results.json`, `.superpowers/sdd/full-extension-results.json`, `.superpowers/sdd/host-test-results.json`: ignored canonical, reviewed-head-bound machine test evidence generated in Task 9.
+- `.superpowers/sdd/reviewed-head-verification.json`: ignored canonical verification result binding the tracked tested-source inventory, TypeScript, build, static, diff, focused/full Extension, and every Host phase to one reviewed product head.
+- `.superpowers/sdd/final-artifacts.sha256.json`: ignored canonical manifest over the exact 58 final evidence artifacts.
+- `.superpowers/sdd/task-1-report.md` through `.superpowers/sdd/task-8-report.md`: ignored hash-pinned completed-task reports; their historical RED evidence predates the Task 9 plan amendment and is validated rather than rewritten.
 
 ### Modified files
 
@@ -278,6 +324,8 @@ The controller confirms the human review/signoff for the three printed evidence 
 - `extension/src/test/chromeMock.ts`: callback-scoped failed `get`, repeated storage failures, Options/content UI message emission, and listener reset support.
 - `host/dh_native_host.py`: recognize the explicit-empty Root marker while preserving old payload fallback.
 - `host/test_session_workspace.py`: old Host-compatible missing/empty fallback and new explicit-empty one-request tests.
+- `host/update_engine.py`: Task 9 authorized bounded Windows-only atomic preparing promotion retry; public constructor and all other update semantics remain frozen.
+- `host/test_update_engine_resume.py`: exact retry/classification/checkpoint/topology/hook/constructor regression matrix for the authorized exception.
 
 ### Deleted file
 
@@ -424,27 +472,30 @@ export function parseScrapedDataSnapshot(
 ): import('./pageReader').ScrapedData | null
 
 export interface AnalyzeInvocation {
-    rootPathOverride?: unknown
+    readonly rootPathOverride: string
 }
 
 export interface AnalyzeRequestSnapshot {
-    requestId: string
-    pageIdentity: PageIdentity | null
-    caseNumber: string
-    rootPath: string
-    rootPathOverrideProvided: boolean
+    readonly requestId: string
+    readonly pageIdentity: PageIdentity | null
+    readonly caseNumber: string
+    readonly rootPath: string
+    readonly rootPathOverrideProvided: boolean
 }
 
-export type ContextMenuAnalyzePayload =
-    | Readonly<{ selectionText?: string }>
-    | Readonly<{ selectionText?: string; rootPath: string }>
+export interface ContextMenuAnalyzePayload {
+    selectionText?: string
+    rootPath?: string
+}
 
 export function buildContextMenuAnalyzePayload(
     selectionText: unknown,
     storedPreferences: unknown,
 ): ContextMenuAnalyzePayload
 
-export function readAnalyzeInvocation(value: unknown): AnalyzeInvocation | undefined
+export function readAnalyzeInvocation(
+    value: unknown,
+): AnalyzeInvocation | undefined
 
 export interface ContextMenuClickDeps {
     readPreferences: () => Promise<unknown>
@@ -461,14 +512,14 @@ export function handleContextMenuAnalyzeClick(
 ): Promise<'sent' | 'ignored' | 'failed'>
 
 export function snapshotAnalyzeRequest(
-    requestId: string,
+    requestId: unknown,
     pageData: unknown,
     preferenceRoot: unknown,
-    invocation?: AnalyzeInvocation,
+    invocation?: unknown,
 ): AnalyzeRequestSnapshot
 
 export function requestMatchesPage(
-    request: Pick<AnalyzeRequestSnapshot, 'pageIdentity'>,
+    request: AnalyzeRequestSnapshot,
     current: PageIdentity | null,
 ): boolean
 ```
@@ -514,11 +565,6 @@ export interface AnalyzeForwardDeps {
         now?: () => number,
     ) => Promise<void>
     completePersistence?: typeof completeAnalyzePersistence
-}
-
-export interface AnalyzeRuntimeMessage {
-    type: 'NATIVE_MSG'
-    payload: Record<string, unknown>
 }
 
 export function isAnalyzePayload(payload: unknown): boolean
@@ -634,7 +680,7 @@ Plan D starts only after reviewed Plan E. It must import and preserve:
 - `AnalyzeNativeAction` has exactly three own enumerable data keys: `action`, `requestId`, and `payload`. Top-level `_persist`, `type`, `extension_warnings`, arbitrary keys, own `__proto__`, and symbols are ignored by from-scratch construction. Its payload is the exact `AnalyzeNativePayload` schema: unknown keys, symbols, accessors, own `__proto__`, and nested runtime wrappers reject the whole request;
 - the Analyze payload retains the parser-owned frozen object by identity through acquisition and leased send, including its non-enumerable inert `toJSON` shadow; the final posted top-level wire object is a new frozen object from `postNativeMessageWire`;
 - non-Analyze acquisition receives only `guarded.forwarded`, never the source object. Invalid guard decisions open no port. Request-ID-less legacy actions receive one ID only during final-wire construction; no spread, `Object.assign`, alternate request augmentation, reconnect, or second pending-map cleanup is allowed;
-- `AnalyzeRuntimeMessage` is the one outer Chrome runtime envelope; `AnalyzeNativeAction` is the one inner Host envelope. Plan D preserves that boundary exactly.
+- The outer Chrome runtime envelope is `{ type: 'NATIVE_MSG'; payload: Record<string, unknown> }`; `AnalyzeNativeAction` is the one inner Host envelope. Plan D preserves that boundary exactly.
 - Plan E's runtime/tab/DOM UI defenses until Plan D atomically replaces them with its typed coordinator route.
 - after Plan D reaches its final committed head, rerun the complete original-base review with exact range `0040b1de1bc196b203014a8e4f94a53babb7e9aa..<final-D-head>` and exact diff form `git diff --full-index --binary "0040b1de1bc196b203014a8e4f94a53babb7e9aa..<final-D-head>"`; Plan E's interim original-base review cannot satisfy or waive that final-D-head gate.
 
@@ -652,7 +698,7 @@ Plan D's provider is frozen to one port lease: after handler parsing, acquire on
         error_code: 'host_protocol_incompatible',
         error: 'Dynamics Helper Host is incompatible. Retry the update or run the manual installer.',
     },
-}
+},
 {
     allowed: false,
     response: {
@@ -660,7 +706,7 @@ Plan D's provider is frozen to one port lease: after handler parsing, acquire on
         error_code: 'installation_integrity_failed',
         error: 'Dynamics Helper installation is incomplete. Retry the update or run the manual installer.',
     },
-}
+},
 {
     allowed: false,
     response: {
@@ -5233,14 +5279,2272 @@ Expected: the exact staged set contains all fourteen Task 8 files and nothing el
 ## Task 9: Final Verification, Evidence, and Plan E Review Readiness
 
 **Files:**
+- Authorized modify: `host/update_engine.py`
+- Authorized modify: `host/test_update_engine_resume.py`
 - Create: `.superpowers/sdd/plan-e-extension-hardening-report.md`
 - Create ignored review artifacts: `.superpowers/sdd/plan-e-only-review-package.txt`, `.superpowers/sdd/plan-e-only-review.diff`, `.superpowers/sdd/plan-e-only-review-findings.md`, `.superpowers/sdd/original-whole-branch-interim-review-package.txt`, `.superpowers/sdd/original-whole-branch-interim-review.diff`, `.superpowers/sdd/original-whole-branch-interim-review-findings.md`
+- Create ignored promotion executors/integrity records: `.superpowers/sdd/invoke-promotion-test.ps1`, `.superpowers/sdd/run-promotion-mutations.ps1`, `.superpowers/sdd/promotion-executor.sha256`, `.superpowers/sdd/promotion-mutation-runner.sha256`, `.superpowers/sdd/promotion-ast.sha256`
+- Create ignored promotion phase/source records: `.superpowers/sdd/promotion-red-source.sha256`, `.superpowers/sdd/promotion-green-source.sha256`, `.superpowers/sdd/promotion-mutation-source.sha256`, `.superpowers/sdd/promotion-red.sha256.json`, `.superpowers/sdd/promotion-green.sha256.json`, `.superpowers/sdd/promotion-mutation.sha256.json`, `.superpowers/sdd/promotion-transcripts.sha256.json`, `.superpowers/sdd/promotion-observed.json`, `.superpowers/sdd/promotion-ledger.json`
+- Create exactly 26 ignored transcript leaves under `.superpowers/sdd/promotion-transcripts/`: eight `red/<method>.txt`, eight `green/<method>.txt`, and two leaves for each of `mutation-classification`, `mutation-bound`, `mutation-initial`, `mutation-pre-sleep`, and `mutation-post-sleep`, with exact names defined in Step 0
+- Create ignored final verification/manifest evidence: `.superpowers/sdd/focused-extension-results.json`, `.superpowers/sdd/full-extension-results.json`, `.superpowers/sdd/host-test-results.json`, `.superpowers/sdd/reviewed-head-verification.json`, `.superpowers/sdd/final-artifacts.sha256.json`
+- Consume without modifying: `.superpowers/sdd/task-1-report.md` through `.superpowers/sdd/task-8-report.md`
 
 **Interfaces:**
-- Consumes: committed Tasks 1-8, their RED/GREEN/mutation output, authoritative specs, and the immutable declared Plan E base validated before execution.
+- Consumes: committed Tasks 1-8, their RED/GREEN/mutation output, authoritative specs, the authorized Windows promotion retry correction, and the immutable declared Plan E base validated before execution.
 - Produces: reproducible final gate evidence, one Plan-E-only review package/findings record, and one required original-base interim whole-branch package/findings record. Task 9 changes no release or other documentation; blocking review fixes may add focused product/test commits before the evidence-only commit. The interim whole-branch review is not final branch-review completion because Plan D is absent.
 
+Tasks 1-8 and their hash-pinned reports were completed before this Task 9 plan
+amendment. Their accepted reports remain the historical authority for named RED
+assertions; this amendment does not fabricate or rerun past RED chronology.
+
+Before any Task 9 step, run this historical-report preflight. All eight reports
+are requirements even if a restored machine currently has fewer. Each report
+must already exist and match its locked SHA-256. If a report is missing after a
+machine restore, recover its exact bytes only from accepted historical evidence
+and rerun this block. If exact accepted bytes cannot be recovered, stop with
+Task 9 `BLOCKED`; never synthesize, summarize, regenerate, or fabricate a report.
+The final artifact gate remains fail-closed over all eight reports and must not
+reduce the locked hashes or artifact count to fit the files present on one
+machine.
+
+```powershell
+$ErrorActionPreference='Stop'
+$expectedTaskReportHashes=[ordered]@{
+    '1'='678228ecdf3f417f09abf9973f9da9cdb4c2bf90b4a549165af592c45c3f2fba'
+    '2'='edee7809419c30bd1a240caf8e220c571813185509bc34ac32a4baebb72e39f7'
+    '3'='5fdd938773b361a96bfb0b95a311285bdb1803b6756670cd7ab1095f82760591'
+    '4'='5f8417f109f4ac07dc3423b388cd40cd841d64d214b33b4ef2d484daca5d20c2'
+    '5'='323e46ccc7b5b6277fa62e0a0b9db30299c00651db16c50aa748a6ee9b2e8f73'
+    '6'='3158a5795b768434e069e8ef59e488e0a9ff877939728f69d9293ab0c8b9c8ef'
+    '7'='49ee4fb0a4717f85767ed19caf5338eac1871b21deed2233d82d97337d32df2f'
+    '8'='3a7d87e8f55e3731e6f405a4b58c38ff75efacb76a0ed431f0522f8ec02cfc0b'
+}
+foreach ($number in 1..8) {
+    $path=".superpowers/sdd/task-$number-report.md"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "BLOCKED: recover exact accepted historical report before Task 9: $path"
+    }
+    $actual=(Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+    if ($actual -cne $expectedTaskReportHashes[[string]$number]) {
+        throw "BLOCKED: historical Task $number report does not match its locked SHA-256"
+    }
+}
+```
+
+Task 9 may maintain an ignored narrative verification log for diagnostics, but
+it is not an authority and no completion gate trusts its prose. The authoritative
+inputs are the committed code/spec/plan, canonical promotion ledger, hash-bound
+scripts/transcripts, freshly regenerated review packages/diffs, controller
+findings, and the final committed evidence report. Historical BLOCKED logs remain
+diagnostic only and are summarized honestly in final evidence.
+
+Step 0 also creates `.superpowers/sdd/promotion-ledger.json` as canonical JSON
+(UTF-8 without BOM, sorted keys, compact separators). Its exact schema is:
+
+```json
+{
+  "schema_version": 1,
+  "plan_commit": "<40hex>",
+  "spec_commit": "249b1a3750b50db1336fb39661db9306355a1a18",
+  "executor_sha256": "<64hex>",
+  "mutation_runner_sha256": "<64hex>",
+  "red_methods": ["<7 exact method names>"],
+  "constructor_red_phase": "passed",
+  "green_methods": ["<8 exact method names>"],
+  "mutation_passes": ["classification","bound","initial","pre-sleep","post-sleep"],
+  "attempts": {"transient_then_success": 2,"exhausted": 3},
+  "delays": {"transient_then_success": [0.05],"exhausted": [0.05,0.2]},
+  "checkpoint_calls": {"first_success": 1,"one_retry": 3,"exhausted": 5},
+  "hook_counts": {"retry_success": {"before": 1,"after": 1},"exhausted": {"before": 1,"after": 0}},
+  "state_and_cause": "passed",
+  "test_commit": "<40hex>",
+  "promotion_commit": "<40hex-or-empty-before-commit>",
+  "update_engine_sha256": "<64hex>",
+  "update_engine_test_sha256": "<64hex>",
+  "observed_sha256": "<64hex>",
+  "transcript_map_sha256": "<64hex>",
+  "red_map_sha256": "<64hex>",
+  "green_map_sha256": "<64hex>",
+  "mutation_map_sha256": "<64hex>",
+  "red_source_record_sha256": "<64hex>",
+  "green_source_record_sha256": "<64hex>",
+  "mutation_source_record_sha256": "<64hex>",
+  "ast_record_sha256": "<64hex>"
+}
+```
+
+The ledger is a post-commit aggregation. Chronology is anchored separately by
+the pre-implementation RED map, pre-commit GREEN map, pre-commit mutation map,
+and pre-commit AST record. After the promotion commit, construct the ledger once
+from those immutable phase maps plus the observed JSON and commit SHA, then
+strict-reread every exact key/value before Step 1. Both ignored script hashes and
+all transcript hashes are stored in the canonical maps and summarized in final
+evidence.
+
+- [ ] **Step 0: Implement the authorized Windows promotion retry with TDD**
+
+The human authorization and accepted design are committed in
+`docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md`.
+This revised implementation plan must also be committed and clean before either
+authorized Host path is edited. Resolve and record both full planning SHAs, then
+require them as HEAD ancestors. Before RED, require
+`git diff --quiet HEAD -- host/update_engine.py host/test_update_engine_resume.py`
+and require the base-to-HEAD Host diff to be absent; after implementation these
+two paths are the only newly authorized Host delta.
+
+Run this fail-closed precondition before writing tests:
+
+```powershell
+$ErrorActionPreference='Stop'
+$base='0dbb4852931b50153fb898b03129ae0092c46404'
+$acceptedSpecCommit='249b1a3750b50db1336fb39661db9306355a1a18'
+$plan='docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md'
+$spec='docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md'
+foreach ($path in @($plan,$spec)) {
+    & git cat-file -e "HEAD:$path"
+    if ($LASTEXITCODE -ne 0) { throw "Promotion authorization path is not committed: $path" }
+    & git diff --quiet -- $path
+    if ($LASTEXITCODE -ne 0) { throw "Promotion authorization path has unstaged changes: $path" }
+    & git diff --cached --quiet -- $path
+    if ($LASTEXITCODE -ne 0) { throw "Promotion authorization path is staged: $path" }
+}
+$head=@(& git rev-parse HEAD)
+$planHead=@(& git log -1 --format=%H HEAD -- $plan)
+$specHead=@(& git log -1 --format=%H HEAD -- $spec)
+if (
+    $LASTEXITCODE -ne 0 -or
+    $head.Count -ne 1 -or
+    $planHead.Count -ne 1 -or
+    $specHead.Count -ne 1 -or
+    $head[0].Trim() -cne $planHead[0].Trim()
+) { throw 'The revised Plan E plan is not the current committed HEAD' }
+$planPaths=@(& git diff-tree --no-commit-id --name-only --no-renames -r $planHead[0].Trim())
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect promotion plan commit paths' }
+$planSubject=@(& git show -s --format=%s $planHead[0].Trim())
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect promotion plan commit subject' }
+if (
+    $planPaths.Count -ne 1 -or $planPaths[0] -cne $plan -or
+    $planSubject.Count -ne 1 -or $planSubject[0] -cne 'docs(update): harden Windows promotion execution plan'
+) { throw 'Promotion plan commit path or subject is invalid' }
+foreach ($commit in @($planHead[0].Trim(),$specHead[0].Trim())) {
+    if ($commit -notmatch '^[0-9a-f]{40}$') { throw 'Invalid promotion planning SHA' }
+    & git merge-base --is-ancestor $commit HEAD
+    if ($LASTEXITCODE -ne 0) { throw "Promotion planning SHA is not a HEAD ancestor: $commit" }
+    "Promotion planning commit: $commit"
+}
+if ($specHead[0].Trim() -cne $acceptedSpecCommit) {
+    throw 'Windows promotion retry spec is not the accepted commit'
+}
+& git cat-file -e "$acceptedSpecCommit`:$spec"
+if ($LASTEXITCODE -ne 0) { throw 'Accepted promotion spec commit does not contain the spec' }
+& git merge-base --is-ancestor $base HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Plan E base is not a HEAD ancestor' }
+$authorized=@('host/update_engine.py','host/test_update_engine_resume.py')
+foreach ($path in $authorized) {
+    & git cat-file -e "$base`:$path"
+    if ($LASTEXITCODE -ne 0) { throw "Authorized Host path is absent at base: $path" }
+}
+$hostDelta=@(& git diff --name-only --no-renames "$base..HEAD" -- $authorized)
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect authorized Host baseline' }
+if ($hostDelta.Count -ne 0) { throw 'Authorized Host paths changed before Step 0 RED' }
+& git diff --quiet -- $authorized
+if ($LASTEXITCODE -ne 0) { throw 'Authorized Host paths have unstaged changes before Step 0 RED' }
+& git diff --cached --quiet -- $authorized
+if ($LASTEXITCODE -ne 0) { throw 'Authorized Host paths are staged before Step 0 RED' }
+```
+Before editing production, add a focused `PreparingPromotionRetryTests` class to
+`host/test_update_engine_resume.py` with these exact tests:
+
+```text
+test_windows_access_denied_retries_atomic_preparing_promotion
+test_windows_sharing_errors_32_and_33_are_retryable
+test_persistent_windows_promotion_lock_stops_after_three_attempts
+test_non_windows_or_unlisted_promotion_errors_are_not_retried
+test_preparing_promotion_revalidates_before_and_after_sleep
+test_preparing_promotion_revalidation_rejects_every_authority_mismatch
+test_preparing_promotion_hooks_wrap_the_logical_operation_once
+test_update_engine_constructor_signature_remains_frozen
+```
+
+Update the existing `test_unittest_class_map_is_exact` expected class set in the
+same test-first edit to include `PreparingPromotionRetryTests`. That existing
+meta-test must remain GREEN while the seven new behavior selectors provide RED.
+
+The revalidation mismatch matrix covers at both failure/pre-sleep and post-sleep
+checkpoints: every field of `transition(staging, PREPARED)` independently
+(schema version, transaction ID, phase, initiator, target/prior version,
+fresh-install, ownership digest, failure/reason/original failure, rollback-from,
+initiating process, `ownership_path`, and `seed_receipt`),
+ownership bytes/digest, probe manifest, Host tree, Extension tree, extra
+workspace topology, `updates_root`/`transactions_root`/preparing/descendant
+symlink or reparse classification, destination creation, and state-read error.
+Pre-sleep rows assert zero sleeper calls. Exact helper-call counts are one for
+first-attempt success, three for one-retry success, and five for exhausted three
+attempts. Constructor signature is positional `install_root` plus keyword-only
+`mutex_factory` and `hooks` only.
+
+Every success/failure row asserts `_replace_path` receives exactly
+`(paths.preparing_root, paths.transaction_root)`. Retry success asserts final
+workspace exact, preparing absent, active exact, and a byte snapshot of every
+live product path unchanged. Exhaustion asserts active/final absent, preparing
+still exact, live snapshot unchanged, outer exception exactly
+`PreparedTransactionConflict`, and `exception.__cause__ is final_os_error`.
+Source disappearance/target appearance/revalidation errors assert no subsequent
+replace and no sleeper when they occur before sleep. Hook tests assert one
+before and one after event on success, one before and zero after on exhausted
+failure, regardless of replace attempts.
+
+Replace the test module's complete leading import section with this exact block:
+
+```python
+import ast
+import inspect
+import json
+import os
+import shutil
+import stat
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+import update_engine
+
+from package_archive import validate_staged_package
+from package_manifest import generate_release_documents, write_release_documents
+from product_info import VERSION
+from test_update_engine_host import TX
+from test_update_support import (
+    FakeMutationMutex,
+    FaultController,
+    InjectedCrash,
+    InjectedFault,
+    RecordingHooks,
+)
+from update_engine import (
+    PreparedTransactionConflict,
+    UpdateEngine,
+    UpdateEngineError,
+    UpdateEngineHooks,
+    UpdateStateConflict,
+)
+from update_journal import (
+    ActiveTransaction,
+    InitiatingProcessIdentity,
+    JournalPhase,
+    JournalReason,
+    TransactionPaths,
+    UpdateInitiator,
+    read_active_transaction,
+)
+```
+
+Insert this exact complete class immediately before
+`class OwnershipBoundaryTests`. It is the complete test and evidence-writer
+contract; do not add, omit, or rewrite helpers or methods:
+
+<!-- PROMOTION_TEST_CLASS_START -->
+```python
+class PreparingPromotionRetryTests(unittest.TestCase):
+    PROMOTION_LABEL = "workspace:promote-preparing"
+
+    JOURNAL_MUTATIONS = {
+        "journal-schema-version": ("schema_version", 2),
+        "journal-transaction-id": (
+            "transaction_id",
+            "ffffffffffffffffffffffffffffffff",
+        ),
+        "journal-phase": ("phase", "staging"),
+        "journal-initiator": ("initiator", "installer"),
+        "journal-target-version": ("target_version", "9.9.9"),
+        "journal-prior-version": ("prior_version", "old-version"),
+        "journal-fresh-install": ("fresh_install", True),
+        "journal-ownership-digest": ("ownership_sha256", "0" * 64),
+        "journal-reason-code": ("reason_code", "host_install_failed"),
+        "journal-original-failure": (
+            "original_failure_code",
+            "host_install_failed",
+        ),
+        "journal-rollback-from": ("rollback_from", "host-installed"),
+        "journal-initiating-process": (
+            "initiating_process",
+            {"pid": 7, "creation_token": "mutated"},
+        ),
+        "journal-ownership-path": ("ownership_path", "other.json"),
+        "journal-seed-receipt": (
+            "seed_receipt",
+            {
+                "path": "config.json",
+                "expected_sha256": "1" * 64,
+                "seed_installed": False,
+                "observed_live_sha256": None,
+            },
+        ),
+    }
+
+    REVALIDATION_MUTATIONS = (
+        "source-disappears",
+        "destination-created",
+        *JOURNAL_MUTATIONS,
+        "ownership-bytes",
+        "probe-manifest",
+        "host-digest",
+        "host-inventory",
+        "extension-digest",
+        "extension-inventory",
+        "extra-workspace-topology",
+        "updates-root-symlink",
+        "updates-root-reparse",
+        "transactions-root-symlink",
+        "transactions-root-reparse",
+        "preparing-root-symlink",
+        "preparing-root-reparse",
+        "descendant-symlink",
+        "descendant-reparse",
+        "descendant-unsupported",
+        "updates-root-canonical-escape",
+        "transactions-root-canonical-escape",
+        "preparing-root-canonical-escape",
+        "destination-canonical-escape",
+        "state-read-error",
+    )
+
+    def _require_retry_implementation(self):
+        missing = [
+            name
+            for name in (
+                "_replace_path",
+                "_sleep",
+                "_is_windows",
+                "PROMOTION_RETRY_DELAYS",
+                "PROMOTION_TRANSIENT_WINERRORS",
+            )
+            if not hasattr(update_engine, name)
+        ]
+        missing.extend(
+            name
+            for name in (
+                "_promote_preparing_with_retry",
+                "_require_preparing_promotion_candidate",
+            )
+            if not hasattr(UpdateEngine, name)
+        )
+        self.assertEqual(
+            missing,
+            [],
+            "preparing-promotion retry implementation is absent",
+        )
+        self.assertIs(update_engine._replace_path, os.replace)
+        self.assertIs(update_engine._sleep, time.sleep)
+        self.assertEqual(update_engine._is_windows, os.name == "nt")
+        self.assertEqual(update_engine.PROMOTION_RETRY_DELAYS, (0.05, 0.2))
+        self.assertEqual(
+            update_engine.PROMOTION_TRANSIENT_WINERRORS,
+            frozenset((5, 32, 33)),
+        )
+
+    @staticmethod
+    def _windows_error(winerror):
+        error = OSError("synthetic promotion failure")
+        error.winerror = winerror
+        return error
+
+    @staticmethod
+    def _canonical_json_bytes(value):
+        return (
+            json.dumps(
+                value,
+                ensure_ascii=True,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode("utf-8")
+
+    @staticmethod
+    def _tree_snapshot(root):
+        if not root.exists():
+            return None
+        result = {"": ("directory", None)}
+        for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+            relative = path.relative_to(root).as_posix()
+            info = path.lstat()
+            if stat.S_ISDIR(info.st_mode):
+                result[relative] = ("directory", None)
+            elif stat.S_ISREG(info.st_mode):
+                result[relative] = ("file", path.read_bytes())
+            else:
+                result[relative] = ("other", None)
+        return result
+
+    def _apply_revalidation_mutation(self, name, paths, faults, external):
+        if name == "source-disappears":
+            shutil.rmtree(paths.preparing_root)
+            return
+        if name == "destination-created":
+            paths.transaction_root.mkdir()
+            return
+        if name in self.JOURNAL_MUTATIONS:
+            key, replacement = self.JOURNAL_MUTATIONS[name]
+            value = json.loads(
+                paths.preparing_journal.read_text(encoding="utf-8")
+            )
+            value[key] = replacement
+            paths.preparing_journal.write_bytes(self._canonical_json_bytes(value))
+            return
+        if name == "ownership-bytes":
+            value = json.loads(
+                paths.preparing_ownership.read_text(encoding="utf-8")
+            )
+            value["host_backup_roots"] = ["unexpected"]
+            paths.preparing_ownership.write_bytes(
+                self._canonical_json_bytes(value)
+            )
+            return
+        if name == "probe-manifest":
+            paths.preparing_probe_manifest.write_bytes(
+                paths.preparing_probe_manifest.read_bytes() + b" "
+            )
+            return
+        if name == "host-digest":
+            (paths.preparing_staged_host / "helper.dll").write_bytes(
+                b"mutated-host"
+            )
+            return
+        if name == "host-inventory":
+            (paths.preparing_staged_host / "unexpected.dll").write_bytes(
+                b"unexpected"
+            )
+            return
+        if name == "extension-digest":
+            (paths.preparing_staged_extension / "assets/app.js").write_bytes(
+                b"mutated-extension"
+            )
+            return
+        if name == "extension-inventory":
+            (paths.preparing_staged_extension / "unexpected.js").write_bytes(
+                b"unexpected"
+            )
+            return
+        if name == "extra-workspace-topology":
+            (paths.preparing_root / "unexpected.bin").write_bytes(b"unexpected")
+            return
+
+        lstat_targets = {
+            "updates-root": paths.updates_root,
+            "transactions-root": paths.transactions_root,
+            "preparing-root": paths.preparing_root,
+            "descendant": paths.preparing_staged_host / "_internal",
+        }
+        if name.endswith("-symlink") or name.endswith("-reparse"):
+            component, kind = name.rsplit("-", 1)
+            faults["lstat"] = (lstat_targets[component], kind)
+            return
+        if name == "descendant-unsupported":
+            faults["lstat"] = (
+                paths.preparing_staged_host / "helper.dll",
+                "unsupported",
+            )
+            return
+
+        resolve_targets = {
+            "updates-root": paths.updates_root,
+            "transactions-root": paths.transactions_root,
+            "preparing-root": paths.preparing_root,
+            "destination": paths.transaction_root,
+        }
+        if name.endswith("-canonical-escape"):
+            component = name.removesuffix("-canonical-escape")
+            faults["resolve"] = (resolve_targets[component], external)
+            return
+        if name == "state-read-error":
+            faults["read_text"] = paths.preparing_journal
+            return
+        raise AssertionError(f"unknown revalidation mutation: {name}")
+
+    def _exercise_promotion(
+        self,
+        replace_outcomes,
+        *,
+        is_windows=True,
+        mutation=None,
+        hook_fault=None,
+    ):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            fixture = MatrixHarness(root, "installed")
+            paths = TransactionPaths.for_install(fixture.install, TX)
+            external = root / "external"
+            external.mkdir()
+            if hook_fault is not None:
+                fixture.controller.arm(
+                    hook_fault,
+                    self.PROMOTION_LABEL,
+                    InjectedFault,
+                )
+
+            live_before = live_snapshot(fixture.install)
+            real_replace = os.replace
+            real_lstat = Path.lstat
+            real_resolve = Path.resolve
+            real_read_text = Path.read_text
+            real_validator = fixture.engine._require_preparing_promotion_candidate
+            replace_calls = []
+            replacement_errors = []
+            delays = []
+            sequence = []
+            validation_count = 0
+            candidate_snapshot = None
+            mutation_applied = False
+            faults = {"lstat": None, "resolve": None, "read_text": None}
+
+            def apply_mutation_once():
+                nonlocal mutation_applied
+                if mutation_applied:
+                    return
+                self._apply_revalidation_mutation(
+                    mutation[1],
+                    paths,
+                    faults,
+                    external,
+                )
+                mutation_applied = True
+
+            def validating(*args):
+                nonlocal candidate_snapshot, validation_count
+                validation_count += 1
+                sequence.append(("validate", validation_count))
+                if candidate_snapshot is None:
+                    candidate_snapshot = self._tree_snapshot(paths.preparing_root)
+                if (
+                    mutation is not None
+                    and mutation[0] == "initial"
+                    and validation_count == 1
+                ):
+                    apply_mutation_once()
+                if (
+                    mutation is not None
+                    and mutation[0] == "pre-sleep"
+                    and validation_count == 2
+                ):
+                    apply_mutation_once()
+                return real_validator(*args)
+
+            def replacing(source, destination):
+                attempt = len(replace_calls) + 1
+                replace_calls.append((Path(source), Path(destination)))
+                sequence.append(("replace", attempt))
+                if callable(replace_outcomes):
+                    action = replace_outcomes(attempt)
+                elif attempt <= len(replace_outcomes):
+                    action = replace_outcomes[attempt - 1]
+                else:
+                    action = AssertionError(
+                        "unexpected additional promotion attempt"
+                    )
+                if action is None:
+                    return real_replace(source, destination)
+                if not isinstance(action, BaseException):
+                    raise AssertionError("invalid replacement outcome")
+                replacement_errors.append(action)
+                raise action
+
+            def sleeping(delay):
+                delays.append(delay)
+                sequence.append(("sleep", delay))
+                if mutation is not None and mutation[0] == "post-sleep":
+                    apply_mutation_once()
+
+            def lstat(path, *args, **kwargs):
+                target = faults["lstat"]
+                if target is None or path != target[0]:
+                    return real_lstat(path, *args, **kwargs)
+                info = real_lstat(path, *args, **kwargs)
+                kind = target[1]
+                if kind == "symlink":
+                    return SimpleNamespace(
+                        st_mode=stat.S_IFLNK | stat.S_IMODE(info.st_mode),
+                        st_file_attributes=0,
+                    )
+                if kind == "reparse":
+                    return SimpleNamespace(
+                        st_mode=info.st_mode,
+                        st_file_attributes=0x400,
+                    )
+                return SimpleNamespace(
+                    st_mode=stat.S_IFIFO,
+                    st_file_attributes=0,
+                )
+
+            def resolve(path, *args, **kwargs):
+                target = faults["resolve"]
+                if target is not None and path == target[0]:
+                    return target[1]
+                return real_resolve(path, *args, **kwargs)
+
+            def read_text(path, *args, **kwargs):
+                if (
+                    faults["read_text"] is not None
+                    and path == faults["read_text"]
+                ):
+                    raise OSError("synthetic state-read failure")
+                return real_read_text(path, *args, **kwargs)
+
+            result = None
+            outcome_error = None
+            with (
+                mock.patch.object(update_engine, "_replace_path", replacing),
+                mock.patch.object(update_engine, "_sleep", sleeping),
+                mock.patch.object(update_engine, "_is_windows", is_windows),
+                mock.patch.object(
+                    fixture.engine,
+                    "_require_preparing_promotion_candidate",
+                    side_effect=validating,
+                ),
+                mock.patch.object(Path, "lstat", lstat),
+                mock.patch.object(Path, "resolve", resolve),
+                mock.patch.object(Path, "read_text", read_text),
+            ):
+                try:
+                    result = fixture.prepare()
+                except Exception as error:
+                    outcome_error = error
+
+            active_value = None
+            active_error = None
+            if paths.active.exists():
+                try:
+                    active_value = read_active_transaction(paths.active)
+                except Exception as error:
+                    active_error = error
+            events = tuple(fixture.recording.events)
+            return {
+                "result": result,
+                "error": outcome_error,
+                "cause": (
+                    outcome_error.__cause__
+                    if outcome_error is not None
+                    else None
+                ),
+                "attempts": len(replace_calls),
+                "replace_calls": tuple(replace_calls),
+                "expected_replace": (
+                    paths.preparing_root,
+                    paths.transaction_root,
+                ),
+                "replacement_errors": tuple(replacement_errors),
+                "delays": tuple(delays),
+                "validations": validation_count,
+                "sequence": tuple(sequence),
+                "candidate_snapshot": candidate_snapshot,
+                "preparing_snapshot": self._tree_snapshot(paths.preparing_root),
+                "final_snapshot": self._tree_snapshot(paths.transaction_root),
+                "preparing_exists": paths.preparing_root.exists(),
+                "final_exists": paths.transaction_root.exists(),
+                "active_exists": paths.active.exists(),
+                "active": active_value,
+                "active_error": active_error,
+                "live_before": live_before,
+                "live_after": live_snapshot(fixture.install),
+                "hook_before": sum(
+                    kind == "before" and label == self.PROMOTION_LABEL
+                    for kind, label in events
+                ),
+                "hook_after": sum(
+                    kind == "after" and label == self.PROMOTION_LABEL
+                    for kind, label in events
+                ),
+            }
+
+    def _assert_replace_calls(self, case, count, label):
+        self.assertEqual(
+            case["replace_calls"],
+            (case["expected_replace"],) * count,
+            label,
+        )
+
+    def _assert_active_is_exact(self, case, label):
+        self.assertIsNone(case["active_error"], label)
+        self.assertEqual(
+            case["active"],
+            ActiveTransaction(1, TX, f"transactions/{TX}/journal.json"),
+            label,
+        )
+
+    def _assert_first_success(self, case, label):
+        self.assertIsNone(case["error"], label)
+        self.assertEqual(case["result"].phase, JournalPhase.PREPARED, label)
+        self.assertEqual(case["attempts"], 1, label)
+        self.assertEqual(case["delays"], (), label)
+        self.assertEqual(case["validations"], 1, label)
+        self._assert_replace_calls(case, 1, label)
+        self.assertFalse(case["preparing_exists"], label)
+        self.assertTrue(case["final_exists"], label)
+        self.assertEqual(case["final_snapshot"], case["candidate_snapshot"], label)
+        self.assertTrue(case["active_exists"], label)
+        self._assert_active_is_exact(case, label)
+        self.assertEqual(case["live_after"], case["live_before"], label)
+        self.assertEqual(case["hook_before"], 1, label)
+        self.assertEqual(case["hook_after"], 1, label)
+
+    def _assert_retry_success(self, case, label):
+        self.assertIsNone(case["error"], label)
+        self.assertEqual(case["result"].phase, JournalPhase.PREPARED, label)
+        self.assertEqual(case["attempts"], 2, label)
+        self.assertEqual(case["delays"], (0.05,), label)
+        self.assertEqual(case["validations"], 3, label)
+        self._assert_replace_calls(case, 2, label)
+        self.assertFalse(case["preparing_exists"], label)
+        self.assertTrue(case["final_exists"], label)
+        self.assertEqual(case["final_snapshot"], case["candidate_snapshot"], label)
+        self.assertTrue(case["active_exists"], label)
+        self._assert_active_is_exact(case, label)
+        self.assertEqual(case["live_after"], case["live_before"], label)
+        self.assertEqual(case["hook_before"], 1, label)
+        self.assertEqual(case["hook_after"], 1, label)
+
+    def _assert_exhausted(self, case, label):
+        self.assertEqual(case["attempts"], 3, label)
+        self.assertEqual(case["delays"], (0.05, 0.2), label)
+        self.assertEqual(case["validations"], 5, label)
+        self._assert_replace_calls(case, 3, label)
+        self.assertIs(type(case["error"]), PreparedTransactionConflict, label)
+        self.assertEqual(len(case["replacement_errors"]), 3, label)
+        self.assertIs(case["cause"], case["replacement_errors"][-1], label)
+        self.assertTrue(case["preparing_exists"], label)
+        self.assertFalse(case["final_exists"], label)
+        self.assertFalse(case["active_exists"], label)
+        self.assertEqual(
+            case["preparing_snapshot"],
+            case["candidate_snapshot"],
+            label,
+        )
+        self.assertEqual(case["live_after"], case["live_before"], label)
+        self.assertEqual(case["hook_before"], 1, label)
+        self.assertEqual(case["hook_after"], 0, label)
+
+    def _assert_not_retried(self, case, original_error, label):
+        self.assertEqual(case["attempts"], 1, label)
+        self.assertEqual(case["delays"], (), label)
+        self.assertEqual(case["validations"], 1, label)
+        self._assert_replace_calls(case, 1, label)
+        self.assertIs(type(case["error"]), PreparedTransactionConflict, label)
+        self.assertIs(case["cause"], original_error, label)
+        self.assertTrue(case["preparing_exists"], label)
+        self.assertFalse(case["final_exists"], label)
+        self.assertFalse(case["active_exists"], label)
+        self.assertEqual(
+            case["preparing_snapshot"],
+            case["candidate_snapshot"],
+            label,
+        )
+        self.assertEqual(case["live_after"], case["live_before"], label)
+        self.assertEqual(case["hook_before"], 1, label)
+        self.assertEqual(case["hook_after"], 0, label)
+
+    def _write_promotion_evidence(self, value):
+        raw_path = os.environ.get("DH_PROMOTION_EVIDENCE")
+        if raw_path is None:
+            return
+        path = Path(raw_path)
+        self.assertTrue(path.is_absolute())
+        self.assertTrue(path.parent.is_dir())
+        self.assertFalse(path.exists())
+        encoded = self._canonical_json_bytes(value)
+        self.assertEqual(json.loads(encoded.decode("utf-8")), value)
+        with path.open("xb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+
+    def test_windows_access_denied_retries_atomic_preparing_promotion(self):
+        self._require_retry_implementation()
+        access_denied = self._windows_error(5)
+        retry = self._exercise_promotion((access_denied, None))
+        self._assert_retry_success(retry, "WinError 5 retry success")
+        first_success = self._exercise_promotion((None,))
+        self._assert_first_success(first_success, "first-attempt promotion success")
+        exhausted = self._exercise_promotion(
+            lambda _attempt: self._windows_error(32)
+        )
+        self._assert_exhausted(exhausted, "aggregate exhausted promotion")
+        self._write_promotion_evidence(
+            {
+                "attempts": {
+                    "transient_then_success": retry["attempts"],
+                    "exhausted": exhausted["attempts"],
+                },
+                "delays": {
+                    "transient_then_success": list(retry["delays"]),
+                    "exhausted": list(exhausted["delays"]),
+                },
+                "checkpoint_calls": {
+                    "first_success": first_success["validations"],
+                    "one_retry": retry["validations"],
+                    "exhausted": exhausted["validations"],
+                },
+                "hook_counts": {
+                    "retry_success": {
+                        "before": retry["hook_before"],
+                        "after": retry["hook_after"],
+                    },
+                    "exhausted": {
+                        "before": exhausted["hook_before"],
+                        "after": exhausted["hook_after"],
+                    },
+                },
+                "state_and_cause": "passed",
+            }
+        )
+
+    def test_windows_sharing_errors_32_and_33_are_retryable(self):
+        self._require_retry_implementation()
+        for winerror in (32, 33):
+            injected = self._windows_error(winerror)
+            case = self._exercise_promotion((injected, None))
+            self._assert_retry_success(case, f"WinError {winerror} retry")
+        permission_error = PermissionError("synthetic access denied")
+        permission_error.winerror = 5
+        permission_case = self._exercise_promotion((permission_error, None))
+        self._assert_retry_success(
+            permission_case,
+            "PermissionError WinError 5 retry",
+        )
+
+    def test_persistent_windows_promotion_lock_stops_after_three_attempts(self):
+        self._require_retry_implementation()
+        case = self._exercise_promotion(lambda _attempt: self._windows_error(32))
+        self._assert_exhausted(case, "persistent sharing violation")
+
+    def test_non_windows_or_unlisted_promotion_errors_are_not_retried(self):
+        self._require_retry_implementation()
+
+        class IntSubclass(int):
+            pass
+
+        non_os_error = RuntimeError("generic promotion failure")
+        non_os_error.winerror = 5
+        cases = (
+            ("non-Windows", False, self._windows_error(5)),
+            ("unlisted", True, self._windows_error(87)),
+            ("missing-winerror", True, OSError("generic promotion failure")),
+            ("non-OSError", True, non_os_error),
+            ("boolean-winerror", True, self._windows_error(True)),
+            (
+                "int-subclass-winerror",
+                True,
+                self._windows_error(IntSubclass(5)),
+            ),
+        )
+        for label, is_windows, injected in cases:
+            case = self._exercise_promotion((injected,), is_windows=is_windows)
+            self._assert_not_retried(case, injected, label)
+
+    def test_preparing_promotion_revalidates_before_and_after_sleep(self):
+        self._require_retry_implementation()
+        first = self._exercise_promotion((None,))
+        self.assertEqual(first["sequence"], (("validate", 1), ("replace", 1)))
+        self._assert_first_success(first, "first-success sequence")
+        retry = self._exercise_promotion((self._windows_error(5), None))
+        self.assertEqual(
+            retry["sequence"],
+            (
+                ("validate", 1),
+                ("replace", 1),
+                ("validate", 2),
+                ("sleep", 0.05),
+                ("validate", 3),
+                ("replace", 2),
+            ),
+        )
+        self._assert_retry_success(retry, "one-retry sequence")
+        exhausted = self._exercise_promotion(
+            lambda _attempt: self._windows_error(33)
+        )
+        self.assertEqual(
+            exhausted["sequence"],
+            (
+                ("validate", 1),
+                ("replace", 1),
+                ("validate", 2),
+                ("sleep", 0.05),
+                ("validate", 3),
+                ("replace", 2),
+                ("validate", 4),
+                ("sleep", 0.2),
+                ("validate", 5),
+                ("replace", 3),
+            ),
+        )
+        self._assert_exhausted(exhausted, "exhausted sequence")
+        initial_corruption = self._exercise_promotion(
+            lambda _attempt: self._windows_error(5),
+            mutation=("initial", "extra-workspace-topology"),
+        )
+        self.assertEqual(initial_corruption["sequence"], (("validate", 1),))
+        self.assertIs(
+            type(initial_corruption["error"]),
+            PreparedTransactionConflict,
+        )
+        self.assertEqual(initial_corruption["attempts"], 0)
+        self.assertEqual(initial_corruption["delays"], ())
+        self.assertEqual(initial_corruption["validations"], 1)
+        self.assertTrue(initial_corruption["preparing_exists"])
+        self.assertFalse(initial_corruption["final_exists"])
+        self.assertFalse(initial_corruption["active_exists"])
+        self.assertEqual(
+            initial_corruption["live_after"],
+            initial_corruption["live_before"],
+        )
+        self.assertEqual(initial_corruption["hook_before"], 1)
+        self.assertEqual(initial_corruption["hook_after"], 0)
+
+    def test_preparing_promotion_revalidation_rejects_every_authority_mismatch(
+        self,
+    ):
+        self._require_retry_implementation()
+        for checkpoint in ("pre-sleep", "post-sleep"):
+            for mutation in self.REVALIDATION_MUTATIONS:
+                label = f"{checkpoint}:{mutation}"
+                case = self._exercise_promotion(
+                    lambda _attempt: self._windows_error(5),
+                    mutation=(checkpoint, mutation),
+                )
+                self.assertIs(
+                    type(case["error"]),
+                    PreparedTransactionConflict,
+                    label,
+                )
+                self._assert_replace_calls(case, 1, label)
+                self.assertEqual(
+                    case["delays"],
+                    () if checkpoint == "pre-sleep" else (0.05,),
+                    label,
+                )
+                self.assertEqual(
+                    case["validations"],
+                    2 if checkpoint == "pre-sleep" else 3,
+                    label,
+                )
+                self.assertFalse(case["active_exists"], label)
+                self.assertEqual(case["live_after"], case["live_before"], label)
+                self.assertEqual(case["hook_before"], 1, label)
+                self.assertEqual(case["hook_after"], 0, label)
+                self.assertEqual(
+                    case["preparing_exists"],
+                    mutation != "source-disappears",
+                    label,
+                )
+                self.assertEqual(
+                    case["final_exists"],
+                    mutation == "destination-created",
+                    label,
+                )
+
+    def test_preparing_promotion_hooks_wrap_the_logical_operation_once(self):
+        self._require_retry_implementation()
+        retry = self._exercise_promotion((self._windows_error(5), None))
+        self._assert_retry_success(retry, "retry hook counts")
+        exhausted = self._exercise_promotion(
+            lambda _attempt: self._windows_error(32)
+        )
+        self._assert_exhausted(exhausted, "exhausted hook counts")
+        before_failure = self._exercise_promotion((None,), hook_fault="before")
+        self.assertIs(type(before_failure["error"]), PreparedTransactionConflict)
+        self.assertIsInstance(before_failure["cause"], InjectedFault)
+        self.assertEqual(before_failure["attempts"], 0)
+        self.assertEqual(before_failure["delays"], ())
+        self.assertEqual(before_failure["validations"], 0)
+        self.assertEqual(before_failure["hook_before"], 1)
+        self.assertEqual(before_failure["hook_after"], 0)
+        self.assertTrue(before_failure["preparing_exists"])
+        self.assertFalse(before_failure["final_exists"])
+        self.assertFalse(before_failure["active_exists"])
+        after_failure = self._exercise_promotion((None,), hook_fault="after")
+        self.assertIs(type(after_failure["error"]), PreparedTransactionConflict)
+        self.assertIsInstance(after_failure["cause"], InjectedFault)
+        self._assert_replace_calls(after_failure, 1, "after-hook failure")
+        self.assertEqual(after_failure["attempts"], 1)
+        self.assertEqual(after_failure["delays"], ())
+        self.assertEqual(after_failure["validations"], 1)
+        self.assertEqual(after_failure["hook_before"], 1)
+        self.assertEqual(after_failure["hook_after"], 1)
+        self.assertFalse(after_failure["preparing_exists"])
+        self.assertTrue(after_failure["final_exists"])
+        self.assertFalse(after_failure["active_exists"])
+        self.assertEqual(after_failure["live_after"], after_failure["live_before"])
+
+    def test_update_engine_constructor_signature_remains_frozen(self):
+        signature = inspect.signature(UpdateEngine)
+        parameters = signature.parameters
+        self.assertEqual(
+            tuple(parameters),
+            ("install_root", "mutex_factory", "hooks"),
+        )
+        self.assertIs(
+            parameters["install_root"].kind,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+        self.assertIs(
+            parameters["install_root"].default,
+            inspect.Parameter.empty,
+        )
+        self.assertIs(
+            parameters["mutex_factory"].kind,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+        self.assertIs(
+            parameters["mutex_factory"].default,
+            update_engine.create_windows_mutation_mutex,
+        )
+        self.assertIs(
+            parameters["hooks"].kind,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+        self.assertIsNone(parameters["hooks"].default)
+        self.assertIs(signature.return_annotation, inspect.Signature.empty)
+```
+<!-- PROMOTION_TEST_CLASS_END -->
+
+In `OwnershipBoundaryTests.test_unittest_class_map_is_exact`, add this exact
+member to the expected class-name set:
+
+```python
+"PreparingPromotionRetryTests",
+```
+
+Run the focused RED from the repository root in a fresh isolated six-directory
+environment with `PYTHONPATH=host`:
+
+```powershell
+$ErrorActionPreference='Stop'
+$root=Join-Path ([IO.Path]::GetTempPath()) ('dh-promotion-red-' + [guid]::NewGuid().ToString('N'))
+$envNames=@('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP','PYTHONPATH','DH_PROMOTION_EVIDENCE')
+$saved=@{}
+foreach ($name in $envNames) { $saved[$name]=[Environment]::GetEnvironmentVariable($name,'Process') }
+$exit=99
+try {
+    New-Item -ItemType Directory -Path $root | Out-Null
+    foreach ($name in @('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP')) {
+        $value=Join-Path $root $name.ToLowerInvariant()
+        New-Item -ItemType Directory -Path $value | Out-Null
+        [Environment]::SetEnvironmentVariable($name,$value,'Process')
+    }
+    [Environment]::SetEnvironmentVariable('PYTHONPATH',(Resolve-Path -LiteralPath 'host').Path,'Process')
+    Remove-Item -LiteralPath 'Env:DH_PROMOTION_EVIDENCE' -ErrorAction SilentlyContinue
+    & 'host\venv\Scripts\python.exe' -m unittest host.test_update_engine_resume.PreparingPromotionRetryTests -v
+    $exit=$LASTEXITCODE
+} finally {
+    foreach ($name in $envNames) {
+        if ($null -eq $saved[$name]) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
+        else { [Environment]::SetEnvironmentVariable($name,$saved[$name],'Process') }
+    }
+    if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+}
+if ($exit -eq 0) { throw 'Promotion retry RED unexpectedly passed' }
+if ($exit -ne 1) { throw "Promotion retry RED returned unexpected exit code: $exit" }
+```
+
+The class-level command above is inventory only. Capture valid RED evidence by
+running each of these seven behavior selectors independently in a fresh copy of
+the same environment block and capturing `2>&1` output:
+
+```text
+test_windows_access_denied_retries_atomic_preparing_promotion
+test_windows_sharing_errors_32_and_33_are_retryable
+test_persistent_windows_promotion_lock_stops_after_three_attempts
+test_non_windows_or_unlisted_promotion_errors_are_not_retried
+test_preparing_promotion_revalidates_before_and_after_sleep
+test_preparing_promotion_revalidation_rejects_every_authority_mismatch
+test_preparing_promotion_hooks_wrap_the_logical_operation_once
+```
+
+For each selector, require exit 1, one verbose line containing the exact selector
+and `... FAIL`, `Ran 1 test`, and `FAILED (failures=1)`. Reject output containing
+`ERROR`, `ImportError`, `ModuleNotFoundError`, or `skipped`. Run
+`test_update_engine_constructor_signature_remains_frozen` separately and require
+exit 0, exact selector plus `... ok`, `Ran 1 test`, and final `OK`. Thus seven
+behavior failures and one constructor pass are mandatory; missing/skipped/setup
+tests cannot count as RED.
+
+Use this self-contained executor for every per-selector RED, GREEN, and mutation
+run; each tool call gets a new function definition and fresh environment:
+
+<!-- PROMOTION_EXECUTOR_START -->
+```powershell
+function Invoke-PromotionTest {
+    param(
+        [Parameter(Mandatory=$true)][string]$Method,
+        [Parameter(Mandatory=$true)][int]$ExpectedExit,
+        [Parameter(Mandatory=$true)][string]$ExpectedStatus,
+        [string]$EvidencePath
+    )
+    $root=Join-Path ([IO.Path]::GetTempPath()) ('dh-promotion-one-' + [guid]::NewGuid().ToString('N'))
+    $envNames=@('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP','PYTHONPATH','DH_PROMOTION_EVIDENCE')
+    $saved=@{}
+    foreach ($name in $envNames) { $saved[$name]=[Environment]::GetEnvironmentVariable($name,'Process') }
+    $lines=@()
+    $exit=99
+    try {
+        New-Item -ItemType Directory -Path $root | Out-Null
+        foreach ($name in @('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP')) {
+            $value=Join-Path $root $name.ToLowerInvariant()
+            New-Item -ItemType Directory -Path $value | Out-Null
+            [Environment]::SetEnvironmentVariable($name,$value,'Process')
+        }
+        [Environment]::SetEnvironmentVariable('PYTHONPATH',(Resolve-Path -LiteralPath 'host').Path,'Process')
+        if ($EvidencePath) {
+            [Environment]::SetEnvironmentVariable('DH_PROMOTION_EVIDENCE',$EvidencePath,'Process')
+        } else {
+            Remove-Item -LiteralPath 'Env:DH_PROMOTION_EVIDENCE' -ErrorAction SilentlyContinue
+        }
+        $selector="host.test_update_engine_resume.PreparingPromotionRetryTests.$Method"
+        $lines=@(& 'host\venv\Scripts\python.exe' -m unittest $selector -v 2>&1)
+        $exit=$LASTEXITCODE
+    } finally {
+        foreach ($name in $envNames) {
+            if ($null -eq $saved[$name]) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
+            else { [Environment]::SetEnvironmentVariable($name,$saved[$name],'Process') }
+        }
+        if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+    }
+    $text=$lines -join "`n"
+    if ($exit -ne $ExpectedExit) { throw "$Method returned $exit instead of $ExpectedExit`n$text" }
+    $statusPattern='(?m)^' + [regex]::Escape($Method) + ' .* \.\.\. ' + [regex]::Escape($ExpectedStatus) + '\r?$'
+    if ([regex]::Matches($text,$statusPattern).Count -ne 1) { throw "$Method status line mismatch`n$text" }
+    if ($text -cnotmatch '(?m)^Ran 1 test in [0-9.]+s\r?$') { throw "$Method did not run exactly one test`n$text" }
+    if ($ExpectedStatus -eq 'FAIL') {
+        if ($text -cnotmatch '(?m)^FAILED \(failures=1\)\r?$') { throw "$Method failure summary mismatch`n$text" }
+    } elseif ($text -cnotmatch '(?m)^OK\r?$') { throw "$Method OK summary missing`n$text" }
+    if ($text -cmatch '(?m)(^ERROR:|^ImportError:|^ModuleNotFoundError:|\bskipped\b)') { throw "$Method had invalid test output`n$text" }
+    return $text
+}
+```
+<!-- PROMOTION_EXECUTOR_END -->
+
+Before invoking any later fresh shell, create the ignored UTF-8-no-BOM script
+`.superpowers/sdd/invoke-promotion-test.ps1` with `apply_patch`; its complete
+contents are the exact function fence between the two promotion-executor markers
+above and nothing else. Read it back,
+require exactly one `function Invoke-PromotionTest`, compute SHA-256, and record
+the hash. Every later RED/GREEN/mutation block begins with:
+
+```powershell
+function Import-PromotionExecutor {
+    $executor='.superpowers/sdd/invoke-promotion-test.ps1'
+    $hashPath='.superpowers/sdd/promotion-executor.sha256'
+    $expected=[IO.File]::ReadAllText((Join-Path (Get-Location) $hashPath),[Text.UTF8Encoding]::new($false)).Trim()
+    $actual=(Get-FileHash -Algorithm SHA256 -LiteralPath $executor).Hash.ToLowerInvariant()
+    if ($expected -notmatch '^[0-9a-f]{64}$' -or $actual -cne $expected) {
+        throw 'Promotion executor hash mismatch before import'
+    }
+    . $executor
+    $definition=(Get-Command Invoke-PromotionTest -CommandType Function).Definition
+    Set-Item -Path Function:global:Invoke-PromotionTest -Value $definition
+}
+Import-PromotionExecutor
+```
+
+and verifies the script is a leaf, has no BOM, matches the recorded SHA, and is
+ignored with `git check-ignore -q`. The script is a
+Task 9 evidence artifact, never staged; its SHA-256 is recorded in the final
+report. This satisfies the fresh-shell rule without relying on prior function
+state.
+
+Immediately validate it:
+
+```powershell
+$executor='.superpowers/sdd/invoke-promotion-test.ps1'
+if (-not (Test-Path -LiteralPath $executor -PathType Leaf)) { throw 'Promotion executor is missing' }
+$bytes=[IO.File]::ReadAllBytes((Join-Path (Get-Location) $executor))
+if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { throw 'Promotion executor has a BOM' }
+$text=[Text.UTF8Encoding]::new($false,$true).GetString($bytes)
+if ([regex]::Matches($text,'(?m)^function Invoke-PromotionTest \{$').Count -ne 1) { throw 'Promotion executor body is invalid' }
+$planText=@(& git show 'HEAD:docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md') -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'Could not read committed Plan E plan' }
+$match=[regex]::Match(
+    $planText,
+    '(?s)<!-- PROMOTION_EXECUTOR_START -->\n```powershell\n(.*?)\n```\n<!-- PROMOTION_EXECUTOR_END -->'
+)
+if (-not $match.Success) { throw 'Could not extract committed promotion executor' }
+$expectedText=$match.Groups[1].Value + "`n"
+$actualText=($text -replace "`r`n","`n").TrimEnd("`n") + "`n"
+if ($actualText -cne $expectedText) { throw 'Promotion executor differs from committed plan' }
+& git check-ignore -q -- $executor
+if ($LASTEXITCODE -ne 0) { throw 'Promotion executor is not ignored' }
+$executorHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $executor).Hash.ToLowerInvariant()
+$executorHashPath='.superpowers/sdd/promotion-executor.sha256'
+$executorHashTemp="$executorHashPath.tmp"
+foreach ($path in @($executorHashPath,$executorHashTemp)) {
+    if (Test-Path -LiteralPath $path) { throw "Promotion executor hash-record path already exists: $path" }
+}
+try {
+    $tempFullPath=Join-Path (Get-Location) $executorHashTemp
+    $expectedBytes=[Text.UTF8Encoding]::new($false).GetBytes($executorHash + "`n")
+    $stream=$null
+    try {
+        $stream=[IO.FileStream]::new(
+            $tempFullPath,
+            [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write,
+            [IO.FileShare]::None
+        )
+        $stream.Write($expectedBytes,0,$expectedBytes.Length)
+        $stream.Flush($true)
+    } finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+    $actualBytes=[IO.File]::ReadAllBytes($tempFullPath)
+    if ([Convert]::ToHexString($actualBytes) -cne [Convert]::ToHexString($expectedBytes)) { throw 'Promotion executor hash-record temporary validation failed' }
+    [IO.File]::Move((Join-Path (Get-Location) $executorHashTemp),(Join-Path (Get-Location) $executorHashPath),$false)
+} finally {
+    Remove-Item -LiteralPath $executorHashTemp -Force -ErrorAction SilentlyContinue
+}
+"Promotion executor SHA-256: $executorHash"
+```
+
+Each selector invocation writes its returned text plus LF to an ignored leaf
+under `.superpowers/sdd/promotion-transcripts/<phase>/<method>.txt`, using phases
+`red`, `green`, and `mutation-<name>`. Transcript directories must be absent
+before their phase, are created with `New-Item`, and are hash-inventoried after
+the phase. Step 10 reruns the exact status/count/error parser against every
+transcript rather than trusting summary prose.
+
+Run and persist the seven RED selectors plus constructor pass:
+
+```powershell
+$ErrorActionPreference='Stop'
+$executor='.superpowers/sdd/invoke-promotion-test.ps1'
+$expectedHash=[IO.File]::ReadAllText(
+    (Join-Path (Get-Location) '.superpowers/sdd/promotion-executor.sha256'),
+    [Text.UTF8Encoding]::new($false)
+).Trim()
+$actualHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $executor).Hash.ToLowerInvariant()
+if ($actualHash -cne $expectedHash) { throw 'Promotion executor hash changed before RED' }
+. $executor
+$redDir='.superpowers/sdd/promotion-transcripts/red'
+if (Test-Path -LiteralPath $redDir) { throw 'Promotion RED transcript directory already exists' }
+$preMapPath='.superpowers/sdd/promotion-red.sha256.json'
+$redSourcePath='.superpowers/sdd/promotion-red-source.sha256'
+foreach ($path in @($preMapPath,"$preMapPath.tmp",$redSourcePath,"$redSourcePath.tmp")) {
+    if (Test-Path -LiteralPath $path) { throw "Promotion RED chronology path already exists: $path" }
+}
+New-Item -ItemType Directory -Path $redDir | Out-Null
+$redMethods=@(
+    'test_windows_access_denied_retries_atomic_preparing_promotion',
+    'test_windows_sharing_errors_32_and_33_are_retryable',
+    'test_persistent_windows_promotion_lock_stops_after_three_attempts',
+    'test_non_windows_or_unlisted_promotion_errors_are_not_retried',
+    'test_preparing_promotion_revalidates_before_and_after_sleep',
+    'test_preparing_promotion_revalidation_rejects_every_authority_mismatch',
+    'test_preparing_promotion_hooks_wrap_the_logical_operation_once'
+)
+foreach ($method in $redMethods) {
+    $text=Invoke-PromotionTest -Method $method -ExpectedExit 1 -ExpectedStatus 'FAIL'
+    $target=Join-Path $redDir "$method.txt"
+    $temporary=Join-Path $redDir "$method.txt.tmp"
+    [IO.File]::WriteAllText((Join-Path (Get-Location) $temporary),$text + "`n",[Text.UTF8Encoding]::new($false))
+    if ([IO.File]::ReadAllText((Join-Path (Get-Location) $temporary),[Text.UTF8Encoding]::new($false)) -cne $text + "`n" -or (Test-Path -LiteralPath $target)) { throw "Promotion RED transcript validation failed: $method" }
+    [IO.File]::Move((Join-Path (Get-Location) $temporary),(Join-Path (Get-Location) $target))
+}
+$constructor='test_update_engine_constructor_signature_remains_frozen'
+$text=Invoke-PromotionTest -Method $constructor -ExpectedExit 0 -ExpectedStatus 'ok'
+$target=Join-Path $redDir "$constructor.txt"
+$temporary=Join-Path $redDir "$constructor.txt.tmp"
+[IO.File]::WriteAllText((Join-Path (Get-Location) $temporary),$text + "`n",[Text.UTF8Encoding]::new($false))
+if ([IO.File]::ReadAllText((Join-Path (Get-Location) $temporary),[Text.UTF8Encoding]::new($false)) -cne $text + "`n" -or (Test-Path -LiteralPath $target)) { throw 'Promotion constructor transcript validation failed' }
+[IO.File]::Move((Join-Path (Get-Location) $temporary),(Join-Path (Get-Location) $target))
+$expectedRedNames=@($redMethods + $constructor | ForEach-Object { "$_.txt" } | Sort-Object)
+$redEntries=@(Get-ChildItem -LiteralPath $redDir -Force)
+$unsupportedRed=@($redEntries | Where-Object { $_.PSIsContainer -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 })
+$actualRedNames=@($redEntries | Where-Object { -not $_.PSIsContainer } | ForEach-Object Name | Sort-Object)
+$missingRed=@($expectedRedNames | Where-Object { $actualRedNames -cnotcontains $_ })
+$extraRed=@($actualRedNames | Where-Object { $expectedRedNames -cnotcontains $_ })
+if ($unsupportedRed.Count -ne 0 -or $missingRed.Count -ne 0 -or $extraRed.Count -ne 0 -or $actualRedNames.Count -ne 8) {
+    throw "Promotion RED transcript inventory mismatch. Missing: $($missingRed -join ', '); Extra: $($extraRed -join ', ')"
+}
+$preMap=[ordered]@{}
+foreach ($file in @($redEntries | Sort-Object Name)) {
+    $preMap[$file.Name]=(Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
+}
+$mapCanonicalizer=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+value=json.loads(sys.stdin.read(),object_pairs_hook=pairs,parse_constant=reject_constant)
+print(json.dumps(value,sort_keys=True,separators=(',',':')))
+'@
+$preMapCanonical=@((ConvertTo-Json $preMap -Compress) | & 'host\venv\Scripts\python.exe' -c $mapCanonicalizer)
+if ($LASTEXITCODE -ne 0 -or $preMapCanonical.Count -ne 1) { throw 'Could not canonicalize promotion RED map' }
+[IO.File]::WriteAllText((Join-Path (Get-Location) "$preMapPath.tmp"),$preMapCanonical[0] + "`n",[Text.UTF8Encoding]::new($false))
+$lockedRedMap=[IO.File]::ReadAllText((Join-Path (Get-Location) "$preMapPath.tmp"),[Text.UTF8Encoding]::new($false))
+if ($lockedRedMap -cne $preMapCanonical[0] + "`n") { throw 'Promotion RED map bytes are not canonical' }
+[IO.File]::Move((Join-Path (Get-Location) "$preMapPath.tmp"),(Join-Path (Get-Location) $preMapPath))
+$redSource=(@(& git hash-object 'host/update_engine.py')[0].Trim()) + ' ' + (@(& git hash-object 'host/test_update_engine_resume.py')[0].Trim())
+[IO.File]::WriteAllText((Join-Path (Get-Location) "$redSourcePath.tmp"),$redSource + "`n",[Text.UTF8Encoding]::new($false))
+if ([IO.File]::ReadAllText((Join-Path (Get-Location) "$redSourcePath.tmp"),[Text.UTF8Encoding]::new($false)) -cne $redSource + "`n") { throw 'Promotion RED source record validation failed' }
+[IO.File]::Move((Join-Path (Get-Location) "$redSourcePath.tmp"),(Join-Path (Get-Location) $redSourcePath))
+& git check-ignore -q -- $preMapPath
+if ($LASTEXITCODE -ne 0) { throw 'Promotion RED hash map is not ignored' }
+```
+
+Commit the accepted RED tests before touching production. Stage exactly
+`host/test_update_engine_resume.py`, require `host/update_engine.py` unchanged
+from HEAD, run cached diff check, and commit exact subject
+`test(update): cover locked preparing promotion`. Record the full test commit SHA
+in the ledger inputs. This commit must contain one path only.
+
+```powershell
+$expected=@('host/test_update_engine_resume.py')
+& git diff --quiet HEAD -- 'host/update_engine.py'
+if ($LASTEXITCODE -ne 0) { throw 'Production changed before RED test commit' }
+& git add -- $expected
+if ($LASTEXITCODE -ne 0) { throw 'Could not stage promotion RED tests' }
+$actual=@(& git diff --cached --name-only --no-renames --)
+if ($LASTEXITCODE -ne 0 -or $actual.Count -ne 1 -or $actual[0] -cne $expected[0]) {
+    throw 'Promotion RED test commit path mismatch'
+}
+& git diff --cached --check
+if ($LASTEXITCODE -ne 0) { throw 'Promotion RED staged diff check failed' }
+& git commit -m "test(update): cover locked preparing promotion"
+if ($LASTEXITCODE -ne 0) { throw 'Promotion RED test commit failed' }
+```
+
+Implement exactly the accepted design in `host/update_engine.py`:
+
+```py
+import time
+
+_replace_path = os.replace
+_sleep = time.sleep
+_is_windows = os.name == "nt"
+
+PROMOTION_RETRY_DELAYS = (0.05, 0.2)
+PROMOTION_TRANSIENT_WINERRORS = frozenset((5, 32, 33))
+```
+
+Keep `UpdateEngine.__init__` unchanged. Insert this exact validator immediately
+after `_verify_prepared_workspace`; Step 5's AST audit compares its complete AST
+to this committed contract, not just its name or signature:
+
+<!-- PROMOTION_VALIDATOR_START -->
+```py
+def _require_preparing_promotion_candidate(
+    self,
+    package: ValidatedPackage,
+    candidate: OwnershipPlan,
+    candidate_bytes: bytes,
+    paths: TransactionPaths,
+    staging: UpdateJournal,
+) -> None:
+    try:
+        prepared = transition(staging, JournalPhase.PREPARED)
+        expected_updates_root = self.install_root / "updates"
+        expected_transactions_root = expected_updates_root / "transactions"
+        expected_preparing_root = (
+            expected_transactions_root / f"{staging.transaction_id}.preparing"
+        )
+        expected_transaction_root = (
+            expected_transactions_root / staging.transaction_id
+        )
+        if (
+            paths.install_root != self.install_root
+            or paths.updates_root != expected_updates_root
+            or paths.transactions_root != expected_transactions_root
+            or paths.preparing_root != expected_preparing_root
+            or paths.preparing_staged_root != expected_preparing_root / "staged"
+            or paths.preparing_staged_host
+            != expected_preparing_root / "staged" / "host"
+            or paths.preparing_staged_extension
+            != expected_preparing_root / "staged" / "extension"
+            or paths.preparing_probe_manifest
+            != expected_preparing_root / "probe" / UPDATE_MANIFEST_PATH
+            or paths.preparing_ownership
+            != expected_preparing_root / "ownership.json"
+            or paths.preparing_journal != expected_preparing_root / "journal.json"
+            or paths.transaction_root != expected_transaction_root
+        ):
+            raise PreparedTransactionConflict()
+        if (
+            type(candidate_bytes) is not bytes
+            or candidate.transaction_id != staging.transaction_id
+            or candidate.target_version != staging.target_version
+            or candidate.target_version != package.manifest.package_version
+            or candidate.prior_version != staging.prior_version
+            or staging.fresh_install != (candidate.source is OwnershipSource.FRESH)
+            or ownership_plan_bytes(candidate) != candidate_bytes
+            or ownership_plan_sha256(candidate) != prepared.ownership_sha256
+        ):
+            raise PreparedTransactionConflict()
+
+        reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        plain_directories = (
+            self.install_root,
+            paths.updates_root,
+            paths.transactions_root,
+            paths.preparing_root,
+        )
+        canonical_directories: list[Path] = []
+        for directory in plain_directories:
+            info = directory.lstat()
+            attributes = getattr(info, "st_file_attributes", 0)
+            if not stat.S_ISDIR(info.st_mode) or attributes & reparse:
+                raise PreparedTransactionConflict()
+            directory.relative_to(self.install_root)
+            canonical = directory.resolve(strict=True)
+            canonical.relative_to(self.install_root)
+            if canonical != directory:
+                raise PreparedTransactionConflict()
+            canonical_directories.append(canonical)
+
+        expected_host = tuple(
+            sorted(
+                (
+                    *candidate.host_files,
+                    *candidate.seed_files,
+                    *candidate.metadata_files,
+                )
+            )
+        )
+        expected_files = {
+            "journal.json",
+            "ownership.json",
+            f"probe/{UPDATE_MANIFEST_PATH}",
+        }
+        expected_files.update(
+            f"staged/host/{item.path}" for item in expected_host
+        )
+        expected_files.update(
+            f"staged/extension/{item.path}" for item in candidate.extension_files
+        )
+        expected_directories = {
+            "probe",
+            "staged",
+            "staged/host",
+            "staged/extension",
+        }
+        for relative in expected_files:
+            parts = relative.split("/")
+            expected_directories.update(
+                "/".join(parts[:index]) for index in range(1, len(parts))
+            )
+
+        actual_files: set[str] = set()
+        actual_directories: set[str] = set()
+        canonical_preparing_root = canonical_directories[-1]
+
+        def visit(directory: Path) -> None:
+            for child in sorted(directory.iterdir(), key=lambda item: item.name):
+                info = child.lstat()
+                attributes = getattr(info, "st_file_attributes", 0)
+                if attributes & reparse:
+                    raise PreparedTransactionConflict()
+                relative = child.relative_to(paths.preparing_root).as_posix()
+                canonical_child = child.resolve(strict=True)
+                canonical_child.relative_to(canonical_preparing_root)
+                if canonical_child != child:
+                    raise PreparedTransactionConflict()
+                if stat.S_ISDIR(info.st_mode):
+                    if relative not in expected_directories:
+                        raise PreparedTransactionConflict()
+                    actual_directories.add(relative)
+                    visit(child)
+                elif stat.S_ISREG(info.st_mode):
+                    if relative not in expected_files:
+                        raise PreparedTransactionConflict()
+                    actual_files.add(relative)
+                else:
+                    raise PreparedTransactionConflict()
+
+        visit(paths.preparing_root)
+        if (
+            actual_directories != expected_directories
+            or actual_files != expected_files
+        ):
+            raise PreparedTransactionConflict()
+        if read_journal(paths.preparing_journal) != prepared:
+            raise PreparedTransactionConflict()
+        self._verify_prepared_workspace(
+            package,
+            candidate,
+            candidate_bytes,
+            paths,
+            preparing=True,
+        )
+
+        def require_absent(path: Path) -> None:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return
+            raise PreparedTransactionConflict()
+
+        require_absent(paths.transaction_root)
+        canonical_destination = paths.transaction_root.resolve(strict=False)
+        canonical_destination.relative_to(self.install_root)
+        if (
+            canonical_destination != expected_transaction_root
+            or canonical_destination.parent != canonical_directories[2]
+        ):
+            raise PreparedTransactionConflict()
+        require_absent(canonical_destination)
+    except PreparedTransactionConflict:
+        raise
+    except Exception as error:
+        raise PreparedTransactionConflict() from error
+```
+<!-- PROMOTION_VALIDATOR_END -->
+
+Add the exact single private
+`_promote_preparing_with_retry(self,package,candidate,candidate_bytes,paths,staging)`
+method below the validator. The logical
+`workspace:promote-preparing` operation invokes before/after hooks once around a
+call to `_promote_preparing_with_retry`. That method's loop revalidates initially, after each classified
+transient failure before sleep, and after sleep immediately before retry. It
+uses exact integer `winerror`, `_is_windows`, at most three attempts, and delays
+`0.05`, `0.2`; every other error/state change fails through existing
+`PreparedTransactionConflict` wrapping without retry. `os.replace` remains the
+only atomic publication and active is still written only afterward.
+
+The retry method body is exact so implementation, mutation, and static review
+share one contract:
+
+<!-- PROMOTION_METHOD_START -->
+```py
+def _promote_preparing_with_retry(
+    self,
+    package: ValidatedPackage,
+    candidate: OwnershipPlan,
+    candidate_bytes: bytes,
+    paths: TransactionPaths,
+    staging: UpdateJournal,
+) -> None:
+    # promotion-checkpoint: initial
+    self._require_preparing_promotion_candidate(
+        package, candidate, candidate_bytes, paths, staging
+    )
+    for attempt in range(1 + len(PROMOTION_RETRY_DELAYS)):
+        try:
+            _replace_path(paths.preparing_root, paths.transaction_root)
+            return
+        except OSError as error:
+            winerror = getattr(error, "winerror", None)
+            if not _is_windows or type(winerror) is not int or winerror not in PROMOTION_TRANSIENT_WINERRORS or attempt >= len(PROMOTION_RETRY_DELAYS):
+                raise
+            # promotion-checkpoint: pre-sleep
+            self._require_preparing_promotion_candidate(
+                package, candidate, candidate_bytes, paths, staging
+            )
+            delay = PROMOTION_RETRY_DELAYS[attempt]
+            _sleep(delay)
+            # promotion-checkpoint: post-sleep
+            self._require_preparing_promotion_candidate(
+                package, candidate, candidate_bytes, paths, staging
+            )
+    raise RuntimeError("unreachable promotion retry state")
+```
+<!-- PROMOTION_METHOD_END -->
+
+Replace the old `transaction_root.exists()`/`preparing_root.exists()` precheck
+and direct `os.replace` operation with this exact call site; the validator owns
+both source and destination state checks:
+
+```py
+self._run_preparation_operation(
+    "workspace:promote-preparing",
+    lambda: self._promote_preparing_with_retry(
+        package,
+        candidate,
+        candidate_bytes,
+        paths,
+        staging,
+    ),
+)
+```
+
+Run the focused GREEN as eight independent exact selectors through the executor
+below. Each selector must exit 0 with its exact name once, `... ok`, `Ran 1 test`,
+final `OK`, and no `FAIL`, `ERROR`, or `skipped`; the eight validated transcripts
+together are the focused 8/8 evidence. Then run:
+
+```powershell
+$ErrorActionPreference='Stop'
+function Import-PromotionExecutor {
+    $executor='.superpowers/sdd/invoke-promotion-test.ps1'
+    $expected=[IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/promotion-executor.sha256'),[Text.UTF8Encoding]::new($false)).Trim()
+    $actual=(Get-FileHash -Algorithm SHA256 -LiteralPath $executor).Hash.ToLowerInvariant()
+    if ($actual -cne $expected) { throw 'Promotion executor hash changed before GREEN' }
+    . $executor
+    $definition=(Get-Command Invoke-PromotionTest -CommandType Function).Definition
+    Set-Item -Path Function:global:Invoke-PromotionTest -Value $definition
+}
+Import-PromotionExecutor
+$greenDir='.superpowers/sdd/promotion-transcripts/green'
+$greenMapPath='.superpowers/sdd/promotion-green.sha256.json'
+$greenSourcePath='.superpowers/sdd/promotion-green-source.sha256'
+foreach ($path in @($greenDir,$greenMapPath,"$greenMapPath.tmp",$greenSourcePath,"$greenSourcePath.tmp")) {
+    if (Test-Path -LiteralPath $path) { throw "Promotion GREEN chronology path already exists: $path" }
+}
+New-Item -ItemType Directory -Path $greenDir | Out-Null
+$methods=@(
+    'test_windows_access_denied_retries_atomic_preparing_promotion',
+    'test_windows_sharing_errors_32_and_33_are_retryable',
+    'test_persistent_windows_promotion_lock_stops_after_three_attempts',
+    'test_non_windows_or_unlisted_promotion_errors_are_not_retried',
+    'test_preparing_promotion_revalidates_before_and_after_sleep',
+    'test_preparing_promotion_revalidation_rejects_every_authority_mismatch',
+    'test_preparing_promotion_hooks_wrap_the_logical_operation_once',
+    'test_update_engine_constructor_signature_remains_frozen'
+)
+foreach ($method in $methods) {
+    $text=Invoke-PromotionTest -Method $method -ExpectedExit 0 -ExpectedStatus 'ok'
+    $target=Join-Path $greenDir "$method.txt"
+    $temporary=Join-Path $greenDir "$method.txt.tmp"
+    [IO.File]::WriteAllText((Join-Path (Get-Location) $temporary),$text + "`n",[Text.UTF8Encoding]::new($false))
+    if ([IO.File]::ReadAllText((Join-Path (Get-Location) $temporary),[Text.UTF8Encoding]::new($false)) -cne $text + "`n" -or (Test-Path -LiteralPath $target)) { throw "Promotion GREEN transcript validation failed: $method" }
+    [IO.File]::Move((Join-Path (Get-Location) $temporary),(Join-Path (Get-Location) $target))
+}
+$expectedGreenNames=@($methods | ForEach-Object { "$_.txt" } | Sort-Object)
+$greenEntries=@(Get-ChildItem -LiteralPath $greenDir -Force)
+$unsupportedGreen=@($greenEntries | Where-Object { $_.PSIsContainer -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 })
+$actualGreenNames=@($greenEntries | Where-Object { -not $_.PSIsContainer } | ForEach-Object Name | Sort-Object)
+$missingGreen=@($expectedGreenNames | Where-Object { $actualGreenNames -cnotcontains $_ })
+$extraGreen=@($actualGreenNames | Where-Object { $expectedGreenNames -cnotcontains $_ })
+if ($unsupportedGreen.Count -ne 0 -or $missingGreen.Count -ne 0 -or $extraGreen.Count -ne 0 -or $actualGreenNames.Count -ne 8) {
+    throw "Promotion GREEN transcript inventory mismatch. Missing: $($missingGreen -join ', '); Extra: $($extraGreen -join ', ')"
+}
+$greenMap=[ordered]@{}
+foreach ($file in @($greenEntries | Sort-Object Name)) {
+    $greenMap[$file.Name]=(Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
+}
+$mapCanonicalizer=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+value=json.loads(sys.stdin.read(),object_pairs_hook=pairs,parse_constant=reject_constant)
+print(json.dumps(value,sort_keys=True,separators=(',',':')))
+'@
+$greenCanonical=@((ConvertTo-Json $greenMap -Compress) | & 'host\venv\Scripts\python.exe' -c $mapCanonicalizer)
+if ($LASTEXITCODE -ne 0 -or $greenCanonical.Count -ne 1) { throw 'Could not canonicalize promotion GREEN map' }
+[IO.File]::WriteAllText((Join-Path (Get-Location) "$greenMapPath.tmp"),$greenCanonical[0] + "`n",[Text.UTF8Encoding]::new($false))
+if ([IO.File]::ReadAllText((Join-Path (Get-Location) "$greenMapPath.tmp"),[Text.UTF8Encoding]::new($false)) -cne $greenCanonical[0] + "`n") { throw 'Promotion GREEN map bytes are not canonical' }
+[IO.File]::Move((Join-Path (Get-Location) "$greenMapPath.tmp"),(Join-Path (Get-Location) $greenMapPath))
+$greenSource=(@(& git hash-object 'host/update_engine.py')[0].Trim()) + ' ' + (@(& git hash-object 'host/test_update_engine_resume.py')[0].Trim())
+[IO.File]::WriteAllText((Join-Path (Get-Location) "$greenSourcePath.tmp"),$greenSource + "`n",[Text.UTF8Encoding]::new($false))
+if ([IO.File]::ReadAllText((Join-Path (Get-Location) "$greenSourcePath.tmp"),[Text.UTF8Encoding]::new($false)) -cne $greenSource + "`n") { throw 'Promotion GREEN source record validation failed' }
+[IO.File]::Move((Join-Path (Get-Location) "$greenSourcePath.tmp"),(Join-Path (Get-Location) $greenSourcePath))
+```
+
+Then run:
+
+```powershell
+$ErrorActionPreference='Stop'
+$root=Join-Path ([IO.Path]::GetTempPath()) ('dh-promotion-green-' + [guid]::NewGuid().ToString('N'))
+$envNames=@('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP','PYTHONPATH','DH_PROMOTION_EVIDENCE')
+$saved=@{}
+foreach ($name in $envNames) { $saved[$name]=[Environment]::GetEnvironmentVariable($name,'Process') }
+try {
+    New-Item -ItemType Directory -Path $root | Out-Null
+    foreach ($name in @('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP')) {
+        $value=Join-Path $root $name.ToLowerInvariant()
+        New-Item -ItemType Directory -Path $value | Out-Null
+        [Environment]::SetEnvironmentVariable($name,$value,'Process')
+    }
+    [Environment]::SetEnvironmentVariable('PYTHONPATH',(Resolve-Path -LiteralPath 'host').Path,'Process')
+    Remove-Item -LiteralPath 'Env:DH_PROMOTION_EVIDENCE' -ErrorAction SilentlyContinue
+    & 'host\venv\Scripts\python.exe' -m unittest host.test_update_engine_resume -v
+    if ($LASTEXITCODE -ne 0) { throw 'Update-engine resume suite failed' }
+} finally {
+    foreach ($name in $envNames) {
+        if ($null -eq $saved[$name]) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
+        else { [Environment]::SetEnvironmentVariable($name,$saved[$name],'Process') }
+    }
+    if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+}
+```
+
+Mutation proofs independently remove transient classification, change the
+three-attempt bound to four, and remove each initial/pre-sleep/post-sleep
+revalidation call. For each mutation, save original file bytes, assert one exact
+source replacement occurred, run the matching selector through the same fresh
+isolated executor, require exit 1 plus the exact `... FAIL`/one-test/failure-only
+output, and restore original bytes in `finally`; require byte equality after
+restoration. Use these exact selectors:
+
+```text
+test_windows_access_denied_retries_atomic_preparing_promotion
+test_persistent_windows_promotion_lock_stops_after_three_attempts
+test_preparing_promotion_revalidates_before_and_after_sleep
+test_preparing_promotion_revalidation_rejects_every_authority_mismatch
+```
+
+Each mutation must produce unittest exit 1 for its matching selector, never an
+import/setup error. Restore after every run, rerun the exact focused GREEN, and
+require `git diff --check`.
+
+The implementation includes checkpoint marker comments
+`# promotion-checkpoint: initial`, `# promotion-checkpoint: pre-sleep`, and
+`# promotion-checkpoint: post-sleep` immediately before the respective helper
+calls; a source-contract test requires each once in this order. The five mutation
+replacements are exact and each must match once:
+
+```text
+classification: `if not _is_windows or type(winerror) is not int or winerror not in PROMOTION_TRANSIENT_WINERRORS or attempt >= len(PROMOTION_RETRY_DELAYS):` -> `if True:`
+bound: `PROMOTION_RETRY_DELAYS = (0.05, 0.2)` -> `PROMOTION_RETRY_DELAYS = (0.05, 0.2, 0.4)`
+initial marker plus helper call -> `pass  # mutation: omit initial revalidation`
+pre-sleep marker plus helper call -> `pass  # mutation: omit pre-sleep revalidation`
+post-sleep marker plus helper call -> `pass  # mutation: omit post-sleep revalidation`
+```
+
+For each mutation, read and save original `host/update_engine.py` bytes, decode
+strict UTF-8, require the old block occurs exactly once, replace it, write UTF-8
+without BOM, invoke the mapped fully qualified selector through
+`Invoke-PromotionTest`, then restore the original bytes in `finally`. After
+restoration compare SHA-256 and bytes to the original. The exact mapping is:
+
+```text
+classification -> test_windows_access_denied_retries_atomic_preparing_promotion
+bound -> test_persistent_windows_promotion_lock_stops_after_three_attempts
+initial -> test_preparing_promotion_revalidates_before_and_after_sleep
+pre-sleep -> test_preparing_promotion_revalidation_rejects_every_authority_mismatch
+post-sleep -> test_preparing_promotion_revalidation_rejects_every_authority_mismatch
+```
+
+Every mutation tool call begins with `$ErrorActionPreference='Stop'` and dots
+`.superpowers/sdd/invoke-promotion-test.ps1`; mappings above are bare method
+names because the executor adds the module/class prefix. Mutation output uses
+the same case-sensitive status/error checks as RED.
+
+Create `.superpowers/sdd/run-promotion-mutations.ps1` with `apply_patch` as a
+second ignored UTF-8-no-BOM evidence script. It defines a five-row literal table
+with fields `Name`, `Old`, `New`, and `Method`; the `Old` value for each
+checkpoint is the complete marker comment plus the full six-argument helper
+call, not a description. For each row it:
+
+1. reads original bytes and SHA-256;
+2. strict-decodes UTF-8 and requires exactly one ordinal occurrence of `Old`;
+3. writes the one replacement without BOM;
+4. invokes `Invoke-PromotionTest -Method $row.Method -ExpectedExit 1 -ExpectedStatus 'FAIL'`;
+5. restores original bytes in `finally`;
+6. rereads and requires byte equality and SHA equality;
+7. runs the exact method GREEN after restoration.
+
+The script requires all five rows execute and prints one fixed `MUTATION PASS:
+<name>` line per row. It is read back, hashed, ignored, and recorded exactly like
+the selector executor. The final report includes both script hashes and all five
+fixed PASS lines; neither script is staged.
+
+Its complete body is:
+
+<!-- PROMOTION_MUTATION_RUNNER_START -->
+```powershell
+$ErrorActionPreference='Stop'
+$executor='.superpowers/sdd/invoke-promotion-test.ps1'
+$expectedExecutorHash=[IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/promotion-executor.sha256'),[Text.UTF8Encoding]::new($false)).Trim()
+$actualExecutorHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $executor).Hash.ToLowerInvariant()
+if ($actualExecutorHash -cne $expectedExecutorHash) { throw 'Promotion executor hash changed before mutation run' }
+. $executor
+$path='host/update_engine.py'
+$initialCall=@'
+        # promotion-checkpoint: initial
+        self._require_preparing_promotion_candidate(
+            package, candidate, candidate_bytes, paths, staging
+        )
+'@
+$preSleepCall=@'
+                # promotion-checkpoint: pre-sleep
+                self._require_preparing_promotion_candidate(
+                    package, candidate, candidate_bytes, paths, staging
+                )
+'@
+$postSleepCall=@'
+                # promotion-checkpoint: post-sleep
+                self._require_preparing_promotion_candidate(
+                    package, candidate, candidate_bytes, paths, staging
+                )
+'@
+$rows=@(
+    [ordered]@{Name='classification';Old='if not _is_windows or type(winerror) is not int or winerror not in PROMOTION_TRANSIENT_WINERRORS or attempt >= len(PROMOTION_RETRY_DELAYS):';New='if True:';Method='test_windows_access_denied_retries_atomic_preparing_promotion'},
+    [ordered]@{Name='bound';Old='PROMOTION_RETRY_DELAYS = (0.05, 0.2)';New='PROMOTION_RETRY_DELAYS = (0.05, 0.2, 0.4)';Method='test_persistent_windows_promotion_lock_stops_after_three_attempts'},
+    [ordered]@{Name='initial';Old=$initialCall;New='        pass  # mutation: omit initial revalidation';Method='test_preparing_promotion_revalidates_before_and_after_sleep'},
+    [ordered]@{Name='pre-sleep';Old=$preSleepCall;New='                pass  # mutation: omit pre-sleep revalidation';Method='test_preparing_promotion_revalidation_rejects_every_authority_mismatch'},
+    [ordered]@{Name='post-sleep';Old=$postSleepCall;New='                pass  # mutation: omit post-sleep revalidation';Method='test_preparing_promotion_revalidation_rejects_every_authority_mismatch'}
+)
+$outputRoot='.superpowers/sdd/promotion-transcripts'
+$original=[IO.File]::ReadAllBytes((Join-Path (Get-Location) $path))
+$originalHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($original))
+$mutationMapPath='.superpowers/sdd/promotion-mutation.sha256.json'
+if ((Test-Path -LiteralPath $mutationMapPath) -or (Test-Path -LiteralPath "$mutationMapPath.tmp")) { throw 'Promotion mutation map or temporary already exists' }
+foreach ($row in $rows) {
+    $directory=Join-Path $outputRoot ("mutation-" + $row.Name)
+    if (Test-Path -LiteralPath $directory) { throw "Mutation transcript exists: $($row.Name)" }
+    New-Item -ItemType Directory -Path $directory | Out-Null
+    try {
+        $text=[Text.UTF8Encoding]::new($false,$true).GetString($original)
+        if ([regex]::Matches($text,[regex]::Escape($row.Old)).Count -ne 1) {
+            throw "Mutation source block mismatch: $($row.Name)"
+        }
+        $mutated=$text.Replace($row.Old,$row.New)
+        [IO.File]::WriteAllText((Join-Path (Get-Location) $path),$mutated,[Text.UTF8Encoding]::new($false))
+        $failure=Invoke-PromotionTest -Method $row.Method -ExpectedExit 1 -ExpectedStatus 'FAIL'
+        $failureTarget=Join-Path $directory "$($row.Method).txt"
+        $failureTemp=Join-Path $directory "$($row.Method).txt.tmp"
+        [IO.File]::WriteAllText((Join-Path (Get-Location) $failureTemp),$failure + "`n",[Text.UTF8Encoding]::new($false))
+        if ([IO.File]::ReadAllText((Join-Path (Get-Location) $failureTemp),[Text.UTF8Encoding]::new($false)) -cne $failure + "`n" -or (Test-Path -LiteralPath $failureTarget)) { throw "Promotion mutation transcript validation failed: $($row.Name)" }
+        [IO.File]::Move((Join-Path (Get-Location) $failureTemp),(Join-Path (Get-Location) $failureTarget))
+    } finally {
+        [IO.File]::WriteAllBytes((Join-Path (Get-Location) $path),$original)
+    }
+    $restored=[IO.File]::ReadAllBytes((Join-Path (Get-Location) $path))
+    $restoredHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($restored))
+    if ([Convert]::ToHexString($restored) -cne [Convert]::ToHexString($original) -or $restoredHash -cne $originalHash) {
+        throw "Mutation restoration mismatch: $($row.Name)"
+    }
+    $restoredGreen=Invoke-PromotionTest -Method $row.Method -ExpectedExit 0 -ExpectedStatus 'ok'
+    $greenTarget=Join-Path $directory "$($row.Method).restored-green.txt"
+    $greenTemp=Join-Path $directory "$($row.Method).restored-green.txt.tmp"
+    [IO.File]::WriteAllText((Join-Path (Get-Location) $greenTemp),$restoredGreen + "`n",[Text.UTF8Encoding]::new($false))
+    if ([IO.File]::ReadAllText((Join-Path (Get-Location) $greenTemp),[Text.UTF8Encoding]::new($false)) -cne $restoredGreen + "`n" -or (Test-Path -LiteralPath $greenTarget)) { throw "Promotion restored GREEN transcript validation failed: $($row.Name)" }
+    [IO.File]::Move((Join-Path (Get-Location) $greenTemp),(Join-Path (Get-Location) $greenTarget))
+    "MUTATION PASS: $($row.Name)"
+}
+$expectedTranscriptMethods=@(
+    'test_windows_access_denied_retries_atomic_preparing_promotion','test_windows_sharing_errors_32_and_33_are_retryable',
+    'test_persistent_windows_promotion_lock_stops_after_three_attempts','test_non_windows_or_unlisted_promotion_errors_are_not_retried',
+    'test_preparing_promotion_revalidates_before_and_after_sleep','test_preparing_promotion_revalidation_rejects_every_authority_mismatch',
+    'test_preparing_promotion_hooks_wrap_the_logical_operation_once','test_update_engine_constructor_signature_remains_frozen'
+)
+$expectedMutationMethods=[ordered]@{}
+foreach ($row in $rows) { $expectedMutationMethods[$row.Name]=$row.Method }
+$expectedTranscriptDirectories=@('red','green') + @($expectedMutationMethods.Keys | ForEach-Object { "mutation-$_" })
+$expectedTranscriptFiles=@()
+foreach ($method in $expectedTranscriptMethods) { $expectedTranscriptFiles += "red/$method.txt"; $expectedTranscriptFiles += "green/$method.txt" }
+foreach ($entry in $expectedMutationMethods.GetEnumerator()) { $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).txt"; $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).restored-green.txt" }
+$rootInfo=Get-Item -LiteralPath $outputRoot -Force
+$transcriptEntries=@(Get-ChildItem -LiteralPath $outputRoot -Force -Recurse)
+$unsupportedTranscriptEntries=@($transcriptEntries | Where-Object { ($_ -isnot [IO.FileInfo] -and $_ -isnot [IO.DirectoryInfo]) -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 })
+$actualTranscriptDirectories=@($transcriptEntries | Where-Object { $_ -is [IO.DirectoryInfo] } | ForEach-Object { [IO.Path]::GetRelativePath((Join-Path (Get-Location) $outputRoot),$_.FullName).Replace('\','/') } | Sort-Object)
+$actualTranscriptFiles=@($transcriptEntries | Where-Object { $_ -is [IO.FileInfo] } | ForEach-Object { [IO.Path]::GetRelativePath((Join-Path (Get-Location) $outputRoot),$_.FullName).Replace('\','/') } | Sort-Object)
+$missingTranscriptDirectories=@($expectedTranscriptDirectories | Where-Object { $actualTranscriptDirectories -cnotcontains $_ }); $extraTranscriptDirectories=@($actualTranscriptDirectories | Where-Object { $expectedTranscriptDirectories -cnotcontains $_ })
+$missingTranscriptFiles=@($expectedTranscriptFiles | Where-Object { $actualTranscriptFiles -cnotcontains $_ }); $extraTranscriptFiles=@($actualTranscriptFiles | Where-Object { $expectedTranscriptFiles -cnotcontains $_ })
+if ($rootInfo -isnot [IO.DirectoryInfo] -or ($rootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $unsupportedTranscriptEntries.Count -ne 0 -or $actualTranscriptDirectories.Count -ne 7 -or $actualTranscriptFiles.Count -ne 26 -or $missingTranscriptDirectories.Count -ne 0 -or $extraTranscriptDirectories.Count -ne 0 -or $missingTranscriptFiles.Count -ne 0 -or $extraTranscriptFiles.Count -ne 0) { throw 'Promotion mutation transcript topology mismatch' }
+$mutationMap=[ordered]@{}
+foreach ($relative in @($actualTranscriptFiles | Where-Object { $_ -like 'mutation-*/*' })) {
+    $fullPath=Join-Path $outputRoot $relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
+    $mutationMap[$relative]=(Get-FileHash -Algorithm SHA256 -LiteralPath $fullPath).Hash.ToLowerInvariant()
+}
+$mapCanonicalizer=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+value=json.loads(sys.stdin.read(),object_pairs_hook=pairs,parse_constant=reject_constant)
+print(json.dumps(value,sort_keys=True,separators=(',',':')))
+'@
+$mutationCanonical=@((ConvertTo-Json $mutationMap -Compress) | & 'host\venv\Scripts\python.exe' -c $mapCanonicalizer)
+if ($LASTEXITCODE -ne 0 -or $mutationCanonical.Count -ne 1) { throw 'Could not canonicalize promotion mutation map' }
+[IO.File]::WriteAllText((Join-Path (Get-Location) "$mutationMapPath.tmp"),$mutationCanonical[0] + "`n",[Text.UTF8Encoding]::new($false))
+if ([IO.File]::ReadAllText((Join-Path (Get-Location) "$mutationMapPath.tmp"),[Text.UTF8Encoding]::new($false)) -cne $mutationCanonical[0] + "`n") { throw 'Promotion mutation map bytes are not canonical' }
+[IO.File]::Move((Join-Path (Get-Location) "$mutationMapPath.tmp"),(Join-Path (Get-Location) $mutationMapPath))
+```
+<!-- PROMOTION_MUTATION_RUNNER_END -->
+
+Invoke and validate the mutation runner in a fresh shell:
+
+```powershell
+$ErrorActionPreference='Stop'
+$runner='.superpowers/sdd/run-promotion-mutations.ps1'
+if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) { throw 'Promotion mutation runner is missing' }
+& git check-ignore -q -- $runner
+if ($LASTEXITCODE -ne 0) { throw 'Promotion mutation runner is not ignored' }
+$runnerText=[IO.File]::ReadAllText((Join-Path (Get-Location) $runner),[Text.UTF8Encoding]::new($false)) -replace "`r`n","`n"
+$planText=@(& git show 'HEAD:docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md') -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'Could not read committed plan for mutation runner' }
+$runnerMatch=[regex]::Match($planText,'(?s)<!-- PROMOTION_MUTATION_RUNNER_START -->\n```powershell\n(.*?)\n```\n<!-- PROMOTION_MUTATION_RUNNER_END -->')
+if (-not $runnerMatch.Success) { throw 'Could not extract committed mutation runner' }
+if ($runnerText.TrimEnd("`n") -cne $runnerMatch.Groups[1].Value) { throw 'Mutation runner differs from committed plan' }
+$runnerHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $runner).Hash.ToLowerInvariant()
+$runnerHashPath='.superpowers/sdd/promotion-mutation-runner.sha256'
+$runnerHashTemp="$runnerHashPath.tmp"
+foreach ($path in @($runnerHashPath,$runnerHashTemp)) {
+    if (Test-Path -LiteralPath $path) { throw "Promotion mutation-runner hash-record path already exists: $path" }
+}
+try {
+    $tempFullPath=Join-Path (Get-Location) $runnerHashTemp
+    $expectedBytes=[Text.UTF8Encoding]::new($false).GetBytes($runnerHash + "`n")
+    $stream=$null
+    try {
+        $stream=[IO.FileStream]::new(
+            $tempFullPath,
+            [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write,
+            [IO.FileShare]::None
+        )
+        $stream.Write($expectedBytes,0,$expectedBytes.Length)
+        $stream.Flush($true)
+    } finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+    $actualBytes=[IO.File]::ReadAllBytes($tempFullPath)
+    if ([Convert]::ToHexString($actualBytes) -cne [Convert]::ToHexString($expectedBytes)) { throw 'Promotion mutation-runner hash-record temporary validation failed' }
+    [IO.File]::Move((Join-Path (Get-Location) $runnerHashTemp),(Join-Path (Get-Location) $runnerHashPath),$false)
+} finally {
+    Remove-Item -LiteralPath $runnerHashTemp -Force -ErrorAction SilentlyContinue
+}
+$mutationSourcePath='.superpowers/sdd/promotion-mutation-source.sha256'
+if ((Test-Path -LiteralPath $mutationSourcePath) -or (Test-Path -LiteralPath "$mutationSourcePath.tmp")) { throw 'Promotion mutation source record or temporary already exists' }
+$lines=@(& $runner 2>&1)
+if ($LASTEXITCODE -ne 0) { throw "Promotion mutation runner failed`n$($lines -join "`n")" }
+foreach ($name in @('classification','bound','initial','pre-sleep','post-sleep')) {
+    if (@($lines | Where-Object { $_ -ceq "MUTATION PASS: $name" }).Count -ne 1) {
+        throw "Promotion mutation PASS line mismatch: $name"
+    }
+}
+$mutationSource=(@(& git hash-object 'host/update_engine.py')[0].Trim()) + ' ' + (@(& git hash-object 'host/test_update_engine_resume.py')[0].Trim())
+[IO.File]::WriteAllText((Join-Path (Get-Location) "$mutationSourcePath.tmp"),$mutationSource + "`n",[Text.UTF8Encoding]::new($false))
+if ([IO.File]::ReadAllText((Join-Path (Get-Location) "$mutationSourcePath.tmp"),[Text.UTF8Encoding]::new($false)) -cne $mutationSource + "`n") { throw 'Promotion mutation source record validation failed' }
+[IO.File]::Move((Join-Path (Get-Location) "$mutationSourcePath.tmp"),(Join-Path (Get-Location) $mutationSourcePath))
+"Promotion mutation runner SHA-256: $runnerHash"
+```
+
+Commit only the production path after this exact staged-set and diff check:
+
+```text
+host/update_engine.py
+```
+
+Before staging, execute the committed-plan AST audit block from Step 5 verbatim:
+read current committed plan, extract the text between
+`PROMOTION_AST_AUDIT_START/END`, pipe it to Host Python, require exit 0, and
+require full AST equality for the production validator, retry method, and
+complete promotion test class against their marked plan contracts while
+retaining every structural audit below. Write
+`.superpowers/sdd/promotion-ast.sha256` with audit-program, engine, and test
+SHA-256 values. If this audit fails, do not stage or commit; fix through a new
+focused RED and rerun all Step 0 evidence. Step 5 later repeats the same audit
+against the committed promotion change.
+
+```powershell
+$ErrorActionPreference='Stop'
+$planText=@(& git show 'HEAD:docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md') -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'Could not read committed plan for pre-commit AST audit' }
+$match=[regex]::Match($planText,'(?s)<!-- PROMOTION_AST_AUDIT_START -->\n```python\n(.*?)\n```\n<!-- PROMOTION_AST_AUDIT_END -->')
+if (-not $match.Success) { throw 'Could not extract pre-commit AST audit' }
+$audit=$match.Groups[1].Value
+$audit | & 'host\venv\Scripts\python.exe' -
+if ($LASTEXITCODE -ne 0) { throw 'Pre-commit promotion AST audit failed' }
+$auditHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.UTF8Encoding]::new($false).GetBytes($audit))).ToLowerInvariant()
+$engineHash=(Get-FileHash -Algorithm SHA256 -LiteralPath 'host/update_engine.py').Hash.ToLowerInvariant()
+$testHash=(Get-FileHash -Algorithm SHA256 -LiteralPath 'host/test_update_engine_resume.py').Hash.ToLowerInvariant()
+$astRecordPath='.superpowers/sdd/promotion-ast.sha256'
+if ((Test-Path -LiteralPath $astRecordPath) -or (Test-Path -LiteralPath "$astRecordPath.tmp")) { throw 'Promotion pre-commit AST record or temporary already exists' }
+$astRecord="$auditHash $engineHash $testHash`n"
+[IO.File]::WriteAllText((Join-Path (Get-Location) "$astRecordPath.tmp"),$astRecord,[Text.UTF8Encoding]::new($false))
+if ([IO.File]::ReadAllText((Join-Path (Get-Location) "$astRecordPath.tmp"),[Text.UTF8Encoding]::new($false)) -cne $astRecord) { throw 'Promotion AST record validation failed' }
+[IO.File]::Move((Join-Path (Get-Location) "$astRecordPath.tmp"),(Join-Path (Get-Location) $astRecordPath))
+```
+
+Use exact subject `fix(update): retry locked preparing promotion`. Record this
+focused RED/GREEN/mutation/commit and the historical uncontrolled/controlled
+WinError observations in the final report. Only after this commit continue to
+Step 1.
+
+```powershell
+$expected=@('host/update_engine.py')
+& git add -- $expected
+if ($LASTEXITCODE -ne 0) { throw 'Could not stage promotion retry paths' }
+$actual=@(& git diff --cached --name-only --no-renames --)
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect staged promotion paths' }
+$missing=@($expected | Where-Object { $actual -cnotcontains $_ })
+$extra=@($actual | Where-Object { $expected -cnotcontains $_ })
+if ($missing.Count -ne 0 -or $extra.Count -ne 0 -or $actual.Count -ne 1) {
+    throw "Promotion staged path mismatch. Missing: $($missing -join ', '); Extra: $($extra -join ', ')"
+}
+& git diff --cached --check
+if ($LASTEXITCODE -ne 0) { throw 'Promotion staged diff check failed' }
+& git commit -m "fix(update): retry locked preparing promotion"
+if ($LASTEXITCODE -ne 0) { throw 'Promotion retry commit failed' }
+```
+
+After commit, run the exact focused method
+`test_windows_access_denied_retries_atomic_preparing_promotion` with environment
+variable `DH_PROMOTION_EVIDENCE` naming an ignored fresh JSON output path. That
+selected evidence method runs three fresh internal scenarios: first-attempt
+success, WinError 5 then success, and three-attempt exhaustion. It exclusively
+creates the canonical JSON after all state, cause, checkpoint, delay, and hook
+assertions for all three scenarios pass. Strict-load that JSON with
+duplicate-key rejection and require exact values. Then create the canonical
+ledger:
+
+```powershell
+$ErrorActionPreference='Stop'
+$observedPath='.superpowers/sdd/promotion-observed.json'
+$observedTemp='.superpowers/sdd/promotion-observed.tmp'
+if ((Test-Path -LiteralPath $observedPath) -or (Test-Path -LiteralPath $observedTemp)) { throw 'Promotion observed evidence or temporary already exists' }
+$executor='.superpowers/sdd/invoke-promotion-test.ps1'
+$expected=[IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/promotion-executor.sha256'),[Text.UTF8Encoding]::new($false)).Trim()
+$actual=(Get-FileHash -Algorithm SHA256 -LiteralPath $executor).Hash.ToLowerInvariant()
+if ($actual -cne $expected) { throw 'Promotion executor hash changed before observed evidence run' }
+. $executor
+$absoluteObservedTemp=Join-Path (Get-Location) $observedTemp
+Invoke-PromotionTest -Method 'test_windows_access_denied_retries_atomic_preparing_promotion' -ExpectedExit 0 -ExpectedStatus 'ok' -EvidencePath $absoluteObservedTemp | Out-Null
+if (-not (Test-Path -LiteralPath $observedTemp -PathType Leaf)) { throw 'Promotion observed evidence temporary is missing' }
+$python=@'
+import json, pathlib, sys
+def strict_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('duplicate key')
+        result[key] = value
+    return result
+def reject_constant(value):
+    raise ValueError('non-finite JSON constant: '+value)
+def exact(actual, expected, path='root'):
+    if type(actual) is not type(expected): raise SystemExit('type mismatch at '+path)
+    if isinstance(expected, dict):
+        if set(actual)!=set(expected): raise SystemExit('key mismatch at '+path)
+        for key in expected: exact(actual[key],expected[key],path+'.'+key)
+    elif isinstance(expected, list):
+        if len(actual)!=len(expected): raise SystemExit('length mismatch at '+path)
+        for index,(left,right) in enumerate(zip(actual,expected)): exact(left,right,f'{path}[{index}]')
+    elif actual!=expected: raise SystemExit('value mismatch at '+path)
+path = pathlib.Path(sys.argv[1])
+value = json.loads(path.read_text(encoding='utf-8'), object_pairs_hook=strict_pairs, parse_constant=reject_constant)
+expected = {
+    'attempts': {'transient_then_success': 2, 'exhausted': 3},
+    'delays': {'transient_then_success': [0.05], 'exhausted': [0.05, 0.2]},
+    'checkpoint_calls': {'first_success': 1, 'one_retry': 3, 'exhausted': 5},
+    'hook_counts': {'retry_success': {'before': 1, 'after': 1}, 'exhausted': {'before': 1, 'after': 0}},
+    'state_and_cause': 'passed',
+}
+exact(value,expected)
+print(json.dumps(value, sort_keys=True, separators=(',', ':')))
+'@
+$observedCanonical=@($python | & 'host\venv\Scripts\python.exe' - $observedTemp)
+if ($LASTEXITCODE -ne 0 -or $observedCanonical.Count -ne 1) { throw 'Promotion observed evidence validation failed' }
+$observedText=[IO.File]::ReadAllText((Join-Path (Get-Location) $observedTemp),[Text.UTF8Encoding]::new($false))
+if ($observedText -cne $observedCanonical[0] + "`n") { throw 'Promotion observed evidence is not canonical' }
+[IO.File]::Move((Join-Path (Get-Location) $observedTemp),(Join-Path (Get-Location) $observedPath))
+$planCommit=@(& git log -1 --format=%H HEAD -- 'docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md')
+$promotionCommit=@(& git rev-parse HEAD)
+$testCommit=@(& git log -1 --format=%H HEAD -- 'host/test_update_engine_resume.py')
+if ($LASTEXITCODE -ne 0 -or $planCommit.Count -ne 1 -or $promotionCommit.Count -ne 1 -or $testCommit.Count -ne 1) { throw 'Could not resolve promotion ledger commits' }
+$executorHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/invoke-promotion-test.ps1').Hash.ToLowerInvariant()
+$runnerHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/run-promotion-mutations.ps1').Hash.ToLowerInvariant()
+$committedPlan=@(& git show 'HEAD:docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md') -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'Could not read committed plan at final gate' }
+$executorContract=[regex]::Match($committedPlan,'(?s)<!-- PROMOTION_EXECUTOR_START -->\n```powershell\n(.*?)\n```\n<!-- PROMOTION_EXECUTOR_END -->')
+$runnerContract=[regex]::Match($committedPlan,'(?s)<!-- PROMOTION_MUTATION_RUNNER_START -->\n```powershell\n(.*?)\n```\n<!-- PROMOTION_MUTATION_RUNNER_END -->')
+if (-not $executorContract.Success -or -not $runnerContract.Success) { throw 'Committed promotion script contracts are missing' }
+$actualExecutor=([IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/invoke-promotion-test.ps1'),[Text.UTF8Encoding]::new($false)) -replace "`r`n","`n").TrimEnd("`n")
+$actualRunner=([IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/run-promotion-mutations.ps1'),[Text.UTF8Encoding]::new($false)) -replace "`r`n","`n").TrimEnd("`n")
+if ($actualExecutor -cne $executorContract.Groups[1].Value) { throw 'Final promotion executor differs from committed plan' }
+if ($actualRunner -cne $runnerContract.Groups[1].Value) { throw 'Final promotion runner differs from committed plan' }
+$committedPlan=@(& git show 'HEAD:docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md') -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'Could not read committed plan for script validation' }
+$executorMatch=[regex]::Match($committedPlan,'(?s)<!-- PROMOTION_EXECUTOR_START -->\n```powershell\n(.*?)\n```\n<!-- PROMOTION_EXECUTOR_END -->')
+$runnerMatch=[regex]::Match($committedPlan,'(?s)<!-- PROMOTION_MUTATION_RUNNER_START -->\n```powershell\n(.*?)\n```\n<!-- PROMOTION_MUTATION_RUNNER_END -->')
+if (-not $executorMatch.Success -or -not $runnerMatch.Success) { throw 'Committed promotion script contract missing' }
+$actualExecutor=([IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/invoke-promotion-test.ps1'),[Text.UTF8Encoding]::new($false)) -replace "`r`n","`n").TrimEnd("`n")
+$actualRunner=([IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/run-promotion-mutations.ps1'),[Text.UTF8Encoding]::new($false)) -replace "`r`n","`n").TrimEnd("`n")
+if ($actualExecutor -cne $executorMatch.Groups[1].Value) { throw 'Promotion executor differs from committed plan at final gate' }
+if ($actualRunner -cne $runnerMatch.Groups[1].Value) { throw 'Promotion mutation runner differs from committed plan at final gate' }
+$executorHashFile=[IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/promotion-executor.sha256'),[Text.UTF8Encoding]::new($false)).Trim()
+$runnerHashFile=[IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/promotion-mutation-runner.sha256'),[Text.UTF8Encoding]::new($false)).Trim()
+if ($executorHashFile -cne $executorHash -or $runnerHashFile -cne $runnerHash) { throw 'Promotion recorded script hash mismatch' }
+$observed=$observedCanonical[0] | ConvertFrom-Json -AsHashtable
+$ledger=[ordered]@{
+    schema_version=1; plan_commit=$planCommit[0].Trim(); spec_commit='249b1a3750b50db1336fb39661db9306355a1a18'; executor_sha256=$executorHash; mutation_runner_sha256=$runnerHash;
+    red_methods=@('test_windows_access_denied_retries_atomic_preparing_promotion','test_windows_sharing_errors_32_and_33_are_retryable','test_persistent_windows_promotion_lock_stops_after_three_attempts','test_non_windows_or_unlisted_promotion_errors_are_not_retried','test_preparing_promotion_revalidates_before_and_after_sleep','test_preparing_promotion_revalidation_rejects_every_authority_mismatch','test_preparing_promotion_hooks_wrap_the_logical_operation_once'); constructor_red_phase='passed';
+    green_methods=@('test_windows_access_denied_retries_atomic_preparing_promotion','test_windows_sharing_errors_32_and_33_are_retryable','test_persistent_windows_promotion_lock_stops_after_three_attempts','test_non_windows_or_unlisted_promotion_errors_are_not_retried','test_preparing_promotion_revalidates_before_and_after_sleep','test_preparing_promotion_revalidation_rejects_every_authority_mismatch','test_preparing_promotion_hooks_wrap_the_logical_operation_once','test_update_engine_constructor_signature_remains_frozen'); mutation_passes=@('classification','bound','initial','pre-sleep','post-sleep');
+    attempts=$observed.attempts; delays=$observed.delays; checkpoint_calls=$observed.checkpoint_calls; hook_counts=$observed.hook_counts; state_and_cause=$observed.state_and_cause; test_commit=$testCommit[0].Trim(); promotion_commit=$promotionCommit[0].Trim(); update_engine_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath 'host/update_engine.py').Hash.ToLowerInvariant(); update_engine_test_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath 'host/test_update_engine_resume.py').Hash.ToLowerInvariant(); observed_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $observedPath).Hash.ToLowerInvariant(); transcript_map_sha256='pending'; red_map_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-red.sha256.json').Hash.ToLowerInvariant(); green_map_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-green.sha256.json').Hash.ToLowerInvariant(); mutation_map_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-mutation.sha256.json').Hash.ToLowerInvariant(); red_source_record_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-red-source.sha256').Hash.ToLowerInvariant(); green_source_record_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-green-source.sha256').Hash.ToLowerInvariant(); mutation_source_record_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-mutation-source.sha256').Hash.ToLowerInvariant(); ast_record_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-ast.sha256').Hash.ToLowerInvariant()
+}
+$ledgerPath='.superpowers/sdd/promotion-ledger.json'
+$transcriptMapPath='.superpowers/sdd/promotion-transcripts.sha256.json'
+foreach ($path in @($ledgerPath,"$ledgerPath.tmp",$transcriptMapPath,"$transcriptMapPath.tmp")) {
+    if (Test-Path -LiteralPath $path) { throw "Promotion post-commit chronology path already exists: $path" }
+}
+$ledgerDraft=$ledger | ConvertTo-Json -Depth 8 -Compress
+$canonicalizer=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+value=json.loads(sys.stdin.read(),object_pairs_hook=pairs,parse_constant=reject_constant)
+print(json.dumps(value,sort_keys=True,separators=(',',':')))
+'@
+$ledgerLines=@($ledgerDraft | & 'host\venv\Scripts\python.exe' -c $canonicalizer)
+if ($LASTEXITCODE -ne 0 -or $ledgerLines.Count -ne 1) { throw 'Could not canonicalize promotion ledger' }
+$transcriptRoot=Join-Path (Get-Location) '.superpowers/sdd/promotion-transcripts'
+$expectedTranscriptMethods=@(
+    'test_windows_access_denied_retries_atomic_preparing_promotion',
+    'test_windows_sharing_errors_32_and_33_are_retryable',
+    'test_persistent_windows_promotion_lock_stops_after_three_attempts',
+    'test_non_windows_or_unlisted_promotion_errors_are_not_retried',
+    'test_preparing_promotion_revalidates_before_and_after_sleep',
+    'test_preparing_promotion_revalidation_rejects_every_authority_mismatch',
+    'test_preparing_promotion_hooks_wrap_the_logical_operation_once',
+    'test_update_engine_constructor_signature_remains_frozen'
+)
+$expectedMutationMethods=[ordered]@{
+    classification='test_windows_access_denied_retries_atomic_preparing_promotion'
+    bound='test_persistent_windows_promotion_lock_stops_after_three_attempts'
+    initial='test_preparing_promotion_revalidates_before_and_after_sleep'
+    'pre-sleep'='test_preparing_promotion_revalidation_rejects_every_authority_mismatch'
+    'post-sleep'='test_preparing_promotion_revalidation_rejects_every_authority_mismatch'
+}
+$expectedTranscriptDirectories=@('red','green') + @($expectedMutationMethods.Keys | ForEach-Object { "mutation-$_" })
+$expectedTranscriptFiles=@()
+foreach ($method in $expectedTranscriptMethods) {
+    $expectedTranscriptFiles += "red/$method.txt"
+    $expectedTranscriptFiles += "green/$method.txt"
+}
+foreach ($entry in $expectedMutationMethods.GetEnumerator()) {
+    $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).txt"
+    $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).restored-green.txt"
+}
+$rootInfo=Get-Item -LiteralPath $transcriptRoot -Force
+$transcriptEntries=@(Get-ChildItem -LiteralPath $transcriptRoot -Force -Recurse)
+$unsupportedTranscriptEntries=@($transcriptEntries | Where-Object {
+    ($_ -isnot [IO.FileInfo] -and $_ -isnot [IO.DirectoryInfo]) -or
+    ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+})
+$actualTranscriptDirectories=@($transcriptEntries | Where-Object { $_ -is [IO.DirectoryInfo] } | ForEach-Object { [IO.Path]::GetRelativePath($transcriptRoot,$_.FullName).Replace('\','/') } | Sort-Object)
+$actualTranscriptFiles=@($transcriptEntries | Where-Object { $_ -is [IO.FileInfo] } | ForEach-Object { [IO.Path]::GetRelativePath($transcriptRoot,$_.FullName).Replace('\','/') } | Sort-Object)
+$missingTranscriptDirectories=@($expectedTranscriptDirectories | Where-Object { $actualTranscriptDirectories -cnotcontains $_ })
+$extraTranscriptDirectories=@($actualTranscriptDirectories | Where-Object { $expectedTranscriptDirectories -cnotcontains $_ })
+$missingTranscriptFiles=@($expectedTranscriptFiles | Where-Object { $actualTranscriptFiles -cnotcontains $_ })
+$extraTranscriptFiles=@($actualTranscriptFiles | Where-Object { $expectedTranscriptFiles -cnotcontains $_ })
+if (
+    $rootInfo -isnot [IO.DirectoryInfo] -or ($rootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+    $unsupportedTranscriptEntries.Count -ne 0 -or
+    $actualTranscriptDirectories.Count -ne 7 -or $actualTranscriptFiles.Count -ne 26 -or
+    $missingTranscriptDirectories.Count -ne 0 -or $extraTranscriptDirectories.Count -ne 0 -or
+    $missingTranscriptFiles.Count -ne 0 -or $extraTranscriptFiles.Count -ne 0
+) {
+    throw "Promotion transcript topology mismatch. Missing directories: $($missingTranscriptDirectories -join ', '); Extra directories: $($extraTranscriptDirectories -join ', '); Missing files: $($missingTranscriptFiles -join ', '); Extra files: $($extraTranscriptFiles -join ', ')"
+}
+$transcriptMap=[ordered]@{}
+foreach ($relative in $actualTranscriptFiles) {
+    $fullPath=Join-Path $transcriptRoot $relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
+    $transcriptMap[$relative]=(Get-FileHash -Algorithm SHA256 -LiteralPath $fullPath).Hash.ToLowerInvariant()
+}
+if ($transcriptMap.Count -ne 26) { throw "Promotion transcript count mismatch: $($transcriptMap.Count)" }
+$transcriptMapCanonical=@((ConvertTo-Json $transcriptMap -Compress) | & 'host\venv\Scripts\python.exe' -c $canonicalizer)
+if ($LASTEXITCODE -ne 0 -or $transcriptMapCanonical.Count -ne 1) { throw 'Could not canonicalize promotion transcript map' }
+[IO.File]::WriteAllText((Join-Path (Get-Location) "$transcriptMapPath.tmp"),$transcriptMapCanonical[0] + "`n",[Text.UTF8Encoding]::new($false))
+if ([IO.File]::ReadAllText((Join-Path (Get-Location) "$transcriptMapPath.tmp"),[Text.UTF8Encoding]::new($false)) -cne $transcriptMapCanonical[0] + "`n") { throw 'Promotion transcript map bytes are not canonical' }
+[IO.File]::Move((Join-Path (Get-Location) "$transcriptMapPath.tmp"),(Join-Path (Get-Location) $transcriptMapPath))
+$ledger.transcript_map_sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $transcriptMapPath).Hash.ToLowerInvariant()
+$ledgerDraft=$ledger | ConvertTo-Json -Depth 8 -Compress
+$ledgerLines=@($ledgerDraft | & 'host\venv\Scripts\python.exe' -c $canonicalizer)
+if ($LASTEXITCODE -ne 0 -or $ledgerLines.Count -ne 1) { throw 'Could not finalize promotion ledger' }
+[IO.File]::WriteAllText((Join-Path (Get-Location) "$ledgerPath.tmp"),$ledgerLines[0] + "`n",[Text.UTF8Encoding]::new($false))
+if ([IO.File]::ReadAllText((Join-Path (Get-Location) "$ledgerPath.tmp"),[Text.UTF8Encoding]::new($false)) -cne $ledgerLines[0] + "`n") { throw 'Promotion ledger bytes are not canonical' }
+[IO.File]::Move((Join-Path (Get-Location) "$ledgerPath.tmp"),(Join-Path (Get-Location) $ledgerPath))
+foreach ($path in @($ledgerPath,$observedPath,$transcriptMapPath,'.superpowers/sdd/invoke-promotion-test.ps1','.superpowers/sdd/run-promotion-mutations.ps1')) {
+    & git check-ignore -q -- $path
+    if ($LASTEXITCODE -ne 0) { throw "Promotion evidence artifact is not ignored: $path" }
+}
+```
+
+The controller writes one `promotion-transcripts.sha256.json` canonical ordered
+JSON map of all 26 transcripts: 8 RED-phase, 8 focused GREEN, 5 mutation
+failures, and 5 post-restoration mutation GREEN runs. Step 10 recomputes the map
+exactly before accepting evidence.
+
 - [ ] **Step 1: Start from a clean committed product head and inspect scope**
+
+For the mandatory rerun after any controller review fix, first remove only the
+known mutable current-run outputs below. Never remove or overwrite promotion
+RED/GREEN/mutation transcripts, their phase maps/source records, the pre-commit
+AST record, accepted Task 1-8 reports, or any other chronology evidence. A
+tracked or staged mutable path is a hard stop rather than a deletion target.
+
+```powershell
+$ErrorActionPreference='Stop'
+$mutableCurrentRunArtifacts=@(
+    '.superpowers/sdd/focused-extension-results.json',
+    '.superpowers/sdd/focused-extension-results.raw.tmp',
+    '.superpowers/sdd/focused-extension-results.canonical.tmp',
+    '.superpowers/sdd/full-extension-results.json',
+    '.superpowers/sdd/full-extension-results.raw.tmp',
+    '.superpowers/sdd/full-extension-results.canonical.tmp',
+    '.superpowers/sdd/host-test-results.json',
+    '.superpowers/sdd/host-test-results.tmp',
+    '.superpowers/sdd/reviewed-head-verification.json',
+    '.superpowers/sdd/reviewed-head-verification.tmp',
+    '.superpowers/sdd/final-artifacts.sha256.json',
+    '.superpowers/sdd/final-artifacts.sha256.tmp',
+    '.superpowers/sdd/plan-e-only-review-package.txt',
+    '.superpowers/sdd/plan-e-only-review-package.tmp',
+    '.superpowers/sdd/plan-e-only-review.diff',
+    '.superpowers/sdd/plan-e-only-review.diff.tmp',
+    '.superpowers/sdd/plan-e-only-review-findings.md',
+    '.superpowers/sdd/original-whole-branch-interim-review-package.txt',
+    '.superpowers/sdd/original-whole-branch-interim-review-package.tmp',
+    '.superpowers/sdd/original-whole-branch-interim-review.diff',
+    '.superpowers/sdd/original-whole-branch-interim-review.diff.tmp',
+    '.superpowers/sdd/original-whole-branch-interim-review-findings.md',
+    '.superpowers/sdd/plan-e-extension-hardening-report.md'
+)
+$immutableChronology=@(
+    '.superpowers/sdd/promotion-red-source.sha256',
+    '.superpowers/sdd/promotion-green-source.sha256',
+    '.superpowers/sdd/promotion-mutation-source.sha256',
+    '.superpowers/sdd/promotion-red.sha256.json',
+    '.superpowers/sdd/promotion-green.sha256.json',
+    '.superpowers/sdd/promotion-mutation.sha256.json',
+    '.superpowers/sdd/promotion-transcripts.sha256.json',
+    '.superpowers/sdd/promotion-ast.sha256'
+)
+if (@($mutableCurrentRunArtifacts | Where-Object { $immutableChronology -ccontains $_ }).Count -ne 0) {
+    throw 'Mutable reset list contains immutable chronology evidence'
+}
+foreach ($path in $mutableCurrentRunArtifacts) {
+    $tracked=@(& git ls-files -- $path)
+    if ($LASTEXITCODE -ne 0) { throw "Could not inspect mutable artifact tracking: $path" }
+    $staged=@(& git diff --cached --name-only --no-renames -- $path)
+    if ($LASTEXITCODE -ne 0) { throw "Could not inspect mutable artifact staging: $path" }
+    if ($tracked.Count -ne 0 -or $staged.Count -ne 0) {
+        throw "Refusing to reset tracked or staged current-run artifact: $path"
+    }
+    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+}
+```
+
+Every suite block resolves its own literal reviewed head and repeats the tested
+source check below before starting. The tested-source roots are the complete
+tracked `extension`, `host`, and `tests` trees, this plan's committed verification
+program, `.gitignore`, and root release/installer
+dependencies `release_helper.py`, `dev_switch.py`, `installer_core.ps1`,
+`dyhelper_installer.ps1`, and `install.bat`. The
+HEAD tree inventory and current tracked inventory must be byte-for-byte equal,
+and no tracked path under those roots may be staged, modified, deleted, or
+unmerged. This is deliberately global to product/test dependencies rather than
+limited to the 60 Plan E range paths.
 
 Run:
 
@@ -5268,6 +7572,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Plan E base is not an ancestor of HEAD' }
 $expectedRangePaths=@(
     'docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md',
     'docs/superpowers/specs/2026-07-24-plan-e-boundary-correction-design.md',
+    'docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md',
     'extension/src/background/analyzeBridge.test.ts',
     'extension/src/background/analyzeBridge.ts',
     'extension/src/background/analyzeRequestHandler.test.ts',
@@ -5322,7 +7627,9 @@ $expectedRangePaths=@(
     'extension/src/utils/teamCatalog.ts',
     'extension/src/utils/translations.ts',
     'host/dh_native_host.py',
-    'host/test_session_workspace.py'
+    'host/test_session_workspace.py',
+    'host/test_update_engine_resume.py',
+    'host/update_engine.py'
 )
 $actualRangePaths=@(& git diff --name-only --no-renames "$integrationBase..HEAD")
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect Plan E integration range' }
@@ -5338,15 +7645,42 @@ if (
 $dirtyPlanE=@(& git status --porcelain=v1 --untracked-files=all -- $expectedRangePaths)
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect Plan E path status' }
 if ($dirtyPlanE.Count -ne 0) { throw 'A Plan E range path is dirty' }
+$testedSourceRoots=@('extension','host','tests','docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md','.gitignore','release_helper.py','dev_switch.py','installer_core.ps1','dyhelper_installer.ps1','install.bat')
+$testedHead=@(& git rev-parse HEAD)
+if ($LASTEXITCODE -ne 0 -or $testedHead.Count -ne 1 -or $testedHead[0].Trim() -notmatch '^[0-9a-f]{40}$') {
+    throw 'Could not resolve tested source head'
+}
+$headSourceInventory=@(& git ls-tree -r --name-only $testedHead[0].Trim() -- $testedSourceRoots)
+if ($LASTEXITCODE -ne 0 -or $headSourceInventory.Count -lt 1) { throw 'Could not inventory tested source at HEAD' }
+$trackedSourceInventory=@(& git ls-files -- $testedSourceRoots)
+if ($LASTEXITCODE -ne 0) { throw 'Could not inventory tracked tested source' }
+if (($headSourceInventory -join "`n") -cne ($trackedSourceInventory -join "`n")) {
+    throw 'Tracked tested-source inventory differs from reviewed HEAD'
+}
+$dirtyTestedSource=@(& git status --porcelain=v1 --untracked-files=no -- $testedSourceRoots)
+if ($LASTEXITCODE -ne 0 -or $dirtyTestedSource.Count -ne 0) {
+    throw 'Tracked product/test source is not globally clean at reviewed HEAD'
+}
 $planDSentinels=@('extension/src/background/nativePortClient.ts','extension/src/background/hostGate.ts','extension/src/background/updateProtocol.ts','extension/src/background/updateCoordinator.ts','extension/src/background/serviceWorker.update.test.ts')
 foreach ($path in $planDSentinels) {
     if (Test-Path -LiteralPath $path) { throw "Plan D sentinel appeared: $path" }
 }
 ```
 
-Expected: no Plan E path is dirty; the name-only list contains exactly the unique Task 1-8 path union plus the approved correction spec and this repaired plan after the declared A-C base; no Plan D sentinel, version, dependency, registry, publish, or real-user-data file changed. Record the correction-spec and repaired-plan commits separately from the eight product/test task commits.
+Expected: no tracked product/test source anywhere under the literal tested-source
+roots is dirty or differs from the resolved HEAD inventory; no Plan E path is
+dirty; the name-only list contains exactly 60 paths: the unique Task 1-8 path
+union, both approved correction specs, this repaired plan, and the two authorized
+Windows promotion retry paths. No other Plan A-C path, Plan D sentinel, version,
+dependency, registry, publish, or real-user-data file changed. Record both
+correction-spec commits, both plan revisions, Tasks 1-8, controller fixes, and
+the promotion retry commit separately.
 
-If unrelated untracked plan files from another agent are present, record and ignore them; do not stage, edit, remove, or require a globally clean worktree. “No uncommitted product/test changes” means no path in this plan's File Map appears in `git status --short`; cross-check every status line against that exact map before continuing.
+Unrelated untracked plan files may be recorded and ignored; do not stage, edit,
+or remove them. Tracked documentation outside the tested-source roots need not be
+globally clean, but every tracked product/test dependency in the literal
+tested-source roots above must be clean and exactly inventoried at the
+resolved test head before every focused/full Extension or Host suite.
 
 Each later shell command is independent: reread and exact-byte validate `plan-e-base.txt` against the declared SHA inside any block that needs `$integrationBase`; never rely on the variable from Step 1 surviving another tool call. Use only the declared SHA and separately resolved immutable review head for Plan E-only version/scope diffs. Do not substitute current `HEAD` after resolving a review head, the branch base, or a guessed downstream commit.
 
@@ -5391,8 +7725,100 @@ foreach ($relative in $requiredExtension) {
         throw "Required Plan E Extension file missing: $fullPath"
     }
 }
-& npm run test:run --prefix extension -- @focusedExtension --reporter=dot
-if ($LASTEXITCODE -ne 0) { throw 'Focused Extension verification failed' }
+$focusedResult='.superpowers/sdd/focused-extension-results.json'
+$focusedRaw='.superpowers/sdd/focused-extension-results.raw.tmp'
+$focusedTemp='.superpowers/sdd/focused-extension-results.canonical.tmp'
+if ((Test-Path -LiteralPath $focusedResult) -or (Test-Path -LiteralPath $focusedRaw) -or (Test-Path -LiteralPath $focusedTemp)) { throw 'Focused Extension result or temporary already exists; run the documented mutable-result reset first' }
+$focusedHead=@(& git rev-parse HEAD)
+if ($LASTEXITCODE -ne 0 -or $focusedHead.Count -ne 1 -or $focusedHead[0].Trim() -notmatch '^[0-9a-f]{40}$') { throw 'Could not bind focused Extension result to HEAD' }
+$testedSourceRoots=@('extension','host','tests','docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md','.gitignore','release_helper.py','dev_switch.py','installer_core.ps1','dyhelper_installer.ps1','install.bat')
+$headSource=@(& git ls-tree -r --name-only $focusedHead[0].Trim() -- $testedSourceRoots)
+$trackedSource=@(& git ls-files -- $testedSourceRoots)
+$currentHead=@(& git rev-parse HEAD)
+$dirtySource=@(& git status --porcelain=v1 --untracked-files=no -- $testedSourceRoots)
+if (
+    $LASTEXITCODE -ne 0 -or $headSource.Count -lt 1 -or $currentHead.Count -ne 1 -or
+    $currentHead[0].Trim() -cne $focusedHead[0].Trim() -or
+    ($headSource -join "`n") -cne ($trackedSource -join "`n") -or
+    $dirtySource.Count -ne 0
+) { throw 'Focused Extension tested source is not globally clean at reviewed HEAD' }
+$focusedRawAbsolute=Join-Path (Get-Location) $focusedRaw
+try {
+    & npm run test:run --prefix extension -- @focusedExtension --reporter=verbose --reporter=json "--outputFile.json=$focusedRawAbsolute"
+    if ($LASTEXITCODE -ne 0) { throw 'Focused Extension verification failed' }
+$focusedValidator=@'
+import json,os,pathlib,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value):
+    raise ValueError('non-finite JSON constant: '+value)
+def validate_counts(value,rows,name):
+    required={'numTotalTestSuites','numPassedTestSuites','numFailedTestSuites','numPendingTestSuites','numTotalTests','numPassedTests','numFailedTests','numPendingTests','numTodoTests'}
+    if not required.issubset(value): raise SystemExit(name+' missing counter')
+    for key,counter in value.items():
+        if key.startswith('num') and (type(counter) is not int or counter<0): raise SystemExit(name+' invalid counter '+key)
+    if value['numTotalTestSuites']!=value['numPassedTestSuites']+value['numFailedTestSuites']+value['numPendingTestSuites']: raise SystemExit(name+' suite counter relationship')
+    if value['numTotalTests']!=value['numPassedTests']+value['numFailedTests']+value['numPendingTests']+value['numTodoTests']: raise SystemExit(name+' test counter relationship')
+    if value['numTotalTestSuites']!=len(rows) or value['numPassedTestSuites']!=len(rows): raise SystemExit(name+' suite/file counter relationship')
+    assertion_lists=[row.get('assertionResults') for row in rows]
+    if any(type(items) is not list or not items for items in assertion_lists) or sum(len(items) for items in assertion_lists)!=value['numTotalTests']: raise SystemExit(name+' assertion counter relationship')
+    if value['numTotalTests']<1 or value['numPassedTests']!=value['numTotalTests']: raise SystemExit(name+' passing counter relationship')
+    if any(value[key]!=0 for key in ('numFailedTestSuites','numPendingTestSuites','numFailedTests','numPendingTests','numTodoTests')): raise SystemExit(name+' nonzero failure/pending counter')
+    if 'numRuntimeErrorTestSuites' in value and value['numRuntimeErrorTestSuites']!=0: raise SystemExit(name+' runtime-error counter')
+raw,temp,target=map(pathlib.Path,sys.argv[1:4])
+head=sys.argv[4]
+value=json.loads(raw.read_text(encoding='utf-8'),object_pairs_hook=pairs,parse_constant=reject_constant)
+if type(value) is not dict or 'reviewed_head' in value:
+    raise SystemExit('focused Vitest root shape mismatch')
+expected=[item.replace('\\','/') for item in sys.argv[5:]]
+if len(expected)!=len(set(expected)): raise SystemExit('duplicate focused expected path')
+rows=value.get('testResults')
+if type(rows) is not list or not rows or any(type(row) is not dict for row in rows):
+    raise SystemExit('focused Vitest rows mismatch')
+validate_counts(value,rows,'focused Vitest')
+row_keys=[json.dumps(row,sort_keys=True,separators=(',',':')) for row in rows]
+if len(row_keys)!=len(set(row_keys)): raise SystemExit('duplicate focused testResults row')
+def observed_path(row):
+    name=row.get('name')
+    if type(name) is not str: raise SystemExit('focused Vitest row name mismatch')
+    name=name.replace('\\','/')
+    if '/extension/' in name: return name.rsplit('/extension/',1)[1]
+    if name.startswith('extension/'): return name[len('extension/'):]
+    return name
+observed=[observed_path(row) for row in rows]
+if len(observed)!=len(set(observed)): raise SystemExit('duplicate focused observed file path')
+if value.get('success') is not True or value.get('numFailedTests') != 0 or value.get('numFailedTestSuites') != 0 or value.get('numPendingTests') != 0 or value.get('numPendingTestSuites') != 0 or value.get('numTodoTests') != 0:
+    raise SystemExit('focused Vitest status mismatch')
+if value.get('numTotalTests') != value.get('numPassedTests') or value.get('numTotalTests',0) < 1:
+    raise SystemExit('focused Vitest test count mismatch')
+if set(observed) != set(expected) or len(observed)!=len(expected):
+    raise SystemExit(f'focused Vitest file mismatch: {sorted(observed)}')
+if any(row.get('status') != 'passed' for row in rows):
+    raise SystemExit('focused Vitest file status mismatch')
+for row in rows:
+    assertions=row.get('assertionResults')
+    if type(assertions) is not list or not assertions or any(type(item) is not dict or item.get('status')!='passed' for item in assertions):
+        raise SystemExit('focused Vitest pending/todo/skipped test detected')
+value['reviewed_head']=head
+canonical=json.dumps(value,sort_keys=True,separators=(',',':'))+'\n'
+temp.write_text(canonical,encoding='utf-8',newline='')
+check=temp.read_text(encoding='utf-8')
+parsed=json.loads(check,object_pairs_hook=pairs,parse_constant=reject_constant)
+if check!=canonical or parsed!=value or target.exists(): raise SystemExit('focused canonical promotion precondition failed')
+os.replace(temp,target)
+print(f"{value['numTotalTests']} {len(rows)}")
+'@
+    $focusedCounts=@($focusedValidator | & 'host\venv\Scripts\python.exe' - $focusedRaw $focusedTemp $focusedResult $focusedHead[0].Trim() @focusedExtension)
+    if ($LASTEXITCODE -ne 0 -or $focusedCounts.Count -ne 1) { throw 'Focused Extension JSON validation failed' }
+} finally {
+    Remove-Item -LiteralPath $focusedRaw,$focusedTemp -Force -ErrorAction SilentlyContinue
+}
+& git check-ignore -q -- $focusedResult
+if ($LASTEXITCODE -ne 0) { throw 'Focused Extension result is not ignored' }
 ```
 
 Expected: `utils/ownData.ts`, `background/analyzeRequestHandler.ts`, `background/nativeMessageWire.ts`, and their focused tests exist; every asserted Plan E test passes, including `content/updateErrorBridge.test.ts`. Record exact totals.
@@ -5401,8 +7827,101 @@ Expected: `utils/ownData.ts`, `background/analyzeRequestHandler.ts`, `background
 
 ```powershell
 $ErrorActionPreference='Stop'
-& npm run test:run --prefix extension -- --reporter=dot
-if ($LASTEXITCODE -ne 0) { throw 'Full Extension tests failed' }
+$fullResult='.superpowers/sdd/full-extension-results.json'
+$fullRaw='.superpowers/sdd/full-extension-results.raw.tmp'
+$fullTemp='.superpowers/sdd/full-extension-results.canonical.tmp'
+if ((Test-Path -LiteralPath $fullResult) -or (Test-Path -LiteralPath $fullRaw) -or (Test-Path -LiteralPath $fullTemp)) { throw 'Full Extension result or temporary already exists; run the documented mutable-result reset first' }
+$fullHead=@(& git rev-parse HEAD)
+if ($LASTEXITCODE -ne 0 -or $fullHead.Count -ne 1 -or $fullHead[0].Trim() -notmatch '^[0-9a-f]{40}$') { throw 'Could not bind full Extension result to HEAD' }
+$testedSourceRoots=@('extension','host','tests','docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md','.gitignore','release_helper.py','dev_switch.py','installer_core.ps1','dyhelper_installer.ps1','install.bat')
+$headSource=@(& git ls-tree -r --name-only $fullHead[0].Trim() -- $testedSourceRoots)
+$trackedSource=@(& git ls-files -- $testedSourceRoots)
+$currentHead=@(& git rev-parse HEAD)
+$dirtySource=@(& git status --porcelain=v1 --untracked-files=no -- $testedSourceRoots)
+if (
+    $LASTEXITCODE -ne 0 -or $headSource.Count -lt 1 -or $currentHead.Count -ne 1 -or
+    $currentHead[0].Trim() -cne $fullHead[0].Trim() -or
+    ($headSource -join "`n") -cne ($trackedSource -join "`n") -or
+    $dirtySource.Count -ne 0
+) { throw 'Full Extension tested source is not globally clean at reviewed HEAD' }
+$expectedFullTests=@(& git ls-tree -r --name-only $fullHead[0].Trim() -- extension/src | Where-Object { $_ -match '\.test\.tsx?$' })
+if ($LASTEXITCODE -ne 0 -or $expectedFullTests.Count -lt 1) { throw 'Could not inventory full Extension tests' }
+$expectedFullTests=@($expectedFullTests | ForEach-Object { $_ -replace '^extension/','' })
+$fullRawAbsolute=Join-Path (Get-Location) $fullRaw
+try {
+    & npm run test:run --prefix extension -- --reporter=verbose --reporter=json "--outputFile.json=$fullRawAbsolute"
+    if ($LASTEXITCODE -ne 0) { throw 'Full Extension tests failed' }
+$fullValidator=@'
+import json,os,pathlib,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value):
+    raise ValueError('non-finite JSON constant: '+value)
+def validate_counts(value,rows,name):
+    required={'numTotalTestSuites','numPassedTestSuites','numFailedTestSuites','numPendingTestSuites','numTotalTests','numPassedTests','numFailedTests','numPendingTests','numTodoTests'}
+    if not required.issubset(value): raise SystemExit(name+' missing counter')
+    for key,counter in value.items():
+        if key.startswith('num') and (type(counter) is not int or counter<0): raise SystemExit(name+' invalid counter '+key)
+    if value['numTotalTestSuites']!=value['numPassedTestSuites']+value['numFailedTestSuites']+value['numPendingTestSuites']: raise SystemExit(name+' suite counter relationship')
+    if value['numTotalTests']!=value['numPassedTests']+value['numFailedTests']+value['numPendingTests']+value['numTodoTests']: raise SystemExit(name+' test counter relationship')
+    if value['numTotalTestSuites']!=len(rows) or value['numPassedTestSuites']!=len(rows): raise SystemExit(name+' suite/file counter relationship')
+    assertion_lists=[row.get('assertionResults') for row in rows]
+    if any(type(items) is not list or not items for items in assertion_lists) or sum(len(items) for items in assertion_lists)!=value['numTotalTests']: raise SystemExit(name+' assertion counter relationship')
+    if value['numTotalTests']<1 or value['numPassedTests']!=value['numTotalTests']: raise SystemExit(name+' passing counter relationship')
+    if any(value[key]!=0 for key in ('numFailedTestSuites','numPendingTestSuites','numFailedTests','numPendingTests','numTodoTests')): raise SystemExit(name+' nonzero failure/pending counter')
+    if 'numRuntimeErrorTestSuites' in value and value['numRuntimeErrorTestSuites']!=0: raise SystemExit(name+' runtime-error counter')
+raw,temp,target=map(pathlib.Path,sys.argv[1:4])
+head=sys.argv[4]
+value=json.loads(raw.read_text(encoding='utf-8'),object_pairs_hook=pairs,parse_constant=reject_constant)
+if type(value) is not dict or 'reviewed_head' in value: raise SystemExit('full Vitest root shape mismatch')
+expected=[item.replace('\\','/') for item in sys.argv[5:]]
+if len(expected)!=len(set(expected)): raise SystemExit('duplicate full expected path')
+rows=value.get('testResults')
+if type(rows) is not list or not rows or any(type(row) is not dict for row in rows): raise SystemExit('full Vitest rows mismatch')
+validate_counts(value,rows,'full Vitest')
+row_keys=[json.dumps(row,sort_keys=True,separators=(',',':')) for row in rows]
+if len(row_keys)!=len(set(row_keys)): raise SystemExit('duplicate full testResults row')
+def observed_path(row):
+    name=row.get('name')
+    if type(name) is not str: raise SystemExit('full Vitest row name mismatch')
+    name=name.replace('\\','/')
+    if '/extension/' in name: return name.rsplit('/extension/',1)[1]
+    if name.startswith('extension/'): return name[len('extension/'):]
+    return name
+observed=[observed_path(row) for row in rows]
+if len(observed)!=len(set(observed)): raise SystemExit('duplicate full observed file path')
+if value.get('success') is not True or value.get('numFailedTests') != 0 or value.get('numFailedTestSuites') != 0 or value.get('numPendingTests') != 0 or value.get('numPendingTestSuites') != 0 or value.get('numTodoTests') != 0:
+    raise SystemExit('full Vitest status mismatch')
+if value.get('numTotalTests') != value.get('numPassedTests') or value.get('numTotalTests',0) < 1:
+    raise SystemExit('full Vitest test count mismatch')
+if not rows or any(row.get('status') != 'passed' for row in rows):
+    raise SystemExit('full Vitest file status mismatch')
+if set(observed) != set(expected) or len(observed)!=len(expected):
+    raise SystemExit(f'full Vitest file mismatch: {sorted(observed)}')
+for row in rows:
+    assertions=row.get('assertionResults')
+    if type(assertions) is not list or not assertions or any(type(item) is not dict or item.get('status')!='passed' for item in assertions):
+        raise SystemExit('full Vitest pending/todo/skipped test detected')
+value['reviewed_head']=head
+canonical=json.dumps(value,sort_keys=True,separators=(',',':'))+'\n'
+temp.write_text(canonical,encoding='utf-8',newline='')
+check=temp.read_text(encoding='utf-8')
+parsed=json.loads(check,object_pairs_hook=pairs,parse_constant=reject_constant)
+if check!=canonical or parsed!=value or target.exists(): raise SystemExit('full canonical promotion precondition failed')
+os.replace(temp,target)
+print(f"{value['numTotalTests']} {len(rows)}")
+'@
+    $fullCounts=@($fullValidator | & 'host\venv\Scripts\python.exe' - $fullRaw $fullTemp $fullResult $fullHead[0].Trim() @expectedFullTests)
+    if ($LASTEXITCODE -ne 0 -or $fullCounts.Count -ne 1) { throw 'Full Extension JSON validation failed' }
+} finally {
+    Remove-Item -LiteralPath $fullRaw,$fullTemp -Force -ErrorAction SilentlyContinue
+}
+& git check-ignore -q -- $fullResult
+if ($LASTEXITCODE -ne 0) { throw 'Full Extension result is not ignored' }
 Push-Location -LiteralPath 'extension'
 try {
     & npm exec tsc -- --noEmit -p tsconfig.json
@@ -5436,7 +7955,7 @@ if (-not (Test-Path -LiteralPath 'host\venv\Scripts\python.exe' -PathType Leaf))
 $root=Join-Path $tempParent `
     ('dh-plan-e-host-' + [guid]::NewGuid().ToString('N'))
 if (Test-Path -LiteralPath $root) { throw 'Plan E Host temp root already exists' }
-$envNames=@('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP','PYTHONPATH')
+$envNames=@('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP','PYTHONPATH','DH_PROMOTION_EVIDENCE','DH_PLAN_C_FROZEN_ONEDIR')
 $savedEnv=@{}
 foreach ($name in $envNames) {
     $savedEnv[$name]=[Environment]::GetEnvironmentVariable($name,'Process')
@@ -5473,28 +7992,99 @@ function Set-PlanEHostEnvironment {
     } else {
         Remove-Item -LiteralPath 'Env:PYTHONPATH' -ErrorAction SilentlyContinue
     }
+    Remove-Item -LiteralPath 'Env:DH_PROMOTION_EVIDENCE' -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath 'Env:DH_PLAN_C_FROZEN_ONEDIR' -ErrorAction SilentlyContinue
 }
+$hostResultPath='.superpowers/sdd/host-test-results.json'
+$hostResultTemp='.superpowers/sdd/host-test-results.tmp'
+if ((Test-Path -LiteralPath $hostResultPath) -or (Test-Path -LiteralPath $hostResultTemp)) { throw 'Host result or temporary already exists; run the documented mutable-result reset first' }
+$hostHead=@(& git rev-parse HEAD)
+if ($LASTEXITCODE -ne 0 -or $hostHead.Count -ne 1 -or $hostHead[0].Trim() -notmatch '^[0-9a-f]{40}$') { throw 'Could not bind Host result to HEAD' }
+$testedSourceRoots=@('extension','host','tests','docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md','.gitignore','release_helper.py','dev_switch.py','installer_core.ps1','dyhelper_installer.ps1','install.bat')
+$headSource=@(& git ls-tree -r --name-only $hostHead[0].Trim() -- $testedSourceRoots)
+$trackedSource=@(& git ls-files -- $testedSourceRoots)
+$dirtySource=@(& git status --porcelain=v1 --untracked-files=no -- $testedSourceRoots)
+if (
+    $LASTEXITCODE -ne 0 -or $headSource.Count -lt 1 -or
+    ($headSource -join "`n") -cne ($trackedSource -join "`n") -or
+    $dirtySource.Count -ne 0
+) { throw 'Host tested source is not globally clean at reviewed HEAD' }
+$hostResults=[ordered]@{schema_version=1;reviewed_head=$hostHead[0].Trim()}
+function Assert-PlanETestedSource {
+    $current=@(& git rev-parse HEAD)
+    $headFiles=@(& git ls-tree -r --name-only $hostHead[0].Trim() -- $testedSourceRoots)
+    $trackedFiles=@(& git ls-files -- $testedSourceRoots)
+    $dirty=@(& git status --porcelain=v1 --untracked-files=no -- $testedSourceRoots)
+    if (
+        $LASTEXITCODE -ne 0 -or $current.Count -ne 1 -or
+        $current[0].Trim() -cne $hostHead[0].Trim() -or
+        ($headFiles -join "`n") -cne ($trackedFiles -join "`n") -or
+        $dirty.Count -ne 0
+    ) { throw 'Tracked product/test source changed before a Host phase' }
+}
+function Invoke-PlanEHostSuite {
+    param(
+        [Parameter(Mandatory=$true)][string]$Name,
+        [Parameter(Mandatory=$true)][string[]]$Arguments,
+        [Parameter(Mandatory=$true)][AllowEmptyCollection()][object[]]$ExpectedSkips
+    )
+    Assert-PlanETestedSource
+    $lines=@(& 'host\venv\Scripts\python.exe' @Arguments 2>&1)
+    $exit=$LASTEXITCODE
+    foreach ($line in $lines) { [Console]::Out.WriteLine([string]$line) }
+    $text=$lines -join "`n"
+    $ran=[regex]::Matches($text,'(?m)^Ran ([1-9][0-9]*) tests? in [0-9.]+s\r?$')
+    $ok=[regex]::Matches($text,'(?m)^OK(?: \(skipped=([0-9]+)\))?\r?$')
+    if ($exit -ne 0 -or $ran.Count -ne 1 -or $ok.Count -ne 1 -or $text -cmatch '(?m)^(FAILED|ERROR:)') {
+        throw "$Name Host suite output is invalid"
+    }
+    $skipped=if ($ok[0].Groups[1].Success) { [int]$ok[0].Groups[1].Value } else { 0 }
+    $skipMatches=[regex]::Matches($text,"(?m)^.* \(([^()\r\n]+)\) \.\.\. skipped '([^'\r\n]*)'\r?$")
+    $skips=@($skipMatches | ForEach-Object {
+        [ordered]@{selector=$_.Groups[1].Value;reason=$_.Groups[2].Value}
+    })
+    if ($skipped -ne $skips.Count -or $skips.Count -ne $ExpectedSkips.Count) {
+        throw "$Name Host suite skip count/verbose identity mismatch"
+    }
+    for ($index=0; $index -lt $ExpectedSkips.Count; $index++) {
+        if (
+            $skips[$index].selector -cne $ExpectedSkips[$index].selector -or
+            $skips[$index].reason -cne $ExpectedSkips[$index].reason
+        ) { throw "$Name Host suite skip identity/reason mismatch" }
+    }
+    return [ordered]@{tests=[int]$ran[0].Groups[1].Value;skipped=$skipped;skips=$skips}
+}
+$authorizedSkip=[ordered]@{
+    selector='host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation'
+    reason='DH_PLAN_C_FROZEN_ONEDIR not set'
+}
+$fullHostTestPaths=@(& git ls-tree -r --name-only $hostHead[0].Trim() -- host | Where-Object { $_ -match '^host/test_[^/]+\.py$' })
+if ($LASTEXITCODE -ne 0 -or $fullHostTestPaths.Count -lt 1) { throw 'Could not inventory full Host test modules at reviewed HEAD' }
+$fullHostModules=@($fullHostTestPaths | ForEach-Object { ($_ -replace '\.py$','') -replace '/','.' })
+if ($fullHostModules.Count -ne @($fullHostModules | Sort-Object -Unique).Count) { throw 'Full Host test module inventory contains duplicates' }
+$fullHostArguments=@('-m','unittest') + $fullHostModules + @('-v')
 try {
     New-Item -ItemType Directory -Path $root | Out-Null
     Set-PlanEHostEnvironment -Phase 'focused' -UseHostPath $true
-    & 'host\venv\Scripts\python.exe' -m unittest host.test_session_workspace host.test_prompt_session host.test_prompt_sources host.test_sdk_compat host.test_debug_prompt_isolation host.test_model_config -v
-    if ($LASTEXITCODE -ne 0) { throw 'Focused Host suite failed' }
+    $hostResults.focused=Invoke-PlanEHostSuite -Name 'focused' -ExpectedSkips @() -Arguments @('-m','unittest','host.test_session_workspace','host.test_prompt_session','host.test_prompt_sources','host.test_sdk_compat','host.test_debug_prompt_isolation','host.test_model_config','-v')
 
-    Set-PlanEHostEnvironment -Phase 'full' -UseHostPath $false
-    & 'host\venv\Scripts\python.exe' -m unittest discover host -v
-    if ($LASTEXITCODE -ne 0) { throw 'Full Host discovery failed' }
+    Set-PlanEHostEnvironment -Phase 'full' -UseHostPath $true
+    $hostResults.full=Invoke-PlanEHostSuite -Name 'full' -ExpectedSkips @($authorizedSkip) -Arguments $fullHostArguments
 
     Set-PlanEHostEnvironment -Phase 'compile' -UseHostPath $false
+    Assert-PlanETestedSource
     & 'host\venv\Scripts\python.exe' -m compileall -q -x '[\\/]venv[\\/]' host
     if ($LASTEXITCODE -ne 0) { throw 'Host compileall failed' }
+    $hostResults.compile='passed'
 
     Set-PlanEHostEnvironment -Phase 'update-engine' -UseHostPath $true
-    & 'host\venv\Scripts\python.exe' -m unittest host.test_update_engine_resume -v
-    if ($LASTEXITCODE -ne 0) { throw 'A-C update-engine resume gate failed' }
+    $hostResults.update_engine=Invoke-PlanEHostSuite -Name 'update-engine' -ExpectedSkips @() -Arguments @('-m','unittest','host.test_update_engine_resume','host.test_update_engine_host','host.test_update_engine_extension','host.test_update_engine_rollback','-v')
+
+    Set-PlanEHostEnvironment -Phase 'recovery' -UseHostPath $true
+    $hostResults.recovery=Invoke-PlanEHostSuite -Name 'recovery' -ExpectedSkips @($authorizedSkip) -Arguments @('-m','unittest','host.test_update_recovery','-v')
 
     Set-PlanEHostEnvironment -Phase 'package' -UseHostPath $true
-    & 'host\venv\Scripts\python.exe' -m unittest host.test_release_helper host.test_package_archive -v
-    if ($LASTEXITCODE -ne 0) { throw 'A-C release/package gate failed' }
+    $hostResults.package=Invoke-PlanEHostSuite -Name 'package' -ExpectedSkips @() -Arguments @('-m','unittest','host.test_release_helper','host.test_package_archive','-v')
 } finally {
     foreach ($name in $envNames) {
         if ($null -eq $savedEnv[$name]) {
@@ -5511,16 +8101,52 @@ try {
         Remove-Item -LiteralPath $root -Recurse -Force
     }
 }
+$hostResultJson=$hostResults | ConvertTo-Json -Depth 5 -Compress
+$canonicalizer=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+value=json.loads(sys.stdin.read(),object_pairs_hook=pairs,parse_constant=reject_constant)
+print(json.dumps(value,sort_keys=True,separators=(',',':')))
+'@
+$canonical=@($hostResultJson | & 'host\venv\Scripts\python.exe' -c $canonicalizer)
+if ($LASTEXITCODE -ne 0 -or $canonical.Count -ne 1) { throw 'Host result canonicalization failed' }
+try {
+    [IO.File]::WriteAllText((Join-Path (Get-Location) $hostResultTemp),$canonical[0] + "`n",[Text.UTF8Encoding]::new($false))
+    $tempText=[IO.File]::ReadAllText((Join-Path (Get-Location) $hostResultTemp),[Text.UTF8Encoding]::new($false))
+    if ($tempText -cne $canonical[0] + "`n" -or (Test-Path -LiteralPath $hostResultPath)) { throw 'Host atomic promotion precondition failed' }
+    [IO.File]::Move((Join-Path (Get-Location) $hostResultTemp),(Join-Path (Get-Location) $hostResultPath))
+} finally {
+    Remove-Item -LiteralPath $hostResultTemp -Force -ErrorAction SilentlyContinue
+}
+& git check-ignore -q -- $hostResultPath
+if ($LASTEXITCODE -ne 0) { throw 'Host test result is not ignored' }
 ```
 
-Expected: focused Host and full discovery report `OK`; source-only compileall exits 0 without diagnostics; A-C crash-resume and release/archive staging tests report `OK` without building/publishing assets. Record exact test totals. Every Python phase receives distinct existing `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP` directories before process start. `PYTHONPATH=host` is present only for focused dotted-module phases. Do not invoke authenticated Analyze or real Native Host registration. The same block's `finally` restores every prior process environment value and removes the one known parent after all child processes exit; no later shell depends on its variables.
+Expected: focused Host and the exact reviewed-head inventory of every tracked top-level `host/test_*.py` module report `OK`; source-only compileall exits 0 without diagnostics; the expanded update-engine gate (resume/host/extension/rollback), recovery/package gates, and release/archive staging tests report `OK` without building/publishing assets. Full and recovery each contain exactly the authorized skip selector `host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation` with exact reason `DH_PLAN_C_FROZEN_ONEDIR not set`; focused, update-engine, and package contain zero skips. The verbose selector identity and reason are stored, not inferred from the summary count. The focused promotion retry tests are included in both resume and the full Host inventory and must pass without real delays. Record exact test totals. Every Python phase receives distinct existing `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP` directories before process start. `PYTHONPATH=host` is present for dotted-module phases and absent for compileall. Do not invoke authenticated Analyze or real Native Host registration. The same block's `finally` restores every prior process environment value and removes the one known parent after all child processes exit; no later shell depends on its variables.
 
 - [ ] **Step 5: Run the no-coercion, ownership, and compatibility static scans**
 
 Run from the root using `git grep` so only tracked source is inspected. The first two commands are expected-no-match gates, so handle exit code 1 explicitly; later commands are inventory scans and may print matches:
 
+<!-- REVIEWED_HEAD_STATIC_AUDIT_START -->
 ```powershell
 $ErrorActionPreference='Stop'
+$staticHead=@(& git rev-parse HEAD)
+$testedSourceRoots=@('extension','host','tests','docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md','.gitignore','release_helper.py','dev_switch.py','installer_core.ps1','dyhelper_installer.ps1','install.bat')
+$headSource=@(& git ls-tree -r --name-only $staticHead[0].Trim() -- $testedSourceRoots)
+$trackedSource=@(& git ls-files -- $testedSourceRoots)
+$dirtySource=@(& git status --porcelain=v1 --untracked-files=no -- $testedSourceRoots)
+if (
+    $LASTEXITCODE -ne 0 -or $staticHead.Count -ne 1 -or
+    ($headSource -join "`n") -cne ($trackedSource -join "`n") -or
+    $dirtySource.Count -ne 0
+) { throw 'Static audit source is not globally clean at reviewed HEAD' }
 & git grep -n -E '\bString\(|JSON\.stringify|\.toString\(' -- extension/src/utils/ownData.ts extension/src/utils/bookmarkItems.ts extension/src/utils/analysisStore.ts extension/src/background/analyzeBridge.ts extension/src/background/analyzeRequestHandler.ts extension/src/background/nativeMessageWire.ts extension/src/utils/pageIdentity.ts extension/src/utils/analyzeRequest.ts extension/src/utils/nativeUpdateError.ts
 if ($LASTEXITCODE -eq 0) { throw 'Parser-boundary coercion remains' }
 if ($LASTEXITCODE -ne 1) { throw 'Parser-boundary coercion scan failed' }
@@ -5803,15 +8429,255 @@ if ($LASTEXITCODE -ne 1) { throw 'Stale Analyze contract scan failed' }
 & git grep -n -E 'mergeRootPathOverride|setRootPathOverride|useState.*rootPathOverride|rootPathOverride.*useState' -- extension/src
 if ($LASTEXITCODE -eq 0) { throw 'Persistent Root override state remains' }
 if ($LASTEXITCODE -ne 1) { throw 'Persistent Root state scan failed' }
-git grep -n -E 'dh_latest_analysis_owner|analysis_result_not_persisted|analysis_pending_cleanup_failed' -- extension/src
-if ($LASTEXITCODE -gt 1) { throw 'Analysis owner/warning inventory scan failed' }
-git grep -n 'extension_warnings' -- extension/src host
-if ($LASTEXITCODE -gt 1) { throw 'Extension warning inventory scan failed' }
+$ownerWarningMatches=@(& git grep -l -E 'dh_latest_analysis_owner|analysis_result_not_persisted|analysis_pending_cleanup_failed' -- extension/src)
+if ($LASTEXITCODE -ne 0) { throw 'Analysis owner/warning inventory scan failed' }
+foreach ($path in @(
+    'extension/src/utils/analysisStore.ts',
+    'extension/src/components/FAB.tsx'
+)) {
+    if ($ownerWarningMatches -cnotcontains $path) { throw "Analysis owner/warning inventory omits $path" }
+}
+$extensionWarningMatches=@(& git grep -l -F 'extension_warnings' -- extension/src)
+if ($LASTEXITCODE -ne 0 -or $extensionWarningMatches -cnotcontains 'extension/src/background/analyzeBridge.ts') {
+    throw 'Extension warning Extension inventory is incomplete'
+}
+& git grep -n -F 'extension_warnings' -- host
+if ($LASTEXITCODE -eq 0) { throw 'Extension warning metadata reached Host source' }
+if ($LASTEXITCODE -ne 1) { throw 'Extension warning Host scan failed' }
 & git grep -n -F "kind: 'remove'" -- extension/src/components/Options.tsx
 if ($LASTEXITCODE -eq 0) { throw 'Obsolete bookmark remove intent remains' }
 if ($LASTEXITCODE -ne 1) { throw 'Bookmark remove-intent scan failed' }
-git grep -n 'rootPathOverrideProvided' -- extension/src host/dh_native_host.py host/test_session_workspace.py
-if ($LASTEXITCODE -gt 1) { throw 'Root marker inventory scan failed' }
+$rootMarkerMatches=@(& git grep -l -F 'rootPathOverrideProvided' -- extension/src host/dh_native_host.py host/test_session_workspace.py)
+if ($LASTEXITCODE -ne 0) { throw 'Root marker inventory scan failed' }
+foreach ($path in @(
+    'extension/src/utils/analyzeRequest.ts',
+    'extension/src/background/analyzeBridge.ts',
+    'extension/src/components/FAB.tsx',
+    'host/dh_native_host.py',
+    'host/test_session_workspace.py'
+)) {
+    if ($rootMarkerMatches -cnotcontains $path) { throw "Root marker inventory omits $path" }
+}
+foreach ($literal in @(
+    '_replace_path = os.replace',
+    '_sleep = time.sleep',
+    '_is_windows = os.name == "nt"',
+    'PROMOTION_RETRY_DELAYS = (0.05, 0.2)',
+    'PROMOTION_TRANSIENT_WINERRORS = frozenset((5, 32, 33))'
+)) {
+    $matches=@(& git grep -n -F $literal -- host/update_engine.py)
+    if ($LASTEXITCODE -ne 0 -or $matches.Count -ne 1) {
+        throw "Windows promotion retry literal is not unique: $literal"
+    }
+}
+$productionHelper=@(& git grep -n -F 'def _require_preparing_promotion_candidate' -- host/update_engine.py)
+if ($LASTEXITCODE -ne 0 -or $productionHelper.Count -ne 1) {
+    throw 'Preparing promotion revalidation helper is not uniquely defined'
+}
+$promotionMethod=@(& git grep -n -F 'def _promote_preparing_with_retry' -- host/update_engine.py)
+if ($LASTEXITCODE -ne 0 -or $promotionMethod.Count -ne 1) {
+    throw 'Preparing promotion retry method is not uniquely defined'
+}
+foreach ($testName in @(
+    'test_windows_access_denied_retries_atomic_preparing_promotion',
+    'test_windows_sharing_errors_32_and_33_are_retryable',
+    'test_persistent_windows_promotion_lock_stops_after_three_attempts',
+    'test_non_windows_or_unlisted_promotion_errors_are_not_retried',
+    'test_preparing_promotion_revalidates_before_and_after_sleep',
+    'test_preparing_promotion_revalidation_rejects_every_authority_mismatch',
+    'test_preparing_promotion_hooks_wrap_the_logical_operation_once',
+    'test_update_engine_constructor_signature_remains_frozen'
+)) {
+    $matches=@(& git grep -n -F "def $testName" -- host/test_update_engine_resume.py)
+    if ($LASTEXITCODE -ne 0 -or $matches.Count -ne 1) {
+        throw "Promotion retry test is missing or duplicated: $testName"
+    }
+}
+$committedPlan=@(& git show 'HEAD:docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md') -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'Could not read committed plan for static AST audit' }
+$auditMatch=[regex]::Match($committedPlan,'(?s)<!-- PROMOTION_AST_AUDIT_START -->\n```python\n(.*?)\n```\n<!-- PROMOTION_AST_AUDIT_END -->')
+if (-not $auditMatch.Success) { throw 'Promotion AST audit contract missing during static scan' }
+$auditMatch.Groups[1].Value | & 'host\venv\Scripts\python.exe' -
+if ($LASTEXITCODE -ne 0) { throw 'Promotion AST audit failed during static scan' }
+```
+<!-- REVIEWED_HEAD_STATIC_AUDIT_END -->
+
+<!-- PROMOTION_AST_AUDIT_START -->
+```python
+import ast
+import subprocess
+from pathlib import Path
+
+tree = ast.parse(Path('host/update_engine.py').read_text(encoding='utf-8'))
+source = Path('host/update_engine.py').read_text(encoding='utf-8')
+plan_source = Path('docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md').read_text(encoding='utf-8')
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+engine = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'UpdateEngine')
+methods = {node.name: node for node in engine.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+constructor = methods['__init__']
+require([arg.arg for arg in constructor.args.args] == ['self', 'install_root'], 'constructor positional args')
+require([arg.arg for arg in constructor.args.kwonlyargs] == ['mutex_factory', 'hooks'], 'constructor keyword args')
+require(len(constructor.args.kw_defaults) == 2, 'constructor defaults')
+require(constructor.args.posonlyargs == [], 'constructor positional-only args')
+require(constructor.args.vararg is None and constructor.args.kwarg is None, 'constructor variadic args')
+require(ast.unparse(constructor.args.kw_defaults[0]) == 'create_windows_mutation_mutex', 'mutex default')
+require(ast.unparse(constructor.args.kw_defaults[1]) == 'None', 'hooks default')
+base_source = subprocess.check_output(
+    ['git','show','0dbb4852931b50153fb898b03129ae0092c46404:host/update_engine.py'],
+    text=True,
+    encoding='utf-8',
+)
+base_tree=ast.parse(base_source)
+base_engine=next(node for node in base_tree.body if isinstance(node,ast.ClassDef) and node.name == 'UpdateEngine')
+base_methods={node.name:node for node in base_engine.body if isinstance(node,(ast.FunctionDef,ast.AsyncFunctionDef))}
+require(
+    ast.dump(constructor,include_attributes=False)
+    == ast.dump(base_methods['__init__'],include_attributes=False),
+    'constructor differs from immutable base',
+)
+promotion = methods['_promote_preparing_with_retry']
+require([arg.arg for arg in promotion.args.args] == [
+    'self','package','candidate','candidate_bytes','paths','staging'
+], 'promotion signature')
+validator = methods['_require_preparing_promotion_candidate']
+require([arg.arg for arg in validator.args.args] == [
+    'self','package','candidate','candidate_bytes','paths','staging'
+], 'validator signature')
+
+replace_calls = []
+sleep_calls = []
+direct_os_replace = []
+for node in ast.walk(promotion):
+    if not isinstance(node, ast.Call):
+        continue
+    if isinstance(node.func, ast.Name) and node.func.id == '_replace_path':
+        replace_calls.append(node)
+    if isinstance(node.func, ast.Name) and node.func.id == '_sleep':
+        sleep_calls.append(node)
+    if (
+        isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == 'os'
+        and node.func.attr == 'replace'
+    ):
+        direct_os_replace.append(node)
+require(len(replace_calls) == 1, 'replace call count')
+require(len(sleep_calls) == 1, 'sleep call count')
+require(direct_os_replace == [], 'direct os.replace in promotion')
+replace = replace_calls[0]
+require(
+    [ast.unparse(argument) for argument in replace.args]
+    == ['paths.preparing_root','paths.transaction_root'],
+    'replace arguments',
+)
+resume = methods['_resume_preparation']
+resume_calls = [
+    node for node in ast.walk(resume)
+    if isinstance(node, ast.Call)
+    and isinstance(node.func, ast.Attribute)
+    and isinstance(node.func.value, ast.Name)
+    and node.func.value.id == 'self'
+    and node.func.attr == '_promote_preparing_with_retry'
+]
+require(len(resume_calls) == 1, 'resume promotion call count')
+promotion_source = ast.get_source_segment(
+    source, promotion
+)
+import re
+promotion_contract = re.search(
+    r'(?s)<!-- PROMOTION_METHOD_START -->\n```py\n(.*?)\n```\n<!-- PROMOTION_METHOD_END -->',
+    plan_source,
+)
+require(promotion_contract is not None, 'promotion method contract missing from plan')
+production_method = ast.dump(ast.parse(promotion_source).body[0], include_attributes=False)
+contract_method = ast.dump(ast.parse(promotion_contract.group(1)).body[0], include_attributes=False)
+require(production_method == contract_method, 'production promotion method differs from committed plan')
+validator_contract = re.search(
+    r'(?s)<!-- PROMOTION_VALIDATOR_START -->\n```py\n(.*?)\n```\n<!-- PROMOTION_VALIDATOR_END -->',
+    plan_source,
+)
+require(validator_contract is not None, 'promotion validator contract missing from plan')
+production_validator = ast.dump(validator, include_attributes=False)
+contract_validator = ast.dump(
+    ast.parse(validator_contract.group(1)).body[0],
+    include_attributes=False,
+)
+require(
+    production_validator == contract_validator,
+    'production promotion validator differs from committed plan',
+)
+require(promotion_source.count('_require_preparing_promotion_candidate') == 3, 'checkpoint helper call count')
+markers=[
+    '# promotion-checkpoint: initial',
+    '# promotion-checkpoint: pre-sleep',
+    '# promotion-checkpoint: post-sleep',
+]
+positions=[promotion_source.find(marker) for marker in markers]
+require(all(position >= 0 for position in positions) and positions == sorted(positions), 'checkpoint marker order')
+require('type(winerror) is not int' in promotion_source, 'exact winerror type check')
+require('for attempt in range(1 + len(PROMOTION_RETRY_DELAYS))' in promotion_source, 'retry bound')
+require('delay = PROMOTION_RETRY_DELAYS[attempt]' in promotion_source, 'delay selection')
+require('_sleep(delay)' in promotion_source, 'sleep use')
+require('_is_windows' in promotion_source, 'Windows discriminator use')
+require('PROMOTION_TRANSIENT_WINERRORS' in promotion_source, 'winerror allowlist use')
+for forbidden in ('shutil.copy','shutil.move','os.rename','copytree','rmtree'):
+    require(forbidden not in promotion_source, f'forbidden promotion fallback: {forbidden}')
+run_operation = methods['_run_operation']
+run_source=ast.get_source_segment(source,run_operation)
+require('before_filesystem_operation' in run_source and 'after_filesystem_operation' in run_source, 'hook wrapper')
+require(
+    ast.dump(run_operation,include_attributes=False)
+    == ast.dump(base_methods['_run_operation'],include_attributes=False),
+    'operation hook wrapper differs from immutable base',
+)
+resume_source=ast.get_source_segment(source,resume)
+promote_position=resume_source.find('self._promote_preparing_with_retry')
+active_position=resume_source.find('"active:write"')
+require(promote_position >= 0 and active_position > promote_position, 'active write ordering')
+
+test_source=Path('host/test_update_engine_resume.py').read_text(encoding='utf-8')
+test_tree=ast.parse(test_source)
+production_test_class=next(
+    node for node in test_tree.body
+    if isinstance(node, ast.ClassDef) and node.name == 'PreparingPromotionRetryTests'
+)
+test_class_contract=re.search(
+    r'(?s)<!-- PROMOTION_TEST_CLASS_START -->\n```python\n(.*?)\n```\n<!-- PROMOTION_TEST_CLASS_END -->',
+    plan_source,
+)
+require(test_class_contract is not None, 'promotion test class contract missing from plan')
+contract_test_class=ast.parse(test_class_contract.group(1)).body[0]
+require(
+    ast.dump(production_test_class,include_attributes=False)
+    == ast.dump(contract_test_class,include_attributes=False),
+    'production promotion test class differs from committed plan',
+)
+class_map_test=next(
+    node for node in ast.walk(test_tree)
+    if isinstance(node, ast.FunctionDef) and node.name == 'test_unittest_class_map_is_exact'
+)
+class_map_source=ast.get_source_segment(test_source,class_map_test)
+require('PreparingPromotionRetryTests' in class_map_source, 'class map omits promotion tests')
+```
+<!-- PROMOTION_AST_AUDIT_END -->
+
+```powershell
+$committedPlan=@(& git show 'HEAD:docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md') -join "`n"
+$auditMatch=[regex]::Match($committedPlan,'(?s)<!-- PROMOTION_AST_AUDIT_START -->\n```python\n(.*?)\n```\n<!-- PROMOTION_AST_AUDIT_END -->')
+if (-not $auditMatch.Success) { throw 'Promotion AST audit contract missing' }
+$promotionAudit=$auditMatch.Groups[1].Value
+$recordPath='.superpowers/sdd/promotion-ast.sha256'
+$existingRecord=[IO.File]::ReadAllText((Join-Path (Get-Location) $recordPath),[Text.UTF8Encoding]::new($false)).Trim()
+$expectedAuditHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.UTF8Encoding]::new($false).GetBytes($promotionAudit))).ToLowerInvariant()
+$expectedEngineHash=(Get-FileHash -Algorithm SHA256 -LiteralPath 'host/update_engine.py').Hash.ToLowerInvariant()
+$expectedTestHash=(Get-FileHash -Algorithm SHA256 -LiteralPath 'host/test_update_engine_resume.py').Hash.ToLowerInvariant()
+if ($existingRecord -cne "$expectedAuditHash $expectedEngineHash $expectedTestHash") {
+    throw 'Pre-commit promotion AST record does not match committed Host blobs'
+}
+$promotionAudit | & 'host\venv\Scripts\python.exe' -
+if ($LASTEXITCODE -ne 0) { throw 'Promotion retry AST/constructor audit failed' }
 ```
 
 Expected:
@@ -5827,6 +8693,10 @@ Expected:
 - `extension_warnings` appears only in Extension response handling/tests and never in Host-bound payload construction or `host/`;
 - the fixed-string `git grep` scan returns no match and exit code 1, proving the obsolete bookmark queue variant `{ kind: 'remove' }` is gone from tracked `Options.tsx`; other legitimate storage removals are outside this precise gate;
 - explicit Root marker appears in request assembly and Host compatibility tests/handler only.
+- Windows promotion retry uses exactly the three private seams, `0.05/0.2`
+  delays, exact `5/32/33` allowlist, one complete revalidation helper, and focused
+  retry/checkpoint/constructor tests; no public constructor parameter or
+  non-atomic fallback appears.
 
 Also run:
 
@@ -5861,6 +8731,196 @@ foreach ($path in $planDSentinels) {
 
 Expected: Plan E-only range passes diff check, has no version/dependency diff, and Plan D remains unstarted.
 
+Create the one canonical reviewed-head verification artifact only after focused
+and full Extension, all Host phases, TypeScript, build, static, and diff gates
+have passed. This block revalidates every machine result rather than trusting an
+earlier shell status. It reruns TypeScript, build, the exact committed static
+audit above, and diff checks against the same resolved head; it inventories every
+tracked tested-source blob as `path -> git blob SHA`. Write a temporary canonical
+JSON file and atomically promote it only after strict reread. If either temporary
+or final path already exists, run the documented mutable-result reset first.
+
+```powershell
+$ErrorActionPreference='Stop'
+$resultPath='.superpowers/sdd/reviewed-head-verification.json'
+$tempPath='.superpowers/sdd/reviewed-head-verification.tmp'
+if ((Test-Path -LiteralPath $resultPath) -or (Test-Path -LiteralPath $tempPath)) {
+    throw 'Reviewed-head verification result or temporary already exists'
+}
+$reviewedHead=@(& git rev-parse HEAD)
+if ($LASTEXITCODE -ne 0 -or $reviewedHead.Count -ne 1 -or $reviewedHead[0].Trim() -notmatch '^[0-9a-f]{40}$') {
+    throw 'Could not resolve reviewed verification head'
+}
+$reviewedHead=$reviewedHead[0].Trim()
+$testedSourceRoots=@('extension','host','tests','docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md','.gitignore','release_helper.py','dev_switch.py','installer_core.ps1','dyhelper_installer.ps1','install.bat')
+$sourcePaths=@(& git ls-tree -r --name-only $reviewedHead -- $testedSourceRoots)
+$trackedSource=@(& git ls-files -- $testedSourceRoots)
+$dirtySource=@(& git status --porcelain=v1 --untracked-files=no -- $testedSourceRoots)
+if (
+    $LASTEXITCODE -ne 0 -or $sourcePaths.Count -lt 1 -or
+    ($sourcePaths -join "`n") -cne ($trackedSource -join "`n") -or
+    $dirtySource.Count -ne 0
+) { throw 'Reviewed verification source is not globally clean at reviewed HEAD' }
+$sourceBlobs=[ordered]@{}
+foreach ($path in $sourcePaths) {
+    $blob=@(& git rev-parse "$reviewedHead`:$path")
+    if ($LASTEXITCODE -ne 0 -or $blob.Count -ne 1 -or $blob[0].Trim() -notmatch '^[0-9a-f]{40}$') {
+        throw "Could not resolve reviewed source blob: $path"
+    }
+    $workingBlob=@(& git hash-object -- $path)
+    if ($LASTEXITCODE -ne 0 -or $workingBlob.Count -ne 1 -or $workingBlob[0].Trim() -cne $blob[0].Trim()) {
+        throw "Working tested source differs from reviewed blob: $path"
+    }
+    $sourceBlobs[$path]=$blob[0].Trim()
+}
+$strictResults=@'
+import json,pathlib,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value):
+    raise ValueError('non-finite JSON constant: '+value)
+def validate_counts(value,rows,name):
+    required={'numTotalTestSuites','numPassedTestSuites','numFailedTestSuites','numPendingTestSuites','numTotalTests','numPassedTests','numFailedTests','numPendingTests','numTodoTests'}
+    if not required.issubset(value): raise SystemExit(name+' missing counter')
+    for key,counter in value.items():
+        if key.startswith('num') and (type(counter) is not int or counter<0): raise SystemExit(name+' invalid counter '+key)
+    if value['numTotalTestSuites']!=value['numPassedTestSuites']+value['numFailedTestSuites']+value['numPendingTestSuites']: raise SystemExit(name+' suite counter relationship')
+    if value['numTotalTests']!=value['numPassedTests']+value['numFailedTests']+value['numPendingTests']+value['numTodoTests']: raise SystemExit(name+' test counter relationship')
+    if value['numTotalTestSuites']!=len(rows) or value['numPassedTestSuites']!=len(rows): raise SystemExit(name+' suite/file counter relationship')
+    assertion_lists=[row.get('assertionResults') for row in rows]
+    if any(type(items) is not list or not items for items in assertion_lists) or sum(len(items) for items in assertion_lists)!=value['numTotalTests']: raise SystemExit(name+' assertion counter relationship')
+    if value['numTotalTests']<1 or value['numPassedTests']!=value['numTotalTests']: raise SystemExit(name+' passing counter relationship')
+    if any(value[key]!=0 for key in ('numFailedTestSuites','numPendingTestSuites','numFailedTests','numPendingTests','numTodoTests')): raise SystemExit(name+' nonzero failure/pending counter')
+    if 'numRuntimeErrorTestSuites' in value and value['numRuntimeErrorTestSuites']!=0: raise SystemExit(name+' runtime-error counter')
+def load(path):
+    text=pathlib.Path(path).read_text(encoding='utf-8')
+    value=json.loads(text,object_pairs_hook=pairs,parse_constant=reject_constant)
+    if text!=json.dumps(value,sort_keys=True,separators=(',',':'))+'\n': raise SystemExit(path+' noncanonical')
+    return value
+focused,full,host=map(load,sys.argv[1:4])
+head=sys.argv[4]
+args=sys.argv[5:]
+split=args.index('--full')
+expected={'focused':args[:split],'full':args[split+1:]}
+for name,value in (('focused',focused),('full',full)):
+    if type(value) is not dict or value.get('reviewed_head')!=head: raise SystemExit(name+' head')
+    rows=value.get('testResults')
+    if type(rows) is not list or not rows or any(type(row) is not dict for row in rows): raise SystemExit(name+' rows')
+    validate_counts(value,rows,name)
+    keys=[json.dumps(row,sort_keys=True,separators=(',',':')) for row in rows]
+    if len(keys)!=len(set(keys)): raise SystemExit(name+' duplicate row')
+    def rel(row):
+        path=row.get('name')
+        if type(path) is not str: raise SystemExit(name+' path type')
+        path=path.replace('\\','/')
+        return path.rsplit('/extension/',1)[1] if '/extension/' in path else path.removeprefix('extension/')
+    observed=[rel(row) for row in rows]
+    if len(observed)!=len(set(observed)) or len(expected[name])!=len(set(expected[name])) or set(observed)!=set(expected[name]) or len(observed)!=len(expected[name]): raise SystemExit(name+' inventory')
+    if value.get('success') is not True or value.get('numFailedTests')!=0 or value.get('numFailedTestSuites')!=0 or value.get('numPendingTests')!=0 or value.get('numPendingTestSuites')!=0 or value.get('numTodoTests')!=0: raise SystemExit(name+' status')
+    if value.get('numTotalTests')!=value.get('numPassedTests') or value.get('numTotalTests',0)<1: raise SystemExit(name+' totals')
+    for row in rows:
+        if row.get('status')!='passed': raise SystemExit(name+' suite status')
+        assertions=row.get('assertionResults')
+        if type(assertions) is not list or not assertions or any(type(item) is not dict or item.get('status')!='passed' for item in assertions): raise SystemExit(name+' pending/todo/skipped test')
+authorized=[{'selector':'host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation','reason':'DH_PLAN_C_FROZEN_ONEDIR not set'}]
+expected_skips={'focused':[],'full':authorized,'update_engine':[],'recovery':authorized,'package':[]}
+if type(host) is not dict or set(host)!={'schema_version','reviewed_head','focused','full','compile','update_engine','recovery','package'} or type(host.get('schema_version')) is not int or host.get('schema_version')!=1 or host.get('reviewed_head')!=head or host.get('compile')!='passed': raise SystemExit('host shape/head')
+for name,skips in expected_skips.items():
+    row=host.get(name)
+    if type(row) is not dict or set(row)!={'tests','skipped','skips'} or type(row.get('tests')) is not int or row['tests']<1 or type(row.get('skipped')) is not int or row['skipped']<0 or row['skipped']>row['tests'] or row['skipped']!=len(skips) or row.get('skips')!=skips: raise SystemExit(name+' host skips/count')
+print(json.dumps({'focused_extension':{'files':len(focused['testResults']),'tests':focused['numTotalTests']},'full_extension':{'files':len(full['testResults']),'tests':full['numTotalTests']},'host':{name:host[name] for name in ('focused','full','update_engine','recovery','package')}},sort_keys=True,separators=(',',':')))
+'@
+$expectedFocused=@(
+    'src/utils/ownData.test.ts','src/utils/bookmarkItems.test.ts','src/components/Options.test.tsx',
+    'src/components/MenuLogic.teamCache.test.ts','src/utils/teamCatalog.test.ts','src/background/teamManifestSync.test.ts',
+    'src/utils/analysisStore.test.ts','src/background/analyzeBridge.test.ts','src/background/analyzeRequestHandler.test.ts',
+    'src/background/nativeMessageWire.test.ts','src/hooks/useAnalysisHydration.test.ts','src/utils/promptSourceErrors.test.ts',
+    'src/utils/pageIdentity.test.ts','src/utils/analyzeRequest.test.ts','src/background/contextMenu.test.ts',
+    'src/components/ResultPopover.test.tsx','src/components/FAB.pageIdentity.test.tsx','src/components/FAB.analyzeRequest.test.tsx',
+    'src/components/FAB.spinner.test.tsx','src/components/FAB.promptSourceErrors.test.tsx','src/utils/nativeUpdateError.test.ts',
+    'src/utils/configUpdateResult.test.ts','src/background/resetExtensionState.test.ts','src/content/updateErrorBridge.test.ts'
+)
+$expectedFull=@(& git ls-tree -r --name-only $reviewedHead -- extension/src | Where-Object { $_ -match '\.test\.tsx?$' } | ForEach-Object { $_ -replace '^extension/','' })
+if ($LASTEXITCODE -ne 0 -or $expectedFull.Count -lt 1) { throw 'Could not inventory reviewed full Extension tests' }
+$testSummary=@($strictResults | & 'host\venv\Scripts\python.exe' - '.superpowers/sdd/focused-extension-results.json' '.superpowers/sdd/full-extension-results.json' '.superpowers/sdd/host-test-results.json' $reviewedHead @expectedFocused '--full' @expectedFull)
+if ($LASTEXITCODE -ne 0 -or $testSummary.Count -ne 1) { throw 'Strict reviewed-head machine-result validation failed' }
+Push-Location -LiteralPath 'extension'
+try {
+    & npm exec tsc -- --noEmit -p tsconfig.json
+    if ($LASTEXITCODE -ne 0) { throw 'Reviewed-head TypeScript gate failed' }
+} finally { Pop-Location }
+& npm run build --prefix extension
+if ($LASTEXITCODE -ne 0) { throw 'Reviewed-head build gate failed' }
+$committedPlan=@(& git show 'HEAD:docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md') -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'Could not read committed plan for static audit' }
+$staticMatch=[regex]::Match($committedPlan,'(?s)<!-- REVIEWED_HEAD_STATIC_AUDIT_START -->\n```powershell\n(.*?)\n```\n<!-- REVIEWED_HEAD_STATIC_AUDIT_END -->')
+if (-not $staticMatch.Success) { throw 'Reviewed-head static audit contract is missing' }
+$staticScript=[scriptblock]::Create($staticMatch.Groups[1].Value)
+& $staticScript
+if ($LASTEXITCODE -ne 0) { throw 'Reviewed-head static audit failed' }
+$base='0dbb4852931b50153fb898b03129ae0092c46404'
+& git diff --check "$base..$reviewedHead"
+if ($LASTEXITCODE -ne 0) { throw 'Reviewed-head Plan E diff gate failed' }
+& git diff --exit-code "$base..$reviewedHead" -- extension/package.json extension/package-lock.json extension/manifest.json
+if ($LASTEXITCODE -ne 0) { throw 'Reviewed-head dependency/version diff gate failed' }
+$dirtyAfter=@(& git status --porcelain=v1 --untracked-files=no -- $testedSourceRoots)
+$headAfter=@(& git rev-parse HEAD)
+$sourceAfter=@(& git ls-tree -r --name-only $reviewedHead -- $testedSourceRoots)
+$trackedAfter=@(& git ls-files -- $testedSourceRoots)
+if (
+    $LASTEXITCODE -ne 0 -or $dirtyAfter.Count -ne 0 -or
+    $headAfter.Count -ne 1 -or $headAfter[0].Trim() -cne $reviewedHead -or
+    ($sourceAfter -join "`n") -cne ($trackedAfter -join "`n")
+) { throw 'Build/static/diff gates changed reviewed head or tracked tested source' }
+$results=[ordered]@{
+    schema_version=1
+    reviewed_head=$reviewedHead
+    tested_source_roots=$testedSourceRoots
+    tested_source_blobs=$sourceBlobs
+    focused_extension='passed'
+    full_extension='passed'
+    host='passed'
+    host_compile='passed'
+    typescript='passed'
+    build='passed'
+    static='passed'
+    diff='passed'
+    machine_result_sha256=[ordered]@{
+        focused_extension=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/focused-extension-results.json').Hash.ToLowerInvariant()
+        full_extension=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/full-extension-results.json').Hash.ToLowerInvariant()
+        host=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/host-test-results.json').Hash.ToLowerInvariant()
+    }
+    test_summary=($testSummary[0] | ConvertFrom-Json -AsHashtable)
+}
+$canonicalizer=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+value=json.loads(sys.stdin.read(),object_pairs_hook=pairs,parse_constant=reject_constant)
+print(json.dumps(value,sort_keys=True,separators=(',',':')))
+'@
+$canonical=@(($results | ConvertTo-Json -Depth 20 -Compress) | & 'host\venv\Scripts\python.exe' -c $canonicalizer)
+if ($LASTEXITCODE -ne 0 -or $canonical.Count -ne 1) { throw 'Could not canonicalize reviewed-head verification' }
+try {
+    [IO.File]::WriteAllText((Join-Path (Get-Location) $tempPath),$canonical[0] + "`n",[Text.UTF8Encoding]::new($false))
+    $tempText=[IO.File]::ReadAllText((Join-Path (Get-Location) $tempPath),[Text.UTF8Encoding]::new($false))
+    $strict=@($tempText | & 'host\venv\Scripts\python.exe' -c $canonicalizer)
+    if ($LASTEXITCODE -ne 0 -or $strict.Count -ne 1 -or $tempText -cne $strict[0] + "`n" -or (Test-Path -LiteralPath $resultPath)) { throw 'Reviewed-head verification atomic promotion precondition failed' }
+    [IO.File]::Move((Join-Path (Get-Location) $tempPath),(Join-Path (Get-Location) $resultPath))
+} finally { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+& git check-ignore -q -- $resultPath
+if ($LASTEXITCODE -ne 0) { throw 'Reviewed-head verification result is not ignored' }
+```
+
 - [ ] **Step 6: Confirm the complete requirement matrix manually**
 
 Record PASS/FAIL plus test names in the report for every row:
@@ -5884,13 +8944,14 @@ Record PASS/FAIL plus test names in the report for every row:
 | one-request Root, pure context-menu boundary, and old Host fallback | request/context-menu/FAB/Host tests |
 | Plan E-owned update-error helper and baseline runtime/tab/DOM delivery | nativeUpdateError/content/Options/FAB tests |
 | exact config matrix and revision retry | config/Options tests |
+| Windows preparing promotion tolerates bounded sharing violations without weakening atomicity | `PreparingPromotionRetryTests`, expanded update-engine/full Host gates, static seam inventory |
 | Plan D handoff | stale-D execution blocker; frozen atomic provider/lease imports, parse/acquire+gate/start/leased-send order, exact inner envelope/payload shadow, frozen non-Analyze snapshot, final-wire sender, invalid-no-port/no-reconnect contract; Plan D sentinels absent |
 
 Any FAIL blocks evidence commit and must be fixed through a new focused TDD commit, not hidden in the report.
 
 Confirm the Plan D handoff text marks the current Plan D document stale and names exact provider/lease/wire imports, tests, parse/acquire+gate/start/leased-send order, denial behavior, frozen non-Analyze snapshot, final-wire register-before-post/unregister behavior, invalid-no-port/no-reconnect rules, and exact three-key inner envelope plus inert payload shadow. Plan D implementation is outside this plan and must begin only after Plan E review plus a reviewed committed Plan D revision.
 
-Perform the writing-plans self-review now: reread spec sections 6-10, 11.3-11.4, and 13 Plan E and point each sentence to a task/test row above; scan implementation/report text for unresolved authoring markers or vague error-handling directions; compare every exported signature/property name against the locked interfaces. Correct any gap in a focused TDD commit before proceeding.
+Perform the writing-plans self-review now: reread spec sections 6-10, 11.3-11.4, and 13 Plan E plus both correction specs and point each sentence to a task/test row above; scan implementation/report text for unresolved authoring markers or vague error-handling directions; compare every exported signature/property name against the locked interfaces and confirm the `UpdateEngine` constructor remains frozen. Correct any gap in a focused TDD commit before proceeding.
 
 - [ ] **Step 7: Generate the Plan-E-only review package**
 
@@ -5936,15 +8997,22 @@ $package=@(
     '## Diff Stat'
 ) + $stat + @('', '## Commits') + $log + @('', '## Paths') + $paths
 $packageText=($package -join "`n") + "`n"
-[IO.File]::WriteAllText(
-    (Join-Path (Get-Location) '.superpowers/sdd/plan-e-only-review-package.txt'),
-    $packageText,
-    [Text.UTF8Encoding]::new($false)
-)
-& git diff --full-index --binary $reviewRange --output=".superpowers/sdd/plan-e-only-review.diff"
-if ($LASTEXITCODE -ne 0) { throw 'Could not write Plan E review diff' }
-if (-not (Test-Path -LiteralPath '.superpowers/sdd/plan-e-only-review.diff')) {
-    throw 'Plan E review diff is missing'
+$packagePath='.superpowers/sdd/plan-e-only-review-package.txt'
+$packageTemp='.superpowers/sdd/plan-e-only-review-package.tmp'
+$diffPath='.superpowers/sdd/plan-e-only-review.diff'
+$diffTemp='.superpowers/sdd/plan-e-only-review.diff.tmp'
+foreach ($path in @($packagePath,$packageTemp,$diffPath,$diffTemp)) {
+    if (Test-Path -LiteralPath $path) { throw "Plan E review output already exists: $path" }
+}
+try {
+    [IO.File]::WriteAllText((Join-Path (Get-Location) $packageTemp),$packageText,[Text.UTF8Encoding]::new($false))
+    & git diff --full-index --binary $reviewRange --output=$diffTemp
+    if ($LASTEXITCODE -ne 0) { throw 'Could not write Plan E review diff temporary' }
+    if ([IO.File]::ReadAllText((Join-Path (Get-Location) $packageTemp),[Text.UTF8Encoding]::new($false)) -cne $packageText -or -not (Test-Path -LiteralPath $diffTemp -PathType Leaf)) { throw 'Plan E review temporary validation failed' }
+    [IO.File]::Move((Join-Path (Get-Location) $packageTemp),(Join-Path (Get-Location) $packagePath))
+    [IO.File]::Move((Join-Path (Get-Location) $diffTemp),(Join-Path (Get-Location) $diffPath))
+} finally {
+    Remove-Item -LiteralPath $packageTemp,$diffTemp -Force -ErrorAction SilentlyContinue
 }
 ```
 
@@ -5995,15 +9063,22 @@ $package=@(
     '## Diff Stat'
 ) + $stat + @('', '## Commits') + $log + @('', '## Paths') + $paths
 $packageText=($package -join "`n") + "`n"
-[IO.File]::WriteAllText(
-    (Join-Path (Get-Location) '.superpowers/sdd/original-whole-branch-interim-review-package.txt'),
-    $packageText,
-    [Text.UTF8Encoding]::new($false)
-)
-& git diff --full-index --binary $reviewRange --output=".superpowers/sdd/original-whole-branch-interim-review.diff"
-if ($LASTEXITCODE -ne 0) { throw 'Could not write whole-branch review diff' }
-if (-not (Test-Path -LiteralPath '.superpowers/sdd/original-whole-branch-interim-review.diff')) {
-    throw 'Whole-branch review diff is missing'
+$packagePath='.superpowers/sdd/original-whole-branch-interim-review-package.txt'
+$packageTemp='.superpowers/sdd/original-whole-branch-interim-review-package.tmp'
+$diffPath='.superpowers/sdd/original-whole-branch-interim-review.diff'
+$diffTemp='.superpowers/sdd/original-whole-branch-interim-review.diff.tmp'
+foreach ($path in @($packagePath,$packageTemp,$diffPath,$diffTemp)) {
+    if (Test-Path -LiteralPath $path) { throw "Whole-branch review output already exists: $path" }
+}
+try {
+    [IO.File]::WriteAllText((Join-Path (Get-Location) $packageTemp),$packageText,[Text.UTF8Encoding]::new($false))
+    & git diff --full-index --binary $reviewRange --output=$diffTemp
+    if ($LASTEXITCODE -ne 0) { throw 'Could not write whole-branch review diff temporary' }
+    if ([IO.File]::ReadAllText((Join-Path (Get-Location) $packageTemp),[Text.UTF8Encoding]::new($false)) -cne $packageText -or -not (Test-Path -LiteralPath $diffTemp -PathType Leaf)) { throw 'Whole-branch review temporary validation failed' }
+    [IO.File]::Move((Join-Path (Get-Location) $packageTemp),(Join-Path (Get-Location) $packagePath))
+    [IO.File]::Move((Join-Path (Get-Location) $diffTemp),(Join-Path (Get-Location) $diffPath))
+} finally {
+    Remove-Item -LiteralPath $packageTemp,$diffTemp -Force -ErrorAction SilentlyContinue
 }
 ```
 
@@ -6019,11 +9094,126 @@ Independently review the original-base diff for all branch behavior, cross-plan 
 
 Under `Review Base`, `Review Head`, and `Review Range`, put only the package's literal value on the immediately following line. Under `Plan D Rerun Requirement`, put the exact required sentence on the immediately following line. Under `Disposition`, put only `INTERIM PASS THROUGH PLAN E` or `BLOCKED` on the immediately following line. Use `None.` under an empty severity/testing section; do not omit a heading.
 
-The two controller reviews are separate completion gates. Resolve every Critical/Important finding from either findings file in a separate focused RED/GREEN/mutation commit, then rerun Task 9 Steps 1-8 so exact range paths, verification, and both packages independently recompute the same later committed product head and both reviews are repeated. Do not create the evidence commit while either review is blocked or the two recorded heads differ. Minor/testing risks remain recorded separately.
+The two controller reviews are separate completion gates. Resolve every
+Critical/Important finding from either findings file in a separate focused
+RED/GREEN/mutation commit, then rerun Task 9 Steps 1-8 so exact range paths,
+verification, and both packages independently recompute the same later committed
+product head and both reviews are repeated. Exception: if a finding requires any
+further change to `host/update_engine.py` or `host/test_update_engine_resume.py`,
+stop before editing and obtain a human-approved revision of the Windows promotion
+spec and this plan. Reset/rebuild all promotion phase maps, transcripts, ledger,
+AST record, and Host blob evidence under that revision. Ordinary review-fix flow
+may not rewrite Host blobs while retaining old promotion evidence. Do not create
+the evidence commit while either review is blocked or the two recorded heads
+differ. Minor/testing risks remain recorded separately.
 
 - [ ] **Step 9: Write the final evidence report with exact observed output**
 
-Create `.superpowers/sdd/plan-e-extension-hardening-report.md` with these completed sections and only observed values:
+Before creating the report, run the final-artifact manifest generation block
+published in Step 10 against the completed packages/findings and all promotion
+artifacts. Record the resulting manifest SHA in the report. Then create
+`.superpowers/sdd/plan-e-extension-hardening-report.md` with these completed
+sections and only observed values:
+
+```powershell
+$ErrorActionPreference='Stop'
+$manifestPath='.superpowers/sdd/final-artifacts.sha256.json'
+$manifestTemp='.superpowers/sdd/final-artifacts.sha256.tmp'
+if ((Test-Path -LiteralPath $manifestPath) -or (Test-Path -LiteralPath $manifestTemp)) {
+    throw 'Final artifact manifest or temporary already exists; run the documented mutable-result reset first'
+}
+$roots=@(
+    '.superpowers/sdd/invoke-promotion-test.ps1','.superpowers/sdd/run-promotion-mutations.ps1',
+    '.superpowers/sdd/promotion-executor.sha256','.superpowers/sdd/promotion-mutation-runner.sha256',
+    '.superpowers/sdd/promotion-red-source.sha256','.superpowers/sdd/promotion-green-source.sha256',
+    '.superpowers/sdd/promotion-mutation-source.sha256','.superpowers/sdd/promotion-observed.json',
+    '.superpowers/sdd/promotion-ledger.json','.superpowers/sdd/promotion-transcripts.sha256.json',
+    '.superpowers/sdd/promotion-red.sha256.json','.superpowers/sdd/promotion-green.sha256.json',
+    '.superpowers/sdd/promotion-mutation.sha256.json','.superpowers/sdd/promotion-ast.sha256',
+    '.superpowers/sdd/focused-extension-results.json','.superpowers/sdd/full-extension-results.json',
+    '.superpowers/sdd/host-test-results.json','.superpowers/sdd/reviewed-head-verification.json',
+    '.superpowers/sdd/plan-e-only-review-package.txt','.superpowers/sdd/plan-e-only-review.diff',
+    '.superpowers/sdd/plan-e-only-review-findings.md',
+    '.superpowers/sdd/original-whole-branch-interim-review-package.txt',
+    '.superpowers/sdd/original-whole-branch-interim-review.diff',
+    '.superpowers/sdd/original-whole-branch-interim-review-findings.md'
+)
+$roots += @(1..8 | ForEach-Object { ".superpowers/sdd/task-$_-report.md" })
+$transcriptRoot=Join-Path (Get-Location) '.superpowers/sdd/promotion-transcripts'
+$expectedTranscriptMethods=@(
+    'test_windows_access_denied_retries_atomic_preparing_promotion','test_windows_sharing_errors_32_and_33_are_retryable',
+    'test_persistent_windows_promotion_lock_stops_after_three_attempts','test_non_windows_or_unlisted_promotion_errors_are_not_retried',
+    'test_preparing_promotion_revalidates_before_and_after_sleep','test_preparing_promotion_revalidation_rejects_every_authority_mismatch',
+    'test_preparing_promotion_hooks_wrap_the_logical_operation_once','test_update_engine_constructor_signature_remains_frozen'
+)
+$expectedMutationMethods=[ordered]@{classification='test_windows_access_denied_retries_atomic_preparing_promotion';bound='test_persistent_windows_promotion_lock_stops_after_three_attempts';initial='test_preparing_promotion_revalidates_before_and_after_sleep';'pre-sleep'='test_preparing_promotion_revalidation_rejects_every_authority_mismatch';'post-sleep'='test_preparing_promotion_revalidation_rejects_every_authority_mismatch'}
+$expectedTranscriptDirectories=@('red','green') + @($expectedMutationMethods.Keys | ForEach-Object { "mutation-$_" })
+$expectedTranscriptFiles=@()
+foreach ($method in $expectedTranscriptMethods) { $expectedTranscriptFiles += "red/$method.txt"; $expectedTranscriptFiles += "green/$method.txt" }
+foreach ($entry in $expectedMutationMethods.GetEnumerator()) { $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).txt"; $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).restored-green.txt" }
+$rootInfo=Get-Item -LiteralPath $transcriptRoot -Force
+$transcriptEntries=@(Get-ChildItem -LiteralPath $transcriptRoot -Force -Recurse)
+$unsupportedTranscriptEntries=@($transcriptEntries | Where-Object { ($_ -isnot [IO.FileInfo] -and $_ -isnot [IO.DirectoryInfo]) -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 })
+$actualTranscriptDirectories=@($transcriptEntries | Where-Object { $_ -is [IO.DirectoryInfo] } | ForEach-Object { [IO.Path]::GetRelativePath($transcriptRoot,$_.FullName).Replace('\','/') } | Sort-Object)
+$actualTranscriptFiles=@($transcriptEntries | Where-Object { $_ -is [IO.FileInfo] } | ForEach-Object { [IO.Path]::GetRelativePath($transcriptRoot,$_.FullName).Replace('\','/') } | Sort-Object)
+$missingTranscriptDirectories=@($expectedTranscriptDirectories | Where-Object { $actualTranscriptDirectories -cnotcontains $_ }); $extraTranscriptDirectories=@($actualTranscriptDirectories | Where-Object { $expectedTranscriptDirectories -cnotcontains $_ })
+$missingTranscriptFiles=@($expectedTranscriptFiles | Where-Object { $actualTranscriptFiles -cnotcontains $_ }); $extraTranscriptFiles=@($actualTranscriptFiles | Where-Object { $expectedTranscriptFiles -cnotcontains $_ })
+if ($rootInfo -isnot [IO.DirectoryInfo] -or ($rootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $unsupportedTranscriptEntries.Count -ne 0 -or $actualTranscriptDirectories.Count -ne 7 -or $actualTranscriptFiles.Count -ne 26 -or $missingTranscriptDirectories.Count -ne 0 -or $extraTranscriptDirectories.Count -ne 0 -or $missingTranscriptFiles.Count -ne 0 -or $extraTranscriptFiles.Count -ne 0) { throw 'Final-manifest transcript topology mismatch' }
+$roots += @($actualTranscriptFiles | ForEach-Object { '.superpowers/sdd/promotion-transcripts/' + $_ })
+$roots=@($roots | Sort-Object -Unique)
+if ($roots.Count -ne 58) { throw "Final artifact path count mismatch: $($roots.Count)" }
+$artifactRoot=Join-Path (Get-Location) '.superpowers/sdd'
+$managedLeafNames=@($roots | Where-Object { $_ -notlike '.superpowers/sdd/promotion-transcripts/*' } | ForEach-Object { [IO.Path]::GetFileName($_) })
+$artifactEntries=@(Get-ChildItem -LiteralPath $artifactRoot -Force -Recurse)
+$unsupportedManagedEntries=@($artifactEntries | Where-Object {
+    $relative=[IO.Path]::GetRelativePath($artifactRoot,$_.FullName).Replace('\','/')
+    $artifactPath='.superpowers/sdd/' + $relative
+    $managedTranscript=$relative -eq 'promotion-transcripts' -or $relative -like 'promotion-transcripts/*'
+    $managedName=$managedLeafNames -ccontains $_.Name
+    ($managedTranscript -or $managedName) -and (
+        ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        ($managedName -and ($_ -isnot [IO.FileInfo] -or $roots -cnotcontains $artifactPath))
+    )
+})
+$observedManagedFiles=@($artifactEntries | Where-Object {
+    $relative=[IO.Path]::GetRelativePath($artifactRoot,$_.FullName).Replace('\','/')
+    $_ -is [IO.FileInfo] -and ($relative -like 'promotion-transcripts/*' -or $managedLeafNames -ccontains $_.Name)
+} | ForEach-Object { '.superpowers/sdd/' + [IO.Path]::GetRelativePath($artifactRoot,$_.FullName).Replace('\','/') } | Sort-Object -Unique)
+$missingManaged=@($roots | Where-Object { $observedManagedFiles -cnotcontains $_ }); $extraManaged=@($observedManagedFiles | Where-Object { $roots -cnotcontains $_ })
+if ($unsupportedManagedEntries.Count -ne 0 -or $missingManaged.Count -ne 0 -or $extraManaged.Count -ne 0 -or $observedManagedFiles.Count -ne 58) { throw "Final-manifest artifact filesystem inventory mismatch. Missing: $($missingManaged -join ', '); Extra: $($extraManaged -join ', ')" }
+$manifest=[ordered]@{}
+foreach ($path in $roots) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Final artifact missing: $path" }
+    $manifest[$path]=(Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+}
+$manifestCanonicalizer=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+value=json.loads(sys.stdin.read(),object_pairs_hook=pairs,parse_constant=reject_constant)
+if type(value) is not dict or any(type(k) is not str or type(v) is not str for k,v in value.items()): raise SystemExit('invalid manifest')
+print(json.dumps(value,sort_keys=True,separators=(',',':')))
+'@
+$canonical=@((ConvertTo-Json $manifest -Compress) | & 'host\venv\Scripts\python.exe' -c $manifestCanonicalizer)
+if ($LASTEXITCODE -ne 0 -or $canonical.Count -ne 1) { throw 'Could not canonicalize final artifact manifest' }
+try {
+    [IO.File]::WriteAllText((Join-Path (Get-Location) $manifestTemp),$canonical[0] + "`n",[Text.UTF8Encoding]::new($false))
+    $tempText=[IO.File]::ReadAllText((Join-Path (Get-Location) $manifestTemp),[Text.UTF8Encoding]::new($false))
+    $strict=@($tempText | & 'host\venv\Scripts\python.exe' -c $manifestCanonicalizer)
+    if ($LASTEXITCODE -ne 0 -or $strict.Count -ne 1 -or $tempText -cne $strict[0] + "`n" -or (Test-Path -LiteralPath $manifestPath)) { throw 'Final manifest atomic promotion precondition failed' }
+    [IO.File]::Move((Join-Path (Get-Location) $manifestTemp),(Join-Path (Get-Location) $manifestPath))
+} finally { Remove-Item -LiteralPath $manifestTemp -Force -ErrorAction SilentlyContinue }
+& git check-ignore -q -- $manifestPath
+if ($LASTEXITCODE -ne 0) { throw 'Final artifact manifest is not ignored' }
+$manifestHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $manifestPath).Hash.ToLowerInvariant()
+"Final artifact manifest SHA-256: $manifestHash"
+```
+
 
 ```markdown
 # Plan E Extension Data and Request Hardening Report
@@ -6050,11 +9240,11 @@ Create `.superpowers/sdd/plan-e-extension-hardening-report.md` with these comple
 ## Residual Risks
 ```
 
-Replace all bracketed labels with observed commit IDs. Record reviewed A-C prerequisite evidence, Plan D sentinel absence, the immutable declared Plan E range, the correction-spec and repaired-plan commits separately from Tasks 1-8, the complete corrected RED sequence (all six missing-module REDs plus every assertion RED added by the correction), all eight exact staged-path checks, shared own-data and non-Analyze/wire mutation evidence, Analyze request-handler/Options/content-bridge/FAB RED/GREEN, the stale-D execution blocker, and frozen Plan D provider/lease/wire imports/order/envelope. Summarize `.superpowers/sdd/plan-e-only-review-findings.md` and `.superpowers/sdd/original-whole-branch-interim-review-findings.md` under separate headings with their distinct literal bases/ranges/heads; do not merge their findings. State that the original-base review is interim through Plan E and that final whole-branch review completion remains blocked on the exact post-D rerun. State explicitly that no real Chrome storage, registry, `%LOCALAPPDATA%\DynamicsHelper`, update, package, publish, install, MyCases, or authenticated model operation occurred. The first historical upgrade limitation belongs to later Plan D/release verification, not Plan E execution. Record whether optional authenticated smoke was skipped.
+Replace all bracketed labels with observed commit IDs. Record reviewed A-C prerequisite evidence, the human-authorized Windows promotion exception, Plan D sentinel absence, the immutable declared 60-path Plan E range, both correction-spec and plan-revision commits separately from Tasks 1-8, controller fixes, and the promotion retry commit. Record the complete corrected RED sequence (all six missing-module REDs plus every assertion RED added by both corrections), all eight exact staged-path checks plus the separate one-path promotion RED/production commit gates, shared own-data and non-Analyze/wire mutation evidence, promotion retry/checkpoint mutations, historical uncontrolled and controlled WinError observations, the later clean full Host run, Analyze request-handler/Options/content-bridge/FAB RED/GREEN, the stale-D execution blocker, and frozen Plan D provider/lease/wire imports/order/envelope. The report must include exact machine-derived lines for focused/full Extension and focused/full/update-engine/recovery/package Host totals, including each skip count. It must name the exact authorized full/recovery skipped selector and reason and state zero skips in focused/update-engine/package. Record `PASS` for TypeScript, build, static, diff, focused/full Extension, and all Host phases at the exact reviewed head from `.superpowers/sdd/reviewed-head-verification.json`, plus that artifact's SHA-256. Summarize `.superpowers/sdd/plan-e-only-review-findings.md` and `.superpowers/sdd/original-whole-branch-interim-review-findings.md` under separate headings with their distinct literal bases/ranges/heads; do not merge their findings. State that the original-base review is interim through Plan E and that final whole-branch review completion remains blocked on the exact post-D rerun. State explicitly that no real Chrome storage, registry, `%LOCALAPPDATA%\DynamicsHelper`, update, package, publish, install, MyCases, or authenticated model operation occurred. The first historical upgrade limitation belongs to later Plan D/release verification, not Plan E execution. Record whether optional authenticated smoke was skipped.
 
 - [ ] **Step 10: Validate both review records, self-review evidence, and commit it alone**
 
-Review the report against spec sections 6-10, 11.3-11.4, and 13 Plan E. Search for bracketed labels, incomplete markers, unsupported claims, missing RED/mutation evidence, missing A-C/Plan D-handoff evidence, merged/missing review findings, any claim that final whole-branch review is complete, and mismatched totals; correct every occurrence. Then run:
+Review the report against spec sections 6-10, 11.3-11.4, and 13 Plan E plus both correction specs. Search for bracketed labels, incomplete markers, unsupported claims, missing RED/mutation evidence (including every promotion checkpoint mutation), missing A-C authorization/Plan D-handoff evidence, missing 60-path inventory/promotion commit/history, merged/missing review findings, any claim that final whole-branch review is complete, and mismatched totals; correct every occurrence. Then run:
 
 ```powershell
 $ErrorActionPreference='Stop'
@@ -6066,6 +9256,482 @@ $requiredReviewArtifacts=@(
     '.superpowers/sdd/original-whole-branch-interim-review.diff',
     '.superpowers/sdd/original-whole-branch-interim-review-findings.md'
 )
+$evidencePath='.superpowers/sdd/plan-e-extension-hardening-report.md'
+if (-not (Test-Path -LiteralPath $evidencePath -PathType Leaf)) {
+    throw 'Plan E evidence report is missing'
+}
+$evidence=[IO.File]::ReadAllText(
+    (Join-Path (Get-Location) $evidencePath),
+    [Text.UTF8Encoding]::new($false)
+)
+$evidenceHeadings=@(
+    'Scope and Constraints','Commit Map','Requirement-to-Test Matrix',
+    'A-C Prerequisite and Plan D Handoff Evidence','RED Evidence',
+    'Restored Mutation Evidence','Focused Extension Results',
+    'Full Extension and Build Results','Isolated Host Results',
+    'Static and Diff Results','Plan D Handoff Result',
+    'Plan-E-Only Controller Review Findings',
+    'Original Whole-Branch Interim Review Findings',
+    'Plan D Final Whole-Branch Rerun Requirement','Plan E Review Readiness',
+    'Skipped Unsafe Operations','Residual Risks'
+)
+$normalizedEvidence=$evidence -replace "`r`n","`n"
+$headingMatches=[regex]::Matches($normalizedEvidence,'(?m)^## ([^\n]+)$')
+$actualEvidenceHeadings=@($headingMatches | ForEach-Object { $_.Groups[1].Value })
+if (($actualEvidenceHeadings -join "`n") -cne ($evidenceHeadings -join "`n")) {
+    throw 'Plan E evidence heading order/set mismatch'
+}
+if ([regex]::Matches($normalizedEvidence,'(?m)^# Plan E Extension Data and Request Hardening Report$').Count -ne 1) {
+    throw 'Plan E evidence title mismatch'
+}
+$evidenceSections=@{}
+for ($index=0; $index -lt $headingMatches.Count; $index++) {
+    $heading=$headingMatches[$index].Groups[1].Value
+    $start=$headingMatches[$index].Index + $headingMatches[$index].Length
+    $end=if ($index + 1 -lt $headingMatches.Count) { $headingMatches[$index + 1].Index } else { $normalizedEvidence.Length }
+    $body=$normalizedEvidence.Substring($start,$end-$start).Trim()
+    if ([string]::IsNullOrWhiteSpace($body)) { throw "Plan E evidence section is empty: $heading" }
+    $evidenceSections[$heading]=$body
+}
+$taskReportHashes=[ordered]@{}
+$expectedTaskReportHashes=[ordered]@{
+    '1'='678228ecdf3f417f09abf9973f9da9cdb4c2bf90b4a549165af592c45c3f2fba'
+    '2'='edee7809419c30bd1a240caf8e220c571813185509bc34ac32a4baebb72e39f7'
+    '3'='5fdd938773b361a96bfb0b95a311285bdb1803b6756670cd7ab1095f82760591'
+    '4'='5f8417f109f4ac07dc3423b388cd40cd841d64d214b33b4ef2d484daca5d20c2'
+    '5'='323e46ccc7b5b6277fa62e0a0b9db30299c00651db16c50aa748a6ee9b2e8f73'
+    '6'='3158a5795b768434e069e8ef59e488e0a9ff877939728f69d9293ab0c8b9c8ef'
+    '7'='49ee4fb0a4717f85767ed19caf5338eac1871b21deed2233d82d97337d32df2f'
+    '8'='3a7d87e8f55e3731e6f405a4b58c38ff75efacb76a0ed431f0522f8ec02cfc0b'
+}
+foreach ($number in 1..8) {
+    $path=".superpowers/sdd/task-$number-report.md"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Task report missing: $path" }
+    $hash=(Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+    if ($hash -cne $expectedTaskReportHashes[[string]$number]) { throw "Task report changed after task review: $number" }
+    $taskReportHashes["Task $number report SHA-256"]=$hash
+}
+foreach ($entry in $taskReportHashes.GetEnumerator()) {
+    $line=('**' + $entry.Key + ':** `' + $entry.Value + '`')
+    if ([regex]::Matches($evidence,'(?m)^' + [regex]::Escape($line) + '\r?$').Count -ne 1) {
+        throw "Final evidence task report hash mismatch: $($entry.Key)"
+    }
+}
+$testEvidenceValidator=@'
+# REVIEWED_TEST_EVIDENCE_VALIDATOR_START
+import json,pathlib,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value):
+    raise ValueError('non-finite JSON constant: '+value)
+def validate_counts(value,rows,name):
+    required={'numTotalTestSuites','numPassedTestSuites','numFailedTestSuites','numPendingTestSuites','numTotalTests','numPassedTests','numFailedTests','numPendingTests','numTodoTests'}
+    if not required.issubset(value): raise SystemExit(name+' missing counter')
+    for key,counter in value.items():
+        if key.startswith('num') and (type(counter) is not int or counter<0): raise SystemExit(name+' invalid counter '+key)
+    if value['numTotalTestSuites']!=value['numPassedTestSuites']+value['numFailedTestSuites']+value['numPendingTestSuites']: raise SystemExit(name+' suite counter relationship')
+    if value['numTotalTests']!=value['numPassedTests']+value['numFailedTests']+value['numPendingTests']+value['numTodoTests']: raise SystemExit(name+' test counter relationship')
+    if value['numTotalTestSuites']!=len(rows) or value['numPassedTestSuites']!=len(rows): raise SystemExit(name+' suite/file counter relationship')
+    assertion_lists=[row.get('assertionResults') for row in rows]
+    if any(type(items) is not list or not items for items in assertion_lists) or sum(len(items) for items in assertion_lists)!=value['numTotalTests']: raise SystemExit(name+' assertion counter relationship')
+    if value['numTotalTests']<1 or value['numPassedTests']!=value['numTotalTests']: raise SystemExit(name+' passing counter relationship')
+    if any(value[key]!=0 for key in ('numFailedTestSuites','numPendingTestSuites','numFailedTests','numPendingTests','numTodoTests')): raise SystemExit(name+' nonzero failure/pending counter')
+    if 'numRuntimeErrorTestSuites' in value and value['numRuntimeErrorTestSuites']!=0: raise SystemExit(name+' runtime-error counter')
+def strict(path):
+    text=pathlib.Path(path).read_text(encoding='utf-8')
+    value=json.loads(text,object_pairs_hook=pairs,parse_constant=reject_constant)
+    if text!=json.dumps(value,sort_keys=True,separators=(',',':'))+'\n': raise SystemExit(path+' noncanonical')
+    return value
+focused,full,host,verification=map(strict,sys.argv[1:5])
+head=sys.argv[5]
+arguments=sys.argv[6:]
+separator=arguments.index('--full')
+expected_files={'focused':arguments[:separator],'full':arguments[separator+1:]}
+for name,value in (('focused',focused),('full',full)):
+    if type(value) is not dict or value.get('reviewed_head')!=head: raise SystemExit(name+' reviewed head')
+    rows=value.get('testResults')
+    if type(rows) is not list or not rows or any(type(row) is not dict for row in rows): raise SystemExit(name+' rows')
+    validate_counts(value,rows,name)
+    row_keys=[json.dumps(row,sort_keys=True,separators=(',',':')) for row in rows]
+    if len(row_keys)!=len(set(row_keys)): raise SystemExit(name+' duplicate testResults row')
+    def rel(row):
+        path=row.get('name')
+        if type(path) is not str: raise SystemExit(name+' path type')
+        path=path.replace('\\','/')
+        return path.rsplit('/extension/',1)[1] if '/extension/' in path else path.removeprefix('extension/')
+    observed=[rel(row) for row in rows]
+    expected=expected_files[name]
+    if len(observed)!=len(set(observed)) or len(expected)!=len(set(expected)) or set(observed)!=set(expected) or len(observed)!=len(expected): raise SystemExit(name+' exact inventory')
+    if value.get('success') is not True or value.get('numFailedTests')!=0 or value.get('numFailedTestSuites')!=0 or value.get('numPendingTests')!=0 or value.get('numPendingTestSuites')!=0 or value.get('numTodoTests')!=0: raise SystemExit(name+' Vitest status')
+    if value.get('numTotalTests')!=value.get('numPassedTests') or value.get('numTotalTests',0)<1: raise SystemExit(name+' count')
+    for row in rows:
+        if row.get('status')!='passed': raise SystemExit(name+' suite status')
+        assertions=row.get('assertionResults')
+        if type(assertions) is not list or not assertions or any(type(item) is not dict or item.get('status')!='passed' for item in assertions): raise SystemExit(name+' pending/todo/skipped test')
+authorized=[{'selector':'host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation','reason':'DH_PLAN_C_FROZEN_ONEDIR not set'}]
+expected_skips={'focused':[],'full':authorized,'update_engine':[],'recovery':authorized,'package':[]}
+if type(host) is not dict or set(host)!={'schema_version','reviewed_head','focused','full','compile','update_engine','recovery','package'} or type(host.get('schema_version')) is not int or host.get('schema_version')!=1 or host.get('reviewed_head')!=head or host.get('compile')!='passed': raise SystemExit('Host result shape')
+for name,skips in expected_skips.items():
+    row=host.get(name)
+    if type(row) is not dict or set(row)!={'tests','skipped','skips'} or type(row.get('tests')) is not int or row['tests']<1 or type(row.get('skipped')) is not int or row['skipped']<0 or row['skipped']>row['tests'] or row['skipped']!=len(skips) or row.get('skips')!=skips: raise SystemExit(name+' Host exact skips/count')
+required={'focused_extension','full_extension','host','host_compile','typescript','build','static','diff'}
+verification_keys={'schema_version','reviewed_head','tested_source_roots','tested_source_blobs','focused_extension','full_extension','host','host_compile','typescript','build','static','diff','machine_result_sha256','test_summary'}
+roots=['extension','host','tests','docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md','.gitignore','release_helper.py','dev_switch.py','installer_core.ps1','dyhelper_installer.ps1','install.bat']
+if type(verification) is not dict or set(verification)!=verification_keys or type(verification.get('schema_version')) is not int or verification.get('schema_version')!=1 or verification.get('reviewed_head')!=head or verification.get('tested_source_roots')!=roots or any(verification.get(key)!='passed' for key in required) or type(verification.get('tested_source_blobs')) is not dict or not verification['tested_source_blobs']: raise SystemExit('reviewed-head verification status/head/shape')
+machine_hashes=verification.get('machine_result_sha256')
+if type(machine_hashes) is not dict or set(machine_hashes)!={'focused_extension','full_extension','host'} or any(type(value) is not str or len(value)!=64 for value in machine_hashes.values()): raise SystemExit('reviewed-head machine-result hashes')
+summary=verification.get('test_summary')
+if type(summary) is not dict or set(summary)!={'focused_extension','full_extension','host'}: raise SystemExit('reviewed-head verification summary shape')
+for name,expected in (('focused_extension',{'files':len(focused['testResults']),'tests':focused['numTotalTests']}),('full_extension',{'files':len(full['testResults']),'tests':full['numTotalTests']})):
+    row=summary.get(name)
+    if type(row) is not dict or set(row)!={'files','tests'} or any(type(row.get(key)) is not int or row[key]<1 for key in ('files','tests')) or row!=expected: raise SystemExit(name+' summary counters')
+if summary.get('host')!={name:host[name] for name in ('focused','full','update_engine','recovery','package')}: raise SystemExit('reviewed-head verification Host summary')
+print(focused['numTotalTests'],len(focused['testResults']),full['numTotalTests'],len(full['testResults']),*(host[name][key] for name in ('focused','full','update_engine','recovery','package') for key in ('tests','skipped')))
+# REVIEWED_TEST_EVIDENCE_VALIDATOR_END
+'@
+$reviewPackageForTests=[IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/plan-e-only-review-package.txt'),[Text.UTF8Encoding]::new($false))
+$testReviewedHead=[regex]::Match($reviewPackageForTests,'(?m)^Review head: ([0-9a-f]{40})$').Groups[1].Value
+if ($testReviewedHead -notmatch '^[0-9a-f]{40}$') { throw 'Could not resolve reviewed head for test evidence' }
+$expectedFocusedForEvidence=@(
+    'src/utils/ownData.test.ts','src/utils/bookmarkItems.test.ts','src/components/Options.test.tsx',
+    'src/components/MenuLogic.teamCache.test.ts','src/utils/teamCatalog.test.ts','src/background/teamManifestSync.test.ts',
+    'src/utils/analysisStore.test.ts','src/background/analyzeBridge.test.ts','src/background/analyzeRequestHandler.test.ts',
+    'src/background/nativeMessageWire.test.ts','src/hooks/useAnalysisHydration.test.ts','src/utils/promptSourceErrors.test.ts',
+    'src/utils/pageIdentity.test.ts','src/utils/analyzeRequest.test.ts','src/background/contextMenu.test.ts',
+    'src/components/ResultPopover.test.tsx','src/components/FAB.pageIdentity.test.tsx','src/components/FAB.analyzeRequest.test.tsx',
+    'src/components/FAB.spinner.test.tsx','src/components/FAB.promptSourceErrors.test.tsx','src/utils/nativeUpdateError.test.ts',
+    'src/utils/configUpdateResult.test.ts','src/background/resetExtensionState.test.ts','src/content/updateErrorBridge.test.ts'
+)
+$expectedFullForEvidence=@(& git ls-tree -r --name-only $testReviewedHead -- extension/src | Where-Object { $_ -match '\.test\.tsx?$' } | ForEach-Object { $_ -replace '^extension/','' })
+if ($LASTEXITCODE -ne 0 -or $expectedFullForEvidence.Count -lt 1) { throw 'Could not inventory final full Extension tests' }
+$testEvidence=@($testEvidenceValidator | & 'host\venv\Scripts\python.exe' - '.superpowers/sdd/focused-extension-results.json' '.superpowers/sdd/full-extension-results.json' '.superpowers/sdd/host-test-results.json' '.superpowers/sdd/reviewed-head-verification.json' $testReviewedHead @expectedFocusedForEvidence '--full' @expectedFullForEvidence)
+if ($LASTEXITCODE -ne 0 -or $testEvidence.Count -ne 1) { throw 'Final machine test evidence validation failed' }
+$verificationText=[IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/reviewed-head-verification.json'),[Text.UTF8Encoding]::new($false))
+$verification=$verificationText | ConvertFrom-Json -AsHashtable
+$testedSourceRoots=@('extension','host','tests','docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md','.gitignore','release_helper.py','dev_switch.py','installer_core.ps1','dyhelper_installer.ps1','install.bat')
+$sourcePaths=@(& git ls-tree -r --name-only $testReviewedHead -- $testedSourceRoots)
+$trackedSource=@(& git ls-files -- $testedSourceRoots)
+$dirtySource=@(& git status --porcelain=v1 --untracked-files=no -- $testedSourceRoots)
+if (
+    $LASTEXITCODE -ne 0 -or $sourcePaths.Count -lt 1 -or
+    ($sourcePaths -join "`n") -cne ($trackedSource -join "`n") -or
+    $dirtySource.Count -ne 0 -or
+    $verification.tested_source_blobs.Count -ne $sourcePaths.Count
+) { throw 'Reviewed-head verification tested-source inventory mismatch' }
+foreach ($path in $sourcePaths) {
+    $blob=@(& git rev-parse "$testReviewedHead`:$path")
+    $working=@(& git hash-object -- $path)
+    if (
+        $LASTEXITCODE -ne 0 -or $blob.Count -ne 1 -or $working.Count -ne 1 -or
+        -not $verification.tested_source_blobs.ContainsKey($path) -or
+        $verification.tested_source_blobs[$path] -cne $blob[0].Trim() -or
+        $working[0].Trim() -cne $blob[0].Trim()
+    ) { throw "Reviewed-head verification source blob mismatch: $path" }
+}
+$expectedMachineHashes=[ordered]@{
+    focused_extension=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/focused-extension-results.json').Hash.ToLowerInvariant()
+    full_extension=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/full-extension-results.json').Hash.ToLowerInvariant()
+    host=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/host-test-results.json').Hash.ToLowerInvariant()
+}
+foreach ($entry in $expectedMachineHashes.GetEnumerator()) {
+    if ($verification.machine_result_sha256[$entry.Key] -cne $entry.Value) { throw "Reviewed-head machine-result hash mismatch: $($entry.Key)" }
+}
+$testCounts=@($testEvidence[0] -split ' ' | ForEach-Object { [int]$_ })
+if ($testCounts.Count -ne 14) { throw 'Final machine test evidence count vector is invalid' }
+foreach ($line in @(
+    ('**Focused Extension gate:** `PASS` - ' + $testCounts[0] + ' tests, ' + $testCounts[1] + ' files'),
+    ('**Full Extension gate:** `PASS` - ' + $testCounts[2] + ' tests, ' + $testCounts[3] + ' files'),
+    ('**Focused Host gate:** `PASS` - ' + $testCounts[4] + ' tests, ' + $testCounts[5] + ' skipped'),
+    ('**Fresh isolated full Host gate:** `PASS` - ' + $testCounts[6] + ' tests, ' + $testCounts[7] + ' skipped'),
+    ('**Update-engine Host gate:** `PASS` - ' + $testCounts[8] + ' tests, ' + $testCounts[9] + ' skipped'),
+    ('**Recovery Host gate:** `PASS` - ' + $testCounts[10] + ' tests, ' + $testCounts[11] + ' skipped'),
+    ('**Package Host gate:** `PASS` - ' + $testCounts[12] + ' tests, ' + $testCounts[13] + ' skipped')
+)) {
+    if ([regex]::Matches($evidence,'(?m)^' + [regex]::Escape($line) + '\r?$').Count -ne 1) {
+        throw "Final evidence machine test count mismatch: $line"
+    }
+}
+$authorizedSkipSelector='host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation'
+$authorizedSkipReason='DH_PLAN_C_FROZEN_ONEDIR not set'
+foreach ($line in @(
+    ('**Full Host authorized skip:** `' + $authorizedSkipSelector + '` - `' + $authorizedSkipReason + '`'),
+    ('**Recovery Host authorized skip:** `' + $authorizedSkipSelector + '` - `' + $authorizedSkipReason + '`'),
+    '**Focused/update-engine/package Host skips:** `0`',
+    ('**Reviewed-head verification:** `PASS` - ' + $testReviewedHead),
+    '**TypeScript gate:** `PASS`',
+    '**Production build gate:** `PASS`',
+    '**Static scan gate:** `PASS`',
+    '**Diff gate:** `PASS`'
+)) {
+    if ([regex]::Matches($evidence,'(?m)^' + [regex]::Escape($line) + '\r?$').Count -ne 1) {
+        throw "Final evidence reviewed-head/skip line mismatch: $line"
+    }
+}
+foreach ($section in @('RED Evidence','Restored Mutation Evidence')) {
+    foreach ($number in 1..8) {
+        if (-not $evidenceSections[$section].Contains("Task $number")) {
+            throw "$section omits Task $number"
+        }
+    }
+}
+$ledgerPath='.superpowers/sdd/promotion-ledger.json'
+if (-not (Test-Path -LiteralPath $ledgerPath -PathType Leaf)) { throw 'Promotion ledger is missing' }
+$actualPlanCommit=@(& git log -1 --format=%H HEAD -- 'docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md')
+if ($LASTEXITCODE -ne 0 -or $actualPlanCommit.Count -ne 1) { throw 'Could not resolve promotion plan commit' }
+$executorHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/invoke-promotion-test.ps1').Hash.ToLowerInvariant()
+$runnerHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/run-promotion-mutations.ps1').Hash.ToLowerInvariant()
+$expectedRed=@(
+    'test_windows_access_denied_retries_atomic_preparing_promotion',
+    'test_windows_sharing_errors_32_and_33_are_retryable',
+    'test_persistent_windows_promotion_lock_stops_after_three_attempts',
+    'test_non_windows_or_unlisted_promotion_errors_are_not_retried',
+    'test_preparing_promotion_revalidates_before_and_after_sleep',
+    'test_preparing_promotion_revalidation_rejects_every_authority_mismatch',
+    'test_preparing_promotion_hooks_wrap_the_logical_operation_once'
+)
+$expectedGreen=@($expectedRed + 'test_update_engine_constructor_signature_remains_frozen')
+$ledgerValidator=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def exact(actual, expected, path='root'):
+    if type(actual) is not type(expected):
+        raise SystemExit(f'type mismatch at {path}')
+    if isinstance(expected, dict):
+        if set(actual) != set(expected): raise SystemExit(f'key mismatch at {path}')
+        for key in expected: exact(actual[key], expected[key], f'{path}.{key}')
+    elif isinstance(expected, list):
+        if len(actual) != len(expected): raise SystemExit(f'length mismatch at {path}')
+        for index,(left,right) in enumerate(zip(actual,expected)): exact(left,right,f'{path}[{index}]')
+    elif actual != expected:
+        raise SystemExit(f'value mismatch at {path}')
+path, plan, executor, runner, test_commit, promotion, engine_hash, test_hash, observed_hash, map_hash, red_map_hash, green_map_hash, mutation_map_hash, red_source_hash, green_source_hash, mutation_source_hash, ast_hash = sys.argv[1:]
+text=open(path,encoding='utf-8').read()
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+value=json.loads(text,object_pairs_hook=pairs,parse_constant=reject_constant)
+red=['test_windows_access_denied_retries_atomic_preparing_promotion','test_windows_sharing_errors_32_and_33_are_retryable','test_persistent_windows_promotion_lock_stops_after_three_attempts','test_non_windows_or_unlisted_promotion_errors_are_not_retried','test_preparing_promotion_revalidates_before_and_after_sleep','test_preparing_promotion_revalidation_rejects_every_authority_mismatch','test_preparing_promotion_hooks_wrap_the_logical_operation_once']
+expected={'schema_version':1,'plan_commit':plan,'spec_commit':'249b1a3750b50db1336fb39661db9306355a1a18','executor_sha256':executor,'mutation_runner_sha256':runner,'red_methods':red,'constructor_red_phase':'passed','green_methods':red+['test_update_engine_constructor_signature_remains_frozen'],'mutation_passes':['classification','bound','initial','pre-sleep','post-sleep'],'attempts':{'transient_then_success':2,'exhausted':3},'delays':{'transient_then_success':[0.05],'exhausted':[0.05,0.2]},'checkpoint_calls':{'first_success':1,'one_retry':3,'exhausted':5},'hook_counts':{'retry_success':{'before':1,'after':1},'exhausted':{'before':1,'after':0}},'state_and_cause':'passed','test_commit':test_commit,'promotion_commit':promotion,'update_engine_sha256':engine_hash,'update_engine_test_sha256':test_hash,'observed_sha256':observed_hash,'transcript_map_sha256':map_hash,'red_map_sha256':red_map_hash,'green_map_sha256':green_map_hash,'mutation_map_sha256':mutation_map_hash,'red_source_record_sha256':red_source_hash,'green_source_record_sha256':green_source_hash,'mutation_source_record_sha256':mutation_source_hash,'ast_record_sha256':ast_hash}
+exact(value,expected)
+canonical=json.dumps(value,sort_keys=True,separators=(',',':'))+'\n'
+if text != canonical: raise SystemExit('promotion ledger is not canonical')
+'@
+$testCommitFromEvidence=[regex]::Match($evidence,'(?m)^\*\*Promotion test commit:\*\* `PASS` - 1 path - ([0-9a-f]{40})\r?$').Groups[1].Value
+$promotionCommitFromEvidence=[regex]::Match($evidence,'(?m)^\*\*Promotion implementation commit:\*\* `PASS` - 1 path - ([0-9a-f]{40})\r?$').Groups[1].Value
+if ($testCommitFromEvidence -notmatch '^[0-9a-f]{40}$' -or $promotionCommitFromEvidence -notmatch '^[0-9a-f]{40}$') { throw 'Promotion commit evidence is missing' }
+$engineHash=(Get-FileHash -Algorithm SHA256 -LiteralPath 'host/update_engine.py').Hash.ToLowerInvariant()
+$testHash=(Get-FileHash -Algorithm SHA256 -LiteralPath 'host/test_update_engine_resume.py').Hash.ToLowerInvariant()
+$promotionEngineBlob=@(& git rev-parse "$promotionCommitFromEvidence`:host/update_engine.py")
+$promotionTestBlob=@(& git rev-parse "$testCommitFromEvidence`:host/test_update_engine_resume.py")
+$headEngineBlob=@(& git rev-parse "HEAD:host/update_engine.py")
+$headTestBlob=@(& git rev-parse "HEAD:host/test_update_engine_resume.py")
+if (
+    $LASTEXITCODE -ne 0 -or
+    @($promotionEngineBlob,$promotionTestBlob,$headEngineBlob,$headTestBlob | Where-Object { $_.Count -ne 1 }).Count -ne 0 -or
+    $promotionEngineBlob[0].Trim() -cne $headEngineBlob[0].Trim() -or
+    $promotionTestBlob[0].Trim() -cne $headTestBlob[0].Trim()
+) { throw 'Reviewed Host blobs differ from promotion evidence commit' }
+$observedHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-observed.json').Hash.ToLowerInvariant()
+$transcriptMapHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-transcripts.sha256.json').Hash.ToLowerInvariant()
+$finalSourceHashes=$headEngineBlob[0].Trim() + ' ' + $headTestBlob[0].Trim()
+foreach ($path in @('.superpowers/sdd/promotion-green-source.sha256','.superpowers/sdd/promotion-mutation-source.sha256')) {
+    $value=[IO.File]::ReadAllText((Join-Path (Get-Location) $path),[Text.UTF8Encoding]::new($false)).Trim()
+    if ($value -cne $finalSourceHashes) { throw "Promotion phase source hash mismatch: $path" }
+}
+$redSource=[IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/promotion-red-source.sha256'),[Text.UTF8Encoding]::new($false)).Trim()
+if ($redSource -notmatch '^[0-9a-f]{40} [0-9a-f]{40}$') { throw 'Promotion RED source blob record invalid' }
+$baseEngineBlob=@(& git rev-parse '0dbb4852931b50153fb898b03129ae0092c46404:host/update_engine.py')
+if ($LASTEXITCODE -ne 0 -or $baseEngineBlob.Count -ne 1) { throw 'Could not resolve base engine blob' }
+if ($redSource -cne "$($baseEngineBlob[0].Trim()) $($promotionTestBlob[0].Trim())") { throw 'Promotion RED source chronology mismatch' }
+$redMapHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-red.sha256.json').Hash.ToLowerInvariant()
+$greenMapHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-green.sha256.json').Hash.ToLowerInvariant()
+$mutationMapHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-mutation.sha256.json').Hash.ToLowerInvariant()
+$redSourceHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-red-source.sha256').Hash.ToLowerInvariant()
+$greenSourceHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-green-source.sha256').Hash.ToLowerInvariant()
+$mutationSourceHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-mutation-source.sha256').Hash.ToLowerInvariant()
+$astRecordHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-ast.sha256').Hash.ToLowerInvariant()
+$observedValidator=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+def exact(a,e,p='root'):
+    if type(a) is not type(e): raise SystemExit('type '+p)
+    if isinstance(e,dict):
+        if set(a)!=set(e): raise SystemExit('keys '+p)
+        for k in e: exact(a[k],e[k],p+'.'+k)
+    elif isinstance(e,list):
+        if len(a)!=len(e): raise SystemExit('length '+p)
+        for i,(x,y) in enumerate(zip(a,e)): exact(x,y,f'{p}[{i}]')
+    elif a!=e: raise SystemExit('value '+p)
+value=json.load(open(sys.argv[1],encoding='utf-8'),object_pairs_hook=pairs,parse_constant=reject_constant)
+expected={'attempts':{'transient_then_success':2,'exhausted':3},'delays':{'transient_then_success':[0.05],'exhausted':[0.05,0.2]},'checkpoint_calls':{'first_success':1,'one_retry':3,'exhausted':5},'hook_counts':{'retry_success':{'before':1,'after':1},'exhausted':{'before':1,'after':0}},'state_and_cause':'passed'}
+exact(value,expected)
+'@
+& 'host\venv\Scripts\python.exe' -c $observedValidator '.superpowers/sdd/promotion-observed.json'
+if ($LASTEXITCODE -ne 0) { throw 'Promotion observed JSON validation failed at final gate' }
+& 'host\venv\Scripts\python.exe' -c $ledgerValidator $ledgerPath $actualPlanCommit[0].Trim() $executorHash $runnerHash $testCommitFromEvidence $promotionCommitFromEvidence $engineHash $testHash $observedHash $transcriptMapHash $redMapHash $greenMapHash $mutationMapHash $redSourceHash $greenSourceHash $mutationSourceHash $astRecordHash
+if ($LASTEXITCODE -ne 0) { throw 'Promotion ledger validation failed' }
+foreach ($requiredText in @(
+    '2026-07-28-windows-preparing-promotion-retry-design.md',
+    'fix(update): retry locked preparing promotion',
+    'PROMOTION_RETRY_DELAYS = (0.05, 0.2)',
+    'PROMOTION_TRANSIENT_WINERRORS = frozenset((5, 32, 33))',
+    '60 paths',
+    'WinError 5',
+    'initial revalidation',
+    'pre-sleep revalidation',
+    'post-sleep revalidation'
+)) {
+    if (-not $evidence.Contains($requiredText)) {
+        throw "Plan E evidence omits promotion requirement: $requiredText"
+    }
+}
+foreach ($requiredPattern in @(
+    '(?m)^\*\*Windows promotion retry RED:\*\* `PASS` - seven assertion failures and one constructor pass\r?$',
+    '(?m)^\*\*Windows promotion retry GREEN:\*\* `PASS` - 8/8\r?$',
+    '(?m)^\*\*Promotion attempts and delays:\*\* `PASS` - 2 attempts/\[0\.05\] and 3 attempts/\[0\.05, 0\.2\]\r?$',
+    '(?m)^\*\*Promotion checkpoint mutations:\*\* `PASS` - classification, bound, initial, pre-sleep, post-sleep; all restored byte-identical\r?$',
+    '(?m)^\*\*Promotion conflict cause/state:\*\* `PASS` - final OSError cause, preparing exact, final/active absent, live unchanged\r?$',
+    '(?m)^\*\*Promotion AST/constructor audit:\*\* `PASS`\r?$',
+    '(?m)^\*\*Promotion test commit:\*\* `PASS` - 1 path - [0-9a-f]{40}\r?$',
+    '(?m)^\*\*Promotion implementation commit:\*\* `PASS` - 1 path - [0-9a-f]{40}\r?$',
+    '(?m)^\*\*Expanded Plan E range:\*\* `PASS` - 60 paths\r?$',
+    '(?m)^\*\*Fresh isolated full Host gate:\*\* `PASS` - [1-9][0-9]* tests, [0-9]+ skipped\r?$'
+)) {
+    $matches=[regex]::Matches($evidence,$requiredPattern)
+    if ($matches.Count -ne 1) {
+        throw "Plan E evidence promotion PASS line is missing or duplicated: $requiredPattern"
+    }
+}
+$artifactHashes=[ordered]@{
+    'Promotion executor SHA-256'=$executorHash
+    'Promotion mutation runner SHA-256'=$runnerHash
+    'Promotion observed SHA-256'=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-observed.json').Hash.ToLowerInvariant()
+    'Promotion transcript map SHA-256'=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-transcripts.sha256.json').Hash.ToLowerInvariant()
+    'Promotion ledger SHA-256'=(Get-FileHash -Algorithm SHA256 -LiteralPath $ledgerPath).Hash.ToLowerInvariant()
+    'Promotion RED map SHA-256'=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-red.sha256.json').Hash.ToLowerInvariant()
+    'Promotion GREEN map SHA-256'=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-green.sha256.json').Hash.ToLowerInvariant()
+    'Promotion mutation map SHA-256'=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-mutation.sha256.json').Hash.ToLowerInvariant()
+    'Promotion AST record SHA-256'=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/promotion-ast.sha256').Hash.ToLowerInvariant()
+    'Focused Extension result SHA-256'=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/focused-extension-results.json').Hash.ToLowerInvariant()
+    'Full Extension result SHA-256'=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/full-extension-results.json').Hash.ToLowerInvariant()
+    'Host test result SHA-256'=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/host-test-results.json').Hash.ToLowerInvariant()
+    'Reviewed-head verification SHA-256'=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/reviewed-head-verification.json').Hash.ToLowerInvariant()
+}
+foreach ($entry in $artifactHashes.GetEnumerator()) {
+    $line=('**' + $entry.Key + ':** `' + $entry.Value + '`')
+    if ([regex]::Matches($evidence,'(?m)^' + [regex]::Escape($line) + '\r?$').Count -ne 1) {
+        throw "Final evidence artifact hash mismatch: $($entry.Key)"
+    }
+}
+if ($evidence -match '\[(observed|insert|TODO|TBD)[^\]]*\]') {
+    throw 'Plan E evidence retains a placeholder'
+}
+$testCommitMatch=[regex]::Match(
+    $evidence,
+    '(?m)^\*\*Promotion test commit:\*\* `PASS` - 1 path - ([0-9a-f]{40})\r?$'
+)
+$promotionCommitMatch=[regex]::Match($evidence,'(?m)^\*\*Promotion implementation commit:\*\* `PASS` - 1 path - ([0-9a-f]{40})\r?$')
+if (-not $testCommitMatch.Success -or -not $promotionCommitMatch.Success) { throw 'Could not resolve promotion commits from evidence' }
+$testCommit=$testCommitMatch.Groups[1].Value
+$promotionCommit=$promotionCommitMatch.Groups[1].Value
+if ($promotionCommitFromEvidence -cne $promotionCommit) { throw 'Promotion evidence commit mismatch' }
+if ($testCommitFromEvidence -cne $testCommit) { throw 'Promotion test evidence commit mismatch' }
+$subject=@(& git show -s --format=%s $promotionCommit)
+if (
+    $LASTEXITCODE -ne 0 -or
+    $subject.Count -ne 1 -or
+    $subject[0] -cne 'fix(update): retry locked preparing promotion'
+) { throw 'Promotion commit subject is invalid' }
+$promotionPaths=@(& git diff-tree --no-commit-id --name-only --no-renames -r $promotionCommit)
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect promotion commit paths' }
+$expectedPromotionPaths=@('host/update_engine.py')
+if (
+    $promotionPaths.Count -ne 1 -or
+    @($expectedPromotionPaths | Where-Object { $promotionPaths -cnotcontains $_ }).Count -ne 0 -or
+    @($promotionPaths | Where-Object { $expectedPromotionPaths -cnotcontains $_ }).Count -ne 0
+) { throw 'Promotion commit path set is invalid' }
+$testPaths=@(& git diff-tree --no-commit-id --name-only --no-renames -r $testCommit)
+$testSubject=@(& git show -s --format=%s $testCommit)
+if ($LASTEXITCODE -ne 0 -or $testPaths.Count -ne 1 -or $testPaths[0] -cne 'host/test_update_engine_resume.py' -or $testSubject.Count -ne 1 -or $testSubject[0] -cne 'test(update): cover locked preparing promotion') {
+    throw 'Promotion test commit is invalid'
+}
+& git merge-base --is-ancestor $testCommit $promotionCommit
+if ($LASTEXITCODE -ne 0) { throw 'Promotion implementation does not descend from RED test commit' }
+$testParent=@(& git rev-parse "$testCommit^")
+$promotionParent=@(& git rev-parse "$promotionCommit^")
+if (
+    $LASTEXITCODE -ne 0 -or $testParent.Count -ne 1 -or $promotionParent.Count -ne 1 -or
+    $testParent[0].Trim() -cne $actualPlanCommit[0].Trim() -or
+    $promotionParent[0].Trim() -cne $testCommit
+) { throw 'Promotion TDD commits are not the direct plan -> RED -> implementation chain' }
+$replayRoot=Join-Path ([IO.Path]::GetTempPath()) ('dh-promotion-red-replay-' + [guid]::NewGuid().ToString('N'))
+try {
+    & git worktree add --detach $replayRoot $testCommit
+    if ($LASTEXITCODE -ne 0) { throw 'Could not create promotion RED replay worktree' }
+    $python=Join-Path (Get-Location) 'host\venv\Scripts\python.exe'
+    $savedLocation=Get-Location
+    Push-Location -LiteralPath $replayRoot
+    try {
+        $envNames=@('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP','PYTHONPATH','DH_PROMOTION_EVIDENCE')
+        $savedEnv=@{}
+        foreach ($name in $envNames) { $savedEnv[$name]=[Environment]::GetEnvironmentVariable($name,'Process') }
+        $isolation=Join-Path ([IO.Path]::GetTempPath()) ('dh-red-replay-env-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $isolation | Out-Null
+        foreach ($name in @('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP')) {
+            $value=Join-Path $isolation $name.ToLowerInvariant()
+            New-Item -ItemType Directory -Path $value | Out-Null
+            [Environment]::SetEnvironmentVariable($name,$value,'Process')
+        }
+        [Environment]::SetEnvironmentVariable('PYTHONPATH',(Join-Path $replayRoot 'host'),'Process')
+        Remove-Item -LiteralPath 'Env:DH_PROMOTION_EVIDENCE' -ErrorAction SilentlyContinue
+        foreach ($method in $expectedRed) {
+            $selector="host.test_update_engine_resume.PreparingPromotionRetryTests.$method"
+            $lines=@(& $python -m unittest $selector -v 2>&1)
+            $text=$lines -join "`n"
+            if (
+                $LASTEXITCODE -ne 1 -or
+                [regex]::Matches($text,('(?m)^' + [regex]::Escape($method) + ' .* \.\.\. FAIL\r?$')).Count -ne 1 -or
+                [regex]::Matches($text,'(?m)^Ran 1 test in [0-9.]+s\r?$').Count -ne 1 -or
+                [regex]::Matches($text,'(?m)^FAILED \(failures=1\)\r?$').Count -ne 1 -or
+                $text -cmatch '(?m)(^ERROR:|\bskipped\b)'
+            ) {
+                throw "Promotion RED replay did not fail correctly: $method"
+            }
+        }
+        $selector='host.test_update_engine_resume.PreparingPromotionRetryTests.test_update_engine_constructor_signature_remains_frozen'
+        $lines=@(& $python -m unittest $selector -v 2>&1)
+        if ($LASTEXITCODE -ne 0 -or ($lines -join "`n") -cnotmatch '(?m)\.\.\. ok\r?$') {
+            throw 'Promotion constructor replay did not pass'
+        }
+    } finally {
+        foreach ($name in $envNames) {
+            if ($null -eq $savedEnv[$name]) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
+            else { [Environment]::SetEnvironmentVariable($name,$savedEnv[$name],'Process') }
+        }
+        Pop-Location
+        if (Test-Path -LiteralPath $isolation) { Remove-Item -LiteralPath $isolation -Recurse -Force }
+    }
+} finally {
+    if (Test-Path -LiteralPath $replayRoot) {
+        & git worktree remove --force $replayRoot
+        if ($LASTEXITCODE -ne 0) { throw 'Could not remove promotion RED replay worktree' }
+    }
+}
+& git merge-base --is-ancestor '0dbb4852931b50153fb898b03129ae0092c46404' $promotionCommit
+if ($LASTEXITCODE -ne 0) { throw 'Promotion commit is not after the Plan E base' }
 foreach ($path in $requiredReviewArtifacts) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Required review artifact missing: $path"
@@ -6113,6 +9779,229 @@ if ($wholeRange -ne "$wholeBase..$wholeHead") {
 }
 if ($planEHead -ne $wholeHead) {
     throw 'Review package heads differ'
+}
+$latestEngineCommit=@(& git log -1 --format=%H $planEHead -- 'host/update_engine.py')
+$latestTestCommit=@(& git log -1 --format=%H $planEHead -- 'host/test_update_engine_resume.py')
+if (
+    $LASTEXITCODE -ne 0 -or $latestEngineCommit.Count -ne 1 -or $latestTestCommit.Count -ne 1 -or
+    $latestEngineCommit[0].Trim() -cne $promotionCommit -or $latestTestCommit[0].Trim() -cne $testCommit
+) { throw 'A later commit touched promotion evidence Host paths' }
+$actualPlanEPaths=@(& git diff --name-only --no-renames $planERange)
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect reviewed Plan E range paths' }
+if ($actualPlanEPaths.Count -ne 60) { throw 'Reviewed Plan E range is not 60 paths' }
+foreach ($path in @(
+    'docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md',
+    'host/update_engine.py',
+    'host/test_update_engine_resume.py'
+)) {
+    if ($actualPlanEPaths -cnotcontains $path) { throw "Reviewed Plan E range omits $path" }
+}
+$expectedRangePaths=@(
+    'docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md',
+    'docs/superpowers/specs/2026-07-24-plan-e-boundary-correction-design.md',
+    'docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md',
+    'extension/src/background/analyzeBridge.test.ts','extension/src/background/analyzeBridge.ts',
+    'extension/src/background/analyzeRequestHandler.test.ts','extension/src/background/analyzeRequestHandler.ts',
+    'extension/src/background/contextMenu.test.ts','extension/src/background/contextMenu.ts',
+    'extension/src/background/nativeMessageWire.test.ts','extension/src/background/nativeMessageWire.ts',
+    'extension/src/background/resetExtensionState.test.ts','extension/src/background/serviceWorker.ts',
+    'extension/src/background/teamManifestSync.test.ts','extension/src/background/teamManifestSync.ts',
+    'extension/src/components/FAB.analyzeRequest.test.tsx','extension/src/components/FAB.bookmarkTelemetry.test.tsx',
+    'extension/src/components/FAB.pageIdentity.test.tsx','extension/src/components/FAB.promptSourceErrors.test.tsx',
+    'extension/src/components/FAB.rootPathOverride.test.ts','extension/src/components/FAB.spinner.test.tsx',
+    'extension/src/components/FAB.tsx','extension/src/components/FAB.userPrompt.test.tsx',
+    'extension/src/components/MenuLogic.teamCache.test.ts','extension/src/components/MenuLogic.ts',
+    'extension/src/components/Options.collapseFolders.test.ts','extension/src/components/Options.test.tsx',
+    'extension/src/components/Options.tsx','extension/src/components/ResultPopover.test.tsx',
+    'extension/src/components/ResultPopover.tsx','extension/src/content/index.tsx',
+    'extension/src/content/updateErrorBridge.test.ts','extension/src/content/updateErrorBridge.ts',
+    'extension/src/hooks/useAnalysisHydration.test.ts','extension/src/hooks/useAnalysisHydration.ts',
+    'extension/src/test/chromeMock.ts','extension/src/utils/analysisStore.test.ts',
+    'extension/src/utils/analysisStore.ts','extension/src/utils/analyzeRequest.test.ts',
+    'extension/src/utils/analyzeRequest.ts','extension/src/utils/bookmarkItems.test.ts',
+    'extension/src/utils/bookmarkItems.ts','extension/src/utils/configUpdateResult.test.ts',
+    'extension/src/utils/configUpdateResult.ts','extension/src/utils/nativeUpdateError.test.ts',
+    'extension/src/utils/nativeUpdateError.ts','extension/src/utils/ownData.test.ts',
+    'extension/src/utils/ownData.ts','extension/src/utils/pageIdentity.test.ts',
+    'extension/src/utils/pageIdentity.ts','extension/src/utils/prefs.ts',
+    'extension/src/utils/promptSourceErrors.test.ts','extension/src/utils/promptSourceErrors.ts',
+    'extension/src/utils/teamCatalog.test.ts','extension/src/utils/teamCatalog.ts',
+    'extension/src/utils/translations.ts','host/dh_native_host.py',
+    'host/test_session_workspace.py','host/test_update_engine_resume.py','host/update_engine.py'
+)
+$missingRange=@($expectedRangePaths | Where-Object { $actualPlanEPaths -cnotcontains $_ })
+$extraRange=@($actualPlanEPaths | Where-Object { $expectedRangePaths -cnotcontains $_ })
+if ($missingRange.Count -ne 0 -or $extraRange.Count -ne 0 -or $actualPlanEPaths.Count -ne 60) {
+    throw "Reviewed Plan E exact path mismatch. Missing: $($missingRange -join ', '); Extra: $($extraRange -join ', ')"
+}
+& git merge-base --is-ancestor $promotionCommit $planEHead
+if ($LASTEXITCODE -ne 0) { throw 'Promotion commit is not included in reviewed head' }
+$expectedPlanEPackage=@(
+    'Review kind: Plan-E-only',
+    "Review base: $planEBase",
+    "Review head: $planEHead",
+    "Review range: $planERange",
+    "Exact diff command: git diff --full-index --binary `"$planERange`"",
+    '',
+    '## Diff Stat'
+) + @(& git diff --stat $planERange) + @('', '## Commits') + @(& git log --reverse --oneline $planERange) + @('', '## Paths') + @(& git diff --name-status --no-renames $planERange)
+if ($LASTEXITCODE -ne 0) { throw 'Could not regenerate Plan E package inventory' }
+$expectedPlanEPackageText=($expectedPlanEPackage -join "`n") + "`n"
+if (($planEPackage -replace "`r`n","`n") -cne $expectedPlanEPackageText) { throw 'Plan E review package inventory is stale' }
+$expectedWholePackage=@(
+    'Review kind: original whole-branch interim through Plan E',
+    "Review base: $wholeBase",
+    "Review head: $wholeHead",
+    "Review range: $wholeRange",
+    "Exact diff command: git diff --full-index --binary `"$wholeRange`"",
+    '',
+    '## Diff Stat'
+) + @(& git diff --stat $wholeRange) + @('', '## Commits') + @(& git log --reverse --oneline $wholeRange) + @('', '## Paths') + @(& git diff --name-status --no-renames $wholeRange)
+if ($LASTEXITCODE -ne 0) { throw 'Could not regenerate whole-branch package inventory' }
+$expectedWholePackageText=($expectedWholePackage -join "`n") + "`n"
+if (($wholePackage -replace "`r`n","`n") -cne $expectedWholePackageText) { throw 'Whole-branch review package inventory is stale' }
+$transcriptRoot='.superpowers/sdd/promotion-transcripts'
+$expectedMutationMethods=[ordered]@{
+    classification='test_windows_access_denied_retries_atomic_preparing_promotion'
+    bound='test_persistent_windows_promotion_lock_stops_after_three_attempts'
+    initial='test_preparing_promotion_revalidates_before_and_after_sleep'
+    'pre-sleep'='test_preparing_promotion_revalidation_rejects_every_authority_mismatch'
+    'post-sleep'='test_preparing_promotion_revalidation_rejects_every_authority_mismatch'
+}
+$expectedTranscriptDirectories=@('red','green') + @($expectedMutationMethods.Keys | ForEach-Object { "mutation-$_" })
+$expectedTranscriptFiles=@()
+foreach ($method in $expectedGreen) { $expectedTranscriptFiles += "red/$method.txt"; $expectedTranscriptFiles += "green/$method.txt" }
+foreach ($entry in $expectedMutationMethods.GetEnumerator()) { $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).txt"; $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).restored-green.txt" }
+$transcriptRootInfo=Get-Item -LiteralPath $transcriptRoot -Force
+$transcriptEntries=@(Get-ChildItem -LiteralPath $transcriptRoot -Force -Recurse)
+$unsupportedTranscriptEntries=@($transcriptEntries | Where-Object { ($_ -isnot [IO.FileInfo] -and $_ -isnot [IO.DirectoryInfo]) -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 })
+$actualTranscriptDirectories=@($transcriptEntries | Where-Object { $_ -is [IO.DirectoryInfo] } | ForEach-Object { [IO.Path]::GetRelativePath((Join-Path (Get-Location) $transcriptRoot),$_.FullName).Replace('\','/') } | Sort-Object)
+$actualTranscriptFiles=@($transcriptEntries | Where-Object { $_ -is [IO.FileInfo] } | ForEach-Object { [IO.Path]::GetRelativePath((Join-Path (Get-Location) $transcriptRoot),$_.FullName).Replace('\','/') } | Sort-Object)
+$missingTranscriptDirectories=@($expectedTranscriptDirectories | Where-Object { $actualTranscriptDirectories -cnotcontains $_ }); $extraTranscriptDirectories=@($actualTranscriptDirectories | Where-Object { $expectedTranscriptDirectories -cnotcontains $_ })
+$missingTranscriptFiles=@($expectedTranscriptFiles | Where-Object { $actualTranscriptFiles -cnotcontains $_ }); $extraTranscriptFiles=@($actualTranscriptFiles | Where-Object { $expectedTranscriptFiles -cnotcontains $_ })
+if ($transcriptRootInfo -isnot [IO.DirectoryInfo] -or ($transcriptRootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $unsupportedTranscriptEntries.Count -ne 0 -or $actualTranscriptDirectories.Count -ne 7 -or $actualTranscriptFiles.Count -ne 26 -or $missingTranscriptDirectories.Count -ne 0 -or $extraTranscriptDirectories.Count -ne 0 -or $missingTranscriptFiles.Count -ne 0 -or $extraTranscriptFiles.Count -ne 0) { throw 'Final evidence transcript topology mismatch' }
+foreach ($method in $expectedRed) {
+    $path=Join-Path $transcriptRoot "red/$method.txt"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing RED transcript: $method" }
+    $text=[IO.File]::ReadAllText((Join-Path (Get-Location) $path),[Text.UTF8Encoding]::new($false))
+    if ([regex]::Matches($text,('(?m)^' + [regex]::Escape($method) + ' .* \.\.\. FAIL\r?$')).Count -ne 1 -or [regex]::Matches($text,'(?m)^Ran 1 test in [0-9.]+s\r?$').Count -ne 1 -or [regex]::Matches($text,'(?m)^FAILED \(failures=1\)\r?$').Count -ne 1 -or $text -cmatch '(?m)(\.\.\. ok\r?$|^OK\r?$|^ERROR:|\bskipped\b)') { throw "Invalid RED transcript: $method" }
+}
+$constructorPath=Join-Path $transcriptRoot 'red/test_update_engine_constructor_signature_remains_frozen.txt'
+if (-not (Test-Path -LiteralPath $constructorPath -PathType Leaf)) { throw 'Missing constructor RED-phase transcript' }
+$constructorText=[IO.File]::ReadAllText((Join-Path (Get-Location) $constructorPath),[Text.UTF8Encoding]::new($false))
+if ([regex]::Matches($constructorText,'(?m)^test_update_engine_constructor_signature_remains_frozen .* \.\.\. ok\r?$').Count -ne 1 -or [regex]::Matches($constructorText,'(?m)^Ran 1 test in [0-9.]+s\r?$').Count -ne 1 -or [regex]::Matches($constructorText,'(?m)^OK\r?$').Count -ne 1 -or $constructorText -cmatch '(?m)(\.\.\. FAIL\r?$|^FAILED|^ERROR:|\bskipped\b)') { throw 'Invalid constructor RED-phase transcript' }
+foreach ($method in $expectedGreen) {
+    $path=Join-Path $transcriptRoot "green/$method.txt"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing GREEN transcript: $method" }
+    $text=[IO.File]::ReadAllText((Join-Path (Get-Location) $path),[Text.UTF8Encoding]::new($false))
+    if ([regex]::Matches($text,('(?m)^' + [regex]::Escape($method) + ' .* \.\.\. ok\r?$')).Count -ne 1 -or [regex]::Matches($text,'(?m)^Ran 1 test in [0-9.]+s\r?$').Count -ne 1 -or [regex]::Matches($text,'(?m)^OK\r?$').Count -ne 1 -or $text -cmatch '(?m)(\.\.\. FAIL\r?$|^FAILED|^ERROR:|\bskipped\b)') { throw "Invalid GREEN transcript: $method" }
+}
+$transcriptMapPath='.superpowers/sdd/promotion-transcripts.sha256.json'
+if (-not (Test-Path -LiteralPath $transcriptMapPath -PathType Leaf)) { throw 'Promotion transcript hash map is missing' }
+$recordedMapText=[IO.File]::ReadAllText((Join-Path (Get-Location) $transcriptMapPath),[Text.UTF8Encoding]::new($false))
+$strictMapParser=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+value=json.loads(sys.stdin.read(),object_pairs_hook=pairs,parse_constant=reject_constant)
+if not isinstance(value,dict) or any(not isinstance(k,str) or not isinstance(v,str) for k,v in value.items()):
+    raise SystemExit('invalid transcript map')
+print(json.dumps(value,sort_keys=True,separators=(',',':')))
+'@
+$canonicalMap=@($recordedMapText | & 'host\venv\Scripts\python.exe' -c $strictMapParser)
+if ($LASTEXITCODE -ne 0 -or $canonicalMap.Count -ne 1 -or $recordedMapText -cne $canonicalMap[0] + "`n") { throw 'Promotion transcript hash map is invalid or noncanonical' }
+$recordedMap=$canonicalMap[0] | ConvertFrom-Json -AsHashtable
+$redMapPath='.superpowers/sdd/promotion-red.sha256.json'
+$redMapText=[IO.File]::ReadAllText((Join-Path (Get-Location) $redMapPath),[Text.UTF8Encoding]::new($false))
+$canonicalRedMap=@($redMapText | & 'host\venv\Scripts\python.exe' -c $strictMapParser)
+if ($LASTEXITCODE -ne 0 -or $canonicalRedMap.Count -ne 1 -or $redMapText -cne $canonicalRedMap[0] + "`n") { throw 'Promotion RED hash map is invalid or noncanonical' }
+$recordedRedMap=$canonicalRedMap[0] | ConvertFrom-Json -AsHashtable
+$actualRedMap=[ordered]@{}
+foreach ($relative in @($actualTranscriptFiles | Where-Object { $_ -like 'red/*' })) {
+    $name=[IO.Path]::GetFileName($relative)
+    $fullPath=Join-Path $transcriptRoot $relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
+    $actualRedMap[$name]=(Get-FileHash -Algorithm SHA256 -LiteralPath $fullPath).Hash.ToLowerInvariant()
+}
+if ($recordedRedMap.Count -ne 8 -or $actualRedMap.Count -ne 8) { throw 'Promotion RED hash count mismatch' }
+foreach ($key in $actualRedMap.Keys) {
+    if (-not $recordedRedMap.ContainsKey($key) -or $recordedRedMap[$key] -cne $actualRedMap[$key]) { throw "Promotion RED chronology hash mismatch: $key" }
+    $fullKey='red/' + $key
+    if (-not $recordedMap.ContainsKey($fullKey) -or $recordedMap[$fullKey] -cne $actualRedMap[$key]) { throw "Promotion full map does not preserve RED hash: $key" }
+}
+$actualMap=[ordered]@{}
+foreach ($relative in $actualTranscriptFiles) {
+    $fullPath=Join-Path $transcriptRoot $relative.Replace('/',[IO.Path]::DirectorySeparatorChar)
+    $actualMap[$relative]=(Get-FileHash -Algorithm SHA256 -LiteralPath $fullPath).Hash.ToLowerInvariant()
+}
+if ($actualMap.Count -ne 26 -or $recordedMap.Count -ne 26) { throw 'Promotion transcript hash count mismatch' }
+foreach ($key in $actualMap.Keys) {
+    if (-not $recordedMap.ContainsKey($key) -or $recordedMap[$key] -cne $actualMap[$key]) {
+        throw "Promotion transcript hash mismatch: $key"
+    }
+}
+$phaseMapSpecs=[ordered]@{
+    green=[ordered]@{Path='.superpowers/sdd/promotion-green.sha256.json';Prefix='green/';Count=8}
+    mutation=[ordered]@{Path='.superpowers/sdd/promotion-mutation.sha256.json';Prefix='';Count=10}
+}
+foreach ($entry in $phaseMapSpecs.GetEnumerator()) {
+    $phaseText=[IO.File]::ReadAllText((Join-Path (Get-Location) $entry.Value.Path),[Text.UTF8Encoding]::new($false))
+    $canonicalPhase=@($phaseText | & 'host\venv\Scripts\python.exe' -c $strictMapParser)
+    if ($LASTEXITCODE -ne 0 -or $canonicalPhase.Count -ne 1 -or $phaseText -cne $canonicalPhase[0] + "`n") { throw "Promotion $($entry.Key) hash map is invalid or noncanonical" }
+    $phaseMap=$canonicalPhase[0] | ConvertFrom-Json -AsHashtable
+    if ($phaseMap.Count -ne $entry.Value.Count) { throw "Promotion $($entry.Key) map count mismatch" }
+    foreach ($key in $phaseMap.Keys) {
+        if ($entry.Key -eq 'mutation' -and $key -cnotmatch '^mutation-(classification|bound|initial|pre-sleep|post-sleep)/') {
+            throw "Promotion mutation map contains unexpected key: $key"
+        }
+        $fullKey=$entry.Value.Prefix + $key
+        if (-not $recordedMap.ContainsKey($fullKey) -or $recordedMap[$fullKey] -cne $phaseMap[$key]) {
+            throw "Promotion full map does not preserve $($entry.Key) hash: $key"
+        }
+    }
+}
+foreach ($name in @('classification','bound','initial','pre-sleep','post-sleep')) {
+    $directory=Join-Path $transcriptRoot "mutation-$name"
+    $files=@($transcriptEntries | Where-Object { $_ -is [IO.FileInfo] -and $_.DirectoryName -ceq (Join-Path (Get-Location) $directory) })
+    if ($files.Count -ne 2) { throw "Promotion mutation transcript count mismatch: $name" }
+    $expectedMutationMethod=switch ($name) {
+        'classification' { 'test_windows_access_denied_retries_atomic_preparing_promotion' }
+        'bound' { 'test_persistent_windows_promotion_lock_stops_after_three_attempts' }
+        'initial' { 'test_preparing_promotion_revalidates_before_and_after_sleep' }
+        default { 'test_preparing_promotion_revalidation_rejects_every_authority_mismatch' }
+    }
+    $failureFile=$files | Where-Object { $_.Name -ceq "$expectedMutationMethod.txt" }
+    $greenFile=$files | Where-Object { $_.Name -ceq "$expectedMutationMethod.restored-green.txt" }
+    if ($null -eq $failureFile -or $null -eq $greenFile) { throw "Promotion mutation transcript names invalid: $name" }
+    $text=[IO.File]::ReadAllText($failureFile.FullName,[Text.UTF8Encoding]::new($false))
+    if ($text -cnotmatch ('(?m)^' + [regex]::Escape($expectedMutationMethod) + ' .* \.\.\. FAIL\r?$') -or $text -cnotmatch '(?m)^Ran 1 test in [0-9.]+s\r?$' -or $text -cnotmatch '(?m)^FAILED \(failures=1\)\r?$' -or $text -cmatch '(?m)(^ERROR:|^ImportError:|^ModuleNotFoundError:|\bskipped\b)') {
+        throw "Promotion mutation transcript invalid: $name"
+    }
+    $greenText=[IO.File]::ReadAllText($greenFile.FullName,[Text.UTF8Encoding]::new($false))
+    if ([regex]::Matches($greenText,('(?m)^' + [regex]::Escape($expectedMutationMethod) + ' .* \.\.\. ok\r?$')).Count -ne 1 -or [regex]::Matches($greenText,'(?m)^Ran 1 test in [0-9.]+s\r?$').Count -ne 1 -or [regex]::Matches($greenText,'(?m)^OK\r?$').Count -ne 1 -or $greenText -cmatch '(?m)(\.\.\. FAIL\r?$|^FAILED|^ERROR:|\bskipped\b)') {
+        throw "Promotion restored GREEN transcript invalid: $name"
+    }
+}
+$recheckPlanE='.superpowers/sdd/recheck-plan-e.diff'
+$recheckWhole='.superpowers/sdd/recheck-whole.diff'
+try {
+    & git diff --full-index --binary $planERange --output=$recheckPlanE
+    if ($LASTEXITCODE -ne 0) { throw 'Could not regenerate Plan E review diff' }
+    & git diff --full-index --binary $wholeRange --output=$recheckWhole
+    if ($LASTEXITCODE -ne 0) { throw 'Could not regenerate whole-branch review diff' }
+    $planEHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/plan-e-only-review.diff').Hash
+    $planERecheckHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $recheckPlanE).Hash
+    $wholeHash=(Get-FileHash -Algorithm SHA256 -LiteralPath '.superpowers/sdd/original-whole-branch-interim-review.diff').Hash
+    $wholeRecheckHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $recheckWhole).Hash
+    if ($planEHash -cne $planERecheckHash) { throw 'Plan E review diff bytes are stale' }
+    if ($wholeHash -cne $wholeRecheckHash) { throw 'Whole-branch review diff bytes are stale' }
+} finally {
+    Remove-Item -LiteralPath $recheckPlanE -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $recheckWhole -Force -ErrorAction SilentlyContinue
 }
 $currentProductHead=@(& git rev-parse HEAD)
 if ($LASTEXITCODE -ne 0) { throw 'Could not resolve current product head' }
@@ -6228,20 +10117,167 @@ foreach ($heading in @('Minor','Testing Gaps')) {
         throw "Whole-branch $heading section is empty"
     }
 }
+foreach ($sections in @($planESections,$wholeSections)) {
+    foreach ($heading in @('Testing Gaps','Minor')) {
+        $body=$sections[$heading]
+        if ($body -cne 'None.') {
+            $lines=@($body -split "`n" | Where-Object { $_ -ne '' })
+            if ($lines.Count -eq 0 -or @($lines | Where-Object { $_ -cnotmatch '^- \[Minor\] ' }).Count -ne 0) {
+                throw "$heading contains a non-Minor or malformed finding"
+            }
+        }
+    }
+    foreach ($heading in @('Critical','Important')) {
+        if ($sections[$heading] -cne 'None.') { throw "$heading findings remain" }
+    }
+}
 $requiredRerun='Rerun git diff --full-index --binary "0040b1de1bc196b203014a8e4f94a53babb7e9aa..<final-D-head>" and the full original-base controller review after Plan D is committed and before any final whole-branch/release-readiness claim.'
 if ($wholeSections['Plan D Rerun Requirement'] -cne $requiredRerun) {
     throw 'Whole-branch findings final-D rerun requirement is not exact'
 }
-& git diff --check
-if ($LASTEXITCODE -ne 0) { throw 'Evidence working diff check failed' }
+$riskHashes=[ordered]@{
+    'Plan-E Minor/Testing SHA-256'=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.UTF8Encoding]::new($false).GetBytes($planESections['Minor'] + "`n" + $planESections['Testing Gaps']))).ToLowerInvariant()
+    'Whole-branch Minor/Testing SHA-256'=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.UTF8Encoding]::new($false).GetBytes($wholeSections['Minor'] + "`n" + $wholeSections['Testing Gaps']))).ToLowerInvariant()
+}
+foreach ($entry in $riskHashes.GetEnumerator()) {
+    $line=('**' + $entry.Key + ':** `' + $entry.Value + '`')
+    if ([regex]::Matches($evidence,'(?m)^' + [regex]::Escape($line) + '\r?$').Count -ne 1) {
+        throw "Final evidence residual-risk hash mismatch: $($entry.Key)"
+    }
+}
+$rerunBody=$evidenceSections['Plan D Final Whole-Branch Rerun Requirement']
+if (-not $rerunBody.Contains($requiredRerun)) { throw 'Final evidence omits exact Plan D rerun sentence' }
+foreach ($literal in @($planERange,$wholeRange,$planEHead,$promotionCommit)) {
+    if (-not $evidence.Contains($literal)) { throw "Final evidence omits reviewed literal: $literal" }
+}
+foreach ($metadata in @(
+    ('**Integration base from plan-e-base.txt:** `' + $planEBase + '`'),
+    ('**Final reviewed product head:** `' + $planEHead + '`')
+)) {
+    if ([regex]::Matches($evidence,'(?m)^' + [regex]::Escape($metadata) + '\r?$').Count -ne 1) {
+        throw "Final evidence metadata mismatch: $metadata"
+    }
+}
+foreach ($line in @(
+    '**Plan-E-only Critical:** `None.`',
+    '**Plan-E-only Important:** `None.`',
+    '**Original-base interim Critical:** `None.`',
+    '**Original-base interim Important:** `None.`',
+    '**Original-base disposition:** `INTERIM PASS THROUGH PLAN E`'
+)) {
+    if ([regex]::Matches($evidence,'(?m)^' + [regex]::Escape($line) + '\r?$').Count -ne 1) {
+        throw "Final evidence findings summary mismatch: $line"
+    }
+}
+$planEReviewBody=$evidenceSections['Plan-E-Only Controller Review Findings']
+$wholeReviewBody=$evidenceSections['Original Whole-Branch Interim Review Findings']
+foreach ($literal in @($planEBase,$planEHead,$planERange,'Plan-E-only Critical','Plan-E-only Important')) {
+    if (-not $planEReviewBody.Contains($literal)) { throw "Plan-E evidence review section omits $literal" }
+}
+foreach ($literal in @($wholeBase,$wholeHead,$wholeRange,'Original-base interim Critical','Original-base interim Important','INTERIM PASS THROUGH PLAN E')) {
+    if (-not $wholeReviewBody.Contains($literal)) { throw "Whole-branch evidence review section omits $literal" }
+}
+$readinessBody=$evidenceSections['Plan E Review Readiness']
+if (-not $readinessBody.Contains('Plan E is review-ready') -or -not $readinessBody.Contains('final whole-branch review remains pending Plan D')) {
+    throw 'Plan E readiness section is incomplete'
+}
+if (-not $readinessBody.Contains('**Disposition:** `PASS`')) { throw 'Plan E readiness disposition is not PASS' }
 $status=@(git status --short)
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect evidence status' }
 $reviewedPlanEPaths=@(& git diff --name-only --no-renames $planERange)
 if ($LASTEXITCODE -ne 0) { throw 'Could not derive reviewed Plan E paths' }
+& git diff --check -- $reviewedPlanEPaths
+if ($LASTEXITCODE -ne 0) { throw 'Evidence Plan E working diff check failed' }
 $dirtyReviewedPaths=@(& git status --porcelain=v1 --untracked-files=all -- $reviewedPlanEPaths)
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect reviewed Plan E paths' }
 if ($dirtyReviewedPaths.Count -ne 0) {
     throw 'Reviewed Plan E paths changed after review package generation'
+}
+$testedSourceRoots=@('extension','host','tests','docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md','.gitignore','release_helper.py','dev_switch.py','installer_core.ps1','dyhelper_installer.ps1','install.bat')
+$headSource=@(& git ls-tree -r --name-only $planEHead -- $testedSourceRoots)
+$trackedSource=@(& git ls-files -- $testedSourceRoots)
+$dirtySource=@(& git status --porcelain=v1 --untracked-files=no -- $testedSourceRoots)
+if (
+    $LASTEXITCODE -ne 0 -or $headSource.Count -lt 1 -or
+    ($headSource -join "`n") -cne ($trackedSource -join "`n") -or
+    $dirtySource.Count -ne 0
+) { throw 'Final evidence tested source is not globally clean at reviewed head' }
+$manifestPath='.superpowers/sdd/final-artifacts.sha256.json'
+$manifestText=[IO.File]::ReadAllText((Join-Path (Get-Location) $manifestPath),[Text.UTF8Encoding]::new($false))
+$roots=@(
+    '.superpowers/sdd/invoke-promotion-test.ps1','.superpowers/sdd/run-promotion-mutations.ps1',
+    '.superpowers/sdd/promotion-executor.sha256','.superpowers/sdd/promotion-mutation-runner.sha256',
+    '.superpowers/sdd/promotion-red-source.sha256','.superpowers/sdd/promotion-green-source.sha256',
+    '.superpowers/sdd/promotion-mutation-source.sha256',
+    '.superpowers/sdd/promotion-observed.json','.superpowers/sdd/promotion-ledger.json',
+    '.superpowers/sdd/promotion-transcripts.sha256.json','.superpowers/sdd/promotion-red.sha256.json',
+    '.superpowers/sdd/promotion-green.sha256.json','.superpowers/sdd/promotion-mutation.sha256.json',
+    '.superpowers/sdd/promotion-ast.sha256','.superpowers/sdd/plan-e-only-review-package.txt',
+    '.superpowers/sdd/focused-extension-results.json','.superpowers/sdd/full-extension-results.json',
+    '.superpowers/sdd/host-test-results.json','.superpowers/sdd/reviewed-head-verification.json',
+    '.superpowers/sdd/plan-e-only-review.diff','.superpowers/sdd/plan-e-only-review-findings.md',
+    '.superpowers/sdd/original-whole-branch-interim-review-package.txt',
+    '.superpowers/sdd/original-whole-branch-interim-review.diff',
+    '.superpowers/sdd/original-whole-branch-interim-review-findings.md'
+)
+$roots += @(1..8 | ForEach-Object { ".superpowers/sdd/task-$_-report.md" })
+$artifactRoot=Join-Path (Get-Location) '.superpowers/sdd'
+$transcriptRoot=Join-Path $artifactRoot 'promotion-transcripts'
+$expectedTranscriptMethods=@('test_windows_access_denied_retries_atomic_preparing_promotion','test_windows_sharing_errors_32_and_33_are_retryable','test_persistent_windows_promotion_lock_stops_after_three_attempts','test_non_windows_or_unlisted_promotion_errors_are_not_retried','test_preparing_promotion_revalidates_before_and_after_sleep','test_preparing_promotion_revalidation_rejects_every_authority_mismatch','test_preparing_promotion_hooks_wrap_the_logical_operation_once','test_update_engine_constructor_signature_remains_frozen')
+$expectedMutationMethods=[ordered]@{classification='test_windows_access_denied_retries_atomic_preparing_promotion';bound='test_persistent_windows_promotion_lock_stops_after_three_attempts';initial='test_preparing_promotion_revalidates_before_and_after_sleep';'pre-sleep'='test_preparing_promotion_revalidation_rejects_every_authority_mismatch';'post-sleep'='test_preparing_promotion_revalidation_rejects_every_authority_mismatch'}
+$expectedTranscriptDirectories=@('red','green') + @($expectedMutationMethods.Keys | ForEach-Object { "mutation-$_" })
+$expectedTranscriptFiles=@(); foreach ($method in $expectedTranscriptMethods) { $expectedTranscriptFiles += "red/$method.txt"; $expectedTranscriptFiles += "green/$method.txt" }; foreach ($entry in $expectedMutationMethods.GetEnumerator()) { $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).txt"; $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).restored-green.txt" }
+$transcriptRootInfo=Get-Item -LiteralPath $transcriptRoot -Force
+$transcriptEntries=@(Get-ChildItem -LiteralPath $transcriptRoot -Force -Recurse)
+$unsupportedTranscriptEntries=@($transcriptEntries | Where-Object { ($_ -isnot [IO.FileInfo] -and $_ -isnot [IO.DirectoryInfo]) -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 })
+$actualTranscriptDirectories=@($transcriptEntries | Where-Object { $_ -is [IO.DirectoryInfo] } | ForEach-Object { [IO.Path]::GetRelativePath($transcriptRoot,$_.FullName).Replace('\','/') } | Sort-Object)
+$actualTranscriptFiles=@($transcriptEntries | Where-Object { $_ -is [IO.FileInfo] } | ForEach-Object { [IO.Path]::GetRelativePath($transcriptRoot,$_.FullName).Replace('\','/') } | Sort-Object)
+$missingTranscriptDirectories=@($expectedTranscriptDirectories | Where-Object { $actualTranscriptDirectories -cnotcontains $_ }); $extraTranscriptDirectories=@($actualTranscriptDirectories | Where-Object { $expectedTranscriptDirectories -cnotcontains $_ }); $missingTranscriptFiles=@($expectedTranscriptFiles | Where-Object { $actualTranscriptFiles -cnotcontains $_ }); $extraTranscriptFiles=@($actualTranscriptFiles | Where-Object { $expectedTranscriptFiles -cnotcontains $_ })
+if ($transcriptRootInfo -isnot [IO.DirectoryInfo] -or ($transcriptRootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $unsupportedTranscriptEntries.Count -ne 0 -or $actualTranscriptDirectories.Count -ne 7 -or $actualTranscriptFiles.Count -ne 26 -or $missingTranscriptDirectories.Count -ne 0 -or $extraTranscriptDirectories.Count -ne 0 -or $missingTranscriptFiles.Count -ne 0 -or $extraTranscriptFiles.Count -ne 0) { throw 'Final evidence transcript topology mismatch' }
+$roots += @($actualTranscriptFiles | ForEach-Object { '.superpowers/sdd/promotion-transcripts/' + $_ })
+$roots=@($roots | Sort-Object -Unique)
+if ($roots.Count -ne 58) { throw "Final artifact path count mismatch: $($roots.Count)" }
+$managedLeafNames=@($roots | Where-Object { $_ -notlike '.superpowers/sdd/promotion-transcripts/*' } | ForEach-Object { [IO.Path]::GetFileName($_) })
+$artifactEntries=@(Get-ChildItem -LiteralPath $artifactRoot -Force -Recurse)
+$unsupportedManagedEntries=@($artifactEntries | Where-Object {
+    $relative=[IO.Path]::GetRelativePath($artifactRoot,$_.FullName).Replace('\','/'); $artifactPath='.superpowers/sdd/' + $relative
+    $managedTranscript=$relative -eq 'promotion-transcripts' -or $relative -like 'promotion-transcripts/*'; $managedName=$managedLeafNames -ccontains $_.Name
+    ($managedTranscript -or $managedName) -and (($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or ($managedName -and ($_ -isnot [IO.FileInfo] -or $roots -cnotcontains $artifactPath)))
+})
+$observedManagedFiles=@($artifactEntries | Where-Object { $relative=[IO.Path]::GetRelativePath($artifactRoot,$_.FullName).Replace('\','/'); $_ -is [IO.FileInfo] -and ($relative -like 'promotion-transcripts/*' -or $managedLeafNames -ccontains $_.Name) } | ForEach-Object { '.superpowers/sdd/' + [IO.Path]::GetRelativePath($artifactRoot,$_.FullName).Replace('\','/') } | Sort-Object -Unique)
+$missingManaged=@($roots | Where-Object { $observedManagedFiles -cnotcontains $_ }); $extraManaged=@($observedManagedFiles | Where-Object { $roots -cnotcontains $_ })
+if ($unsupportedManagedEntries.Count -ne 0 -or $missingManaged.Count -ne 0 -or $extraManaged.Count -ne 0 -or $observedManagedFiles.Count -ne 58) { throw "Final artifact filesystem inventory mismatch. Missing: $($missingManaged -join ', '); Extra: $($extraManaged -join ', ')" }
+$expectedManifest=[ordered]@{}
+foreach ($path in $roots) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Final artifact missing: $path" }
+    $expectedManifest[$path]=(Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+}
+$manifestParser=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+value=json.loads(sys.stdin.read(),object_pairs_hook=pairs,parse_constant=reject_constant)
+if type(value) is not dict or any(type(k) is not str or type(v) is not str for k,v in value.items()): raise SystemExit('invalid manifest')
+print(json.dumps(value,sort_keys=True,separators=(',',':')))
+'@
+$canonicalManifest=@($manifestText | & 'host\venv\Scripts\python.exe' -c $manifestParser)
+if ($LASTEXITCODE -ne 0 -or $canonicalManifest.Count -ne 1 -or $manifestText -cne $canonicalManifest[0] + "`n") { throw 'Final artifact manifest is invalid or noncanonical' }
+$manifest=$canonicalManifest[0] | ConvertFrom-Json -AsHashtable
+if ($manifest.Count -ne 58 -or $expectedManifest.Count -ne 58) { throw 'Final artifact manifest count mismatch' }
+foreach ($entry in $expectedManifest.GetEnumerator()) {
+    if (-not $manifest.ContainsKey($entry.Key) -or $manifest[$entry.Key] -cne $entry.Value) { throw "Final artifact manifest drift: $($entry.Key)" }
+}
+& git check-ignore -q -- $manifestPath
+if ($LASTEXITCODE -ne 0) { throw 'Final artifact manifest is not ignored' }
+$manifestHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $manifestPath).Hash.ToLowerInvariant()
+$manifestLine=('**Final artifact manifest SHA-256:** `' + $manifestHash + '`')
+if ([regex]::Matches($evidence,'(?m)^' + [regex]::Escape($manifestLine) + '\r?$').Count -ne 1) {
+    throw 'Final report manifest hash line is missing or stale'
 }
 git add -f .superpowers/sdd/plan-e-extension-hardening-report.md
 if ($LASTEXITCODE -ne 0) { throw 'Could not stage evidence report' }
@@ -6279,6 +10315,292 @@ if ($LASTEXITCODE -ne 0 -or $finalHead.Count -ne 1) {
     throw 'Could not resolve final Plan E head'
 }
 $finalHead=$finalHead[0].Trim()
+$finalSubject=@(& git show -s --format=%s $finalHead)
+$finalParent=@(& git rev-parse "$finalHead^")
+if (
+    $LASTEXITCODE -ne 0 -or
+    $finalSubject.Count -ne 1 -or
+    $finalSubject[0] -cne 'docs(verification): record Plan E hardening evidence' -or
+    $finalParent.Count -ne 1
+) { throw 'Final HEAD is not the Plan E evidence commit' }
+$package=[IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/plan-e-only-review-package.txt'),[Text.UTF8Encoding]::new($false))
+$reviewedHead=[regex]::Match($package,'(?m)^Review head: ([0-9a-f]{40})$').Groups[1].Value
+if ($reviewedHead -notmatch '^[0-9a-f]{40}$' -or $finalParent[0].Trim() -cne $reviewedHead) {
+    throw 'Evidence commit parent is not the reviewed product head'
+}
+$finalPaths=@(& git diff-tree --no-commit-id --name-only --no-renames -r $finalHead)
+if ($LASTEXITCODE -ne 0 -or $finalPaths.Count -ne 1 -or $finalPaths[0] -cne '.superpowers/sdd/plan-e-extension-hardening-report.md') {
+    throw 'Final evidence commit contains non-evidence paths'
+}
+$evidencePath='.superpowers/sdd/plan-e-extension-hardening-report.md'
+$committedEvidence=@(& git show "HEAD:$evidencePath") -join "`n"
+$workingEvidence=[IO.File]::ReadAllText((Join-Path (Get-Location) $evidencePath),[Text.UTF8Encoding]::new($false)) -replace "`r`n","`n"
+if ($LASTEXITCODE -ne 0 -or $workingEvidence.TrimEnd("`n") -cne $committedEvidence.TrimEnd("`n")) {
+    throw 'Working evidence differs from committed evidence'
+}
+$artifactPaths=@(
+    '.superpowers/sdd/promotion-ledger.json',
+    '.superpowers/sdd/promotion-observed.json',
+    '.superpowers/sdd/promotion-transcripts.sha256.json',
+    '.superpowers/sdd/promotion-red.sha256.json',
+    '.superpowers/sdd/promotion-green.sha256.json',
+    '.superpowers/sdd/promotion-mutation.sha256.json',
+    '.superpowers/sdd/promotion-ast.sha256',
+    '.superpowers/sdd/focused-extension-results.json',
+    '.superpowers/sdd/full-extension-results.json',
+    '.superpowers/sdd/host-test-results.json',
+    '.superpowers/sdd/reviewed-head-verification.json',
+    '.superpowers/sdd/plan-e-only-review-package.txt',
+    '.superpowers/sdd/plan-e-only-review.diff',
+    '.superpowers/sdd/plan-e-only-review-findings.md',
+    '.superpowers/sdd/original-whole-branch-interim-review-package.txt',
+    '.superpowers/sdd/original-whole-branch-interim-review.diff',
+    '.superpowers/sdd/original-whole-branch-interim-review-findings.md'
+)
+foreach ($path in $artifactPaths) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Final evidence artifact missing: $path" }
+    & git check-ignore -q -- $path
+    if ($LASTEXITCODE -ne 0) { throw "Final evidence artifact is not ignored: $path" }
+}
+$hashLabels=[ordered]@{
+    'Promotion ledger SHA-256'='.superpowers/sdd/promotion-ledger.json'
+    'Promotion observed SHA-256'='.superpowers/sdd/promotion-observed.json'
+    'Promotion transcript map SHA-256'='.superpowers/sdd/promotion-transcripts.sha256.json'
+    'Promotion RED map SHA-256'='.superpowers/sdd/promotion-red.sha256.json'
+    'Promotion GREEN map SHA-256'='.superpowers/sdd/promotion-green.sha256.json'
+    'Promotion mutation map SHA-256'='.superpowers/sdd/promotion-mutation.sha256.json'
+    'Promotion AST record SHA-256'='.superpowers/sdd/promotion-ast.sha256'
+    'Focused Extension result SHA-256'='.superpowers/sdd/focused-extension-results.json'
+    'Full Extension result SHA-256'='.superpowers/sdd/full-extension-results.json'
+    'Host test result SHA-256'='.superpowers/sdd/host-test-results.json'
+    'Reviewed-head verification SHA-256'='.superpowers/sdd/reviewed-head-verification.json'
+}
+foreach ($entry in $hashLabels.GetEnumerator()) {
+    $hash=(Get-FileHash -Algorithm SHA256 -LiteralPath $entry.Value).Hash.ToLowerInvariant()
+    $line=('**' + $entry.Key + ':** `' + $hash + '`')
+    if ([regex]::Matches($committedEvidence,'(?m)^' + [regex]::Escape($line) + '$').Count -ne 1) {
+        throw "Committed evidence hash no longer matches artifact: $($entry.Key)"
+    }
+}
+$finalPhaseMapValidator=@'
+import hashlib,json,pathlib,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+def strict(path):
+    text=path.read_text(encoding='utf-8')
+    value=json.loads(text,object_pairs_hook=pairs,parse_constant=reject_constant)
+    if type(value) is not dict or any(type(k) is not str or type(v) is not str for k,v in value.items()): raise SystemExit(str(path)+' shape')
+    if text!=json.dumps(value,sort_keys=True,separators=(',',':'))+'\n': raise SystemExit(str(path)+' noncanonical')
+    return value
+root=pathlib.Path(sys.argv[1])
+methods=[
+    'test_windows_access_denied_retries_atomic_preparing_promotion',
+    'test_windows_sharing_errors_32_and_33_are_retryable',
+    'test_persistent_windows_promotion_lock_stops_after_three_attempts',
+    'test_non_windows_or_unlisted_promotion_errors_are_not_retried',
+    'test_preparing_promotion_revalidates_before_and_after_sleep',
+    'test_preparing_promotion_revalidation_rejects_every_authority_mismatch',
+    'test_preparing_promotion_hooks_wrap_the_logical_operation_once',
+    'test_update_engine_constructor_signature_remains_frozen',
+]
+mutation_methods={
+    'classification':'test_windows_access_denied_retries_atomic_preparing_promotion',
+    'bound':'test_persistent_windows_promotion_lock_stops_after_three_attempts',
+    'initial':'test_preparing_promotion_revalidates_before_and_after_sleep',
+    'pre-sleep':'test_preparing_promotion_revalidation_rejects_every_authority_mismatch',
+    'post-sleep':'test_preparing_promotion_revalidation_rejects_every_authority_mismatch',
+}
+expected_directories={'red','green',*(f'mutation-{name}' for name in mutation_methods)}
+expected_files={*(f'{phase}/{method}.txt' for phase in ('red','green') for method in methods)}
+for name,method in mutation_methods.items():
+    expected_files.add(f'mutation-{name}/{method}.txt')
+    expected_files.add(f'mutation-{name}/{method}.restored-green.txt')
+entries=list(root.rglob('*'))
+if not root.is_dir() or root.is_symlink() or any(path.is_symlink() or (not path.is_dir() and not path.is_file()) for path in entries): raise SystemExit('unsupported transcript entry')
+actual_directories={path.relative_to(root).as_posix() for path in entries if path.is_dir()}
+actual_files={path.relative_to(root).as_posix() for path in entries if path.is_file()}
+if actual_directories!=expected_directories or actual_files!=expected_files: raise SystemExit('phase transcript topology')
+red_files=sorted(root/path for path in actual_files if path.startswith('red/'))
+green_files=sorted(root/path for path in actual_files if path.startswith('green/'))
+mutation_files=sorted(root/path for path in actual_files if path.startswith('mutation-'))
+red={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in red_files}
+green={path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in green_files}
+mutation={path.relative_to(root).as_posix():hashlib.sha256(path.read_bytes()).hexdigest() for path in mutation_files}
+complete={path.relative_to(root).as_posix():hashlib.sha256(path.read_bytes()).hexdigest() for path in red_files+green_files+mutation_files}
+expected={
+    pathlib.Path(sys.argv[2]):red,
+    pathlib.Path(sys.argv[3]):green,
+    pathlib.Path(sys.argv[4]):mutation,
+    pathlib.Path(sys.argv[5]):complete,
+}
+for path,inventory in expected.items():
+    if strict(path)!=inventory: raise SystemExit(str(path)+' inventory')
+'@
+& 'host\venv\Scripts\python.exe' -c $finalPhaseMapValidator `
+    '.superpowers/sdd/promotion-transcripts' `
+    '.superpowers/sdd/promotion-red.sha256.json' `
+    '.superpowers/sdd/promotion-green.sha256.json' `
+    '.superpowers/sdd/promotion-mutation.sha256.json' `
+    '.superpowers/sdd/promotion-transcripts.sha256.json'
+if ($LASTEXITCODE -ne 0) { throw 'Final canonical promotion phase-map validation failed' }
+$finalVerificationPath='.superpowers/sdd/reviewed-head-verification.json'
+$finalVerificationText=[IO.File]::ReadAllText((Join-Path (Get-Location) $finalVerificationPath),[Text.UTF8Encoding]::new($false))
+$finalVerificationParser=@'
+import hashlib,json,pathlib,subprocess,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate key')
+        out[key]=value
+    return out
+def reject_constant(value):
+    raise ValueError('non-finite JSON constant: '+value)
+path=pathlib.Path(sys.argv[1]); head=sys.argv[2]
+text=path.read_text(encoding='utf-8'); value=json.loads(text,object_pairs_hook=pairs,parse_constant=reject_constant)
+if text!=json.dumps(value,sort_keys=True,separators=(',',':'))+'\n': raise SystemExit('verification noncanonical')
+keys={'schema_version','reviewed_head','tested_source_roots','tested_source_blobs','focused_extension','full_extension','host','host_compile','typescript','build','static','diff','machine_result_sha256','test_summary'}
+passed={'focused_extension','full_extension','host','host_compile','typescript','build','static','diff'}
+roots=['extension','host','tests','docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md','.gitignore','release_helper.py','dev_switch.py','installer_core.ps1','dyhelper_installer.ps1','install.bat']
+if set(value)!=keys or type(value.get('schema_version')) is not int or value.get('schema_version')!=1 or value.get('reviewed_head')!=head or value.get('tested_source_roots')!=roots or any(value.get(key)!='passed' for key in passed): raise SystemExit('verification shape/status/head')
+paths=subprocess.check_output(['git','ls-tree','-r','--name-only',head,'--',*roots],text=True,encoding='utf-8').splitlines()
+blobs=value.get('tested_source_blobs')
+if type(blobs) is not dict or set(blobs)!=set(paths): raise SystemExit('verification source inventory')
+for item in paths:
+    expected=subprocess.check_output(['git','rev-parse',f'{head}:{item}'],text=True,encoding='utf-8').strip()
+    working=subprocess.check_output(['git','hash-object','--',item],text=True,encoding='utf-8').strip()
+    if blobs.get(item)!=expected or working!=expected: raise SystemExit('verification source blob '+item)
+expected_hashes={'focused_extension':'.superpowers/sdd/focused-extension-results.json','full_extension':'.superpowers/sdd/full-extension-results.json','host':'.superpowers/sdd/host-test-results.json'}
+hashes=value.get('machine_result_sha256')
+if type(hashes) is not dict or set(hashes)!=set(expected_hashes): raise SystemExit('verification result hash shape')
+for key,file in expected_hashes.items():
+    if hashes.get(key)!=hashlib.sha256(pathlib.Path(file).read_bytes()).hexdigest(): raise SystemExit('verification result hash '+key)
+summary=value.get('test_summary')
+if type(summary) is not dict or set(summary)!={'focused_extension','full_extension','host'}: raise SystemExit('verification summary shape')
+for key in ('focused_extension','full_extension'):
+    row=summary.get(key)
+    if type(row) is not dict or set(row)!={'files','tests'} or any(type(row.get(name)) is not int or row[name]<1 for name in ('files','tests')): raise SystemExit('verification summary counters '+key)
+host=summary.get('host')
+if type(host) is not dict or set(host)!={'focused','full','update_engine','recovery','package'}: raise SystemExit('verification Host summary shape')
+for key,row in host.items():
+    if type(row) is not dict or set(row)!={'tests','skipped','skips'} or type(row.get('tests')) is not int or row['tests']<1 or type(row.get('skipped')) is not int or row['skipped']<0 or row['skipped']>row['tests'] or type(row.get('skips')) is not list or len(row['skips'])!=row['skipped']: raise SystemExit('verification Host summary counters '+key)
+'@
+& 'host\venv\Scripts\python.exe' -c $finalVerificationParser $finalVerificationPath $reviewedHead
+if ($LASTEXITCODE -ne 0) { throw 'Final reviewed-head verification validation failed' }
+$planAtFinal=@(& git show 'HEAD:docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md') -join "`n"
+if ($LASTEXITCODE -ne 0) { throw 'Could not read committed plan for final strict test validation' }
+$strictTestMatch=[regex]::Match($planAtFinal,'(?s)# REVIEWED_TEST_EVIDENCE_VALIDATOR_START\n(.*?)\n# REVIEWED_TEST_EVIDENCE_VALIDATOR_END')
+if (-not $strictTestMatch.Success) { throw 'Final strict test-evidence validator contract missing' }
+$finalExpectedFocused=@(
+    'src/utils/ownData.test.ts','src/utils/bookmarkItems.test.ts','src/components/Options.test.tsx',
+    'src/components/MenuLogic.teamCache.test.ts','src/utils/teamCatalog.test.ts','src/background/teamManifestSync.test.ts',
+    'src/utils/analysisStore.test.ts','src/background/analyzeBridge.test.ts','src/background/analyzeRequestHandler.test.ts',
+    'src/background/nativeMessageWire.test.ts','src/hooks/useAnalysisHydration.test.ts','src/utils/promptSourceErrors.test.ts',
+    'src/utils/pageIdentity.test.ts','src/utils/analyzeRequest.test.ts','src/background/contextMenu.test.ts',
+    'src/components/ResultPopover.test.tsx','src/components/FAB.pageIdentity.test.tsx','src/components/FAB.analyzeRequest.test.tsx',
+    'src/components/FAB.spinner.test.tsx','src/components/FAB.promptSourceErrors.test.tsx','src/utils/nativeUpdateError.test.ts',
+    'src/utils/configUpdateResult.test.ts','src/background/resetExtensionState.test.ts','src/content/updateErrorBridge.test.ts'
+)
+$finalExpectedFull=@(& git ls-tree -r --name-only $reviewedHead -- extension/src | Where-Object { $_ -match '\.test\.tsx?$' } | ForEach-Object { $_ -replace '^extension/','' })
+if ($LASTEXITCODE -ne 0 -or $finalExpectedFull.Count -lt 1) { throw 'Could not inventory final reviewed Extension tests' }
+$finalStrictTest=@($strictTestMatch.Groups[1].Value | & 'host\venv\Scripts\python.exe' - '.superpowers/sdd/focused-extension-results.json' '.superpowers/sdd/full-extension-results.json' '.superpowers/sdd/host-test-results.json' '.superpowers/sdd/reviewed-head-verification.json' $reviewedHead @finalExpectedFocused '--full' @finalExpectedFull)
+if ($LASTEXITCODE -ne 0 -or $finalStrictTest.Count -ne 1) { throw 'Final strict Vitest/Host evidence validation failed' }
+$manifestPath='.superpowers/sdd/final-artifacts.sha256.json'
+$manifestText=[IO.File]::ReadAllText((Join-Path (Get-Location) $manifestPath),[Text.UTF8Encoding]::new($false))
+$manifestParser=@'
+import json,sys
+def pairs(rows):
+    out={}
+    for key,value in rows:
+        if key in out: raise ValueError('duplicate')
+        out[key]=value
+    return out
+def reject_constant(value): raise ValueError('non-finite JSON constant: '+value)
+value=json.loads(sys.stdin.read(),object_pairs_hook=pairs,parse_constant=reject_constant)
+if not isinstance(value,dict) or any(type(k) is not str or type(v) is not str for k,v in value.items()): raise SystemExit('invalid manifest')
+print(json.dumps(value,sort_keys=True,separators=(',',':')))
+'@
+$canonicalManifest=@($manifestText | & 'host\venv\Scripts\python.exe' -c $manifestParser)
+if ($LASTEXITCODE -ne 0 -or $canonicalManifest.Count -ne 1 -or $manifestText -cne $canonicalManifest[0] + "`n") { throw 'Final artifact manifest invalid or noncanonical' }
+$manifest=$canonicalManifest[0] | ConvertFrom-Json -AsHashtable
+if ($manifest.Count -ne 58) { throw 'Final artifact manifest count mismatch' }
+$finalExpectedArtifacts=@(
+    '.superpowers/sdd/invoke-promotion-test.ps1','.superpowers/sdd/run-promotion-mutations.ps1',
+    '.superpowers/sdd/promotion-executor.sha256','.superpowers/sdd/promotion-mutation-runner.sha256',
+    '.superpowers/sdd/promotion-red-source.sha256','.superpowers/sdd/promotion-green-source.sha256',
+    '.superpowers/sdd/promotion-mutation-source.sha256','.superpowers/sdd/promotion-observed.json',
+    '.superpowers/sdd/promotion-ledger.json','.superpowers/sdd/promotion-transcripts.sha256.json',
+    '.superpowers/sdd/promotion-red.sha256.json','.superpowers/sdd/promotion-green.sha256.json',
+    '.superpowers/sdd/promotion-mutation.sha256.json','.superpowers/sdd/promotion-ast.sha256',
+    '.superpowers/sdd/focused-extension-results.json','.superpowers/sdd/full-extension-results.json',
+    '.superpowers/sdd/host-test-results.json','.superpowers/sdd/reviewed-head-verification.json',
+    '.superpowers/sdd/plan-e-only-review-package.txt','.superpowers/sdd/plan-e-only-review.diff',
+    '.superpowers/sdd/plan-e-only-review-findings.md',
+    '.superpowers/sdd/original-whole-branch-interim-review-package.txt',
+    '.superpowers/sdd/original-whole-branch-interim-review.diff',
+    '.superpowers/sdd/original-whole-branch-interim-review-findings.md'
+)
+$finalExpectedArtifacts += @(1..8 | ForEach-Object { ".superpowers/sdd/task-$_-report.md" })
+$artifactRoot=Join-Path (Get-Location) '.superpowers/sdd'
+$transcriptRoot=Join-Path $artifactRoot 'promotion-transcripts'
+$expectedTranscriptMethods=@('test_windows_access_denied_retries_atomic_preparing_promotion','test_windows_sharing_errors_32_and_33_are_retryable','test_persistent_windows_promotion_lock_stops_after_three_attempts','test_non_windows_or_unlisted_promotion_errors_are_not_retried','test_preparing_promotion_revalidates_before_and_after_sleep','test_preparing_promotion_revalidation_rejects_every_authority_mismatch','test_preparing_promotion_hooks_wrap_the_logical_operation_once','test_update_engine_constructor_signature_remains_frozen')
+$expectedMutationMethods=[ordered]@{classification='test_windows_access_denied_retries_atomic_preparing_promotion';bound='test_persistent_windows_promotion_lock_stops_after_three_attempts';initial='test_preparing_promotion_revalidates_before_and_after_sleep';'pre-sleep'='test_preparing_promotion_revalidation_rejects_every_authority_mismatch';'post-sleep'='test_preparing_promotion_revalidation_rejects_every_authority_mismatch'}
+$expectedTranscriptDirectories=@('red','green') + @($expectedMutationMethods.Keys | ForEach-Object { "mutation-$_" })
+$expectedTranscriptFiles=@(); foreach ($method in $expectedTranscriptMethods) { $expectedTranscriptFiles += "red/$method.txt"; $expectedTranscriptFiles += "green/$method.txt" }; foreach ($entry in $expectedMutationMethods.GetEnumerator()) { $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).txt"; $expectedTranscriptFiles += "mutation-$($entry.Key)/$($entry.Value).restored-green.txt" }
+$transcriptRootInfo=Get-Item -LiteralPath $transcriptRoot -Force
+$transcriptEntries=@(Get-ChildItem -LiteralPath $transcriptRoot -Force -Recurse)
+$unsupportedTranscriptEntries=@($transcriptEntries | Where-Object { ($_ -isnot [IO.FileInfo] -and $_ -isnot [IO.DirectoryInfo]) -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 })
+$actualTranscriptDirectories=@($transcriptEntries | Where-Object { $_ -is [IO.DirectoryInfo] } | ForEach-Object { [IO.Path]::GetRelativePath($transcriptRoot,$_.FullName).Replace('\','/') } | Sort-Object)
+$actualTranscriptFiles=@($transcriptEntries | Where-Object { $_ -is [IO.FileInfo] } | ForEach-Object { [IO.Path]::GetRelativePath($transcriptRoot,$_.FullName).Replace('\','/') } | Sort-Object)
+$missingTranscriptDirectories=@($expectedTranscriptDirectories | Where-Object { $actualTranscriptDirectories -cnotcontains $_ }); $extraTranscriptDirectories=@($actualTranscriptDirectories | Where-Object { $expectedTranscriptDirectories -cnotcontains $_ }); $missingTranscriptFiles=@($expectedTranscriptFiles | Where-Object { $actualTranscriptFiles -cnotcontains $_ }); $extraTranscriptFiles=@($actualTranscriptFiles | Where-Object { $expectedTranscriptFiles -cnotcontains $_ })
+if ($transcriptRootInfo -isnot [IO.DirectoryInfo] -or ($transcriptRootInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $unsupportedTranscriptEntries.Count -ne 0 -or $actualTranscriptDirectories.Count -ne 7 -or $actualTranscriptFiles.Count -ne 26 -or $missingTranscriptDirectories.Count -ne 0 -or $extraTranscriptDirectories.Count -ne 0 -or $missingTranscriptFiles.Count -ne 0 -or $extraTranscriptFiles.Count -ne 0) { throw 'Final-readiness transcript topology mismatch' }
+$finalExpectedArtifacts += @($actualTranscriptFiles | ForEach-Object { '.superpowers/sdd/promotion-transcripts/' + $_ })
+$finalExpectedArtifacts=@($finalExpectedArtifacts | Sort-Object -Unique)
+$managedLeafNames=@($finalExpectedArtifacts | Where-Object { $_ -notlike '.superpowers/sdd/promotion-transcripts/*' } | ForEach-Object { [IO.Path]::GetFileName($_) })
+$artifactEntries=@(Get-ChildItem -LiteralPath $artifactRoot -Force -Recurse)
+$unsupportedManagedEntries=@($artifactEntries | Where-Object {
+    $relative=[IO.Path]::GetRelativePath($artifactRoot,$_.FullName).Replace('\','/'); $artifactPath='.superpowers/sdd/' + $relative
+    $managedTranscript=$relative -eq 'promotion-transcripts' -or $relative -like 'promotion-transcripts/*'; $managedName=$managedLeafNames -ccontains $_.Name
+    ($managedTranscript -or $managedName) -and (($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or ($managedName -and ($_ -isnot [IO.FileInfo] -or $finalExpectedArtifacts -cnotcontains $artifactPath)))
+})
+$observedManagedFiles=@($artifactEntries | Where-Object { $relative=[IO.Path]::GetRelativePath($artifactRoot,$_.FullName).Replace('\','/'); $_ -is [IO.FileInfo] -and ($relative -like 'promotion-transcripts/*' -or $managedLeafNames -ccontains $_.Name) } | ForEach-Object { '.superpowers/sdd/' + [IO.Path]::GetRelativePath($artifactRoot,$_.FullName).Replace('\','/') } | Sort-Object -Unique)
+$missingManaged=@($finalExpectedArtifacts | Where-Object { $observedManagedFiles -cnotcontains $_ }); $extraManaged=@($observedManagedFiles | Where-Object { $finalExpectedArtifacts -cnotcontains $_ })
+if ($unsupportedManagedEntries.Count -ne 0 -or $missingManaged.Count -ne 0 -or $extraManaged.Count -ne 0 -or $observedManagedFiles.Count -ne 58) { throw "Final-readiness artifact filesystem inventory mismatch. Missing: $($missingManaged -join ', '); Extra: $($extraManaged -join ', ')" }
+$missingManifest=@($finalExpectedArtifacts | Where-Object { -not $manifest.ContainsKey($_) })
+$extraManifest=@($manifest.Keys | Where-Object { $finalExpectedArtifacts -cnotcontains $_ })
+if ($finalExpectedArtifacts.Count -ne 58 -or $missingManifest.Count -ne 0 -or $extraManifest.Count -ne 0) {
+    throw "Final artifact manifest path set mismatch. Missing: $($missingManifest -join ', '); Extra: $($extraManifest -join ', ')"
+}
+foreach ($entry in $manifest.GetEnumerator()) {
+    if (-not (Test-Path -LiteralPath $entry.Key -PathType Leaf)) { throw "Manifest artifact missing: $($entry.Key)" }
+    $actual=(Get-FileHash -Algorithm SHA256 -LiteralPath $entry.Key).Hash.ToLowerInvariant()
+    if ($actual -cne $entry.Value) { throw "Manifest artifact drift: $($entry.Key)" }
+}
+$manifestHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $manifestPath).Hash.ToLowerInvariant()
+$manifestLine=('**Final artifact manifest SHA-256:** `' + $manifestHash + '`')
+if ([regex]::Matches($committedEvidence,'(?m)^' + [regex]::Escape($manifestLine) + '$').Count -ne 1) {
+    throw 'Committed evidence manifest hash mismatch'
+}
+$planEFindings=[IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/plan-e-only-review-findings.md'),[Text.UTF8Encoding]::new($false))
+$wholeFindings=[IO.File]::ReadAllText((Join-Path (Get-Location) '.superpowers/sdd/original-whole-branch-interim-review-findings.md'),[Text.UTF8Encoding]::new($false))
+if ($planEFindings -notmatch '(?m)^## Disposition\r?\nPASS\r?$' -or $wholeFindings -notmatch '(?m)^## Disposition\r?\nINTERIM PASS THROUGH PLAN E\r?$') {
+    throw 'Final controller findings disposition changed'
+}
+$planDSentinels=@('extension/src/background/nativePortClient.ts','extension/src/background/hostGate.ts','extension/src/background/updateProtocol.ts','extension/src/background/updateCoordinator.ts','extension/src/background/serviceWorker.update.test.ts')
+foreach ($path in $planDSentinels) { if (Test-Path -LiteralPath $path) { throw "Plan D sentinel appeared after evidence: $path" } }
+$finalTestedSourceRoots=@('extension','host','tests','docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md','.gitignore','release_helper.py','dev_switch.py','installer_core.ps1','dyhelper_installer.ps1','install.bat')
+$finalHeadSource=@(& git ls-tree -r --name-only $reviewedHead -- $finalTestedSourceRoots)
+$finalTrackedSource=@(& git ls-files -- $finalTestedSourceRoots)
+$finalDirtySource=@(& git status --porcelain=v1 --untracked-files=no -- $finalTestedSourceRoots)
+if (
+    $LASTEXITCODE -ne 0 -or $finalHeadSource.Count -lt 1 -or
+    ($finalHeadSource -join "`n") -cne ($finalTrackedSource -join "`n") -or
+    $finalDirtySource.Count -ne 0
+) { throw 'Final tracked product/test source is not globally clean at reviewed head' }
 $trackedPlanEPaths=@(& git diff --name-only --no-renames "$base..$finalHead")
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect final Plan E paths' }
 $dirtyPlanEPaths=@(& git status --porcelain=v1 --untracked-files=all -- $trackedPlanEPaths)
@@ -6288,7 +10610,7 @@ git diff --check "$base..$finalHead"
 if ($LASTEXITCODE -ne 0) { throw 'Final Plan E diff check failed' }
 ```
 
-Expected: no Plan E product/test path is dirty; unrelated pre-existing plan files and ignored review artifacts may remain; latest commit is evidence; Plan E-only `$base..HEAD` passes. Plan E is review-ready, while final whole-branch review remains explicitly pending the required original-base-to-final-D-head rerun. Do not push, tag, publish, package, update, install, or modify real user state.
+Expected: no tracked product/test dependency in the literal tested-source roots is dirty or differs from the reviewed product head; unrelated pre-existing plan files and ignored review artifacts may remain; latest commit is evidence; Plan E-only `$base..HEAD` passes. Plan E is review-ready, while final whole-branch review remains explicitly pending the required original-base-to-final-D-head rerun. Do not push, tag, publish, package, update, install, or modify real user state.
 
 ---
 
@@ -6298,6 +10620,7 @@ Expected: no Plan E product/test path is dirty; unrelated pre-existing plan file
 - [ ] `BookmarkLoadResult` is exactly `loaded|invalid|failed`; every caller narrows `loaded` before `items/source`; team-collapse removal failures retain Reset local cleanup and never replace bookmarks.
 - [ ] Sections 7.1-7.2 map to Tasks 4-5, including mandatory top-level `requestId`/`_persist`, stripping `_persist` plus caller warnings, strict `{markdown:string,saved_to?:string}`, prewritten FAB RED cases, fixed malformed errors, no serialization, fixed warning order, three cleanup attempts, and non-masking Host outcomes.
 - [ ] The approved Plan E correction maps to Task 1's sole generic `ownDataProperty`, Task 5's fresh frozen non-Analyze snapshot, parser-payload/final-wire inert `toJSON` shadows, safe request-ID augmentation, register-before-post, and one unregister on post failure.
+- [ ] The authorized Windows promotion correction maps to Task 9 Step 0's frozen constructor, three private seams, three-attempt `5/32/33` retry, `0.05/0.2` sleeper arguments, complete initial/pre-sleep/post-sleep revalidation, hook order, one test-only RED commit followed directly by one production-only commit, expanded Host gates, and 60-path reviews.
 - [ ] Task 4's first and ownership REDs use namespace/runtime-key access for new exports in existing `analysisStore.ts`; every intended title collects and fails an assertion, never module linking or missing-export collection.
 - [ ] Task 5 freezes one-snapshot exact payload/action parse, one atomic transport acquisition, start, and leased-send behavior; invalid/denied requests perform no persistence/send, disconnect cannot reacquire/reconnect under prior authorization, and non-Analyze messages never return or send their source object.
 - [ ] Sections 8.1-8.2 map to Task 4, including one pending+owner start write, latest-started singleton, request-only cleanup, strict persisted schemas, legacy records, duration zero, and Reset owner removal.
@@ -6310,4 +10633,4 @@ Expected: no Plan E product/test path is dirty; unrelated pre-existing plan file
 - [ ] Plan-E-only and original-base findings are recorded in separate ignored files and separate report sections; Plan E never claims the original whole-branch review is final, and Plan D must rerun it through `<final-D-head>`.
 - [ ] Every temp/environment command is self-contained with same-block `try/finally` restoration; later commands reread known evidence files instead of reusing shell variables.
 - [ ] Plan D handoff marks the current D document stale and tells the later coordinator extraction to route Analyze through `handleAnalyzeRequest(inner,{acquireAuthorizedTransport})`, never bypass parser/acquisition or reuse authorization across port identities, use only `guarded.forwarded` for non-Analyze acquisition, preserve `postNativeMessageWire` semantics on the leased port, and replace current direct-port/UI-owned update behavior while preserving Plan E contracts.
-- [ ] Every created/modified/deleted file is listed, every cross-task symbol has one exact signature, every Task 1-8 commit compares the full staged set to its exact allowlist, and no implementation step leaves an unresolved authoring marker.
+- [ ] Every created/modified/deleted file is listed, every cross-task symbol has one exact signature, every Task 1-8 commit and the Task 9 promotion commit compare the full staged set to their exact allowlists, and no implementation step leaves an unresolved authoring marker.
