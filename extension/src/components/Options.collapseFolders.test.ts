@@ -4,11 +4,8 @@ import type { MenuItem } from './MenuLogic';
 
 /**
  * collapseFolders is the shared helper used by BOTH the initial mount path
- * AND handleReset. Before extraction, it was inlined inside the mount
- * useEffect and Reset's `loadItems().then(setItems)` skipped it — items.json
- * ships zero `collapsed` keys, so Reset rendered every folder fully expanded.
- *
- * These tests pin the contract so Reset and mount stay in sync.
+ * AND handleReset. The tracked public default intentionally omits `collapsed`,
+ * so both paths must apply the same recursive runtime transformation.
  */
 describe('collapseFolders', () => {
     it('forces every top-level folder to collapsed=true when undefined', () => {
@@ -53,23 +50,19 @@ describe('collapseFolders', () => {
         expect((result[0] as any).collapsed).toBeUndefined();
     });
 
-    it('matches the items.json default shape (regression: Reset must not render expanded)', () => {
-        // Mirror of the 7-root default tree shipped in extension/dist/items.json
-        // — every folder has NO `collapsed` key, which is what tripped Reset.
+    it('collapses every folder in a mixed default-like tree', () => {
         const defaultShape: MenuItem[] = [
-            { type: 'folder', label: 'Favorites', children: [{ type: 'link', label: 'X', url: 'https://x' }] },
-            { type: 'folder', label: 'Case Review', children: [] },
-            { type: 'folder', label: 'Tools', children: [] },
-            { type: 'folder', label: 'Dashboard', children: [] },
-            { type: 'folder', label: 'IcM', children: [] },
-            { type: 'link', label: 'Dynamics 365 Docs', url: 'https://docs' },
-            { type: 'link', label: 'About', url: 'https://about' },
+            {
+                type: 'folder',
+                label: 'Resources',
+                children: [{ type: 'link', label: 'Guide', url: 'https://example.com' }],
+            },
+            { type: 'link', label: 'Release Notes', url: 'https://example.com/releases' },
+            { type: 'markdown', label: 'About', content: '# About' },
         ];
         const result = collapseFolders(defaultShape);
         const folders = result.filter(i => i.type === 'folder');
-        expect(folders.length).toBe(5);
-        for (const f of folders) {
-            expect(f.collapsed).toBe(true);
-        }
+        expect(folders).toHaveLength(1);
+        expect(folders[0].collapsed).toBe(true);
     });
 });

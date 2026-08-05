@@ -45,7 +45,6 @@ test_blobs/
 nul
 
 # Misc
-items.json
 build/
 
 # Scratch / probes (B82)

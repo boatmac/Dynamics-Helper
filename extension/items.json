@@ -1,0 +1,28 @@
+[
+  {
+    "type": "folder",
+    "label": "Dynamics Helper Resources",
+    "children": [
+      {
+        "type": "link",
+        "label": "User Guide",
+        "url": "https://github.com/boatmac/Dynamics-Helper/blob/master/USER_GUIDE.md"
+      },
+      {
+        "type": "link",
+        "label": "Releases",
+        "url": "https://github.com/boatmac/Dynamics-Helper/releases"
+      },
+      {
+        "type": "link",
+        "label": "Report a Bug",
+        "url": "https://github.com/boatmac/Dynamics-Helper/issues/new"
+      }
+    ]
+  },
+  {
+    "type": "markdown",
+    "label": "About Dynamics Helper",
+    "content": "# Dynamics Helper\nPublic product resources and support links."
+  }
+]
