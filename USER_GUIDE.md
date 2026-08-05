@@ -242,7 +242,7 @@ Each team's bookmark file at its `url`:
 
 **Personal bookmarks** (drag-and-drop in the **Bookmark Manager** tab) work independently of the team catalog and are not affected by the toggle.
 
-**Built-in defaults:** New browser profiles start with public Dynamics Helper documentation, release, and issue-reporting links. An upgrade does not replace a non-empty personal bookmark menu. Missing, invalid, or empty personal bookmark storage falls back to the shipped defaults. Clearing browser storage or clicking **Reset** loads the currently shipped public defaults again.
+**Built-in defaults:** New browser profiles start with public Dynamics Helper documentation, release, and issue-reporting links. An upgrade does not replace a non-empty personal bookmark menu. Missing, non-array, or empty personal bookmark storage falls back to the shipped defaults. Clearing browser storage or clicking **Reset** loads the currently shipped public defaults again.
 
 ---
 

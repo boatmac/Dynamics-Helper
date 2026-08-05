@@ -276,7 +276,7 @@ If a future refactor moves the catch-up RPC back outside the updater closure (be
 
 `extension/items.json` is the tracked public bootstrap menu consumed by both Options and FAB and copied by CRXJS into `extension/dist/items.json`. It must never contain internal URLs, credentials, query strings, or organization-specific content. Personal bookmarks live in `dh_items`; Team Catalog data is fetched separately.
 
-Every file referenced by `extension/manifest.json` must either be tracked or be produced deterministically by a reviewed build step before release tagging. `npm run build` verifies that the packaged `items.json` is byte-identical to the tracked source.
+Every file referenced by `extension/manifest.json` must either be tracked or be produced deterministically by a reviewed build step before release tagging. `release_helper.py` currently commits and tags before invoking its own build, so the operator MUST start from a clean worktree and successfully run `npm run build --prefix extension` before invoking the helper. That preflight, including the `extension/items.json`/`extension/dist/items.json` byte-identity check, is the pre-tag gate; the helper's later build is a second check, not the pre-tag gate.
 
 ---
 
