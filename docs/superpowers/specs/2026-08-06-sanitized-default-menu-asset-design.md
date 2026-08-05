@@ -89,6 +89,8 @@ and remain under `/boatmac/Dynamics-Helper/`.
 ## 4. Git and Packaging
 
 - Remove the global `items.json` rule from `.gitignore`.
+- Add `.gitattributes` rule `extension/items.json text eol=lf` so the tracked,
+  working-tree, and packaged JSON bytes are stable on Windows and Unix.
 - Do not add a force-include exception while leaving a broad ignore rule; the
   asset's tracked status must be obvious.
 - Keep `extension/manifest.json` and the two existing
@@ -137,6 +139,9 @@ Add build-copy verification after a fresh `npm ci`:
 - `npm run build` passes without provisioning any ignored input.
 - `extension/dist/items.json` exists and is byte-identical to
   `extension/items.json`.
+- `git hash-object --no-filters extension/items.json` equals
+  `git rev-parse HEAD:extension/items.json`, proving the checkout bytes match
+  the committed blob rather than merely matching another normalized copy.
 - Git status remains clean except for ignored dependency/build directories.
 
 The test must use the real tracked asset, not a duplicated fixture. Existing
@@ -160,8 +165,11 @@ This product fix precedes repository-lineage migration acceptance:
 
 1. Implement and review this design on a branch based on canonical `master`.
 2. Establish a new reviewed canonical commit that includes the tracked asset.
-3. Amend the repository-lineage specification and plan to replace fixed
-   canonical SHA `0040b1de...` with that reviewed commit.
+3. Amend the repository-lineage specification and plan with two explicit SHAs:
+   preserve pre-mutation remote SHA
+   `0040b1de1bc196b203014a8e4f94a53babb7e9aa` in historical and drift gates,
+   then add a separately authorized exact-SHA fast-forward with read-back before
+   post-mutation target checks use the reviewed product commit.
 4. Correct Vitest evidence assertions to use `testResults.length == 6` and
    `43` passed tests. `numTotalTestSuites` counts file and nested suite nodes and
    is not the test-file count.
