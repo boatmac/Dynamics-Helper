@@ -366,6 +366,8 @@ This script automates version bumping, git operations, building, and publishing.
 
     The `--notes-file` flag passes the markdown file to `gh release create --notes-file`, so the GitHub release body matches the file's content verbatim. Without this flag the script falls back to a 4-line hardcoded template ("Release vX.X.X / Installation / ..."). Place the notes file under `releases/` — the build step's clean phase now preserves it (only `*.zip` and `DynamicsHelper_v*` staging dirs are deleted).
 
+**Required packaged assets:** Every manifest-referenced release input must be tracked or reproducibly generated before a release tag is created. `extension/items.json` is a tracked public-only product asset; never replace it with an ignored local/private menu. The Extension build must finish with the source/dist byte-identity check passing.
+
 **What it does:**
 
 1. Updates version in `package.json`, `manifest.json`, and `dh_native_host.py`.
