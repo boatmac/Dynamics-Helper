@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:default-items": "node --test test/defaultItems.test.mjs"
   },
   "keywords": [],
   "author": "",
