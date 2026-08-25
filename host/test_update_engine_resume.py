@@ -1212,6 +1212,12 @@ class PreparingPromotionRetryTests(unittest.TestCase):
                 attempt = len(replace_calls) + 1
                 replace_calls.append((Path(source), Path(destination)))
                 sequence.append(("replace", attempt))
+                if (
+                    mutation is not None
+                    and mutation[0] == "pre-replace"
+                    and attempt == 1
+                ):
+                    apply_mutation_once()
                 if callable(replace_outcomes):
                     action = replace_outcomes(attempt)
                 elif attempt <= len(replace_outcomes):
@@ -1530,6 +1536,31 @@ class PreparingPromotionRetryTests(unittest.TestCase):
         self.assertEqual(initial_corruption["hook_before"], 1)
         self.assertEqual(initial_corruption["hook_after"], 0)
 
+    def test_preparing_promotion_rejects_pre_replace_mutation_before_active(self):
+        self._require_retry_implementation()
+        for mutation in (
+            "host-digest",
+            "journal-phase",
+            "extra-workspace-topology",
+        ):
+            with self.subTest(mutation=mutation):
+                case = self._exercise_promotion(
+                    (None,),
+                    mutation=("pre-replace", mutation),
+                )
+                self.assertIs(type(case["error"]), PreparedTransactionConflict)
+                self.assertEqual(case["attempts"], 1)
+                self.assertFalse(case["active_exists"])
+                self.assertFalse(case["preparing_exists"])
+                self.assertTrue(case["final_exists"])
+                self.assertNotEqual(
+                    case["final_snapshot"],
+                    case["candidate_snapshot"],
+                )
+                self.assertEqual(case["live_after"], case["live_before"])
+                self.assertEqual(case["hook_before"], 1)
+                self.assertEqual(case["hook_after"], 0)
+
     def test_preparing_promotion_revalidation_rejects_every_authority_mismatch(
         self,
     ):
@@ -1637,6 +1668,39 @@ class PreparingPromotionRetryTests(unittest.TestCase):
 
 
 class OwnershipBoundaryTests(unittest.TestCase):
+    def test_existing_update_ancestor_reparse_is_rejected_before_preparing_writes(self):
+        for component in ("updates", "transactions"):
+            with self.subTest(component=component):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary).resolve()
+                    fixture = MatrixHarness(root, "installed")
+                    paths = TransactionPaths.for_install(fixture.install, TX)
+                    target = (
+                        paths.updates_root
+                        if component == "updates"
+                        else paths.transactions_root
+                    )
+                    target.mkdir(parents=True)
+                    real_lstat = Path.lstat
+
+                    def lstat(path, *args, **kwargs):
+                        info = real_lstat(path, *args, **kwargs)
+                        if path == target:
+                            return SimpleNamespace(
+                                st_mode=info.st_mode,
+                                st_file_attributes=0x400,
+                            )
+                        return info
+
+                    before = tuple(target.iterdir())
+                    with mock.patch.object(Path, "lstat", lstat):
+                        with self.assertRaises(PreparedTransactionConflict):
+                            fixture.prepare()
+                    self.assertEqual(tuple(target.iterdir()), before)
+                    self.assertFalse(paths.preparing_root.exists())
+                    self.assertFalse(paths.transaction_root.exists())
+                    self.assertFalse(paths.active.exists())
+
     def test_corrupt_active_prepared_workspace_blocks_replay(self):
         with tempfile.TemporaryDirectory() as temporary:
             fixture = MatrixHarness(Path(temporary), "fresh-preexisting")
