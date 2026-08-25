@@ -1712,19 +1712,67 @@ class OwnershipBoundaryTests(unittest.TestCase):
             self.assertTrue(paths.active.exists())
 
     def test_corrupt_promoted_workspace_blocks_active_repair(self):
+        for mutation in ("host-digest", "journal-phase", "extra-topology"):
+            with self.subTest(mutation=mutation):
+                with tempfile.TemporaryDirectory() as temporary:
+                    fixture = MatrixHarness(Path(temporary), "fresh-preexisting")
+                    fixture.controller.arm(
+                        "after", "workspace:promote-preparing", InjectedCrash
+                    )
+                    with self.assertRaises(InjectedCrash):
+                        fixture.prepare()
+                    paths = TransactionPaths.for_install(fixture.install, TX)
+                    if mutation == "host-digest":
+                        (paths.staged_host / "helper.dll").write_bytes(
+                            b"corrupt-staged"
+                        )
+                    elif mutation == "journal-phase":
+                        value = json.loads(paths.journal.read_text(encoding="utf-8"))
+                        value["phase"] = "staging"
+                        paths.journal.write_bytes(
+                            (
+                                json.dumps(
+                                    value,
+                                    ensure_ascii=True,
+                                    allow_nan=False,
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                )
+                                + "\n"
+                            ).encode("utf-8")
+                        )
+                    else:
+                        (paths.transaction_root / "unexpected.bin").write_bytes(
+                            b"unexpected"
+                        )
+                    fixture.controller.clear()
+                    fixture.rebuild_engine()
+                    with self.assertRaises(PreparedTransactionConflict):
+                        fixture.prepare()
+                    self.assertFalse(paths.active.exists())
+
+    def test_nested_preparing_reparse_is_rejected_before_copy(self):
         with tempfile.TemporaryDirectory() as temporary:
-            fixture = MatrixHarness(Path(temporary), "fresh-preexisting")
-            fixture.controller.arm(
-                "after", "workspace:promote-preparing", InjectedCrash
-            )
-            with self.assertRaises(InjectedCrash):
-                fixture.prepare()
+            fixture = MatrixHarness(Path(temporary), "installed")
             paths = TransactionPaths.for_install(fixture.install, TX)
-            (paths.staged_host / "helper.dll").write_bytes(b"corrupt-staged")
-            fixture.controller.clear()
-            fixture.rebuild_engine()
-            with self.assertRaises(PreparedTransactionConflict):
-                fixture.prepare()
+            target_parent = paths.preparing_staged_extension / "assets"
+            target_file = target_parent / "app.js"
+            real_lstat = Path.lstat
+
+            def lstat(path, *args, **kwargs):
+                info = real_lstat(path, *args, **kwargs)
+                if path == target_parent:
+                    return SimpleNamespace(
+                        st_mode=info.st_mode,
+                        st_file_attributes=0x400,
+                    )
+                return info
+
+            with mock.patch.object(Path, "lstat", lstat):
+                with self.assertRaises(PreparedTransactionConflict):
+                    fixture.prepare()
+            self.assertFalse(target_file.exists())
+            self.assertFalse(paths.transaction_root.exists())
             self.assertFalse(paths.active.exists())
 
     def test_corrupt_staged_seed_is_never_installed(self):
