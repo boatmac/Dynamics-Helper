@@ -12,9 +12,9 @@
 
 - Work only in `C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Execution order is frozen: `A -> B -> C -> E -> D`.
 - Plan E precondition: reviewed committed Plans A-C are HEAD ancestors; Plan D has not started and none of `extension/src/background/nativePortClient.ts`, `hostGate.ts`, `updateProtocol.ts`, `updateCoordinator.ts`, or `serviceWorker.update.test.ts` exists. Stop on any mismatch; no alternate order is supported.
-- Implement only authoritative spec sections 6-10, 11, and 13 Plan E plus the accepted `docs/superpowers/specs/2026-07-24-plan-e-boundary-correction-design.md`, `docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md`, and `docs/superpowers/specs/2026-08-19-plan-e-evidence-loss-amendment-design.md`. The 2026-08-19 amendment narrowly supersedes only requirements that make unavailable Task 6/7 narrative report bytes the sole completion evidence; every other correction, chronology, TDD, mutation, scope, and fail-closed gate remains authoritative.
-- The amendment does not retroactively waive any other historical report, chronology, mutation, commit-scope, or review gate.
-- Exactly and only Task 6/7 report slots are replaced; every Task 1-5/8 historical report requirement remains unchanged.
+- Tasks 1-8 remain governed by authoritative spec sections 6-10, 11, and 13 Plan E plus `docs/superpowers/specs/2026-07-24-plan-e-boundary-correction-design.md`, `docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md`, and the historical requirements in `docs/superpowers/specs/2026-08-19-plan-e-evidence-loss-amendment-design.md` that apply to those completed tasks.
+- Task 9 is governed by the latest accepted `docs/superpowers/specs/2026-08-24-plan-e-task-9-evidence-correction-design.md`. For Task 9 only, it supersedes evidence orchestration, artifact-count/inventory, review-count/format, and exact historical promotion-payload requirements from `docs/superpowers/specs/2026-08-19-plan-e-evidence-loss-amendment-design.md`, `docs/superpowers/specs/2026-08-21-plan-e-executor-boundary-correction-design.md`, `docs/superpowers/specs/2026-08-22-plan-e-scripted-evidence-executor-design.md`, and `docs/superpowers/specs/2026-08-23-plan-e-build-asset-and-vitest-identity-correction-design.md`. It preserves the Windows retry product behavior, genuine RED/GREEN/mutation obligations, and all historical-evidence honesty requirements.
+- Task 6/7 reports remain unavailable with their accepted hashes; no current test, audit, or narrative may be represented as reconstructed historical evidence. Task 1-5/8 instructions and completed product contracts remain intact.
 - Use TDD for every production change. Capture each named RED failure before implementation, then matching GREEN and restored mutation proof. Task 6/7 are the sole historical-evidence exception: preserve their accepted report identities, require their exact paths absent, and never claim current-state evidence reconstructs historical RED, GREEN, mutation, reviewer, edit-order, or TDD chronology.
 - Parsers must not use `String`, template interpolation, `JSON.stringify`, `toString`, or custom conversion hooks on rejected values. Catch throwing property access and never log rejected raw values.
 - Preserve the exact current `MenuItem` storage schema: no ID, no migration, empty labels allowed, valid item types are `folder|link|markdown|back|unknown`, and safe unknown own data remains round-trippable.
@@ -26,21 +26,14 @@
 - Plan E retains current baseline direct-port behavior only long enough to normalize update errors and Analyze forwarding safely. Plan D later removes direct-port/UI update ownership while preserving Plan E parser/ordering contracts.
 - Automated tests must not touch real user Chrome storage, the registry, installed Extension files, `%LOCALAPPDATA%\DynamicsHelper`, update/publish paths, or authenticated model sessions. Host tests use a fresh temporary `LOCALAPPDATA`; update tests use injected temporary trees only.
 - Do not change product versions, package dependencies, release assets, registry state, installed files, MyCases, or real update state. Do not push, tag, publish, or install.
-- Authorized Task 9 product/test exception: the Windows retry spec permits only `host/update_engine.py` and `host/test_update_engine_resume.py` to change. The evidence-loss amendment additionally permits only the evidence artifacts and report listed below; it changes no Task 6/7 product/test behavior.
-- The 2026-08-19 amendment is evidence-only; it changes no accepted Task 6/7 implementation, tests, commits, or historical report identity.
-- The evidence-loss amendment does not change the accepted Windows promotion retry design or its complete RED/GREEN/mutation/AST/commit sequence; every Step 0 gate remains authoritative except the required planning chronology, later 61/121 evidence counts, and the mechanical retained-handle launch routing required by the amendment.
-- Tasks 1-8 each end in one independently reviewable commit. Task 9 uses the one-path plan commit `docs(update): integrate Plan E evidence-loss audit`, its direct-child one-path RED commit `test(update): cover locked preparing promotion`, that commit's direct-child one-path implementation commit `fix(update): retry locked preparing promotion`, and one final exact 60-path evidence commit. Compare each complete staged set against its literal allowlist.
-- Every standalone TypeScript command runs with tool working directory
-  `extension/` as `npm exec tsc -- --noEmit --tsBuildInfoFile
-  <exact-token-root-path> -p tsconfig.json`; the build-info path is registered
-  before launch. Do not use root-level `npm --prefix extension exec ... -p
-  tsconfig.json`, which resolves the project path incorrectly.
+- Task 9 may change only its plan, forward-delete `plan_e_evidence.py` and `host/test_plan_e_evidence.py`, add the retry tests in `host/test_update_engine_resume.py`, add the retry implementation in `host/update_engine.py`, and create `.superpowers/sdd/plan-e-extension-hardening-report.md`. It changes no Task 6/7 product behavior.
+- Tasks 1-8 retain their existing independently reviewable commits. Task 9 uses five normal forward commits after the accepted correction: the one-path plan commit `docs(update): simplify Plan E Task 9`, exact two-path deletion commit `chore(evidence): remove abandoned Plan E executor`, test-only RED commit `test(update): cover locked preparing promotion`, production-only GREEN commit `fix(update): retry locked preparing promotion`, then the one-report-path commit `docs(verification): record Plan E hardening evidence`.
+- Every Task 9 command is an independent one-line PowerShell invocation. Task 9 has no persistent orchestration process or lock and no cross-command shell state, custom Git finalization, or generated evidence collection. Task 9 TypeScript checks use the absolute lock-installed local Node/TypeScript entry; tests and builds use lock-installed npm scripts only. Tasks 1-8 retain their historical command requirements.
 - Every filtered Vitest command uses `--reporter=verbose`, titles declared verbatim in the preceding test-writing step, and explicit expected exit handling. “No tests found,” zero matched tests, or unrelated import/configuration failure is never evidence.
 - Missing-module import failure is acceptable exactly once as the isolated first RED for each of these six new production modules: `extension/src/utils/ownData.ts`, `extension/src/utils/bookmarkItems.ts`, `extension/src/background/analyzeRequestHandler.ts`, `extension/src/utils/pageIdentity.ts`, `extension/src/utils/analyzeRequest.ts`, and `extension/src/utils/nativeUpdateError.ts`. No other missing module/export is valid RED. After each first import RED, create the task's specified compile-only shell or implementation before any behavioral/multi-file RED; every subsequent RED must import successfully, execute the named test, and fail its assertion. `extension/src/background/nativeMessageWire.ts`, `extension/src/components/ResultPopover.tsx`, and `extension/src/content/updateErrorBridge.ts` are deliberately created as compile-only shells before their first test runs, so their imports may never be used as RED evidence.
 - A new export added to an existing module is never valid module-link RED evidence. Before its first run, either add a compile-only production export shell or import the existing module as a namespace, access the candidate through a runtime string key, and fail a named existence/behavior assertion after collection. Task 4 uses and retains namespace access through all parser/ownership RED phases.
-- Treat every Task 1-8 shell fence/tool call as a fresh PowerShell process. Task 9 Steps 0-11 are the sole exception: execute all regions in one long-lived foreground controller; after read-only planning preflight, acquire the fixed mutex and create the closed `step0` run lease before any Task 9 write, then atomically transition that same lease to the reviewed-head `evidence` phase after Step 0. Retain both through normal release. Never run a Task 9 writer in a job, background, or detached process.
-- Unless a step explicitly says tool working directory `extension/`, run its PowerShell block from the repository root. Independent commands rely only on repository-relative paths and values initialized inside that block.
-- TypeScript command audit rule: every executable standalone occurrence is exactly `& npm exec tsc -- --noEmit -p tsconfig.json` while `extension/` is the active location, immediately followed by `if ($LASTEXITCODE -ne 0) { throw ... }`; no other standalone `tsc` form is permitted.
+- Treat every shell fence/tool call as a fresh process unless its own text explicitly owns setup and cleanup in one foreground invocation. Run Task 9 commands independently from the repository root; each command initializes every value it uses.
+- Task 9 must not use package-exec or network fallback. Use only lock-installed npm scripts or absolute local Node, TypeScript, Vitest, and Python entries named in Task 9. This Task 9 override does not retroactively alter Tasks 1-8 command transcripts.
 
 ## Plan E Execution Preflight
 
@@ -282,32 +275,9 @@ The controller confirms human review/signoff for the printed prerequisite and pl
 - `extension/src/utils/nativeUpdateError.test.ts`: Plan E-owned candidate-precedence, fallback, accessor/proxy, revoked-proxy, log, forwarding, and no-coercion contract.
 - `extension/src/content/updateErrorBridge.ts`: pure normalized tab-message to `dh-update-error` DOM-event bridge.
 - `extension/src/content/updateErrorBridge.test.ts`: malformed/direct-injection and exact safe DOM detail tests.
-- `.superpowers/sdd/plan-e-extension-hardening-report.md`: committed RED/GREEN/current-audit/final-gate evidence; force-add it only as part of Task 9's exact 60-path evidence set.
-- `.superpowers/sdd/plan-e-base.txt`: ignored immutable declared SHA `0dbb4852931b50153fb898b03129ae0092c46404`; validated/restored before Task 1 and never staged or committed.
-- `.superpowers/sdd/plan-e-only-review-package.txt`: Plan-E range/stat/log/path review package generated from literal base `0dbb4852931b50153fb898b03129ae0092c46404` to the final committed reviewed product head; ignored before final force-add and committed afterward.
-- `.superpowers/sdd/plan-e-only-review.diff`: full-index/binary Plan-E-only review diff; ignored before final force-add and committed afterward.
-- `.superpowers/sdd/plan-e-only-review-findings.md`: controller findings for only the Plan-E integration range; ignored before review and force-added in the final evidence commit.
-- `.superpowers/sdd/original-whole-branch-interim-review-package.txt`: original-base range/stat/log/path package through the committed Plan E head; ignored before final force-add and committed afterward.
-- `.superpowers/sdd/original-whole-branch-interim-review.diff`: full-index/binary original-base-to-Plan-E-head diff; ignored before final force-add and committed afterward.
-- `.superpowers/sdd/original-whole-branch-interim-review-findings.md`: separate interim whole-branch findings; ignored before review, force-added in the final evidence commit, and never represented as final post-Plan-D branch review.
-- `.superpowers/sdd/invoke-promotion-test.ps1`: ignored exact per-selector RED/GREEN/mutation executor extracted from the committed plan.
-- `.superpowers/sdd/run-promotion-mutations.ps1`: ignored exact five-row promotion mutation runner extracted from the committed plan.
-- `.superpowers/sdd/promotion-executor.sha256`, `.superpowers/sdd/promotion-mutation-runner.sha256`: ignored script integrity records.
-- `.superpowers/sdd/promotion-red-source.sha256`, `.superpowers/sdd/promotion-green-source.sha256`, `.superpowers/sdd/promotion-mutation-source.sha256`: ignored phase source-blob chronology records.
-- `.superpowers/sdd/promotion-red.sha256.json`, `.superpowers/sdd/promotion-green.sha256.json`, `.superpowers/sdd/promotion-mutation.sha256.json`, `.superpowers/sdd/promotion-transcripts.sha256.json`: ignored canonical transcript maps.
-- `.superpowers/sdd/promotion-transcripts/red/<eight exact method names>.txt`, `.superpowers/sdd/promotion-transcripts/green/<eight exact method names>.txt`, and `.superpowers/sdd/promotion-transcripts/mutation-<classification|bound|initial|pre-sleep|post-sleep>/<mapped method>.{txt,restored-green.txt}`: the exact 26 ignored transcript leaves generated and enumerated in Task 9 Step 0.
-- `.superpowers/sdd/promotion-observed.json`, `.superpowers/sdd/promotion-ledger.json`, `.superpowers/sdd/promotion-ast.sha256`: ignored canonical observed values, aggregation, and AST/source integrity evidence.
-- `.superpowers/sdd/focused-extension-results.json`, `.superpowers/sdd/full-extension-results.json`, `.superpowers/sdd/host-test-results.json`: ignored canonical, reviewed-head-bound machine test evidence generated in Task 9; the focused aggregate also durably embeds exact current mutation output text and hashes.
-- `.superpowers/sdd/reviewed-head-verification.json`: ignored canonical verification result binding the tracked tested-source inventory, TypeScript, build, static, diff, focused/full Extension, and every Host phase to one reviewed product head.
-- `.superpowers/sdd/task-6-audit-evidence.json` and `.superpowers/sdd/task-7-audit-evidence.json`: canonical current-immutable-state-only audits that occupy the unavailable Task 6/7 report slots; force-added in the final evidence commit and never represented as historical TDD reconstruction.
-- `.superpowers/sdd/final-artifacts.sha256.json`: canonical manifest over the exact 58 final evidence artifacts; force-added beside every manifest artifact and the final report.
-- `.superpowers/sdd/task-1-report.md` through `.superpowers/sdd/task-5-report.md` and `.superpowers/sdd/task-8-report.md`: six ignored, hash-pinned, exact historical reports; force-added unchanged in the final evidence commit.
-- `.superpowers/sdd/task-6-report.md` and `.superpowers/sdd/task-7-report.md`: accepted historical identities only. These exact paths remain absent because no complete bytes matching their locked SHA-256 values were recovered from the examined sources. Do not create, approximate, summarize, or stage them.
-
-Every Task 9 evidence path above described as ignored is ignored only during
-generation and force-added in the final evidence commit unless explicitly
-diagnostic/temporary (`plan-e-base.txt`, recovery record, token roots/owners, or
-the exact token-bearing lease/audit atomic-promotion temporaries).
+- `.superpowers/sdd/plan-e-extension-hardening-report.md`: the only new Task 9 evidence file; create after verification/review and force-add exactly this one path.
+- Existing ignored Task 1-5/8 reports and other diagnostic files may remain as historical context. Task 9 does not modify, enumerate, regenerate, stage, commit, or depend on them for final readiness.
+- The Task 6 and Task 7 report paths are accepted historical identities only. They remain absent because no complete bytes matching their locked SHA-256 values were recovered; do not create, approximate, summarize, or stage them.
 
 ### Modified files
 
@@ -348,9 +318,10 @@ the exact token-bearing lease/audit atomic-promotion temporaries).
 - `host/update_engine.py`: Task 9 authorized bounded Windows-only atomic preparing promotion retry; public constructor and all other update semantics remain frozen.
 - `host/test_update_engine_resume.py`: exact retry/classification/checkpoint/topology/hook/constructor regression matrix for the authorized exception.
 
-### Deleted file
+### Deleted files
 
 - `extension/src/components/FAB.rootPathOverride.test.ts`: it asserts the persistent override lifetime that Plan E removes.
+- The root-level abandoned Plan E evidence-executor module and its Host test module are removed together by the visible Task 9 forward-deletion commit.
 
 ### Public interfaces
 
@@ -5297,2212 +5268,152 @@ if ($LASTEXITCODE -ne 0) { throw 'Task 8 commit failed' }
 
 Expected: the exact staged set contains all fourteen Task 8 files and nothing else; one commit contains helper, current Worker/content/FAB delivery, config classification, tests, and translations. Downstream-plan sentinel files remain absent.
 
-## Task 9: Scripted Evidence Executor, Windows Promotion Retry, and Final Evidence
+## Task 9: Windows Preparing-Promotion Retry and Final Evidence
 
-> **Implementation worker:** Use `superpowers:test-driven-development` for both
-> code cycles and `superpowers:verification-before-completion` before every
-> completion claim. This Task 9 is the complete executable plan. No earlier
-> Task 9 text, embedded executor, or cross-process shell state is retained.
+> **Implementation worker:** Use `superpowers:test-driven-development` for the
+> retry, `superpowers:verification-before-completion` before completion claims,
+> and `superpowers:requesting-code-review` for the independent review. This
+> section supersedes every earlier Task 9 instruction. Tasks 1-8 remain
+> byte-identical historical instructions.
 
-> **Task 9 authority override:** This Task 9 supersedes every earlier global or
-> file-map statement about Task 9 chronology, counts, persistent controller,
-> mutex/lease lifetime, TypeScript/Vitest commands, authorized paths, and release
-> assets. Tasks 1-8 remain byte-identical historical instructions. Task 9 uses
-> only the latest accepted specs and independent one-line scripted calls below.
+### 9.1 Authority, Safety, and Exact Scope
 
-### 9.1 Files, Interfaces, and Scope
+The controlling design is
+`docs/superpowers/specs/2026-08-24-plan-e-task-9-evidence-correction-design.md`
+at exact commit `b77deeec53e3ac8910e8f4542dad877248a5b12a`. The Windows
+product contract remains
+`docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md`
+at exact commit `249b1a3750b50db1336fb39661db9306355a1a18`.
 
-**Exact reviewed-change surface:**
+This documentation-only edit changes exactly this plan path. Commit it now with
+exact subject `docs(update): simplify Plan E Task 9`; it must be the direct child
+of the authority commit. Do not include any other path.
 
-- Authority, read only: `docs/superpowers/specs/2026-08-23-plan-e-build-asset-and-vitest-identity-correction-design.md`
-- Authority, read only: `docs/superpowers/specs/2026-08-22-plan-e-scripted-evidence-executor-design.md`
-- Modify and commit first: `docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md`
-- Create in asset RED: `extension/test/defaultItems.test.mjs`
-- Create in asset GREEN: `.gitattributes`
-- Modify in asset GREEN: `.gitignore`
-- Create in asset GREEN: `extension/items.json`
-- Create in executor RED: `host/test_plan_e_evidence.py`
-- Create as a compile-only shell in executor RED, then implement in GREEN: `plan_e_evidence.py`
-- Modify in promotion RED only: `host/test_update_engine_resume.py`
-- Modify in promotion GREEN only: `host/update_engine.py`
+```powershell
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $git='C:\Program Files\Git\cmd\git.exe'; $path='docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md'; $dirty=@(& $git -C $root status --porcelain=v1 -uall); if($dirty.Count -ne 1 -or $dirty[0].Substring(3) -cne $path){ throw 'Plan commit worktree mismatch' }; & $git -C $root add -- $path; if($LASTEXITCODE -ne 0){ throw 'Could not stage Task 9 plan' }; $staged=@(& $git -C $root diff --cached --name-only --); if($staged.Count -ne 1 -or $staged[0] -cne $path){ throw 'Task 9 plan staged path mismatch' }; & $git -C $root diff --cached --check; if($LASTEXITCODE -ne 0){ throw 'Task 9 plan diff check failed' }; & $git -C $root commit -m 'docs(update): simplify Plan E Task 9'; if($LASTEXITCODE -ne 0){ throw 'Task 9 plan commit failed' }
+```
 
-The latest correction spec, revised plan, asset test and three asset-production
-paths, root CLI, CLI tests, promotion tests, and promotion production are the
-ten paths added or edited by this correction sequence. The prior scripted spec
-is immutable read-only authority and remains an earlier reviewed-range path;
-other earlier Plan E range paths likewise remain reviewed history but are not
-edited by this Task 9 correction.
+Expected: one normal commit changes only this plan. Do not continue if the
+commit fails or if any other path is staged.
 
-No other product, test, documentation, version, dependency, packaging, release,
-installer, or generated path may be edited. The root CLI is internal maintenance
-tooling. The Host runtime must not import it, PyInstaller must not collect it,
-and release staging must not copy it. The public asset correction authorizes the
-asset test plus exact `.gitattributes`, `.gitignore`, and `extension/items.json`
-changes; the Windows retry spec authorizes the two promotion paths; executor
-paths are internal evidence tooling and tests only. No other product/test path is
-authorized.
-The asset is a tracked public release/build input, not a generated release
-artifact; restoring it is the sole exception to the earlier no-release-assets
-wording.
-No architecture/user/developer guide change is required because the asset
-restores an already-accepted public default and the executor is internal Plan E
-tooling; there is no new user workflow or runtime architecture.
-Do not update `AGENTS.md`, `README.md`, `ARCHITECTURE.md`, `DEVELOPER_GUIDE.md`,
-or `USER_GUIDE.md` in this correction.
-Do not modify the accepted specs; they are immutable reviewed authority inputs.
+The committed plan must be the one-path direct child of
+`b77deeec53e3ac8910e8f4542dad877248a5b12a` with exact subject
+`docs(update): simplify Plan E Task 9`. Before any later edit, verify both
+authority commits, the plan lineage, its sole path, the absence of Task 6/7
+report paths, and clean status:
 
-**Authority and precedence:**
+Run this preflight only after committing the plan; before that commit, its clean
+status and HEAD assertions are intentionally not yet true.
 
-1. `docs/superpowers/specs/2026-08-23-plan-e-build-asset-and-vitest-identity-correction-design.md`
-   at `1efb528282a2fd6a5c926f09d417a30d72f45897` is authoritative for the
-   asset TDD/provenance, Vitest selector identity, exact promotion-class
-   restoration, revised chronology, and `70/130` path arithmetic.
-2. `docs/superpowers/specs/2026-08-22-plan-e-scripted-evidence-executor-design.md`
-   at `cba1030baf6508d08d6ce67ac40728ebdd47f199` remains authoritative for the
-   tracked CLI and all orchestration not amended above.
-3. `docs/superpowers/specs/2026-08-19-plan-e-evidence-loss-amendment-design.md`
-   remains authoritative for the Task 6/7 loss boundary, audit schemas, review
-   criteria, final artifact durability, and historical-claim limits.
-4. `docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md`
-   remains authoritative for the complete retry behavior and TDD matrix.
-5. `docs/superpowers/specs/2026-08-21-plan-e-executor-boundary-correction-design.md`
-   remains historical authority for independent process ownership and narrow
-   RED attestation, except where the latest spec replaces its embedded executor,
-   plan subject, producer topology, finalizer behavior, and old path counts.
+```powershell
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $git='C:\Program Files\Git\cmd\git.exe'; $authority='b77deeec53e3ac8910e8f4542dad877248a5b12a'; $retry='249b1a3750b50db1336fb39661db9306355a1a18'; $authoritySubject=(& $git -C $root show -s --format=%s $authority).Trim(); $authorityPaths=@(& $git -C $root diff-tree --no-commit-id --name-only -r $authority); $retrySubject=(& $git -C $root show -s --format=%s $retry).Trim(); $retryPaths=@(& $git -C $root diff-tree --no-commit-id --name-only -r $retry); if ($authoritySubject -cne 'docs(evidence): simplify Plan E verification' -or $authorityPaths.Count -ne 1 -or $authorityPaths[0] -cne 'docs/superpowers/specs/2026-08-24-plan-e-task-9-evidence-correction-design.md' -or $retrySubject -cne 'docs(update): define Windows promotion retry' -or $retryPaths.Count -ne 1 -or $retryPaths[0] -cne 'docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md') { throw 'Task 9 authority identity mismatch' }; $head=(& $git -C $root rev-parse HEAD).Trim(); $parent=(& $git -C $root rev-parse HEAD^).Trim(); $subject=(& $git -C $root show -s --format=%s HEAD).Trim(); $paths=@(& $git -C $root diff-tree --no-commit-id --name-only -r HEAD); if ($parent -cne $authority -or $subject -cne 'docs(update): simplify Plan E Task 9' -or $paths.Count -ne 1 -or $paths[0] -cne 'docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md') { throw 'Task 9 plan commit identity mismatch' }; & $git -C $root diff --quiet "$authority..$head" -- 'docs/superpowers/specs/2026-08-24-plan-e-task-9-evidence-correction-design.md'; if ($LASTEXITCODE -ne 0) { throw 'Authority spec changed after acceptance' }; & $git -C $root diff --quiet "$retry..$head" -- 'docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md'; if ($LASTEXITCODE -ne 0) { throw 'Windows retry design changed after acceptance' }; foreach($missing in @('.superpowers/sdd/task-6-report.md','.superpowers/sdd/task-7-report.md')){ if(Test-Path -LiteralPath (Join-Path $root $missing)){ throw "$missing must remain absent" } }; if (@(& $git -C $root status --porcelain=v1 -uall).Count -ne 0) { throw 'Worktree must be clean' }
+```
 
-The primary product authority remains
-`docs/superpowers/specs/2026-07-18-whole-branch-important-hardening-design.md`,
-Plan E sections 6-10, 11, and 13, narrowed only by the accepted boundary,
-evidence-loss, retry, and executor specs above.
+Expected: exit `0`, no output. Stop on any mismatch. Keep every later commit a
+normal forward commit; never reset, amend, rebase, squash, or rewrite history.
 
-For Task 9 only, this section supersedes the earlier global persistent
-controller/Step-0 exception and every old plan subject/count. No mutex, lease,
-function, environment value, or process handle spans an edit, commit, review, or
-separate command. Tasks 1-8 remain byte-identical historical instructions; their
-old Task-9 references are non-authoritative for this execution.
+The plan itself is committed first. After that commit, only these paths may
+change in Task 9, in this order:
 
-The evidence-loss amendment commit is
-`d51ca4aabd4a40b91818191424993a8d3ab3cd27`; the Windows retry design commit is
-`249b1a3750b50db1336fb39661db9306355a1a18`; the executor-boundary correction is
-`d237ab2ea7aee73114476b3eb19db620321d349f`. Preflight binds each full SHA,
-subject, path, parent, and ancestry rather than trusting filenames alone. Their
-exact subjects are respectively `docs(evidence): define Plan E report-loss
-boundary`, `docs(update): define Windows promotion retry`, and
-`docs(evidence): correct Plan E executor boundary`.
-The latest correction commit is the one-path direct child of the scripted spec
-commit `cba1030baf6508d08d6ce67ac40728ebdd47f199`, with exact subject
-`docs(extension): define Plan E public asset correction` and
-path
-`docs/superpowers/specs/2026-08-23-plan-e-build-asset-and-vitest-identity-correction-design.md`.
-Its full SHA is `1efb528282a2fd6a5c926f09d417a30d72f45897`.
+1. Delete `plan_e_evidence.py` and `host/test_plan_e_evidence.py` together.
+2. Modify `host/test_update_engine_resume.py` for RED.
+3. Modify `host/update_engine.py` for GREEN.
+4. Add `.superpowers/sdd/plan-e-extension-hardening-report.md` last.
 
-The final evidence set is unchanged from the evidence-loss amendment: 24 fixed
-verification artifacts, six exact surviving Task reports, two current-state
-Task 6/7 audits, and 26 promotion transcript leaves, for 58 manifest artifacts.
-The 24 fixed slots include focused/full/Host/static results, inert promotion
-command/mutation provenance snapshots and hash/map/ledger records, both review
-packages/diffs, and both findings files. The two legacy-named `.ps1` paths are
-comment-only UTF-8 evidence snapshots rendered from fixed command definitions
-and observed receipts: the Python CLI writes/hashes them but never invokes,
-imports, dot-sources, or treats them as executable authority. Tests parse both
-and require zero executable PowerShell statements, functions, or script blocks.
-The manifest and final report make the evidence commit exactly 60 paths. The
-auxiliary `.superpowers/sdd/current-state-mutation-results.json` is a
-receipt-bound candidate used to build focused results and audits, is outside the
-58/60 inventories, is removed only after successful final post-validation, and
-is preserved on failure.
-Producer receipts and Git-common state are internal execution state and never
-enter the 58-artifact manifest or 60-path evidence commit.
-All machine evidence remains local and deterministic; no remote attestation,
-timestamp service, signing service, or network upload is added.
-File-content hashes are SHA-256 lowercase hex; Git blob/tree/commit identities
-are lowercase 40-hex SHA-1 as used by this repository. Do not interchange them.
-The public asset and its Node test are reviewed product/test paths, not members
-of the 58/60 evidence sets; final evidence records their committed blobs/build
-hashes without duplicating them as artifacts.
+Do not modify product versions, dependencies, release/package inputs, installer,
+registry code, Plan D files, accepted specs, or Tasks 1-8. Never read or mutate
+real `%LOCALAPPDATA%`, registry, browser, installed product, update, release,
+network, MyCases, or authenticated model state. Never delete recovery sources.
 
-The terminal graph contains exactly eight `produce` records plus the two review
-ingestion terminal records: `promotion`, `focused-extension`, `full-extension`,
-`host`, `static`, `task-audits`, `plan-e-review-package`,
-`whole-review-package`, `plan-e-review`, and `whole-review`. `task-audits` owns
-the auxiliary current-state mutation candidate within its closed dependency.
-The code dependency graph, not receipt-provided strings, selects the exact final
-dependency closure.
-
-Producer IDs in state/receipts are exactly the eight CLI `--kind` values;
-review-ingestion IDs are exactly `plan-e-review` and `whole-review`. No legacy
-short IDs (`focused`, `full`, `audits`, or a review-ingest prefix) are accepted.
-
-Dependencies are fixed: `promotion`, `focused-extension`, `full-extension`, and
-`host` have only chronology/source prerequisites; `static` requires focused,
-full, and Host results; `task-audits` requires focused, Host, static, and its
-owned current mutations; each review package requires frozen audits; each review
-ingestion requires its matching package plus both audits; finalization requires
-promotion, focused, full, Host, static, audits, both packages, and both review
-terminal records for the complete ten-record closure.
-
-Tested-source roots are exactly `extension`, `host`, `tests`, this plan,
-`.gitattributes`, `.gitignore`, `release_helper.py`, `plan_e_evidence.py`, `dev_switch.py`,
-`installer_core.ps1`, `dyhelper_installer.ps1`, and `install.bat`. The CLI binds
-every tracked leaf under those roots to the reviewed-head Git blob; the explicit
-root CLI addition is the latest-spec expansion, while its Host test is naturally
-covered under `host`.
-
-**Public CLI grammar:**
-
-These are the only public subcommands and producer kinds:
+Historical Task 1-5/8 reports may remain as ignored diagnostic files. Do not
+alter or newly commit them, and do not make final readiness depend on them. No
+new evidence artifact list or hash catalog is produced; the
+final report may cite one only as optional context. Do not create Task
+6/7 substitutes. Preserve these exact facts:
 
 ```text
-plan_e_evidence.py preflight
-plan_e_evidence.py produce --kind promotion --reviewed-head 40-lowercase-hex
-plan_e_evidence.py produce --kind focused-extension --reviewed-head 40-lowercase-hex
-plan_e_evidence.py produce --kind full-extension --reviewed-head 40-lowercase-hex
-plan_e_evidence.py produce --kind host --reviewed-head 40-lowercase-hex
-plan_e_evidence.py produce --kind static --reviewed-head 40-lowercase-hex
-plan_e_evidence.py produce --kind task-audits --reviewed-head 40-lowercase-hex
-plan_e_evidence.py produce --kind plan-e-review-package --reviewed-head 40-lowercase-hex
-plan_e_evidence.py produce --kind whole-review-package --reviewed-head 40-lowercase-hex
-plan_e_evidence.py ingest-review --kind plan-e --reviewed-head 40-lowercase-hex --session-id opaque-ascii --input absolute-path
-plan_e_evidence.py ingest-review --kind whole --reviewed-head 40-lowercase-hex --session-id opaque-ascii --input absolute-path
-plan_e_evidence.py retire --old-head 40-lowercase-hex --new-head 40-lowercase-hex
-plan_e_evidence.py finalize --reviewed-head 40-lowercase-hex
-plan_e_evidence.py verify-final --final-head 40-lowercase-hex
-plan_e_evidence.py status
+Task 6 expected SHA-256: 3158a5795b768434e069e8ef59e488e0a9ff877939728f69d9293ab0c8b9c8ef
+Task 7 expected SHA-256: 49ee4fb0a4717f85767ed19caf5338eac1871b21deed2233d82d97337d32df2f
+Availability: UNRECOVERABLE
+HISTORICAL TDD TIMELINE NOT RECONSTRUCTED
 ```
 
-Use stdlib `argparse.ArgumentParser` with `allow_abbrev=False`,
-`fromfile_prefix_chars=None`, `add_help=False`, and a custom non-exiting error
-path. Unknown/duplicate options, omitted required arguments, and extra
-positionals never pass through. Help/version is not a separate evidence command;
-grammar failures emit canonical `invalid_cli`.
-Do not call `sys.exit` inside parsing/handlers; `main` returns the fixed integer
-and the module guard performs the single `SystemExit` conversion.
+Current tests prove current behavior only. They do not reconstruct historical
+RED, GREEN, mutation, edit-order, review, or TDD chronology. Do not search for,
+restore, move, or delete possible recovery copies while executing this task.
 
-Every invocation writes exactly one canonical JSON object to stdout. Every
-object has closed keys, including `schema_version`, `command`, `status`, and
-`code`; `schema_version` is exactly integer `1`. Canonical JSON uses
-`ensure_ascii=True`, strict UTF-8 without BOM, sorted keys, compact separators,
-no CR/non-finite value, and exactly one final LF.
-All persisted executor state/receipt records also use schema version `1`; an
-unknown version blocks without migration.
-No child output, stack trace, arbitrary path content, review text, URL, secret,
-or raw exception is written to stdout/stderr; command-specific safe fields are
-the only diagnostics.
-Exit codes are fixed:
+### 9.2 Remove the Abandoned Evidence Executor
 
-| Exit | Meaning |
-|---:|---|
-| `0` | Success |
-| `2` | Usage or closed CLI grammar failure |
-| `3` | Retained, abandoned, malformed, unknown, or incompatible state blocks automation |
-| `4` | Evidence, test, audit, review, or final validation failure |
-| `5` | Internal execution or I/O failure |
+- [ ] **Step 1: Delete exactly the abandoned executor and its test**
 
-The exact success codes are `preflight_ok`, `state_absent`, `state_ready`,
-`producer_succeeded`, `review_ingested`, `head_retired`, `finalized`, and
-`final_verified`. A rejected review uses `status: "blocked"`, code
-`review_rejected`, and exit `4`. Retained state uses `status: "blocked"`, code
-`retained_state`, and exit `3`. Usage uses `status: "error"`, code
-`invalid_cli`, and exit `2`. Unexpected internal failure uses `status: "error"`,
-code `internal_error`, and exit `5`; it exposes no raw exception text or state
-file content.
-Validation failures use fixed safe codes from a closed enum beneath the command
-result (for example chronology, evidence, test, audit, review, or final); no raw
-exception-derived code is accepted.
-CLI stdout encoding uses `sys.stdout.buffer.write` with one precomputed canonical
-byte string so console encoding/newline translation cannot alter evidence JSON.
-Session IDs are the implementation-safe accepted subset
-`^[A-Za-z0-9][A-Za-z0-9._:@/+\-=]{0,127}$`; the leading alphanumeric prevents a
-value from being interpreted as an option while the remaining shell-safe set
-preserves the scripted spec's opaque printable-ASCII claim boundary. Every
-observed literal is validated first and then passed inside single quotes.
-`finalize` success remains `code: "finalized"` but carries no final commit ID;
-the CAS/result is validated internally, and `verify-final` is the only command
-that exposes the final head.
+Use `apply_patch` to delete exactly:
 
-`status` returns `state_absent` only when neither lease nor state root exists;
-`state_ready` only for a completely strict compatible terminal inventory;
-otherwise exit `3`/`retained_state`. It never treats an empty-but-present root,
-orphan lease, partial quarantine, or unknown entry as absent/ready.
-After finalization, tracked evidence paths do not count as state; only the fixed
-Git-common authority paths are classified by `status`.
-`status` never reports a producer ready merely because a receipt file exists;
-it validates the complete terminal record and candidate hash closure first.
-For `state_ready`, canonical JSON includes exact `reviewed_head` for the selected
-single-head succeeded/rejected terminal set; for `state_absent` it is null; for
-retained/mixed state it is omitted in favor of fixed authority paths. Retirement
-accepts `old-head` only from this validated non-null `state_ready.reviewed_head`.
-
-Closed command-specific success fields are fixed as follows: `preflight` adds
-authority/chronology/cleanliness summaries; `status` adds classification,
-`reviewed_head`, and
-sorted authority paths; `produce` adds kind, reviewed head, receipt path, and
-candidate hash map; `ingest-review` adds kind, reviewed head, declared session
-ID, disposition, receipt/findings/input/package/diff/audit hashes; `retire` adds
-old/new heads and retired terminal IDs; `finalize` adds reviewed head,
-prospective evidence subject/tree/staged map, exact staged manifest/report
-SHA-256 values, and `58/60/130` counts but does not claim the final commit SHA;
-`verify-final` adds final head/parent/subject, exact committed manifest/report
-SHA-256 values, `58/60/70/130` counts, and exact
-`final_commit_validation: "PASS"` / `base_to_final_union_validation: "PASS"`
-fields. Tests lock exact key sets and types for every outcome.
-
-**Implementation architecture, without an embedded implementation:**
-
-- Resolve the repository only as `Path(__file__).resolve().parent`; ambient cwd
-  is never authority.
-- Use only Python standard-library modules. Keep the CLI in one root module,
-  with small immutable record types for command definitions, owner/lease state,
-  producer receipts, review records, retirement checkpoints, and finalizer
-  checkpoints.
-- Keep callable boundaries equivalent to `parse_args`, strict canonical JSON
-  load/write, path containment, read-only Git, foreground child execution,
-  mutex acquisition, preflight, each fixed producer, review ingestion,
-  retirement, finalization, final verification, and `main`. Signatures accept
-  explicit `Path`, immutable definition, and injected adapter values in unit
-  tests; they never accept arbitrary executables, cleanup roots, candidate
-  paths, Git operations, or producer IDs.
-- Test-facing names/signatures are exact:
-  `canonical_json_bytes(value: object) -> bytes`,
-  `load_canonical_json(path: Path, schema: RecordSchema) -> dict[str, object]`,
-  `parse_cli(argv: Sequence[str]) -> ParsedCommand`,
-  `execute_command(command: ParsedCommand, adapters: Adapters) -> CliResult`,
-  `emit_result(result: CliResult, stream: BinaryIO) -> None`, and
-  `main(argv: Sequence[str] | None = None) -> int`. `RecordSchema`,
-  `ParsedCommand`, `CliResult`, `CommandSpec`, `ProducerSpec`, and `Adapters` are
-  frozen dataclasses/protocols. The compile-only shell defines these names and
-  signatures with inert returns so imports/collection succeed.
-- `CliResult` has exact fields `schema_version: int`, `command: str`,
-  `status: str`, `code: str`, and `fields: tuple[tuple[str, object], ...]`;
-  serialization merges the closed command-specific fields after rejecting key
-  collisions. `CommandSpec` binds ID, executable role, argv, cwd role,
-  environment, timeout, stdin policy, and output bounds. `ProducerSpec` binds
-  ID, dependencies, ordered commands, candidate paths, source roots, worktree
-  policy, and validator ID. `Adapters` supplies filesystem, Git, process,
-  mutex, clock, and randomness boundaries; production uses stdlib adapters and
-  tests provide disposable fakes.
-- `status` result schemas explicitly include `reviewed_head: str | None` for
-  `state_absent/state_ready`; retirement reads only a validated `state_ready`
-  object. Finalizer APIs accept the immutable reviewed-head argument and never
-  derive it from current HEAD after CAS. Report inputs intentionally exclude any
-  final commit ID, prospective tree, report/manifest Git blob ID, complete staged
-  blob map, or report self-hash. The committed report builder's signature
-  accepts reviewed head, evidence subject, receipts, validated artifact hashes,
-  the exact staged manifest SHA-256, and fixed inventory/readiness contracts
-  only; `finalize` output owns prospective tree/index and report-hash reporting,
-  while `verify-final` owns final-head reporting.
-- Define code constants for every command, producer dependency, executable,
-  argv, cwd, environment key, candidate path, source root, test selector, skip
-  rule, report heading, review heading, artifact inventory, and commit subject.
-  Tests compare the constants with the literal contracts in this plan.
-- Keep state only at `GIT_COMMON_DIR/plan-e-evidence-v1.lease.json` and below
-  `GIT_COMMON_DIR/plan-e-evidence-v1/heads`, `retirements`, and `finalizer`.
-  Head-scoped producer directories contain only `owner.json`, `candidates`, and
-  `receipt.json`. Candidate strings in receipts are data, never write/delete
-  authority.
-- A lease record is closed over schema, command kind, random 32-lowercase-hex
-  token, reviewed head, owner path, state root, exact authority paths, and the
-  applicable checkpoint. A producer owner additionally binds producer ID,
-  source blobs, candidate allowlist, and optional exact worktree registration.
-- A command receipt row is closed over ID, absolute executable, exact argv,
-  absolute cwd, exact sorted environment, `shell: false`, observed exit code,
-  stdin hash or null, and stdout/stderr SHA-256. A succeeded producer receipt is
-  closed over schema, producer ID, reviewed head, status, source blobs, command
-  rows, candidate SHA-256 map, and optional verified removed-worktree record.
-  Numeric fields require exact `int` (never bool); nullable fields distinguish
-  absent input from an empty byte stream; list/object orders are definition-
-  locked rather than normalized after parsing.
-- A rejected review record contains only its fixed review kind, reviewed head,
-  input/package/diff/audit hashes, declared session ID, fixed rejection
-  classifications, `status: rejected`, and an empty candidate map.
-- A finalizer lease is closed over token, kind, reviewed head, expected branch
-  ref, checkpoint, candidate hash map, index blob map, prospective commit object,
-  expected pre/post ref values, owner path, and quarantine path. Its only legal
-  progression is `started -> candidates-validated -> staged -> committed ->
-  post-validated`.
-  Retained lease validation also binds complete owner, candidate, index, HEAD,
-  ref, temporary, and quarantine maps before resume.
-
-This is the complete **State Model**; there is no repository-side state root,
-ambient temporary authority, or cross-process in-memory state.
-
-`preflight` and `status` are read-only. They do not acquire the mutation mutex,
-create directories, touch the index, refresh filesystem-monitor state, or alter
-Git metadata. All pre-lease Git reads use absolute system Git with
-`--no-optional-locks` and a closed child environment containing
-`GIT_OPTIONAL_LOCKS=0`. Direct Git config parsing must prove that effective
-filesystem monitoring is absent or false before any worktree-reading command.
-Preflight also proves this is the primary worktree, the exact branch is present,
-the tracked source/index is clean, expected evidence outputs are absent or
-known compatible terminal candidates, Task 6/7 report paths are absent, six
-historical reports match, and no unknown linked worktree registration exists.
-It also verifies literal base ancestry, every planning/spec ancestor, Plan A-C
-prerequisite report/commit identity, and all Plan D sentinel paths absent.
-Unexpected repository-side evidence/output files block; only six frozen reports
-and the closed ignored diagnostic allowlist may pre-exist.
-The read-only commands snapshot and recheck Git index bytes and relevant common-
-directory metadata around their own reads, so a nominally read-only child that
-causes refresh side effects fails validation. Read-only failure must not create
-the fixed state root merely to report the failure.
-All Git reads specify `--no-pager`, noninteractive prompt/credential settings,
-and bounded captured output; no command may open an editor, pager, signing UI,
-credential prompt, or network transport.
-Both read-only commands return fixed classifications on strict-read failure and
-never attempt repair, coercion, migration, or a fallback parser.
-They do not require Python bytecode writes; set/inherit no bytecode cache output
-inside the repository.
-Repository config inspection reads fixed local/global/system config files
-directly or with no-optional-locks Git and records their hashes where relevant;
-a config change before a sensitive operation blocks revalidation.
-
-Every mutating invocation independently acquires one fixed Windows named mutex,
-then exclusively creates and durably rereads the fixed lease as its first
-filesystem write. The state root may be created only after that reread. An
-abandoned mutex, existing incompatible lease, unknown state entry, partial
-owner, retained worktree, or malformed receipt blocks without cleanup. The only
-automatic retained-state exceptions are exact same-token finalizer checkpoint
-resume and clean terminal `rejected` review retirement. All other retained
-state requires manual inspection and separate authorization.
-Only `finalize` may resume a retained finalizer lease; every other command
-reports and blocks without adoption.
-Before lease creation, a mutating command performs only the read-only preflight
-checks above; once the lease exists, every subsequent write is selected by that
-lease/token/owner authority until success cleanup or fail-stop retention.
-The lease is a sibling of the state root in the already-existing Git common
-directory, so creating the lease never requires creating its parent or the state
-root first.
-The mutex name is a fixed code constant derived from the canonical repository
-identity, not mutable cwd text; tests use a separate random test-only name.
-Mutex acquisition is nonblocking for ordinary commands: contention returns
-exit `3`/`retained_state` with fixed classification and no mutation. An
-abandoned acquisition is never treated as ownership suitable for cleanup.
-The ctypes adapter checks every Win32 return/error code, closes handles exactly
-once, and never exposes a raw handle outside its context boundary.
-On non-Windows, mutating production commands return fixed unsupported/blocking
-status rather than emulating the mutex; only read-only verification and tests
-with injected adapters may run.
-This Plan E evidence execution is therefore Windows-only, matching the target
-repository and promotion retry incident; cross-platform evidence execution needs
-a separately accepted design.
-
-Before every hook-capable or ref-mutating Git operation, revalidate no effective
-hooksPath/non-sample hook, signing side effect, credential/helper invocation, or
-attributes-selected filter. Do not bypass or disable hooks. `finalize` does not
-run `git commit`; after those checks it writes the index/tree, creates the fixed
-commit with `git commit-tree`, and performs the one compare-and-swap
-`git update-ref <branch> <new-sha> <reviewed-head>` transition.
-The finalizer's Git object/ref operations use the same closed environment and
-validated absolute Git executable as read-only operations, with only fixed
-author/committer values inherited from already-validated local repository config.
-Effective `.gitattributes` for every reviewed/evidence path must not select a
-clean/smudge/process filter, working-tree encoding, or other byte-transforming
-rule; line-ending config is recorded and blob comparisons remain authoritative.
-
-Child processes use `subprocess.run(..., shell=False)`, absolute executables,
-fixed cwd, and a closed environment. Remove `PYTHONPATH`, `PYTHONHOME`,
-`NODE_OPTIONS`, all unapproved `GIT_*`, all `NPM_CONFIG_*`, and all inherited
-environment names with the Plan-E control prefix, plus all other inherited
-evidence-control values unless one fixed producer supplies a reviewed safe
-value. Every Host child receives six distinct, existing, disposable directories
-for `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP`. The
-parent environment is byte-for-byte unchanged.
-Every child has a fixed command-specific timeout; timeout terminates and waits
-for the exact child/process tree through the injected process adapter before
-retaining state. No detached descendant is permitted. Use argument arrays only;
-no command line is joined and reparsed through a shell.
-The fixed command environments retain only validated system variables required
-for process startup plus the explicit producer values; every recorded key/value
-is sorted and presence-aware, including explicit removal of forbidden values.
-Python children set `PYTHONDONTWRITEBYTECODE=1`; no `__pycache__` may appear in
-source or owned candidate trees.
-Captured stdout/stderr are bounded by fixed per-command limits; overflow
-terminates validation with safe code `internal_error`, records hashes only when
-complete, and retains ownership state without echoing potentially sensitive
-child output.
-
-Audit, report, findings, receipt, lease, and manifest parsers use closed
-schema-version-1 shapes unless the latest spec explicitly names a different
-version. They reject unknown/missing keys, duplicate keys, non-finite values,
-bool-as-int, wrong enum/type/order/cardinality, malformed hashes, and
-noncanonical bytes. Audit generation and validation recompute Git lineage,
-trees, subjects, parents, numstat, source blobs, evidence hashes, selectors,
-assertions, and mutation restoration rather than trusting producer prose.
-
-Candidate publication uses same-directory `os.link(temporary, target)` after
-exclusive write, file flush/fsync, parent durability handling, reread, and hash
-validation. Existing targets,
-unsupported hard links, collisions, and concurrent publication fail closed;
-`os.replace` is forbidden for immutable candidate publication. Only finalization
-materializes non-historical candidates at fixed `.superpowers/sdd` paths. The
-six surviving reports are immutable read-only exceptions and are force-added
-from their existing exact bytes.
-Require temporary and target `st_dev` equality and link count/inode identity
-where supported; any cross-volume or unsupported identity check blocks.
-
-All state paths come from a closed code map, are resolved beneath their fixed
-authority root, and reject symlink/reparse hazards. Canonical state transitions
-use no-overwrite publication where immutable and durable same-directory
-replacement only for an already-owned mutable lease/checkpoint. Receipt data
-never selects a filesystem authority. Token-bearing temporary names and allowed
-relative children are derived from that closed map and owner record; cleanup
-rejects unlisted children or token/path mismatch rather than inferring ownership.
-Strict readers bound file sizes before allocation and reject directories,
-hard-link surprises where identity matters, sparse/unsupported entries, and
-content changes between stat/read/reread checks.
-All repository-relative serialized paths use `/`, reject `.`/empty components,
-drive/UNC forms, trailing separators, alternate data streams, reserved Windows
-device names, and casefold collisions.
-
-Before any producer, validate the complete known state inventory: every prior
-record is an exact terminal `succeeded` or `rejected` record at a compatible
-head, every succeeded candidate is present/hash-exact, and there is no unknown
-entry, lease, owner, temporary, quarantine, or registration. This permits
-sequential independent producers without treating compatible completed state as
-a crash. The closed dependency graph enforces producer ordering.
-
-Only `promotion` and `task-audits` may create detached linked worktrees. The
-owner record binds token, normalized absolute path, exact detached head,
-allowed mutation paths, original blobs, and expected mutated hashes. Removal is
-non-force and occurs only after exact registration, head, restored blobs, and
-clean status are revalidated. Pruning worktree registrations, force removal,
-automatic reset, broad cleanup, push, publish, tag, install, registry mutation,
-browser operation, network operation, authenticated operation, and real updates
-are forbidden.
-
-### 9.2 Authority and Chronology Preflight
-
-- [ ] **Step 1: Verify the current authority before changing the plan**
-
-The current branch must be `docs/prompt-scope-cleanup-design`, and current HEAD
-must resolve exactly to `1efb528282a2fd6a5c926f09d417a30d72f45897`
-with subject `docs(extension): define Plan E public asset correction`. That
-commit changed only the latest correction spec and has parent
-`cba1030baf6508d08d6ce67ac40728ebdd47f199`.
-Resolve every abbreviated historical identifier through Git and store/compare
-only full 40-hex SHAs; abbreviations in immutable report prose are display only.
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD
-```
-
-Expected stdout: exactly
-`1efb528282a2fd6a5c926f09d417a30d72f45897`.
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" status --short
-```
-
-Before this documentation revision is committed, the only permitted line is the
-target plan. Before asset RED starts, output must be empty.
-
-- [ ] **Step 2: Commit this revised plan as the sole direct child**
-
-The revised plan commit changes exactly
-`docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md`, has parent
-`1efb528282a2fd6a5c926f09d417a30d72f45897`, and has exact subject
-`docs(update): integrate Plan E build prerequisites`.
-This documentation edit itself is made with `apply_patch`; no product/test file
-is touched before the plan commit.
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" add -- "docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md"
-```
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" diff --cached --check
-```
-
-Before each commit command in this task, compare
-`git diff --cached --name-only --no-renames` with that step's exact path
-allowlist and stop on any missing/extra path. Never use `git add .`.
-Also require unstaged diff contains only the same allowlist before staging.
-The executor RED allowlist is the two sorted paths named in Step 3; each other
-code/document commit allowlist is its one named path; finalization alone owns
-the literal 60-path staging set.
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" commit -m "docs(update): integrate Plan E build prerequisites"
-```
-
-Do not hold an evidence mutex during this commit or any later code-edit/commit
-cycle. Before asset RED, reread the plan commit parent, subject, one-path diff,
-clean tracked worktree, and empty index directly from Git.
-
-The required direct single-parent sequence after that plan commit is exact:
-
-1. One-path public asset RED, subject
-   `test(extension): define Plan E public default asset`.
-2. Exact three-path public asset GREEN, subject
-   `fix(extension): restore public default asset`.
-   Paths are exactly `.gitattributes`, `.gitignore`, and
-   `extension/items.json`; `extension/test/defaultItems.test.mjs` remains the
-   unchanged RED-commit blob.
-3. Two-path executor RED, subject
-   `test(evidence): define Plan E executor contracts`.
-4. One-path executor implementation, subject
-   `feat(evidence): add Plan E evidence executor`.
-5. One-path promotion RED, subject
-   `test(update): cover locked preparing promotion`.
-6. One-path promotion implementation, subject
-   `fix(update): retry locked preparing promotion`.
-7. Optional focused fixes only under separately accepted specs, closed path
-   allowlists, fixed subjects, and fresh RED/GREEN/mutation evidence. Any such
-   fix invalidates and regenerates every producer, audit, and review. The
-   accepted correction spec fixes each subject exactly before the edit; no
-   generic subject pattern authorizes a fix. Adding any reviewed path requires a
-   new accepted path-count amendment before editing.
-   A fix may change only paths already in the 70-path reviewed list unless that
-   amendment explicitly expands the list.
-8. Exact 60-path final evidence child, subject
-   `docs(verification): record Plan E hardening evidence`.
-
-The latest correction commit itself is the one-path direct child of
-`cba1030baf6508d08d6ce67ac40728ebdd47f199`, with its exact path/subject above;
-preflight validates both correction and scripted authorities before future
-children.
-
-Asset RED is the direct child of the plan revision; asset GREEN is its direct
-child; executor RED is the direct child of asset GREEN; executor implementation
-is its direct child; promotion RED is the direct child of executor
-implementation; promotion implementation is the direct child of promotion RED.
-With no optional fix, final evidence is the direct child of promotion
-implementation. With an accepted fix, every fix remains a single-parent
-descendant and final evidence is the child of the last reviewed fix head.
-
-The executor implementation must be GREEN and complete its seven mutation
-checks before promotion RED begins. The promotion RED commit must contain the
-new tests while `host/update_engine.py` remains byte-identical to its parent.
-The implementation commit must leave the RED test blob unchanged.
-Asset GREEN/build must be committed and clean before executor RED begins; the
-executor tests bind its exact asset/test/attributes/ignore blobs.
-
-This is the complete **Commit Sequence**. No squash, amend, merge, reordered
-parent, extra path, or unaccepted interstitial commit is permitted.
-Each commit is created only by its explicit command after exact staged allowlist
-and diff-check gates; do not amend any commit.
-Do not commit, tag, or push any evidence candidate before `finalize`; the only
-pre-final commits are the plan, two asset TDD commits, two executor TDD commits,
-two promotion TDD commits, and separately accepted fixes.
-
-**Locked historical report contract:**
-
-| Task | Required path state | Required SHA-256 |
-|---:|---|---|
-| 1 | Present, immutable | `678228ecdf3f417f09abf9973f9da9cdb4c2bf90b4a549165af592c45c3f2fba` |
-| 2 | Present, immutable | `edee7809419c30bd1a240caf8e220c571813185509bc34ac32a4baebb72e39f7` |
-| 3 | Present, immutable | `5fdd938773b361a96bfb0b95a311285bdb1803b6756670cd7ab1095f82760591` |
-| 4 | Present, immutable | `5f8417f109f4ac07dc3423b388cd40cd841d64d214b33b4ef2d484daca5d20c2` |
-| 5 | Present, immutable | `323e46ccc7b5b6277fa62e0a0b9db30299c00651db16c50aa748a6ee9b2e8f73` |
-| 6 | `.superpowers/sdd/task-6-report.md` absent | `3158a5795b768434e069e8ef59e488e0a9ff877939728f69d9293ab0c8b9c8ef` remains the expected unavailable identity |
-| 7 | `.superpowers/sdd/task-7-report.md` absent | `49ee4fb0a4717f85767ed19caf5338eac1871b21deed2233d82d97337d32df2f` remains the expected unavailable identity |
-| 8 | Present, immutable | `3a7d87e8f55e3731e6f405a4b58c38ff75efacb76a0ed431f0522f8ec02cfc0b` |
-
-If either Task 6/7 report path reappears with its exact locked hash, stop and
-revise the evidence contract before combining it with audits. If the optional
-recovery diagnostic exists, it is read-only and must hash to
-`0c2905ea665ee190cd9725c63385e402dcdf490e71154097b2285fd674d1266f`.
-
-The six present reports are the only pre-existing final-evidence paths. Before
-finalization, require them untracked/unstaged and exact; after finalization they
-must be tracked in the evidence commit with identical blobs. The two absent
-paths never enter the manifest or commit.
-All eight expected report hashes remain present in authority/report metadata;
-only six have available bytes and final paths.
-The current immutable reports themselves are never rewritten to mention the new
-executor; their exact old bytes are evidence inputs.
-
-### 9.3 Public Asset TDD Prerequisite
-
-- [ ] **Step 1: Add only the canonical public-asset contract test**
-
-Use `apply_patch` to create only
-`extension/test/defaultItems.test.mjs` from canonical commit
-`60ee0f2b7ca6784ca12dba8c2bbe66ce338fdef5`. Its exact Git blob is
-`a43893359255c5e1573fdee19569f8cd20dde73f`; canonical blob-byte SHA-256 is
-`b2c4f1e291dbc1862f8ae3a9f1bbaffc7483345b09ccd8d45767f9f7eaa9ce39`;
-size is 7,357 bytes, 208 LF lines, no BOM, final LF. Read bytes via
-`git show`, verify blob ID and SHA-256 through `git cat-file blob`, then apply
-those exact bytes. While RED, `.gitattributes` and `extension/items.json` remain
-absent and `.gitignore` still has exactly one standalone `items.json` line.
-
-```powershell
-& "C:\Program Files\nodejs\node.exe" --test "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension\test\defaultItems.test.mjs"
-```
-
-Expected RED: Node collects all five tests; failures are caused by missing
-`extension/items.json` during test execution, not syntax/import/zero-collection
-failure. Exit is `1`, output includes five collected tests and missing-file
-diagnostics. Before commit, require sole dirty/untracked path is the test,
-`git check-ignore` confirms the missing asset name is still ignored, and staged
-blob equals `a43893359255c5e1573fdee19569f8cd20dde73f`.
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" add -- "extension/test/defaultItems.test.mjs"
-```
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" diff --cached --check
-```
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" commit -m "test(extension): define Plan E public default asset"
-```
-
-Expected: direct one-path child of the revised plan, exact subject/path/blob,
-asset and attributes still absent, `.gitignore` unchanged, clean index/status.
-
-- [ ] **Step 2: Restore exact public asset and LF contract**
-
-Use `apply_patch` only:
-
-1. Create `extension/items.json` from canonical commit
-   `6e501b536cb2693d68bb7d2ece38544ae3ad5c1d`, exact blob
-   `2fa48bf2a60af716c36ed9ee9f80ed83af3e0530`, SHA-256
-   `839ef34acce528efff3a64a563070942fc228326730d390aa7d467c3df83ce25`,
-   692 bytes, 28 LF lines, no BOM, final LF.
-2. Create `.gitattributes` with exactly one line
-   `extension/items.json text eol=lf` plus LF, blob
-   `f40b738f6e25d1e45d6400414b3bad8536138712`, SHA-256
-   `2be83d22f91add38d54a1eda87fa02e3654c9fec3375d5fc72792a7094db6bda`.
-3. Modify current `.gitignore` only by deleting its one exact standalone
-   `items.json` line. All other bytes remain unchanged. Resulting blob is
-   `c7ac6d30d14a7294a13932c0a055fb4dba498bcf`, SHA-256
-   `80ecafcfe55f95ab0c3141c3bf2b5c01a4e143593471a27fd939762307a67c40`,
-   499 bytes, 51 LF lines, final LF.
-
-Do not copy canonical `.gitignore`, private/local/ignored/rescued menu data, or
-canonical `Options.collapseFolders.test.ts`. The asset has exactly the five
-public nodes/credential-free GitHub URLs and canonical JSON enforced by the test.
-
-```powershell
-& "C:\Program Files\nodejs\node.exe" --test "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension\test\defaultItems.test.mjs"
-```
-
-Expected GREEN: exactly five tests pass, zero fail, exit `0`.
-
-Run the network-inert production build with absolute local executables. TypeScript:
-
-```powershell
-& "C:\Program Files\nodejs\node.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension\node_modules\typescript\bin\tsc" --noEmit --tsBuildInfoFile "C:\Users\zhaobo\AppData\Local\Temp\opencode\plan-e-asset-tsbuildinfo" -p "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension\tsconfig.json"
-```
-
-Vite build:
-
-```powershell
-& "C:\Program Files\nodejs\node.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension\node_modules\vite\bin\vite.js" build "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension" --config "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension\vite.config.ts" --configLoader runner --emptyOutDir
-```
-
-Expected: both exit `0`; no npm/npx/network fallback. Verify
-`extension/dist/items.json` exists and its bytes/blob-byte SHA-256 equal source
-and `839ef34acce528efff3a64a563070942fc228326730d390aa7d467c3df83ce25`.
-Verify source/test/attributes canonical blob IDs with `git hash-object` and
-`git cat-file blob`; verify `.gitignore` differs from its parent only by that
-one deleted line.
-
-Stage exactly `.gitattributes`, `.gitignore`, and `extension/items.json`; the
-asset test remains byte-identical to its RED commit and is not restaged.
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" add -- ".gitattributes" ".gitignore" "extension/items.json"
-```
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" diff --cached --check
-```
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" commit -m "fix(extension): restore public default asset"
-```
-
-Expected: direct child of asset RED; exact three paths/subjects/blobs; test blob
-unchanged; five tests/build/source-dist hash rerun GREEN from committed head;
-clean tracked worktree, empty index, and no extra asset/menu path.
-
-### 9.4 Exact Path Inventories
-
-The literal Plan E integration base is
-`0dbb4852931b50153fb898b03129ae0092c46404`. At the reviewed product/tool head,
-`git diff --name-only --no-renames` from that base must equal this exact sorted,
-unique 70-path list. The CLI constants and tests enforce it; the Markdown does
-not implement the validator.
-
-<!-- PLAN_E_REVIEWED_PATHS_START -->
 ```text
-.gitattributes
-.gitignore
-docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md
-docs/superpowers/specs/2026-07-24-plan-e-boundary-correction-design.md
-docs/superpowers/specs/2026-07-28-windows-preparing-promotion-retry-design.md
-docs/superpowers/specs/2026-08-19-plan-e-evidence-loss-amendment-design.md
-docs/superpowers/specs/2026-08-21-plan-e-executor-boundary-correction-design.md
-docs/superpowers/specs/2026-08-22-plan-e-scripted-evidence-executor-design.md
-docs/superpowers/specs/2026-08-23-plan-e-build-asset-and-vitest-identity-correction-design.md
-extension/items.json
-extension/src/background/analyzeBridge.test.ts
-extension/src/background/analyzeBridge.ts
-extension/src/background/analyzeRequestHandler.test.ts
-extension/src/background/analyzeRequestHandler.ts
-extension/src/background/contextMenu.test.ts
-extension/src/background/contextMenu.ts
-extension/src/background/nativeMessageWire.test.ts
-extension/src/background/nativeMessageWire.ts
-extension/src/background/resetExtensionState.test.ts
-extension/src/background/serviceWorker.ts
-extension/src/background/teamManifestSync.test.ts
-extension/src/background/teamManifestSync.ts
-extension/src/components/FAB.analyzeRequest.test.tsx
-extension/src/components/FAB.bookmarkTelemetry.test.tsx
-extension/src/components/FAB.pageIdentity.test.tsx
-extension/src/components/FAB.promptSourceErrors.test.tsx
-extension/src/components/FAB.rootPathOverride.test.ts
-extension/src/components/FAB.spinner.test.tsx
-extension/src/components/FAB.tsx
-extension/src/components/FAB.userPrompt.test.tsx
-extension/src/components/MenuLogic.teamCache.test.ts
-extension/src/components/MenuLogic.ts
-extension/src/components/Options.collapseFolders.test.ts
-extension/src/components/Options.test.tsx
-extension/src/components/Options.tsx
-extension/src/components/ResultPopover.test.tsx
-extension/src/components/ResultPopover.tsx
-extension/src/content/index.tsx
-extension/src/content/updateErrorBridge.test.ts
-extension/src/content/updateErrorBridge.ts
-extension/src/hooks/useAnalysisHydration.test.ts
-extension/src/hooks/useAnalysisHydration.ts
-extension/src/test/chromeMock.ts
-extension/src/utils/analysisStore.test.ts
-extension/src/utils/analysisStore.ts
-extension/src/utils/analyzeRequest.test.ts
-extension/src/utils/analyzeRequest.ts
-extension/src/utils/bookmarkItems.test.ts
-extension/src/utils/bookmarkItems.ts
-extension/src/utils/configUpdateResult.test.ts
-extension/src/utils/configUpdateResult.ts
-extension/src/utils/nativeUpdateError.test.ts
-extension/src/utils/nativeUpdateError.ts
-extension/src/utils/ownData.test.ts
-extension/src/utils/ownData.ts
-extension/src/utils/pageIdentity.test.ts
-extension/src/utils/pageIdentity.ts
-extension/src/utils/prefs.ts
-extension/src/utils/promptSourceErrors.test.ts
-extension/src/utils/promptSourceErrors.ts
-extension/src/utils/teamCatalog.test.ts
-extension/src/utils/teamCatalog.ts
-extension/src/utils/translations.ts
-extension/test/defaultItems.test.mjs
-host/dh_native_host.py
-host/test_plan_e_evidence.py
-host/test_session_workspace.py
-host/test_update_engine_resume.py
-host/update_engine.py
 plan_e_evidence.py
+host/test_plan_e_evidence.py
 ```
-<!-- PLAN_E_REVIEWED_PATHS_END -->
 
-Expected read-only checks at the reviewed head:
+Commit `ed06da102e3c11cfe53ec17ef50e97252037f624` remains visible history. It is
+an abandoned RED attempt for the superseded executor architecture, never reached
+GREEN, and provides no Windows-retry or product-completion evidence. Do not
+reset, amend, rebase, squash, or otherwise hide it.
+
+- [ ] **Step 2: Verify and commit the two deletions**
+
+The pre-commit check below inspects the complete dirty and staged sets, not a
+deletion-filtered subset; each of the two status entries must be an exact delete.
 
 ```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" diff --name-only --no-renames "0dbb4852931b50153fb898b03129ae0092c46404..HEAD"
-```
-
-Expected: exactly the 70 lines above, in bytewise order after sorting, with no
-version/dependency path and no Plan D sentinel.
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" diff --check "0dbb4852931b50153fb898b03129ae0092c46404..HEAD"
-```
-
-Expected: exit `0`, empty stdout/stderr.
-
-The exact final 58-artifact manifest follows. The auxiliary current-state
-mutation candidate is deliberately absent.
-The two findings files are among the 24 fixed slots, so review durability does
-not increase the 58 count.
-
-<!-- PLAN_E_ARTIFACT_PATHS_START -->
-```text
-.superpowers/sdd/focused-extension-results.json
-.superpowers/sdd/full-extension-results.json
-.superpowers/sdd/host-test-results.json
-.superpowers/sdd/invoke-promotion-test.ps1
-.superpowers/sdd/original-whole-branch-interim-review-findings.md
-.superpowers/sdd/original-whole-branch-interim-review-package.txt
-.superpowers/sdd/original-whole-branch-interim-review.diff
-.superpowers/sdd/plan-e-only-review-findings.md
-.superpowers/sdd/plan-e-only-review-package.txt
-.superpowers/sdd/plan-e-only-review.diff
-.superpowers/sdd/promotion-ast.sha256
-.superpowers/sdd/promotion-executor.sha256
-.superpowers/sdd/promotion-green-source.sha256
-.superpowers/sdd/promotion-green.sha256.json
-.superpowers/sdd/promotion-ledger.json
-.superpowers/sdd/promotion-mutation-runner.sha256
-.superpowers/sdd/promotion-mutation-source.sha256
-.superpowers/sdd/promotion-mutation.sha256.json
-.superpowers/sdd/promotion-observed.json
-.superpowers/sdd/promotion-red-source.sha256
-.superpowers/sdd/promotion-red.sha256.json
-.superpowers/sdd/promotion-transcripts.sha256.json
-.superpowers/sdd/promotion-transcripts/green/test_non_windows_or_unlisted_promotion_errors_are_not_retried.txt
-.superpowers/sdd/promotion-transcripts/green/test_persistent_windows_promotion_lock_stops_after_three_attempts.txt
-.superpowers/sdd/promotion-transcripts/green/test_preparing_promotion_hooks_wrap_the_logical_operation_once.txt
-.superpowers/sdd/promotion-transcripts/green/test_preparing_promotion_revalidates_before_and_after_sleep.txt
-.superpowers/sdd/promotion-transcripts/green/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.txt
-.superpowers/sdd/promotion-transcripts/green/test_update_engine_constructor_signature_remains_frozen.txt
-.superpowers/sdd/promotion-transcripts/green/test_windows_access_denied_retries_atomic_preparing_promotion.txt
-.superpowers/sdd/promotion-transcripts/green/test_windows_sharing_errors_32_and_33_are_retryable.txt
-.superpowers/sdd/promotion-transcripts/mutation-bound/test_persistent_windows_promotion_lock_stops_after_three_attempts.restored-green.txt
-.superpowers/sdd/promotion-transcripts/mutation-bound/test_persistent_windows_promotion_lock_stops_after_three_attempts.txt
-.superpowers/sdd/promotion-transcripts/mutation-classification/test_windows_access_denied_retries_atomic_preparing_promotion.restored-green.txt
-.superpowers/sdd/promotion-transcripts/mutation-classification/test_windows_access_denied_retries_atomic_preparing_promotion.txt
-.superpowers/sdd/promotion-transcripts/mutation-initial/test_preparing_promotion_revalidates_before_and_after_sleep.restored-green.txt
-.superpowers/sdd/promotion-transcripts/mutation-initial/test_preparing_promotion_revalidates_before_and_after_sleep.txt
-.superpowers/sdd/promotion-transcripts/mutation-post-sleep/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.restored-green.txt
-.superpowers/sdd/promotion-transcripts/mutation-post-sleep/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.txt
-.superpowers/sdd/promotion-transcripts/mutation-pre-sleep/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.restored-green.txt
-.superpowers/sdd/promotion-transcripts/mutation-pre-sleep/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.txt
-.superpowers/sdd/promotion-transcripts/red/test_non_windows_or_unlisted_promotion_errors_are_not_retried.txt
-.superpowers/sdd/promotion-transcripts/red/test_persistent_windows_promotion_lock_stops_after_three_attempts.txt
-.superpowers/sdd/promotion-transcripts/red/test_preparing_promotion_hooks_wrap_the_logical_operation_once.txt
-.superpowers/sdd/promotion-transcripts/red/test_preparing_promotion_revalidates_before_and_after_sleep.txt
-.superpowers/sdd/promotion-transcripts/red/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.txt
-.superpowers/sdd/promotion-transcripts/red/test_update_engine_constructor_signature_remains_frozen.txt
-.superpowers/sdd/promotion-transcripts/red/test_windows_access_denied_retries_atomic_preparing_promotion.txt
-.superpowers/sdd/promotion-transcripts/red/test_windows_sharing_errors_32_and_33_are_retryable.txt
-.superpowers/sdd/reviewed-head-verification.json
-.superpowers/sdd/run-promotion-mutations.ps1
-.superpowers/sdd/task-1-report.md
-.superpowers/sdd/task-2-report.md
-.superpowers/sdd/task-3-report.md
-.superpowers/sdd/task-4-report.md
-.superpowers/sdd/task-5-report.md
-.superpowers/sdd/task-6-audit-evidence.json
-.superpowers/sdd/task-7-audit-evidence.json
-.superpowers/sdd/task-8-report.md
-```
-<!-- PLAN_E_ARTIFACT_PATHS_END -->
-
-The exact sorted 60-path staged and committed set follows. It is the 58 paths
-above plus the manifest and report, written literally so tests can compare both
-inventories rather than trusting arithmetic alone.
-
-<!-- PLAN_E_FINAL_EVIDENCE_PATHS_START -->
-```text
-.superpowers/sdd/final-artifacts.sha256.json
-.superpowers/sdd/focused-extension-results.json
-.superpowers/sdd/full-extension-results.json
-.superpowers/sdd/host-test-results.json
-.superpowers/sdd/invoke-promotion-test.ps1
-.superpowers/sdd/original-whole-branch-interim-review-findings.md
-.superpowers/sdd/original-whole-branch-interim-review-package.txt
-.superpowers/sdd/original-whole-branch-interim-review.diff
-.superpowers/sdd/plan-e-extension-hardening-report.md
-.superpowers/sdd/plan-e-only-review-findings.md
-.superpowers/sdd/plan-e-only-review-package.txt
-.superpowers/sdd/plan-e-only-review.diff
-.superpowers/sdd/promotion-ast.sha256
-.superpowers/sdd/promotion-executor.sha256
-.superpowers/sdd/promotion-green-source.sha256
-.superpowers/sdd/promotion-green.sha256.json
-.superpowers/sdd/promotion-ledger.json
-.superpowers/sdd/promotion-mutation-runner.sha256
-.superpowers/sdd/promotion-mutation-source.sha256
-.superpowers/sdd/promotion-mutation.sha256.json
-.superpowers/sdd/promotion-observed.json
-.superpowers/sdd/promotion-red-source.sha256
-.superpowers/sdd/promotion-red.sha256.json
-.superpowers/sdd/promotion-transcripts.sha256.json
-.superpowers/sdd/promotion-transcripts/green/test_non_windows_or_unlisted_promotion_errors_are_not_retried.txt
-.superpowers/sdd/promotion-transcripts/green/test_persistent_windows_promotion_lock_stops_after_three_attempts.txt
-.superpowers/sdd/promotion-transcripts/green/test_preparing_promotion_hooks_wrap_the_logical_operation_once.txt
-.superpowers/sdd/promotion-transcripts/green/test_preparing_promotion_revalidates_before_and_after_sleep.txt
-.superpowers/sdd/promotion-transcripts/green/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.txt
-.superpowers/sdd/promotion-transcripts/green/test_update_engine_constructor_signature_remains_frozen.txt
-.superpowers/sdd/promotion-transcripts/green/test_windows_access_denied_retries_atomic_preparing_promotion.txt
-.superpowers/sdd/promotion-transcripts/green/test_windows_sharing_errors_32_and_33_are_retryable.txt
-.superpowers/sdd/promotion-transcripts/mutation-bound/test_persistent_windows_promotion_lock_stops_after_three_attempts.restored-green.txt
-.superpowers/sdd/promotion-transcripts/mutation-bound/test_persistent_windows_promotion_lock_stops_after_three_attempts.txt
-.superpowers/sdd/promotion-transcripts/mutation-classification/test_windows_access_denied_retries_atomic_preparing_promotion.restored-green.txt
-.superpowers/sdd/promotion-transcripts/mutation-classification/test_windows_access_denied_retries_atomic_preparing_promotion.txt
-.superpowers/sdd/promotion-transcripts/mutation-initial/test_preparing_promotion_revalidates_before_and_after_sleep.restored-green.txt
-.superpowers/sdd/promotion-transcripts/mutation-initial/test_preparing_promotion_revalidates_before_and_after_sleep.txt
-.superpowers/sdd/promotion-transcripts/mutation-post-sleep/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.restored-green.txt
-.superpowers/sdd/promotion-transcripts/mutation-post-sleep/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.txt
-.superpowers/sdd/promotion-transcripts/mutation-pre-sleep/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.restored-green.txt
-.superpowers/sdd/promotion-transcripts/mutation-pre-sleep/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.txt
-.superpowers/sdd/promotion-transcripts/red/test_non_windows_or_unlisted_promotion_errors_are_not_retried.txt
-.superpowers/sdd/promotion-transcripts/red/test_persistent_windows_promotion_lock_stops_after_three_attempts.txt
-.superpowers/sdd/promotion-transcripts/red/test_preparing_promotion_hooks_wrap_the_logical_operation_once.txt
-.superpowers/sdd/promotion-transcripts/red/test_preparing_promotion_revalidates_before_and_after_sleep.txt
-.superpowers/sdd/promotion-transcripts/red/test_preparing_promotion_revalidation_rejects_every_authority_mismatch.txt
-.superpowers/sdd/promotion-transcripts/red/test_update_engine_constructor_signature_remains_frozen.txt
-.superpowers/sdd/promotion-transcripts/red/test_windows_access_denied_retries_atomic_preparing_promotion.txt
-.superpowers/sdd/promotion-transcripts/red/test_windows_sharing_errors_32_and_33_are_retryable.txt
-.superpowers/sdd/reviewed-head-verification.json
-.superpowers/sdd/run-promotion-mutations.ps1
-.superpowers/sdd/task-1-report.md
-.superpowers/sdd/task-2-report.md
-.superpowers/sdd/task-3-report.md
-.superpowers/sdd/task-4-report.md
-.superpowers/sdd/task-5-report.md
-.superpowers/sdd/task-6-audit-evidence.json
-.superpowers/sdd/task-7-audit-evidence.json
-.superpowers/sdd/task-8-report.md
-```
-<!-- PLAN_E_FINAL_EVIDENCE_PATHS_END -->
-
-The reviewed set and final evidence set must be disjoint. Therefore the literal
-base-to-final union is exactly `70 + 60 = 130` unique paths. The CLI must compute
-all three lists from Git and its constants and reject missing, extra, duplicate,
-unsorted, renamed, pre-existing evidence, or overlapping paths.
-Every duplicate inventory occurrence is eliminated in this revised Task 9: the
-three marked lists above are the sole Markdown copies, and CLI tests compare
-each code constant directly with its one marked source.
-
-### 9.5 Executor TDD
-
-- [ ] **Step 1: Create the full test module and compile-only CLI shell**
-
-Create `host/test_plan_e_evidence.py` first. It may import the root CLI through
-`importlib.util.spec_from_file_location` so the production module remains
-outside Host runtime imports. All tests use disposable directories and
-disposable Git repositories; tests never point a mutation adapter at this real
-worktree. Patch adapters only at unavoidable Windows/Git/process boundaries,
-and use real filesystem/Git behavior in disposable roots for everything else.
-Test fixtures/helpers remain private in this one test module; do not add fixture
-files, golden files, scripts, or committed sample repositories.
-Create both RED files with `apply_patch`; no generated or editor-side file write
-may add a third path.
-
-Create `plan_e_evidence.py` in the same RED edit with only imports, public
-constants/types/signatures, `main(argv: Sequence[str] | None = None) -> int`, and
-the `if __name__ == "__main__": raise SystemExit(main())` entry point. Every
-stubbed callable returns an inert sentinel or syntactically valid canonical JSON
-with intentionally wrong `status/code`; do not raise from a behavior reached by
-these tests. It must compile and import. It must not create state, launch
-children, or partially implement behavior. Collection/import or raw exception
-errors are invalid RED.
-The shell includes all exact dataclasses/protocols/functions named in section
-9.1; it does not omit an interface and rely on dynamic test lookup failure.
-
-Use exactly these classes and test methods. Each method owns one spec contract;
-table-driven cases collect row diagnostics and end in one aggregate assertion so
-the compile-only shell produces exactly one failure per method. Do not use
-independently failing `subTest` rows during the locked RED, and do not multiply
-overlapping method names.
-
-The seven mutation-proof methods are present in RED but use the inert shell as
-their expected precondition and finish with one assertion that the real
-mutation/restoration contract is not yet available. After GREEN, the same
-methods perform the temporary source mutation and restoration proof; no test is
-added after the two-path RED commit.
-
-Because those methods intentionally fail before the implementation exists and
-pass by actually catching/restoring a broken implementation afterward, they
-provide both the locked RED count and current mutation proof without editing the
-test file in the implementation commit.
-Each helper locks one exact implementation transformation string/AST site in its
-test fixture; no ad hoc mutation selected at runtime is accepted.
-
-**`CliContractTests`**
-
-Exact method count: `12`.
-
-- `test_cli_grammar_accepts_only_fixed_commands_and_producer_kinds`: accepted
-  argv are the exact grammar in section 9.1. Reject missing/extra options,
-  uppercase or short heads, arbitrary producer/review kinds, arbitrary command
-  strings, duplicate options, relative review input, and options on
-  `preflight/status`. Assert exit `2`, canonical stdout, `status: "error"`, and
-  `code: invalid_cli` for every rejected row. Assert parser abbreviation,
-  response files, help/version pseudo-evidence, and unknown pass-through are
-  disabled.
-  Reject either literal session marker and the pre-CAS reviewed-head marker if
-  the controller fails to replace it.
-  On Windows, absolute review input accepts drive-qualified regular paths only;
-  reject relative, UNC/device, alternate-stream, and repository-contained paths.
-- `test_every_command_emits_one_canonical_json_object_and_fixed_exit_code`:
-  invoke success, usage, retained-state, validation-failure, and injected-I/O
-  fixtures; assert one stdout object, no extra line, exact required keys and
-  closed command-specific keys, integer schema version `1`, empty successful
-  stderr, fixed safe failure stderr policy, and exits `0/2/3/4/5` respectively.
-  Inject secret markers into child output, exception text, URLs, review input,
-  and state content; none may appear in stdout/stderr.
-  Command-specific validation classification uses only the closed safe-code
-  enum, never exception-derived text.
-  Patch text stdout encoding/newline behavior and require direct binary write of
-  one canonical byte string.
-- `test_cli_main_maps_only_known_failures_and_releases_resources_in_finally`:
-  table-drive usage, blocked, validation, I/O, and unexpected internal failures;
-  require exact exits/codes, one safe stdout object, no traceback, child/mutex/
-  file handles closed in `finally`, and no conversion of interrupt/termination
-  signals into success.
-  Fixed command timeouts and process-tree termination/await behavior are part of
-  the known internal-failure mapping.
-  Parser/handlers return integers and do not call `sys.exit`; only the module
-  guard converts `main()` to `SystemExit`.
-- `test_review_session_cli_grammar_uses_shell_safe_subset`: accept exactly
-  `^[A-Za-z0-9][A-Za-z0-9._:@/+\-=]{0,127}$`; explicitly reject leading
-  hyphen (including `-x` and `--option`), leading punctuation from the remaining
-  safe set, apostrophe, quote, backtick, dollar, semicolon, pipe, ampersand,
-  parentheses, controls, whitespace, Unicode, empty, and over-limit values
-  before any state mutation. Accept one-character alphanumeric IDs and
-  alphanumeric-leading values containing every permitted remaining character.
-  Invoke the parser with representative accepted/rejected literals as distinct
-  argv elements to prove no value is reparsed as an option or shell syntax.
-  Exercise both the split pair `--session-id -x` and attached
-  `--session-id=-x`; both return canonical `invalid_cli` before mutation. Include embedded `$`, backtick,
-  apostrophe, double quote, semicolon, pipe, ampersand, and parentheses rows. The
-  two accepted IDs must differ exactly.
-- `test_preflight_binds_exact_direct_commit_chronology_and_path_scopes`: build
-  valid and one-axis-mutated Git histories. Require latest-spec -> one-path plan
-  -> one-path asset RED -> three-path asset GREEN -> two-path executor RED ->
-  one-path executor implementation -> one-path promotion RED -> one-path
-  promotion implementation, exact subjects/parents/paths, asset test unchanged
-  from asset RED through asset GREEN, root CLI unchanged from executor RED
-  through promotion RED except its one implementation commit, promotion
-  production unchanged through promotion RED, promotion test unchanged through
-  implementation, and later fixes only
-  under separately accepted specs/closed allowlists. Reject merge, reordered,
-  missing, extra, or later rewritten protected commits.
-  Require every commit has exactly one parent and the reviewed head is the exact
-  tail after any separately accepted fixes.
-  Require plan revision direct parent is the full latest-spec SHA and exact one
-  plan path; no older correction plan subject/path is accepted.
-- `test_preflight_requires_canonical_branch_repo_tools_and_clean_source`:
-  reject wrong branch, secondary worktree, repository identity/path mismatch,
-  detached HEAD, dirty tracked source, nonempty index, changed tested-source
-  blob, Plan D sentinel, version/dependency delta, unsafe/reparse tool, and
-  unexpected evidence output. Unrelated ignored diagnostics are accepted only
-  through the fixed read-only diagnostic allowlist. Also reject missing literal
-  base ancestry, planning/spec/Plan A-C prerequisite drift, and any Plan D
-  sentinel.
-  Require no unexpected tracked/untracked evidence path in the repository; the
-  six historical reports and approved ignored diagnostics are the only initial
-  exceptions.
-  During TDD commit gates, an untracked path outside the exact current allowlist
-  is also rejected.
-- `test_tested_source_roots_and_reviewed_blobs_are_exact`: enumerate every
-  tracked leaf under the fixed tested-source roots, including root CLI and Host
-  executor test; compare working hash to reviewed-head blob, reject missing/
-  extra root or leaf, dirty tested source, and later protected-path rewrite.
-- `test_preflight_requires_six_report_hashes_and_task_6_7_absence`: table-drive
-  each surviving report missing/hash drift, either absent report appearing, and
-  the optional recovery diagnostic with correct/incorrect hash. Correct optional
-  diagnostic is cited but never promoted; every mismatch blocks read-only.
-- `test_recovered_exact_task_6_or_7_report_requires_contract_revision`:
-  place either exact locked historical report at its absent path; preflight and
-  every mutating command block before state creation rather than combining it
-  with audits or deleting/retiring it. Wrong bytes also block as unexpected.
-- `test_repository_root_is_script_relative_not_ambient_cwd`: invoke the copied
-  CLI from an unrelated cwd; assert it resolves the disposable repository that
-  contains the copied script and never reads/writes the unrelated cwd.
-- `test_producer_maps_and_command_constants_are_exact`: compare every producer
-  ID, dependency, command ID, absolute tool role, argv, cwd role, source root,
-  candidate allowlist, selector, skip rule, and final report/review heading with
-  this plan and the accepted specs. Assert arbitrary executables, candidate
-  paths, cleanup roots, Git operations, and command substitutions have no CLI
-  grammar. Fixed absolute executables resolve to Host venv Python, system Git,
-  system Node, and checked-in local Node entry points only; tests reject PATH
-  substitution, npm/npx fallback, or drift. Every Vitest command with cwd at the
-  repository root uses exact argv `--root extension --config vitest.config.ts`;
-  reject an omitted config, a config path with the root redundantly prefixed, or
-  any other root/config pairing. JSON reporter output uses the exact token-owned
-  `--outputFile.json=<absolute-path>` argument.
-- `test_public_types_and_function_signatures_are_exact`: inspect the shell and
-  GREEN module for the section 9.1 dataclasses/protocols/functions, exact
-  annotations/defaults/fields/frozen status, `main` return contract, and no
-  extra public callable/type; this fails by assertion on inert shell behavior,
-  not import/attribute error.
-
-**`CanonicalJsonTests`**
-
-Exact method count: `3`.
-
-- `test_canonical_json_round_trip_is_byte_exact`: accepted object encodes as
-  ASCII-escaped strict UTF-8, no BOM/CR, sorted keys, compact separators, one LF, and strict reread
-  returns the same value.
-- `test_canonical_json_rejects_duplicate_unknown_missing_and_noncanonical_data`:
-  table-drive duplicate keys, unknown/missing keys, `NaN`/infinity, BOM, invalid
-  UTF-8, CRLF, pretty spacing, missing/double final LF, uppercase/malformed
-  hashes, negative counters, bool-as-int, wrong list order, and duplicate list
-  members; each is exit `3` for retained state or `4` for external evidence,
-  never coerced.
-  Distinguish lowercase 40-hex Git IDs from lowercase 64-hex SHA-256 by field;
-  reject swapped lengths/types.
-- `test_random_token_is_exact_128_bit_lowercase_hex`: inject deterministic 16
-  random bytes and require exactly 32 lowercase hex characters; reject short,
-  long, uppercase, non-hex, bool/integer, or reused tokens before lease write.
-  Production randomness is `secrets.token_hex(16)` or equivalent stdlib CSPRNG.
-
-**`PathSafetyTests`**
-
-Exact method count: `2`.
-
-- `test_authority_paths_reject_escape_alias_case_separator_and_reparse`:
-  table-drive `..`, absolute injection, prefix sibling, case-fold alias,
-  separator alias, symlink/reparse owner/root/parent/descendant, unsupported file
-  type, oversize state, content race, and resolved containment escape. Assert no
-  write/delete/Git mutation. Also reject dot/empty/trailing components, drive/
-  UNC, alternate data stream, reserved Windows device, and casefold collision.
-- `test_receipt_strings_never_authorize_writes_or_deletes`: place an outside
-  victim path in candidate, owner, worktree, and quarantine string fields;
-  strict validation blocks and the victim bytes remain unchanged.
-
-**`ReadOnlyCommandTests`**
-
-Exact method count: `6`.
-
-- `test_preflight_and_status_are_read_only_and_index_byte_exact`: snapshot HEAD,
-  ref files, index bytes, worktree registration, tracked status, untracked
-  sentinels, and Git common-directory entries before/after both commands. Assert
-  exact identity and no mutation mutex acquisition or directory creation.
-  `status` strict-reads only known authority paths, reports exact fixed
-  classifications/paths, and never emits retained file contents.
-  Multiple repeated invocations are idempotent and leave identical snapshots/
-  canonical results for unchanged state.
-- `test_status_classifies_only_absent_ready_or_retained_state`: exact no-state
-  returns `state_absent`; a complete compatible terminal inventory returns
-  `state_ready`; empty present root, orphan lease, partial quarantine, unknown
-  entry, malformed terminal record, or candidate drift returns exit `3` and
-  `retained_state` without mutation.
-  After each producer terminal record, `state_ready` enumerates the exact
-  dependency-ordered completed IDs and hashes; missing/out-of-order state blocks.
-  Unknown state schema version is retained/incompatible, never migrated.
-- `test_status_reviewed_head_field_drives_retirement_and_finalizer_literals`:
-  `state_absent` returns null; single-head `state_ready` returns exact 40-hex;
-  mixed/malformed state blocks without a usable head. Retirement accepts only
-  this validated old head, and finalizer/resume tests retain one immutable
-  pre-CAS literal even after current HEAD changes.
-- `test_status_returns_absent_after_successful_finalizer_cleanup`: simulate the
-  complete post-validated success cleanup while committed evidence remains in
-  Git; require no lease/state authority and exact `state_absent`, proving tracked
-  final artifacts are not mistaken for retained executor state.
-- `test_read_only_git_uses_no_optional_locks_and_closed_environment`: capture
-  every Git child; assert absolute Git, leading `--no-optional-locks`,
-  `GIT_OPTIONAL_LOCKS=0`, `shell=False`, fixed cwd, and no inherited
-  Plan-E-prefixed controls, `DH_PROMOTION_EVIDENCE`, `PYTHONPATH`, hooks/helper variables, or
-  unrelated `GIT_*`. The CLI first resolves and validates the fixed system Git
-  executable as a regular non-reparse file; PATH substitution is rejected.
-  Assert no pager/editor/prompt/credential/network behavior is reachable and
-  output capture is bounded.
-- `test_fsmonitor_hook_signing_filter_and_helper_effectiveness_blocks`:
-  table-drive true/effective `core.fsmonitor`, fsmonitor hook, hooksPath,
-  non-sample hook, signing, credential/helper, and attributes-selected filter;
-  assert preflight blocks before worktree-reading/ref-mutating Git. An unused
-  global LFS filter is recorded but does not block. Effective working-tree
-  encoding or other byte-transforming attributes also block; line-ending config
-  is recorded and staged/committed blobs remain exact authority.
-  Change relevant config between preflight and a sensitive operation; immediate
-  revalidation blocks before hook/ref mutation.
-
-**`MutexLeaseTests`**
-
-Exact method count: `7`.
-
-- `test_mutation_creates_and_rereads_lease_before_state_root`: fake adapter logs
-  calls; assert non-abandoned mutex, exclusive canonical lease write/reread, then
-  exact state-root creation, with durable parent/directory handling and mutex
-  release/handle close in `finally`. Before lease, permit only read-only
-  preflight calls; after lease, every write must bind the live token/owner.
-  Assert the lease parent already exists and is the Git common directory; no
-  directory creation precedes the lease write.
-- `test_mutex_name_and_state_paths_bind_canonical_repository_identity`:
-  equivalent path spelling/case resolves to one fixed production mutex/state
-  authority; a different repository identity differs; cwd text cannot change
-  either. Test adapters always substitute a unique nonproduction mutex name.
-- `test_retained_abandoned_partial_and_unknown_state_blocks_without_cleanup`:
-  table-drive held/abandoned mutex, existing incompatible lease, root without
-  compatible succeeded inventory, partial owner, unknown entry, retained temp,
-  and unknown worktree registration. Assert exit `3`, exact authority paths in
-  output, and byte-identical retained state.
-  A later producer invocation at either head also blocks; no retry/adoption path
-  exists for ordinary crash state.
-- `test_finalizer_resume_requires_same_closed_token_and_checkpoint`: exact
-  same-token finalizer state may resume; different kind/token/head/owner,
-  malformed maps, wrong ref/index/HEAD, missing candidate, or abandoned mutex
-  blocks without adoption.
-  No producer/review/retire/status invocation may adopt a finalizer lease;
-  `finalize` alone can resume it.
-- `test_windows_named_mutex_contention_abandonment_release_and_handle_closure`:
-  on Windows, spawn real helper subprocesses with one unique test-only name and
-  verify contention, abandoned acquisition classification, ownership, normal
-  release, and handle closure. Bound child waits with fixed test timeouts and
-  terminate/await on failure so the suite cannot hang. Skip only when
-  `os.name != "nt"`; no production
-  mutex name is touched. The complete executor RED/GREEN counts above are the
-  Windows execution contract; on another platform this single method is the only
-  authorized skip and the recorded total/skip policy must be revised before
-  accepting evidence.
-  Contention is nonblocking and returns exit `3`; abandoned acquisition reports
-  retained state and performs no cleanup/write even though Windows grants the
-  mutex handle. Win32 return/error handling and exactly-once handle closure are
-  asserted for success and every failure branch.
-- `test_non_windows_mutating_commands_block_without_mutex_emulation_or_write`:
-  patch platform discriminator false; every mutating CLI command returns fixed
-  blocked/unsupported classification with no lease/state/child/ref write, while
-  read-only commands and injected unit adapters remain available.
-- `test_mutex_releases_last_and_parent_state_restores_on_success_and_failure`:
-  inject success, validation failure, child failure, and cleanup failure; assert
-  child handles close before owned cleanup, parent cwd/environment stay exact,
-  lease removal occurs only on complete success, and mutex release/handle close
-  are the final adapter actions in `finally`.
-
-**`CommandReceiptTests`**
-
-Exact method count: `6`.
-
-- `test_foreground_command_receipt_matches_actual_execution`: execute a fixed
-  harmless Python child in a disposable repo. Assert receipt executable, argv,
-  cwd, environment, `shell: false`, exit, stdin hash, and captured stdout/stderr
-  hashes came from the exact object passed to `subprocess.run`. Reject command
-  records synthesized before launch, after object mutation, or from descriptive
-  placeholder argv.
-  Require argument-array execution with no joined/reparsed shell command.
-- `test_child_output_limits_fail_safely_without_partial_receipt`: fixed harmless
-  children exceed stdout and stderr bounds separately; assert process
-  termination is awaited, no partial succeeded receipt/candidate is promoted,
-  safe `internal_error` exposes no child text, and retained ownership blocks.
-- `test_child_nonzero_or_start_failure_never_promotes_succeeded_receipt`:
-  table-drive start error, signal-like/nonzero exit, timeout adapter result, and
-  command-definition drift; require waited/closed process when started, exact
-  failure classification, no candidate/succeeded receipt, retained lease/owner,
-  and unchanged parent environment/cwd.
-  Timeout must terminate/await the exact child tree; detached descendants are
-  forbidden by command definitions/adapters.
-- `test_command_receipt_schema_rejects_unknown_missing_type_order_and_hash_drift`:
-  mutate every closed command row field, command ordering, environment
-  key/value/order, bool-as-int exit, stdin null/hash rule, executable/argv/cwd,
-  shell flag, and output hash. Every malformed receipt blocks finalization and
-  cannot be normalized into acceptance.
-- `test_host_children_receive_six_fresh_distinct_contained_directories`:
-  child prints only hashes of its six values; assert all directories existed
-  before child start, were distinct/contained, receipt-bound, removed only after
-  child exit/evidence promotion, and the parent environment stayed unchanged.
-  Every external Git, Node, Python, TypeScript, Vite, Vitest, test, and mutation writer is
-  foreground and synchronously awaited; no cleanup begins while a child handle
-  remains live.
-  Require `PYTHONDONTWRITEBYTECODE=1` and no bytecode cache under source/state.
-- `test_unknown_duplicate_malformed_or_drifting_receipts_are_rejected`:
-  table-drive unknown producer/command ID, duplicate command ID, unknown key,
-  stale head/blob, candidate missing/extra/hash drift, unsafe cwd/env, invalid
-  exit, empty command list, and overlapping candidate ownership; each blocks.
-  A receipt's mere presence never makes state ready; every candidate and source
-  binding is independently recomputed.
-
-**`CandidatePublicationTests`**
-
-Exact method count: `5`.
-
-- `test_candidate_publication_uses_no_clobber_hard_link_and_reread`: verify
-  exclusive temp, flush, exact reread, same-directory hard link, target inode/
-  device/link/bytes/hash identity, and temporary removal. Cross-volume or
-  unsupported identity blocks. Patch `os.replace` to fail if called.
-- `test_candidate_collision_concurrency_and_crash_preserve_state`: existing
-  target, unsupported hard links, two publishers, failure before/after link, and
-  hash mismatch never overwrite target; lease/owner/temp/candidate state remains
-  for inspection as applicable. Also prove a candidate flush/fsync failure and
-  a missing durability capability fail closed before publication.
-  Reinvoking a completed producer does not overwrite or silently succeed; its
-  terminal record is reported by status and duplicate production is blocked.
-- `test_candidate_and_receipt_publication_order_is_crash_safe`: owner/lease
-  precede candidate writes; all exact candidates publish and hash before a
-  terminal receipt; owned child/worktree cleanup completes before succeeded
-  receipt publication; lease removal is last. Inject a crash between every
-  transition and require later automation to block without treating partial
-  state as succeeded.
-  Producer completion leaves source checkout HEAD/ref/index unchanged.
-- `test_fixed_artifact_publication_rejects_collision_except_six_reports`:
-  every non-historical fixed artifact must be absent and no-clobber published;
-  the six report paths are read/hash-only and never written, moved, retired, or
-  deleted. Pre-final candidates remain in Git-common head-scoped state; fixed
-  `.superpowers/sdd` publication happens only in `finalize`.
-  Before finalization those reports must be untracked/unstaged; final staging
-  force-adds their exact bytes, and committed blobs must equal preexisting hashes.
-  Materialization leaves source candidate bytes/hash intact through post-
-  validation and never moves/consumes them early.
-- `test_candidates_are_head_scoped_and_fixed_paths_wait_for_finalize`: produce
-  two immutable reviewed heads with the same producer; assert disjoint
-  head-scoped candidate authorities and no `.superpowers/sdd` fixed artifact
-  exists before finalization.
-
-**`RetirementTests`**
-
-Exact method count: `4`.
-
-- `test_retirement_requires_complete_dependency_closed_terminal_state`:
-  accept exact `succeeded/rejected` closure with ancestor old/new heads. Reject
-  missing dependencies, unexpected producer, crash state, nonancestor, hash
-  drift, rejected candidate, or outside path before any mutation. Subset
-  retirement is accepted only when computed from the closed dependency graph and
-  includes every succeeded upstream candidate plus exact rejected/no-candidate
-  downstream records in that selected closure.
-  Retirement is required before any producer starts for the accepted new head;
-  mixed old/new head-state directories are rejected.
-- `test_retirement_atomically_moves_head_authority_then_deletes_quarantine`:
-  assert one whole old-head-directory rename to token quarantine, then deletion
-  only under quarantine. Failure before rename changes nothing; failure after
-  rename retains quarantine plus lease cleanup status and blocks later calls.
-  HEAD/ref/index remain byte-identical; retirement performs no Git staging or
-  commit.
-- `test_retirement_never_deletes_receipt_supplied_or_unrelated_paths`:
-  inject outside, sibling-head, historical-report, tracked evidence, and
-  unrelated Git-common paths into all receipt string locations; only the
-  constant-selected whole old-head directory may move to quarantine, and all
-  victims remain byte-identical on both success and failure.
-- `test_review_rejection_is_clean_terminal_state_not_crash_state`: invalid
-  review writes only a canonical closed `rejected` record, no findings candidate,
-  cleans owned temporary/lease state, exits `4`, and can later be retired as a
-  dependency-closed terminal record. Rejection classifications are fixed enums
-  such as grammar, binding, criterion, high-severity, disposition, and session;
-  raw findings/input text is not copied into the record or stdout.
-
-**`WorktreeLifecycleTests`**
-
-Exact method count: `4`.
-
-- `test_only_promotion_and_task_audits_may_create_linked_worktrees`: every other
-  producer blocks before `git worktree add`; the two allowed definitions bind
-  normalized exact path, detached head, mutation allowlist, original blobs, and
-  expected mutated hashes.
-- `test_owned_worktree_create_restore_remove_lifecycle_is_exact`: in a disposable
-  Git repo assert owner-before-add, one exact registration/head, only allowed
-  mutation, byte restoration, clean status, non-force exact removal, then path/
-  registration/owner absence. For the promotion definition, one invocation at
-  the reviewed head owns one detached worktree. It first materializes only the
-  exact RED-commit blobs for the promotion test/production paths, runs RED, and
-  restores both reviewed-head blobs in `finally`; it then applies all five fixed
-  production transformations sequentially in that same worktree. Inject failure
-  before mutation, after mutation, after the failing selector, after restoration,
-  and before removal, and require the handler's `finally` to attempt exact-byte
-  restoration/revalidation before any removal. Successful completion proves
-  every RED, GREEN, mutation, and restored-GREEN transcript plus original final
-  blobs and clean reviewed-head status before one non-force removal. Patch
-  prune/force paths to fail if called.
-- `test_worktree_head_blob_status_or_registration_mismatch_is_retained`:
-  every mismatch blocks removal and preserves owner/registration/path.
-- `test_worktree_path_normalization_rejects_case_separator_alias_and_prunable_state`:
-  compare Git porcelain and local paths through resolved Windows case-insensitive
-  identity; reject aliases, duplicate registrations, paths outside the closed
-  token root, and `prunable` metadata without adopting/removing anything.
-
-**`ResultValidationTests`**
-
-Exact method count: `17`.
-
-- `test_vitest_results_use_scoped_selector_multiset_identity`:
-  identity is exactly `(normalized repository-relative file, tuple(ancestorTitles),
-  title)` stored in a `Counter`; duplicate titles across files and duplicate
-  parameter rows in one file are accepted with their exact multiplicity. Never
-  treat neither `title` nor `fullName` alone as identity.
-- `test_vitest_selector_multiplicity_and_status_are_exact`: explicit named
-  selector requirements carry expected multiplicity; reject missing/extra row,
-  wrong count, or any matching occurrence with a non-passing expected status.
-- `test_vitest_full_name_is_derived_consistency_not_identity`: require each
-  `fullName` to equal the exact non-empty `ancestorTitles` followed by `title`,
-  joined with one space; malformed/missing/non-string values fail, but equal
-  repeated `fullName` values remain valid when their scoped multiset is valid.
-- `test_vitest_focused_multiset_equals_full_restricted_multiset`: restrict the
-  full-run scoped-selector Counter to exact focused files and require equality
-  with the focused Counter, including multiplicities and statuses; reject drift
-  even when aggregate totals match.
-- `test_vitest_results_require_exact_files_and_counter_reconciliation`: normalize
-  `testResults[].name` to contained repository-relative POSIX paths, require
-  exact test-file inventory, use `len(testResults)` as file count, and require
-  `sum(len(assertionResults)) == numTotalTests` plus exact passed/failed/pending/
-  deferred counter reconciliation. Nested suite counters never substitute for
-  file count; traversal/case/separator aliases and zero totals fail.
-- `test_extension_producer_argv_and_subset_inventories_are_exact`: compare the
-  fixed twenty-four-file Plan E selector order, Task 6/7 current file lists and named
-  assertions, full tracked test-file inventory, fixed local Vitest executable
-  cwd/argv/reporters/output
-  authority, and focused-to-full file/test relationships. Reject missing/extra/
-  reordered files, wrong reporter/config/cache flag, npm/npx/network-capable
-  fallback, or output outside token root. Every focused/full/Task-audit Vitest
-  argv uses exact `--root extension --config vitest.config.ts`; reject a
-  redundantly root-prefixed config and
-  every other config spelling. Require one absolute token-owned
-  `--outputFile.json=<path>` value per JSON run.
-- `test_asset_provenance_build_copy_and_release_safety_are_exact`: bind canonical
-  test/asset/attributes blobs and SHA-256, exact `.gitignore` deletion, five Node
-  tests, source/dist asset identity, reviewed/release inclusion, and absence of
-  private/local menu markers. The asset is reviewed product, never a final
-  evidence artifact.
-- `test_build_and_static_commands_use_only_absolute_local_node_entries`:
-  require exact TypeScript, Vite, and Vitest local entry files/argv/cwd/output
-  roots; reject npm/npx/PATH lookup, install/update flags, remote URL, package
-  download, or network-capable fallback. Build must copy the tracked asset
-  byte-identically. Vitest cwd is the repository root and its exact root/config
-  pair is `--root extension --config vitest.config.ts`; the Vite build remains
-  `build extension --config extension/vite.config.ts` because that is a separate
-  root-CLI contract.
-- `test_host_results_require_positive_counts_and_exact_skip_policy`: focused,
-  Task-7-current, update-engine, package, executor, and compile phases have zero
-  skips. Full and recovery each allow exactly selector
-  `host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation`
-  with reason `DH_PLAN_C_FROZEN_ONEDIR not set`; extra/missing/wrong skip blocks.
-- `test_host_result_selectors_and_phase_modules_are_exact`: compare each phase's
-  fixed module argv, positive `Ran` total, unique sorted passed selectors, skip
-  subtraction, executor inclusion, and full tracked top-level Host test-module
-  inventory. Reject zero tests, duplicate/missing selector, wrong module, ERROR,
-  or a passing summary whose selector count does not reconcile.
-- `test_promotion_result_requires_red_replay_green_mutations_and_sources`:
-  require seven immutable-RED assertion failures, constructor pass, all eight
-  GREEN selectors, five mutation failures plus restored GREEN, exact source
-  blobs, exact 40 candidates (14 fixed plus 26 transcript leaves), transcript
-  maps, observed attempts `2/3`, delays `0.05/0.2`, validation calls `1/3/5`,
-  hooks once, and cause/state facts. Require source/hash records for the exact
-  inert comment-only promotion command/mutation provenance artifacts; assert
-  both parse to zero executable PowerShell statements and neither `.ps1` path is
-  ever a child executable, imported script, dot-sourced file, or command source; label
-  replay only as `RED commit replay`. Require all GREEN/mutation/restoration work to belong
-  to one `produce --kind promotion` owner/lease and one detached-worktree
-  lifecycle; no separate mutation command or primary-checkout edit is accepted.
-  Assert the ordered command receipt contains the RED/constructor/GREEN/mutation/
-  restored-GREEN actions in that one invocation and contains no `.ps1` executable
-  or second mutation-process entry.
-- `test_promotion_source_semantics_lock_seams_checkpoints_and_atomic_callsite`:
-  extract the committed-plan promotion class/import/class-map contracts and
-  require blob `476760dee46de0273d4b3beb2b8e5452e790d6df`, payload size/lines/SHA,
-  13 helpers/8 tests, exact
-  current indentation and class-map placement; then parse committed
-  `host/update_engine.py` and require exactly the three seams/two
-  constants, frozen constructor, one complete validator, one retry helper, three
-  checkpoint markers/calls in order, `_replace_path` only for promotion, sleep
-  only at fixed delays, and one logical `_run_preparation_operation` call. Reject
-  copy/delete/non-atomic fallback or retry around hooks/active writes.
-  Require unchanged operation label, transitions, active record construction,
-  ownership/probe/staging logic, and later phases outside the approved callsite/
-  helpers/seams/import.
-  Lock the five producer transformations and selector map from section 9.6 as
-  constants in `host/test_plan_e_evidence.py`; each anchor occurs exactly once,
-  and the production CLI consumes those fixed definitions without accepting a
-  mutation string/path from argv or receipt data.
-- `test_promotion_replay_failures_are_assertions_not_collection_or_setup_errors`:
-  for each immutable RED transcript require exactly one named selector,
-  `Ran 1 test`, one `FAIL`, `FAILED (failures=1)`, and no ERROR/import/skip/
-  timeout/signal/zero-match text; constructor requires one `ok` and `OK`.
-  Require RED materialization and reviewed-head restoration to occur under the
-  same promotion owner/lease/worktree and foreground process as GREEN and all
-  five mutations; exact reviewed-head blobs must be restored before GREEN.
-- `test_task_audits_are_canonical_current_state_only`: validate the complete
-  closed schema from the evidence-loss spec, Task 6 `9` commits/`7` paths/empty
-  related list/two mutations, Task 7 `3` commits/`14` paths/one exact related
-  cleanup/one mutation, all locked hashes/blobs/checks, report absence, and both
-  reconstruction booleans false. Bind Task 6 base/head/tree
-  `ba34fb05719adeb8e5501827dc7a7398b8041aec` /
-  `44fdea3e6b60fd975dc150436e08ba048a744c8c` /
-  `6feb60db2767d35a7886ac32b805c12174ff683f`; Task 7 base/head/tree
-  `44fdea3e6b60fd975dc150436e08ba048a744c8c` /
-  `1ad75ea3891513db12a41b48ae5ccf35f32250ab` /
-  `541caa656ccce0c3e8b2acc896269337ceecd995`; and related cleanup
-  `e163eb28492b32b3cf743b6700eebd0bda7504cb`, parent Task 7 head, tree
-  `0547bddb2968d3fd9d160a58d7ce74a67ad8b90c`, subject
-  `test(fab): remove stale Root mock`, sole path
-  `extension/src/components/FAB.pageIdentity.test.tsx`, numstat `0 1`, blobs
-  `95476baad531c6c8a9e9e5022f1440d49a2e299c` to
-  `7eed2e5a8ad30ea30c9ecd51b33bfe32293979dd`. The CLI constant tables also
-  contain the ordered nine Task 6 and three Task 7 core commit rows with their
-  exact parents, trees, subjects, sorted name-status paths, numstat, and head
-  blobs as read from Git; the tests compare every row and reject any extra or
-  missing commit/path.
-- `test_task_audit_schema_rejects_every_closed_field_and_cardinality_drift`:
-  mutate each top-level/nested key, enum, type, order, cardinality, command argv,
-  assertion title, mutation result, machine-evidence hash/null rule, lineage
-  row, source blob, report path/hash, required review kind, and reconstruction
-  boolean. Reject unknown/missing fields, wrong Task 6/7 distribution, stale
-  reviewed head/plan blob, noncanonical bytes, and any claimed historical
-  reconstruction.
-- `test_task_audits_bind_exact_machine_evidence_and_review_requirements`:
-  Task 6 binds focused and reviewed-head verification hashes with Host hash
-  exactly null; Task 7 binds focused, Host, and reviewed-head verification
-  hashes. Both require the two review-kind list in order and exact evidence paths;
-  any stale/missing/mismatched dependency receipt or hash blocks generation.
-- `test_audits_freeze_before_review_and_are_never_regenerated_by_consumers`:
-  after no-clobber audit publication, patch generation to fail if called; both
-  package producers, review ingestions, and finalization must only validate the
-  same bytes/hash. A changed reviewed head or audit input requires retirement
-  and a new head-scoped candidate, never overwrite.
-
-The immutable core commit order locked by those constants is:
-
-```text
-Task 6: c404aaf56250b522cbd038adf7c26ad689c1285d, 2303482bcc9fc10953174c453acb2196675dbc27, 38271fcee6738fcc7baba9eb67de5115f1a16fc7, 17218fae212d80e3231898a0480124683fde84c2, c03057db34f40fa429af2bc34e41f1b320272d34, bc0f701643dfd9b8d1bf2722200b5cb3d3c22eee, 8efc4f290aa3caba7b607bf97b764a073497306c, 932565e6ea2e21798ec0bb27b8502ae08a76ef22, 44fdea3e6b60fd975dc150436e08ba048a744c8c
-Task 7: edeb6a8b4ed0e831ebc7358499106eb0bc4ad135, d7006450df0c672e31e812148a274b8a5e6e5c76, 1ad75ea3891513db12a41b48ae5ccf35f32250ab
-```
-
-Their exact subjects in the same order are Task 6:
-`fix(fab): track SPA identity during analysis`,
-`fix(fab): order SPA scans safely`,
-`fix(fab): bind SPA context snapshots`,
-`fix(fab): bind all analyze invocations`,
-`fix(fab): separate pending scan ownership`,
-`fix(fab): revalidate terminal page ownership`,
-`fix(fab): gate local result hydration`,
-`fix(fab): require terminal full revalidation`, and
-`fix(fab): wake terminal scan coordinator`; Task 7:
-`fix(analysis): scope Root override to one request`,
-`fix(analysis): snapshot latest preference Root`, and
-`fix(analysis): preserve title page ownership`.
-
-Each generated audit has exact schema version `1`, evidence kind
-`plan_e_task_current_state_audit`, required review list
-`["plan_e_only","original_whole_branch_interim"]`, historical availability
-`unrecoverable`, claim scope `current_immutable_commit_state_only`, and the
-closed `audit_subject`, `claim_boundary`, `historical_report`,
-`implementation_lineage`, and `verification` objects defined by the amendment.
-Audit canonical JSON is written once to a head-scoped candidate through the
-same no-clobber hard-link publication as every other candidate; reviews and
-finalization only reread/hash it and never regenerate or edit it.
-
-**`ReviewGrammarTests`**
-
-Exact method count: `8`.
-
-- `test_review_text_requires_exact_whole_file_heading_grammar`: accept only the
-  exact heading orders in section 9.8. Reject prefix/suffix text, duplicate,
-  missing, extra, hidden section, BOM, controls, bidi/format code points, invalid
-  UTF-8, CR, trailing blank line, malformed scalar, unmatched text, and inputs
-  larger than the fixed 1 MiB review limit.
-  Criterion/scalar bodies must be one line; explanations outside severity/
-  testing sections are unmatched text and rejected.
-  Reject NUL and all Unicode control, bidi, and format characters in every
-  section, including findings text and session IDs.
-- `test_review_input_is_single_snapshot_regular_file_and_not_cleanup_authority`:
-  reject relative, missing, directory, symlink/reparse, changing-between-read,
-  or invalid UTF-8 input. Hash and validate one frozen byte snapshot, never
-  reopen it for findings output, and never delete or move the external input.
-- `test_review_disposition_criteria_findings_and_session_rules_are_exact`:
-  require five `PASS` values, `Critical` and `Important` exactly `None.`, exact
-  `PASS` versus `INTERIM PASS THROUGH PLAN E`, and two different session IDs.
-  Implement the user-authorized shell-safe subset of the scripted-spec session
-  grammar: exact regex `^[A-Za-z0-9][A-Za-z0-9._:@/+\-=]{0,127}$`. Reject
-  leading hyphen, every leading punctuation character from the remaining safe
-  set, whitespace, quotes/backticks/dollar/semicolon/pipe/ampersand/parentheses,
-  controls, non-ASCII, empty, equal, or over-limit IDs; no trimming, Unicode
-  normalization, or case folding. Also assert metacharacters are rejected when
-  embedded, not only at the first position, and accepted IDs remain literal
-  single argv values. This deliberate narrowing preserves the spec's opaque-ID
-  claim boundary while making one-line PowerShell transport unambiguous.
-- `test_review_critical_or_important_code_finding_blocks_even_when_criteria_pass`:
-  provide all five criteria `PASS` with one syntactically valid ordinary
-  correctness/security Critical or Important row; only `BLOCKED` is valid and
-  ingestion produces no findings candidate.
-- `test_second_review_must_bind_a_different_declared_session_and_findings_hash`:
-  ingest either order; reject equal normalized IDs, equal complete findings
-  hashes, copied wrong-kind content, or a second record that does not bind its
-  own package/diff while both still bind identical frozen audits/reviewed head.
-- `test_review_findings_require_closed_file_line_grammar`: `Minor` and `Testing
-  Gaps` are either `None.` or one or more `- [Minor] path:line - text` rows;
-  reject mixed `None.`, missing path/positive line, wrong severity, or free text.
-  Critical/Important findings, when testing blocked input, use the same
-  `- [Critical] path:line - text` / `- [Important] path:line - text` grammar and
-  force disposition `BLOCKED`; successful ingestion still requires exact
-  `None.` in both sections. Valid Minor/Testing Gaps rows preserve `PASS` or
-  interim pass while exact counts and combined hash are recorded.
-- `test_review_rejects_hash_range_audit_or_prospective_durability_drift`: bind
-  exact package/diff bytes, bases, reviewed head, range, both audit hashes, and
-  reject a claim that the later evidence commit already exists/is durable. The
-  package producer runs stat/log/name-status and full-index binary diff twice
-  from exact command objects and requires byte-identical rechecks.
-  Require package kind label and exact full-index binary diff command/range once;
-  Plan-E package path inventory must be the literal 70 paths.
-- `test_review_dispatch_candidates_are_receipt_authorized_head_scoped_bytes`:
-  package success output names exact candidate authorities/hashes; dispatch
-  lookup validates kind/head/hash and reads those bytes. Reject manually copied,
-  fixed-path, stale-head, outside-state, or unreceipted package/audit input. An
-  optional read-only transport copy must hash byte-identical before dispatch and
-  never replaces original candidate validation.
-
-**`FinalReportTests`**
-
-Exact method count: `5`.
-
-- `test_final_report_has_exact_headings_and_required_facts`: compare all 18
-  report headings and every fact enumerated in section 9.9, including exact
-  Task 1-5/8 report hashes and RED/mutation summaries, Task 6/7 unavailable
-  forms, exact live totals/skips, executor results, audit/review summaries,
-  forbidden operations, residual risks, and post-D rerun. Reject unresolved
-  authoring markers, duplicate/missing scalar lines, non-lowercase hashes,
-  empty sections, CR/BOM, wrong title, and missing final LF.
-  Require exact candidate-readiness wording and keep it distinct from post-CAS
-  PASS, release readiness, Plan D completion, and final whole-branch completion.
-  Require the `Final artifact manifest SHA-256` scalar to contain exactly one
-  lowercase 64-hex value copied
-  from the exact staged manifest candidate, plus the exact prospective candidate
-  contract lines in section 9.9; reject any pre-CAS base-to-final/final-commit
-  `PASS` wording.
-  Reject embedded executable shell/Python implementation blocks in the report;
-  historical command evidence is summarized by identity/output/hash only.
-- `test_final_report_requirement_matrix_has_exact_unique_coverage`:
-  require every Plan E product, executor, retry, audit, review, and finalization
-  invariant exactly once with exact test file/selector, producer receipt, and
-  artifact binding; reject unmapped, duplicate, stale, or unknown rows.
-- `test_final_report_lists_exact_reviewed_and_evidence_path_sets_once`:
-  compare report path sections with marked 70/60 constants and Git, rejecting
-  duplicate, missing, extra, reordered, renamed, or overlapping paths.
-- `test_final_report_has_no_final_commit_sha_or_post_cas_fixed_point`:
-  report inputs/bytes may contain reviewed head, fixed evidence subject,
-  validated artifact hashes, the exact staged manifest SHA-256, and fixed
-  inventory/readiness contracts only. The manifest excludes itself and the
-  report, so recording its hash is non-circular.
-  Reject prospective/final tree, complete staged blob map, report/manifest Git blob
-  ID, report self-hash, final evidence commit SHA, current post-CAS HEAD, committed-report
-  self-reference, post-cleanup PASS, or any field whose value depends on the
-  report blob's own bytes or eventual commit ID.
-  Require exact candidate-readiness/candidate-contract lines and forbid
-  base-to-final, committed, finalized, or cleanup PASS language inside the
-  report.
-- `test_final_report_rejects_task_6_7_historical_reconstruction_claims`:
-  table-drive positive, split-line, punctuation, and synonym combinations of a
-  Task 6/7 historical RED/GREEN/mutation/TDD/edit/reviewer subject with the
-  forbidden reconstruction verbs `recover`, `recreate`, `replay`, `reproduce`,
-  and `prove`; require rejection. Accept exact `UNRECOVERABLE`, explicit
-  negation, and `current_immutable_commit_state_only` statements.
-
-**`FinalizationTests`**
-
-Exact method count: `15`.
-
-- `test_finalizer_validates_58_artifacts_and_stages_exact_60_blobs`: require all
-  ten selected terminal records with both reviews `succeeded`, candidate hashes,
-  six report hashes,
-  audit/findings bytes,
-  absent Task 6/7 reports, exact manifest, and exact staged list/blob map before
-  commit. One missing/extra/drifting path blocks. Finalization creates only the
-  canonical manifest and complete report; every other artifact comes from an
-  exact producer candidate or six-report read-only exception.
-  Creation order is fixed: freeze/validate the 58-artifact map, create and freeze
-  canonical manifest bytes, compute their SHA-256, create the report once with
-  that exact hash, then stage both. The report is never reopened to insert a
-  value computed from itself or the later commit.
-  Pre-commit untracked artifacts must be ignored and absent from parent/index;
-  this ignore check is never used after commit.
-  Require all 60 paths absent from the reviewed parent tree and added by the
-  evidence commit; modification/rename status is invalid. Require every
-  non-evidence tree entry identical to reviewed head.
-  A clean rejected review may be retired but never satisfies finalization.
-  Recompute every candidate and fixed materialization hash immediately before
-  staging to close producer-to-finalizer drift.
-- `test_final_report_and_manifest_are_single_creation_frozen_candidates`:
-  finalizer exclusively creates canonical manifest and complete report after all
-  inputs freeze, derives both from the same validated artifact map, and rejects
-  any later rewrite, append, reopen race, or pre-existing output before staging.
-  The manifest never contains itself or the report. Finalize the canonical
-  manifest bytes first, hash the frozen staged manifest candidate, then create
-  the report exactly once with that lowercase SHA-256. The report never contains
-  its own hash; finalizer output records both staged hashes externally.
-- `test_finalizer_requires_reviewed_head_equal_audit_subjects_and_review_heads`:
-  mutate either audit subject, either package/findings head, current branch head,
-  or post-review ancestry; finalization blocks before materialization/staging.
-  Only the exact evidence child may advance HEAD after accepted reviews.
-- `test_manifest_is_canonical_exact_58_path_sha256_map`: reject self-inventory,
-  report/manifest entry inclusion, auxiliary mutation entry, missing/extra/
-  unsorted path, duplicate, wrong hash, uppercase hash, or noncanonical bytes;
-  independently hash every artifact before staging and from committed blobs.
-  Compute the canonical manifest SHA-256 before report construction; require the
-  report's exact manifest-hash scalar to match both staged and committed bytes.
-- `test_finalizer_compares_every_staged_blob_with_committed_blob`: mutate a
-  working artifact after staging and make the prospective commit contain a
-  different blob; post-check catches the mismatch even when names/counts match.
-  The report's manifest/audit/review/machine hashes are recomputed from exact
-  staged blobs before commit, including exact equality between its manifest
-  SHA-256 line and the staged canonical manifest bytes, then recomputed from
-  committed blobs afterward.
-  Review summaries are reparsed from staged findings, never receipt process
-  memory or package prose.
-- `test_finalizer_uses_commit_tree_and_compare_and_swap_ref_update`: assert exact
-  tree creation, `git commit-tree` fixed subject/one parent, durable prospective
-  SHA at `staged`, and one `git update-ref branch new reviewed-head`; commit
-  hooks are neither invoked nor bypassed after their absence was revalidated.
-  Branch symbolic-ref identity is recorded before staging and must not drift.
-  The commit object uses the validated repository author/committer identity and
-  fixed message without invoking signing or credential helpers; the resulting
-  prospective commit object is retained internally before ref mutation but is
-  never written into the report. Git object/ref child environment remains
-  closed and checkpoint-bound.
-  Tree creation uses the validated exact index and does not update the worktree;
-  CAS is the sole branch-ref write. Report generation never receives the
-  prospective commit object ID.
-- `test_finalizer_concurrent_branch_or_index_change_blocks_without_overwrite`:
-  mutate branch ref before commit creation, between staged checkpoint and CAS,
-  and mutate one index stage/blob; require compare-and-swap or map validation to
-  fail, preserve the external ref/index value, and retain exact checkpoint state.
-  Assert no second ref writer, checkout, merge, reset, or commit command exists.
-- `test_finalizer_validates_staged_diff_check_and_empty_preexisting_index`:
-  require an empty index before materialization, exact force-add only for the 60
-  paths, successful staged `diff --check`, and no pre-existing staged entry;
-  whitespace errors, unrelated stage, alternate stage number, or path drift
-  retain `staged` authority and block commit.
-  Force-add is path-explicit with `--`; no pathspec expansion or `git add .`.
-- `test_finalizer_preserves_index_and_head_on_post_staging_failure`:
-  inject failures after staged checkpoint and after CAS; assert the exact index,
-  prospective commit object, ref/HEAD, and lease remain as observed, with no automatic
-  unstage/reset/HEAD rewrite. Same-token resume is the only continuation.
-- `test_finalizer_resume_reconciles_only_two_exact_ref_states`: at `staged`, ref
-  may equal reviewed head and receive one CAS; at post-CAS crash, ref may equal
-  recorded prospective commit object and advance to `committed`. Any other ref, HEAD,
-  index, token, map, or candidate blocks and never repeats commit. Resume may
-  continue only the next deterministic transition and never rewrites an earlier
-  checkpoint or infers a missing one.
-- `test_finalizer_cleanup_quarantine_and_checkpoint_failures_are_retained`:
-  before success, atomically move the complete selected head-state directory to
-  finalizer quarantine and update the lease. Inject failure at each checkpoint,
-  rename, deletion, and lease removal; assert exact checkpoint/index/HEAD/state
-  remain and no rollback/reset/unstage occurs.
-- `test_finalizer_failure_exit_codes_preserve_exact_checkpoint_authority`:
-  table-drive validation failure (`4`) versus execution/I/O failure (`5`) at
-  candidate validation, report creation, staging, tree/commit creation, CAS,
-  post-validation, quarantine, and cleanup; assert one canonical safe result and
-  exact retained lease/index/ref/HEAD facts for each checkpoint.
-- `test_finalizer_success_removes_only_owned_state_after_post_validation`:
-  after exact committed/clean-clone validation, require head-state quarantine,
-  owner, receipts, auxiliary mutation candidate, empty state roots, and lease
-  removed in order; an unrelated Git-common sentinel remains byte-identical and
-  the mutex releases last. The committed fixed artifacts remain in the working
-  tree as tracked bytes and are not deleted by evidence-state cleanup.
-  If cleanup fails after commit/post-validation, readiness remains blocked until
-  exact same-token finalizer resume completes cleanup; `verify-final` success
-  alone does not waive retained state.
-- `test_verify_final_is_clean_clone_read_only_and_uses_literal_base`: validate
-  exact parent/subject/60-path commit, manifest hashes, report/audits/reviews,
-  `70 + 60 = 130`, and clean status using committed bytes and literal base only;
-  no ignored `.gitignore`, local `plan-e-base.txt`, or `git check-ignore` read.
-  Clone into a disposable owned path with no local hard-link optimization,
-  checkout detached final head, require one registration/no prunable state,
-  validate every tracked blob, and remove only that owned clone afterward.
-  Require the committed report's manifest SHA-256 line to equal the committed
-  canonical manifest bytes and require the manifest to exclude itself/report.
-  Canonical output alone carries `final_commit_validation: "PASS"` and
-  `base_to_final_union_validation: "PASS"`; either claim in committed report
-  text fails validation.
-- `test_final_primary_checkout_is_clean_exact_head_without_extra_worktrees`:
-  after successful cleanup require branch/HEAD at final SHA, empty index/tracked
-  and unexpected-untracked status, exact committed evidence working blobs, one
-  primary worktree registration, and no `prunable`; any drift blocks readiness.
-
-**`InventoryAndReleaseTests`**
-
-Exact method count: `5`.
-
-- `test_literal_inventories_are_sorted_unique_and_exact`: extract this plan's
-  three marked lists and compare them with CLI constants. Assert `70`, `58`,
-  `60`, disjoint reviewed/evidence sets, final evidence equals artifacts plus
-  manifest/report, auxiliary mutation absence, and union `130`. Assert each
-  marker occurs once and there is no second literal inventory in Task 9.
-  Assert no lease/owner/receipt/quarantine/state path enters either final list.
-- `test_candidate_ownership_arithmetic_is_exact_and_disjoint`: require the ten
-  terminal candidate counts `40/1/1/1/1/3/2/2/1/1`, 53 unique candidates,
-  exactly one auxiliary exclusion, six report exceptions, and exact equality to
-  the 58 manifest paths; reject overlap or count/path drift.
-  Confirm both findings occupy existing fixed slots rather than increasing the
-  manifest count.
-- `test_release_staging_and_pyinstaller_exclude_executor`: inspect
-  `release_helper.stage_release`, build command/hidden imports, release source
-  allowlists, and a disposable staged release. Assert neither
-  `plan_e_evidence.py` nor `host/test_plan_e_evidence.py` enters Extension,
-  Host, `_internal`, staging, hidden imports, or package metadata. The test uses
-  existing staging APIs only inside synthetic roots and never invokes a build,
-  archive publication, tag, release, or real package operation.
-  Also assert `host` production modules never import the root CLI and the CLI
-  does not enter frozen-module graph/xref constants.
-- `test_forbidden_operations_are_unreachable_from_cli_definitions`: inspect
-  command constants and run every command with fake adapters; assert no network,
-  registry, real AppData, browser, install, publish, tag, push, authenticated
-  model, real update, broad reset, prune, or force-remove operation exists.
-  Also assert tests never address the real repository state root, production
-  mutex name, installed product, or user profile directories. Reject release
-  helper `main`, build/archive/publish entry points, updater/update-engine live
-  activation, registration APIs, and HTTP-capable argv in every producer map.
-  Also reject shell invocation, arbitrary `-c` supplied by users, background/
-  detached flags, interactive prompts, and commands outside fixed definitions.
-  Treat the two legacy-named promotion `.ps1` files as comment-only output
-  candidates: assert no command definition executes, imports, or dot-sources
-  them and strict PowerShell AST inspection finds zero executable statements.
-  Reject remote attestation/timestamp/signing/upload commands and any Git remote
-  operation.
-- `test_executor_tests_use_only_disposable_repo_profile_and_temp_roots`:
-  instrument the shared fixture plus filesystem, subprocess, mutex, registry,
-  and network adapters while exercising one row from every command family;
-  every mutable path is under a test temporary root,
-  every Host profile/temp variable points to six fresh children, and attempts to
-  address the real repository/AppData/install/mutex/network fail the test.
-
-Run focused GREEN by class in the exact class order above as implementation
-boundaries land; every class command uses the absolute Host venv Python and
-fully qualified `host.test_plan_e_evidence.<ClassName> -v`. The complete module
-command remains the acceptance gate and supplies the fixed aggregate count.
-Focused class runs are diagnostic iteration, not additional retained evidence
-commands; producer receipts retain the final complete module/discovery commands.
-
-This is exactly **99 behavioral test methods**. The one-to-one mapping is the
-method name to its immediately following input/expected-result paragraph above;
-table rows are cases within that single requirement and may not become unnamed
-or duplicate tests. The test module also contains
-`ExecutorMutationProofTests` with exactly these seven methods:
-`test_mutation_receipt_allowlist_is_caught`,
-`test_mutation_retirement_prevalidation_is_caught`,
-`test_mutation_candidate_atomicity_is_caught`,
-`test_mutation_worktree_head_validation_is_caught`,
-`test_mutation_review_whole_text_coverage_is_caught`,
-`test_mutation_host_skip_policy_is_caught`, and
-`test_mutation_staged_committed_blob_comparison_is_caught`. The complete module
-therefore has exactly **106 methods from the first RED commit**. It self-checks
-both inventories so omitted, renamed, or extra contract tests fail.
-
-- [ ] **Step 2: Run valid RED**
-
-Run named smoke contracts first, then the complete module. The shell must import
-and compile; all 106 tests must collect. Lock RED as exactly **106 assertion
-failures, 0 errors, 0 skips on the required Windows evidence host**. If a stub accidentally satisfies an assertion,
-adjust the shell's fixed wrong result, not the contract. Any syntax/import/
-collection/setup error is invalid RED.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -m unittest "host.test_plan_e_evidence.CliContractTests.test_cli_grammar_accepts_only_fixed_commands_and_producer_kinds" "host.test_plan_e_evidence.CanonicalJsonTests.test_canonical_json_round_trip_is_byte_exact" "host.test_plan_e_evidence.InventoryAndReleaseTests.test_release_staging_and_pyinstaller_exclude_executor" -v
-```
-
-Expected: `Ran 3 tests`; exit `1`; exactly 3 `FAIL`, 0 `ERROR`, 0 skipped. These
-three failures are included in, not additional to, the full 106-failure RED.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -m unittest "host.test_plan_e_evidence" -v
-```
-
-Expected on Windows: `Ran 106 tests`; exit `1`; `FAILED (failures=106)`, no
-errors/skips. Every verbose method line ends in `... FAIL`; no method passes for
-the wrong reason.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "from pathlib import Path; compile(Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py').read_bytes(), r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py', 'exec'); compile(Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\test_plan_e_evidence.py').read_bytes(), r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\test_plan_e_evidence.py', 'exec')"
-```
-
-Expected: exit `0`, no output.
-
-- [ ] **Step 3: Commit exactly the two RED paths**
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" add -- "host/test_plan_e_evidence.py" "plan_e_evidence.py"
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $git='C:\Program Files\Git\cmd\git.exe'; $authority='b77deeec53e3ac8910e8f4542dad877248a5b12a'; $planHead=(& $git -C $root rev-parse HEAD).Trim(); $planParent=(& $git -C $root rev-parse HEAD^).Trim(); $planSubject=(& $git -C $root show -s --format=%s HEAD).Trim(); $planRows=@(& $git -C $root diff-tree --no-commit-id --name-status --no-renames -r HEAD); if($planParent -cne $authority -or $planSubject -cne 'docs(update): simplify Plan E Task 9' -or $planRows.Count -ne 1 -or $planRows[0] -cne "M`tdocs/superpowers/plans/2026-07-18-hardening-e-extension-data.md"){ throw 'Executor deletion parent plan mismatch' }; $expected=@('host/test_plan_e_evidence.py','plan_e_evidence.py'); $dirty=@(& $git -C $root status --porcelain=v1 -uall); if($dirty.Count -ne 2 -or @($dirty | Where-Object { $_.Substring(0,2) -cne ' D' }).Count -ne 0 -or (Compare-Object $expected @($dirty | ForEach-Object { $_.Substring(3) }) -CaseSensitive)){ throw 'Executor deletion worktree mismatch' }; & $git -C $root add -- 'host/test_plan_e_evidence.py' 'plan_e_evidence.py'; if ($LASTEXITCODE -ne 0) { throw 'Could not stage executor deletions' }; $staged=@(& $git -C $root diff --cached --name-status --no-renames --); $expectedStaged=@("D`thost/test_plan_e_evidence.py","D`tplan_e_evidence.py"); if ($staged.Count -ne 2 -or (Compare-Object $expectedStaged $staged -CaseSensitive)) { throw 'Staged executor deletion set/status mismatch' }; & $git -C $root diff --cached --check; if ($LASTEXITCODE -ne 0) { throw 'Executor deletion diff check failed' }
 ```
 
 ```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" diff --cached --check
+& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" commit -m "chore(evidence): remove abandoned Plan E executor"
 ```
+
+Expected: the commit contains exactly two paths and both status codes are `D`.
+The command verifies its subject, all commit paths/statuses, clean state, and
+that both paths are absent at `HEAD`.
 
 ```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" commit -m "test(evidence): define Plan E executor contracts"
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $git='C:\Program Files\Git\cmd\git.exe'; $authority='b77deeec53e3ac8910e8f4542dad877248a5b12a'; $subject=(& $git -C $root show -s --format=%s HEAD).Trim(); $parent=(& $git -C $root rev-parse HEAD^).Trim(); $parentParent=(& $git -C $root rev-parse HEAD^^).Trim(); $parentSubject=(& $git -C $root show -s --format=%s $parent).Trim(); $parentRows=@(& $git -C $root diff-tree --no-commit-id --name-status --no-renames -r $parent); $rows=@(& $git -C $root diff-tree --no-commit-id --name-status --no-renames -r HEAD); $expected=@("D`thost/test_plan_e_evidence.py","D`tplan_e_evidence.py"); if ($subject -cne 'chore(evidence): remove abandoned Plan E executor' -or $parentParent -cne $authority -or $parentSubject -cne 'docs(update): simplify Plan E Task 9' -or $parentRows.Count -ne 1 -or $parentRows[0] -cne "M`tdocs/superpowers/plans/2026-07-18-hardening-e-extension-data.md" -or $rows.Count -ne 2 -or (Compare-Object $expected $rows -CaseSensitive)) { throw "Executor deletion commit/parent mismatch: $($rows -join ', ')" }; foreach($path in @('host/test_plan_e_evidence.py','plan_e_evidence.py')){ & $git -C $root cat-file -e "HEAD:$path" 2>$null; if($LASTEXITCODE -eq 0){ throw "$path still exists in HEAD" } }; if(@(& $git -C $root status --porcelain=v1 -uall).Count -ne 0){ throw 'Worktree is not clean after executor deletion' }
 ```
 
-Reread one parent, exact subject, exact sorted paths
-`host/test_plan_e_evidence.py` and `plan_e_evidence.py`, unchanged unrelated
-blobs, clean tracked status, and empty index. The observed pre-commit executor
-RED remains a narrow process attestation; chronology and the unchanged shell
-blob prove only what is present in the committed RED state.
+- [ ] **Step 3: Prove the retirement survives a new process and clean clone**
 
-- [ ] **Step 4: Implement the root CLI from the test contracts**
-
-Implement only `plan_e_evidence.py` with `apply_patch`. Follow section 9.1's architecture and data
-schemas. Do not edit tests to fit the implementation. Keep all producer command
-definitions and inventories as constants; keep Git/process/filesystem/Windows
-APIs behind narrow injected adapters; keep state parsers closed and canonical;
-and make every failure category return its fixed JSON/code/exit. Do not import
-the CLI from Host production.
-Keep implementation cohesive in the one authorized root file; private helpers
-may separate concerns internally, but do not add a package/module tree or new
-paths without a separately accepted path-count amendment.
-Keep exported/public names exactly to the frozen interfaces/constants required by
-tests; prefix implementation-only helpers with `_`.
-
-Fixed producer behavior:
-
-- `promotion`: create one detached worktree at the immutable reviewed head,
-  materialize the exact promotion test/production blobs from the immutable RED
-  commit long enough to replay seven assertion failures and one constructor
-  pass, then restore exact reviewed-head blobs in `finally`; run GREEN all eight
-  selectors, then five exact temporary mutations and restored GREEN in the same
-  worktree and foreground invocation; complete 40
-  promotion candidates. The 40 are 26 transcript leaves plus the 14 fixed inert
-  promotion provenance/hash/map/ledger/observation artifacts in the 58-path
-  list. Legacy-named `.ps1` artifacts are comment-only evidence snapshots with
-  zero executable statements and are never executed; all behavior lives in the
-  tracked Python producer.
-  Original RED execution is only process attestation.
-- `focused-extension`: exact Plan E focused files plus exact Task 6 and Task 7
-  current-state file sets; canonical Vitest JSON with exact scoped-selector
-  multisets, explicit multiplicities, statuses, and counters.
-- The exact Plan E focused file inventory is
-  `src/utils/ownData.test.ts`, `src/utils/bookmarkItems.test.ts`,
-  `src/components/Options.test.tsx`,
-  `src/components/MenuLogic.teamCache.test.ts`,
-  `src/utils/teamCatalog.test.ts`,
-  `src/background/teamManifestSync.test.ts`,
-  `src/utils/analysisStore.test.ts`,
-  `src/background/analyzeBridge.test.ts`,
-  `src/background/analyzeRequestHandler.test.ts`,
-  `src/background/nativeMessageWire.test.ts`,
-  `src/hooks/useAnalysisHydration.test.ts`,
-  `src/utils/promptSourceErrors.test.ts`,
-  `src/utils/pageIdentity.test.ts`, `src/utils/analyzeRequest.test.ts`,
-  `src/background/contextMenu.test.ts`,
-  `src/components/ResultPopover.test.tsx`,
-  `src/components/FAB.pageIdentity.test.tsx`,
-  `src/components/FAB.analyzeRequest.test.tsx`,
-  `src/components/FAB.spinner.test.tsx`,
-  `src/components/FAB.promptSourceErrors.test.tsx`,
-  `src/utils/nativeUpdateError.test.ts`,
-  `src/utils/configUpdateResult.test.ts`,
-  `src/background/resetExtensionState.test.ts`, and
-  `src/content/updateErrorBridge.test.ts`, in that fixed order with runner/no-
-  cache and verbose plus JSON reporters.
-- `full-extension`: every tracked `extension/src/**/*.test.ts(x)` file at the
-  reviewed head, canonical JSON, no missing/extra test file. Invoke absolute
-  local Node with
-  `extension/node_modules/vitest/vitest.mjs run --root extension --config
-  vitest.config.ts --configLoader runner --no-cache
-  --reporter=verbose --reporter=json --outputFile.json=<token-owned-json-path>`.
-  The focused and Task-audit Extension commands use the same executable/root/
-  config/loader/cache/reporter/output-file grammar before their fixed file and
-  optional `-t` selectors. No JSON is parsed from mixed console output.
-- `host`: focused, Task-7-current, full tracked discovery, update-engine,
-  recovery, package, executor, and source compile phases in isolated roots. Only
-  full and recovery have the one authorized frozen-probe skip/reason. Full
-  discovery inventories every tracked top-level `host/test_*.py` module at the
-  reviewed head, including `host/test_plan_e_evidence.py`; every phase requires
-  a positive exact `Ran N tests` count and sorted passed selectors.
-  Focused modules are `host.test_session_workspace`, `host.test_prompt_session`,
-  `host.test_prompt_sources`, `host.test_sdk_compat`,
-  `host.test_debug_prompt_isolation`, and `host.test_model_config`.
-  Update-engine modules are `host.test_update_engine_resume`,
-  `host.test_update_engine_host`, `host.test_update_engine_extension`, and
-  `host.test_update_engine_rollback`; recovery is `host.test_update_recovery`;
-  package is `host.test_release_helper` plus `host.test_package_archive`;
-  executor is `host.test_plan_e_evidence`.
-- `static`: TypeScript no-emit with token-owned build-info, production Vite build
-  to a token-owned output, static/AST/no-coercion checks, tested-source blobs,
-  and `git diff --check` from literal base to reviewed head. Generated output is
-  confined to owned temporary paths and removed after command termination; it
-  never changes tracked/ignored product output in the primary checkout. The
-  TypeScript argv is absolute local Node plus
-  `extension/node_modules/typescript/bin/tsc --noEmit --tsBuildInfoFile
-  <owned-file> -p extension/tsconfig.json`; build argv is absolute local Node
-  plus `extension/node_modules/vite/bin/vite.js build extension --config
-  extension/vite.config.ts --configLoader runner --outDir <owned-dir>
-  --emptyOutDir`. No npm/npx/network fallback is defined. Owned paths derive
-  only from the producer token and closed map, never CLI grammar.
-- `task-audits`: exact Task 6/7 current-state checks and three mutations in an
-  owned detached worktree, then exact closed audit JSON. It never reconstructs
-  historical reports or chronology. Task 6 reruns
-  `extension/src/utils/pageIdentity.test.ts`,
-  `extension/src/components/FAB.pageIdentity.test.tsx`,
-  `extension/src/components/FAB.spinner.test.tsx`, and
-  `extension/src/hooks/useAnalysisHydration.test.ts`, requiring titles
-  `switches identity from A to B while Analyze is busy`,
-  `contains throwing identity accessors`,
-  `replaces a user-edited A textarea with B after busy Analyze completes`, and
-  `clears A hydration while deferred B hydration is pending`. Task 7 reruns
-  `extension/src/utils/analyzeRequest.test.ts`,
-  `extension/src/background/contextMenu.test.ts`,
-  `extension/src/components/FAB.analyzeRequest.test.tsx`,
-  `extension/src/components/FAB.spinner.test.tsx`,
-  `extension/src/components/FAB.promptSourceErrors.test.tsx`,
-  `extension/src/components/FAB.userPrompt.test.tsx`,
-  `extension/src/components/FAB.bookmarkTelemetry.test.tsx`,
-  `host.test_session_workspace`, and `host.test_prompt_session`, requiring
-  Extension title `applies an explicit empty Root to exactly one request` and
-  Host selectors
-  `TestSessionIdentityLifecycle.test_explicit_empty_analyze_root_overrides_config_for_one_request`,
-  `TestSessionIdentityLifecycle.test_request_after_explicit_empty_without_marker_uses_configured_root`,
-  `TestSessionIdentityLifecycle.test_malformed_explicit_marker_uses_legacy_fallback`, and
-  `TestSessionIdentityLifecycle.test_explicit_marker_with_non_string_root_uses_legacy_fallback`.
-Current mutations disable busy identity scanning, replace descriptor-safe
-  identity parsing with direct accessor read, and treat explicit empty Root as
-  absent/truthy-only; each exact intended title fails once with exit `1`, then
-source bytes restore and the same selector passes.
-- Audit current-state tests/mutations run only after focused/Host/static machine
-  evidence candidates are frozen; their exact outputs and source blobs are
-  recorded in the audit receipt. They are current checks, not historical GREEN.
-- `plan-e-review-package`: exact package/diff for
-  `0dbb4852931b50153fb898b03129ae0092c46404..<reviewed-head>` with the exact
-  70-path inventory and latest asset/Vitest correction.
-- `whole-review-package`: exact package/diff for
-  `0040b1de1bc196b203014a8e4f94a53babb7e9aa..<reviewed-head>`.
-
-Each producer definition lists exact candidate paths and their count. Across the
-eight producers and two review ingestions, candidates are unique. The auxiliary
-current-state mutation candidate is the only succeeded candidate intentionally
-excluded from the 58-artifact manifest; six historical reports have no producer
-candidate. Finalization checks this ownership arithmetic directly rather than
-accepting a prose total.
-Exact candidate arithmetic is `40 + 1 + 1 + 1 + 1 + 3 + 2 + 2 + 1 + 1 = 53`:
-promotion, focused, full, Host, static, task-audits (auxiliary plus two audits),
-both two-file packages, and both one-file findings ingestions. Therefore
-`53 - 1 auxiliary + 6 historical reports = 58` manifest artifacts.
-Implement in small GREEN increments following dependency order, running the
-matching named test class after each boundary, but do not commit partial GREEN;
-the one implementation commit occurs only after the complete module, mutation,
-compile, discovery, and exclusion gates pass.
-
-- [ ] **Step 5: Verify GREEN, compile, and safe mutation proof**
+Run the first check through a new PowerShell process. It proves no executor process,
+tracked/runtime path, temporary root, or extra worktree remains. Historical documentation
+references are permitted; runtime, test-discovery, build, and release code references are not:
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -m unittest "host.test_plan_e_evidence" -v
+& "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -NonInteractive -Command '$ErrorActionPreference="Stop"; $root="C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec"; $tempParent="C:\Users\zhaobo\AppData\Local\Temp\opencode"; $staleRetirement=@(Get-ChildItem -LiteralPath $tempParent -Force | Where-Object { $_.Name -like "plan-e-retirement-clone-*" -or $_.Name -like "plan-e-retirement-pycache-*" -or $_.Name -like "plan-e-retirement-stage-*" }); if($staleRetirement.Count -ne 0){ throw "stale retirement temp roots require manual inspection/authorization: $($staleRetirement.FullName -join " | ")" }; $git="C:\Program Files\Git\cmd\git.exe"; $paths=@("plan_e_evidence.py","host/test_plan_e_evidence.py"); foreach($path in $paths){ if(Test-Path -LiteralPath (Join-Path $root $path)){ throw "retired path remains: $path" }; & $git -C $root cat-file -e "HEAD:$path" 2>$null; if($LASTEXITCODE -eq 0){ throw "retired path remains in HEAD: $path" } }; $runtimeRefs=@(& $git -C $root grep -n -e plan_e_evidence HEAD -- host extension release_helper.py 2>$null); if($LASTEXITCODE -notin @(0,1) -or $runtimeRefs.Count -ne 0){ throw "runtime/build/release reference remains: $($runtimeRefs -join " | ")" }; $processes=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -match "^(python|pythonw)\.exe$" -and $_.CommandLine -match "(?:plan_e_evidence\.py|host\.test_plan_e_evidence)" }); if($processes.Count -ne 0){ throw "executor process remains: $($processes.ProcessId -join ",")" }; $common=[IO.Path]::GetFullPath((Join-Path $root ((& $git -C $root rev-parse --git-common-dir).Trim()))); $commonResidue=@(Get-ChildItem -LiteralPath $common -Force | Where-Object { $_.Name -like "plan-e-evidence*" -or $_.Name -like ".plan-e-evidence*" }); $repoResidue=@(Get-ChildItem -LiteralPath (Split-Path -Parent $root) -Force | Where-Object { $_.Name -like ".Dynamics-Helper-prompt-scope-spec-plan-e-*" }); $sdd=Join-Path $root ".superpowers\sdd"; $sddResidue=if(Test-Path -LiteralPath $sdd){ @(Get-ChildItem -LiteralPath $sdd -Force | Where-Object { $_.Name -like ".task-*-audit-evidence.*.tmp" -or $_.Name -like ".plan-e-*.tmp" }) }else{@()}; $pycResidue=@(); foreach($cache in @((Join-Path $root "__pycache__"),(Join-Path $root "host\__pycache__"))){ if(Test-Path -LiteralPath $cache){ $pycResidue+=@(Get-ChildItem -LiteralPath $cache -Force -File | Where-Object { $_.Name -like "plan_e_evidence*.pyc" -or $_.Name -like "test_plan_e_evidence*.pyc" }) } }; $residue=@($commonResidue+$repoResidue+$sddResidue+$pycResidue); if($residue.Count -ne 0){ throw "executor residue remains: $($residue.FullName -join " | ")" }; $worktrees=@(& $git -C $root worktree list --porcelain | Where-Object { $_ -like "worktree *" }); if($worktrees.Count -ne 1 -or [IO.Path]::GetFullPath($worktrees[0].Substring(9)) -cne [IO.Path]::GetFullPath($root)){ throw "unexpected worktree registration: $($worktrees -join " | ")" }; if(@(& $git -C $root status --porcelain=v1 -uall).Count -ne 0){ throw "retired checkout is dirty" }; "Executor retirement fresh-process check: PASS"'
 ```
 
-Expected on Windows: exactly 106 tests pass, zero failures/errors/skips.
-Require `Ran 106 tests` and final `OK`; zero-test or partial-class success is not
-GREEN.
+Expected: exactly `Executor retirement fresh-process check: PASS`.
 
-Run the three representative named tests again after the full module; require
-`Ran 3 tests`, all `ok`, and final `OK`. This closes the exact named RED smoke
-with matching named GREEN evidence.
+Then verify a clean local clone using the existing Host venv only as a Python interpreter.
+The clone receives no ignored files or venv; bytecode goes to the owned temporary root.
+The check compiles Host source and runs the release-helper tests that lock release staging:
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -m unittest "host.test_plan_e_evidence.CliContractTests.test_cli_grammar_accepts_only_fixed_commands_and_producer_kinds" "host.test_plan_e_evidence.CanonicalJsonTests.test_canonical_json_round_trip_is_byte_exact" "host.test_plan_e_evidence.InventoryAndReleaseTests.test_release_staging_and_pyinstaller_exclude_executor" -v
+$ErrorActionPreference='Stop'; $source='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $tempParent='C:\Users\zhaobo\AppData\Local\Temp\opencode'; $staleRetirement=@(Get-ChildItem -LiteralPath $tempParent -Force | Where-Object { $_.Name -like 'plan-e-retirement-clone-*' -or $_.Name -like 'plan-e-retirement-pycache-*' -or $_.Name -like 'plan-e-retirement-stage-*' }); if($staleRetirement.Count -ne 0){ throw "stale retirement temp roots require manual inspection/authorization: $($staleRetirement.FullName -join ' | ')" }; $clone=Join-Path $tempParent ('plan-e-retirement-clone-'+[guid]::NewGuid().ToString('N')); $cache=Join-Path $tempParent ('plan-e-retirement-pycache-'+[guid]::NewGuid().ToString('N')); $stage=Join-Path $tempParent ('plan-e-retirement-stage-'+[guid]::NewGuid().ToString('N')); $git='C:\Program Files\Git\cmd\git.exe'; $python=Join-Path $source 'host\venv\Scripts\python.exe'; $processEnv=[Environment]::GetEnvironmentVariables('Process'); $cachePresent=$processEnv.Contains('PYTHONPYCACHEPREFIX'); $cacheSaved=if($cachePresent){[string]$processEnv['PYTHONPYCACHEPREFIX']}else{$null}; try { & $git clone --quiet --no-hardlinks --no-local $source $clone; if($LASTEXITCODE -ne 0){ throw 'retirement verification clone failed' }; if(@(& $git -C $clone status --porcelain=v1 -uall).Count -ne 0){ throw 'verification clone is dirty' }; foreach($path in @('plan_e_evidence.py','host/test_plan_e_evidence.py')){ if(Test-Path -LiteralPath (Join-Path $clone $path)){ throw "retired path exists in clone: $path" } }; $refs=@(& $git -C $clone grep -n -e plan_e_evidence HEAD -- host extension release_helper.py 2>$null); if($LASTEXITCODE -notin @(0,1) -or $refs.Count -ne 0){ throw "clone runtime/build/release reference remains: $($refs -join ' | ')" }; New-Item -ItemType Directory -Path $cache | Out-Null; $env:PYTHONPYCACHEPREFIX=$cache; & $python -m compileall -q (Join-Path $clone 'host'); if($LASTEXITCODE -ne 0){ throw 'clone Host compile failed' }; & $python -c "exec(__import__('base64').b64decode('ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCBzeXMKCmNsb25lID0gUGF0aChzeXMuYXJndlsxXSkucmVzb2x2ZShzdHJpY3Q9VHJ1ZSkKd29yayA9IFBhdGgoc3lzLmFyZ3ZbMl0pCnN5cy5wYXRoWzowXSA9IFtzdHIoY2xvbmUpLCBzdHIoY2xvbmUgLyAiaG9zdCIpXQppbXBvcnQgcmVsZWFzZV9oZWxwZXIKCmlmIFBhdGgocmVsZWFzZV9oZWxwZXIuX19maWxlX18pLnJlc29sdmUoKSAhPSAoY2xvbmUgLyAicmVsZWFzZV9oZWxwZXIucHkiKS5yZXNvbHZlKCk6CiAgICByYWlzZSBBc3NlcnRpb25FcnJvcigicmVsZWFzZV9oZWxwZXIgd2FzIG5vdCBpbXBvcnRlZCBmcm9tIHRoZSBjbGVhbiBjbG9uZSIpCgp3b3JrLm1rZGlyKCkKc291cmNlID0gd29yayAvICJzb3VyY2UiCnN0YWdlID0gd29yayAvICJzdGFnZWQiCmZpbGVzID0gewogICAgImV4dGVuc2lvbi9kaXN0L21hbmlmZXN0Lmpzb24iOiBiJ3sidmVyc2lvbiI6IjIuMC43NCIsInZlcnNpb25fbmFtZSI6IjIuMC43NC1iZXRhLjQifVxuJywKICAgICJleHRlbnNpb24vZGlzdC9hc3NldHMvYXBwLmpzIjogYiJhcHAiLAogICAgImRpc3QvZGhfbmF0aXZlX2hvc3QvZGhfbmF0aXZlX2hvc3QuZXhlIjogYiJob3N0LWV4ZSIsCiAgICAiZGlzdC9kaF9uYXRpdmVfaG9zdC9faW50ZXJuYWwvcHl0aG9uMzEzLmRsbCI6IGIicnVudGltZSIsCiAgICAiaG9zdC9jb25maWcuanNvbiI6IGIie31cbiIsCiAgICAiaG9zdC9zeXN0ZW1fcHJvbXB0Lm1kIjogYiJjb3JlIiwKICAgICJob3N0L3JlZ2lzdGVyLnB5IjogYiJyZWdpc3RlciIsCiAgICAiaW5zdGFsbGVyX2NvcmUucHMxIjogYiJpbnN0YWxsZXIiLAogICAgImluc3RhbGwuYmF0IjogYiJ3cmFwcGVyIiwKfQpmb3IgcmVsYXRpdmUsIHBheWxvYWQgaW4gZmlsZXMuaXRlbXMoKToKICAgIHBhdGggPSBzb3VyY2Uuam9pbnBhdGgoKnJlbGF0aXZlLnNwbGl0KCIvIikpCiAgICBwYXRoLnBhcmVudC5ta2RpcihwYXJlbnRzPVRydWUsIGV4aXN0X29rPVRydWUpCiAgICBwYXRoLndyaXRlX2J5dGVzKHBheWxvYWQpCgpyZXN1bHQgPSByZWxlYXNlX2hlbHBlci5zdGFnZV9yZWxlYXNlKHNvdXJjZSwgc3RhZ2UsICIyLjAuNzQtYmV0YS40IikKaWYgcmVzdWx0ICE9IHN0YWdlOgogICAgcmFpc2UgQXNzZXJ0aW9uRXJyb3IoInN0YWdlX3JlbGVhc2UgcmV0dXJuZWQgdGhlIHdyb25nIHBhdGgiKQphY3R1YWwgPSB0dXBsZSgKICAgIHNvcnRlZChwYXRoLnJlbGF0aXZlX3RvKHN0YWdlKS5hc19wb3NpeCgpIGZvciBwYXRoIGluIHN0YWdlLnJnbG9iKCIqIikgaWYgcGF0aC5pc19maWxlKCkpCikKZXhwZWN0ZWQgPSAoCiAgICAiZXh0ZW5zaW9uL2Fzc2V0cy9hcHAuanMiLAogICAgImV4dGVuc2lvbi9tYW5pZmVzdC5qc29uIiwKICAgICJob3N0L19pbnRlcm5hbC9weXRob24zMTMuZGxsIiwKICAgICJob3N0L2NvbmZpZy5qc29uIiwKICAgICJob3N0L2RoX25hdGl2ZV9ob3N0LmV4ZSIsCiAgICAiaG9zdC9pbnN0YWxsZWQtcHJvZHVjdC5qc29uIiwKICAgICJob3N0L3JlZ2lzdGVyLnB5IiwKICAgICJob3N0L3JlbGVhc2UtaW50ZWdyaXR5Lmpzb24iLAogICAgImhvc3Qvc3lzdGVtX3Byb21wdC5tZCIsCiAgICAiaW5zdGFsbC5iYXQiLAogICAgImluc3RhbGxlcl9jb3JlLnBzMSIsCiAgICAidXBkYXRlLW1hbmlmZXN0Lmpzb24iLAopCmlmIGFjdHVhbCAhPSBleHBlY3RlZDoKICAgIHJhaXNlIEFzc2VydGlvbkVycm9yKGYidW5leHBlY3RlZCBzdGFnZWQgcGF0aHM6IHthY3R1YWx9IikKcmV0aXJlZCA9IGIicGxhbl9lX2V2aWRlbmNlIgpmb3IgcmVsYXRpdmUgaW4gYWN0dWFsOgogICAgaWYgcmV0aXJlZC5kZWNvZGUoImFzY2lpIikgaW4gcmVsYXRpdmUgb3IgcmV0aXJlZCBpbiBzdGFnZS5qb2lucGF0aCgqcmVsYXRpdmUuc3BsaXQoIi8iKSkucmVhZF9ieXRlcygpOgogICAgICAgIHJhaXNlIEFzc2VydGlvbkVycm9yKGYicmV0aXJlZCBleGVjdXRvciByZWZlcmVuY2Ugc3RhZ2VkOiB7cmVsYXRpdmV9IikKcHJpbnQoIlN5bnRoZXRpYyBzdGFnZV9yZWxlYXNlIHJldGlyZW1lbnQgcHJvYmU6IFBBU1MiKQo='))" $clone $stage; if($LASTEXITCODE -ne 0){ throw 'synthetic stage_release retirement probe failed' }; "Executor retirement clean-clone check: PASS" } finally { if($cachePresent){ [Environment]::SetEnvironmentVariable('PYTHONPYCACHEPREFIX',$cacheSaved,'Process') } else { Remove-Item -LiteralPath 'Env:PYTHONPYCACHEPREFIX' -ErrorAction SilentlyContinue }; if(Test-Path -LiteralPath $stage){ Remove-Item -LiteralPath $stage -Recurse -Force }; if(Test-Path -LiteralPath $cache){ Remove-Item -LiteralPath $cache -Recurse -Force }; if(Test-Path -LiteralPath $clone){ Remove-Item -LiteralPath $clone -Recurse -Force } }
 ```
 
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "from pathlib import Path; compile(Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py').read_bytes(), r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py', 'exec'); compile(Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\test_plan_e_evidence.py').read_bytes(), r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\test_plan_e_evidence.py', 'exec')"
-```
+Expected: clone Host compilation passes and the probe prints `Synthetic stage_release
+retirement probe: PASS`; it imports clone `release_helper` using source-venv Python,
+stages the exact expected files,
+finds no `plan_e_evidence` path/reference, and never calls PyInstaller. Both fresh processes
+block before creating names when any pre-existing `plan-e-retirement-clone-*`,
+`plan-e-retirement-pycache-*`, or `plan-e-retirement-stage-*` entry exists and report exact
+paths without deletion/adoption. Normal `finally` removes only its exact clone/cache/stage.
+A reboot-left root blocks the next process pending manual inspection and authorization.
 
-Expected: exit `0`, no output.
+### 9.3 Write the Windows Retry RED
 
-`ExecutorMutationProofTests` is the fixed tracked CLI-test mutation helper; only
-this class may mutate the copied CLI. Invoke the whole class once with
-the single foreground command below. Within that one Python process, its seven
-methods cover receipt allowlisting, retirement full prevalidation, hard-link
-candidate atomicity, worktree-head validation, whole-file review coverage, Host
-skip policy, and staged/committed blob comparison. Each method creates its own
-disposable repository and copied CLI, records the original bytes/SHA-256,
-requires one exact source anchor, performs the mutation, observes the matching
-behavioral test fail by one intended assertion, and restores the copied CLI in
-`finally`. It then requires byte/SHA-256 identity and reruns the behavioral test
-GREEN before returning. The class-level fixture performs a final inventory and
-byte-restoration check after all seven methods, including exceptional paths.
-The primary tracked CLI is read-only throughout; no mutation is committed or
-performed against the real repository. Do not invoke separate mutation commands
-or claim cross-process `finally` restoration.
-The mutation-helper implementation is part of the two-path RED commit, not added
-afterward: against the inert CLI shell each method reaches its one final
-"implementation not available" assertion and therefore contributes one valid
-RED failure without mutating source. Once `plan_e_evidence.py` is implemented,
-the unchanged helper activates its one-process disposable-copy mutation path.
+- [ ] **Step 1: Add one compact behavior-complete test class**
 
-The exact behavioral class inventory is `CliContractTests`,
-`CanonicalJsonTests`, `PathSafetyTests`, `ReadOnlyCommandTests`,
-`MutexLeaseTests`, `CommandReceiptTests`, `CandidatePublicationTests`,
-`RetirementTests`, `WorktreeLifecycleTests`, `ResultValidationTests`,
-`ReviewGrammarTests`, `FinalReportTests`, `FinalizationTests`, and
-`InventoryAndReleaseTests`, followed by the exact helper class
-`ExecutorMutationProofTests`. No other `unittest.TestCase` class is permitted in
-the module.
-
-Class arithmetic is exact:
-`12 + 3 + 2 + 6 + 7 + 6 + 5 + 4 + 4 + 17 + 8 + 5 + 15 + 5 = 99`.
-
-The executable count is locked numerically at 106 total methods: 99 behavioral
-contract methods plus 7 mutation-proof methods. Class/method AST inventory and
-the test runner's observed `Ran 106 tests` must agree.
-
-**Prior runtime-defect regression map (all known superseded-executor failures):**
-
-| Prior defect class | Locked regression test(s) |
-|---|---|
-| Process-local PowerShell state/mutex/environment assumed across tool calls | `test_repository_root_is_script_relative_not_ambient_cwd`, `test_mutation_creates_and_rereads_lease_before_state_root`, `test_mutex_releases_last_and_parent_state_restores_on_success_and_failure` |
-| State root created before durable lease authority | `test_mutation_creates_and_rereads_lease_before_state_root` |
-| Candidate move could overwrite/collide or publish partial bytes | `test_candidate_publication_uses_no_clobber_hard_link_and_reread`, `test_candidate_collision_concurrency_and_crash_preserve_state` |
-| Fixed-path artifacts from an older head could be overwritten | `test_candidates_are_head_scoped_and_fixed_paths_wait_for_finalize` |
-| Review validator accepted prefix/suffix/unmatched text or weak session input | `test_review_text_requires_exact_whole_file_heading_grammar`, `test_review_input_is_single_snapshot_regular_file_and_not_cleanup_authority`, `test_second_review_must_bind_a_different_declared_session_and_findings_hash` |
-| Failed review looked like a crash or produced partial findings | `test_review_rejection_is_clean_terminal_state_not_crash_state` |
-| Retirement mutated files before complete prevalidation or left ambiguous partial authority | `test_retirement_requires_complete_dependency_closed_terminal_state`, `test_retirement_atomically_moves_head_authority_then_deletes_quarantine` |
-| Host skip parser accepted wrong selector/reason/count | `test_host_results_require_positive_counts_and_exact_skip_policy`, `test_host_result_selectors_and_phase_modules_are_exact` |
-| Staged names/counts passed while committed blobs differed | `test_finalizer_compares_every_staged_blob_with_committed_blob` |
-| Commit succeeded before checkpoint, creating retry ambiguity | `test_finalizer_uses_commit_tree_and_compare_and_swap_ref_update`, `test_finalizer_resume_reconciles_only_two_exact_ref_states` |
-| Read-only preflight refreshed index/fsmonitor or inherited unsafe Git/process environment | `test_preflight_and_status_are_read_only_and_index_byte_exact`, `test_read_only_git_uses_no_optional_locks_and_closed_environment`, `test_fsmonitor_hook_signing_filter_and_helper_effectiveness_blocks` |
-| Ignored-only evidence could disappear and Task 6/7 history could be overclaimed | `test_verify_final_is_clean_clone_read_only_and_uses_literal_base`, `test_final_report_rejects_task_6_7_historical_reconstruction_claims`, `test_manifest_is_canonical_exact_58_path_sha256_map` |
-| Promotion retry omitted initial/pre-sleep/post-sleep validation or exceeded its retry budget | `test_promotion_result_requires_red_replay_green_mutations_and_sources` plus the complete `PreparingPromotionRetryTests` matrix |
-| Release packaging accidentally included internal executor/test files | `test_release_staging_and_pyinstaller_exclude_executor` |
-| Test harness touched real repository/profile/mutex state | `test_executor_tests_use_only_disposable_repo_profile_and_temp_roots` |
-| Status treated malformed or empty present state as absent/ready | `test_status_classifies_only_absent_ready_or_retained_state` |
-| Child output/exception leaked or unbounded capture produced partial receipts | `test_every_command_emits_one_canonical_json_object_and_fixed_exit_code`, `test_child_output_limits_fail_safely_without_partial_receipt` |
-| Build failed because tracked public `extension/items.json` was missing/ignored | `test_asset_provenance_build_copy_and_release_safety_are_exact` plus canonical Node asset test |
-| Legitimate parameterized/duplicate Vitest rows were rejected by an over-broad identity rule | `test_vitest_results_use_scoped_selector_multiset_identity`, `test_vitest_selector_multiplicity_and_status_are_exact`, `test_vitest_focused_multiset_equals_full_restricted_multiset` |
-| Report/finalizer created a final-commit-SHA fixed point or resumed with post-CAS HEAD | `test_final_report_has_no_final_commit_sha_or_post_cas_fixed_point`, `test_status_reviewed_head_field_drives_retirement_and_finalizer_literals` |
-| Promotion plan summarized rather than restoring the exact accepted class/separate RED runs | `test_promotion_source_semantics_lock_seams_checkpoints_and_atomic_callsite`, `test_promotion_replay_failures_are_assertions_not_collection_or_setup_errors` |
-| Promotion mutations relied on separate authoring calls instead of one owned transaction | `test_promotion_result_requires_red_replay_green_mutations_and_sources`, `test_owned_worktree_create_restore_remove_lifecycle_is_exact`, `test_mutation_worktree_head_validation_is_caught` |
-
-This map is required review input and is reproduced in the report with observed
-PASS evidence hashes, not merely asserted in prose.
-No executor implementation or test may use either field alone as assertion
-identity; static source scans enforce the scoped-Counter contract instead.
-
-The executor implementation may define private helpers needed by these
-boundaries, but the Markdown deliberately gives no receipt/state/retirement/
-report/finalizer function bodies. Tests target observable contracts and the
-small injected adapters, not incidental internal helper count or layout.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -m unittest "host.test_plan_e_evidence.ExecutorMutationProofTests" -v
-```
-
-Expected: one foreground Python exits `0`; seven mutation/restoration proof tests
-pass, and each internally observed one intended assertion failure followed by
-byte-identical `finally` restoration and GREEN. Rerun the complete module
-afterward and require exactly 106 tests (99 behavioral plus 7 executor mutation
-proofs), all passing with no skips.
-
-This one class command is the complete pre-implementation test-quality mutation
-gate. Do not invoke its seven methods in separate shell processes and do not use
-an external temporary script; the tracked test helper owns mutation, expected
-failure, `finally` restoration, hash comparison, and GREEN rerun within this one
-foreground Python process.
-
-- [ ] **Step 6: Commit exactly the CLI implementation path**
-
-Run the discovery command below before staging/commit:
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -m unittest discover -s "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host" -p "test_plan_e_evidence.py" -v
-```
-
-Expected on Windows: `Ran 106 tests`, final `OK`, and no skip. This proves the
-new test file participates in documented Host discovery.
-
-Recheck that the only working-tree path differing from executor RED HEAD is
-`plan_e_evidence.py`, and that `host/test_plan_e_evidence.py` hashes to the
-executor RED blob before staging.
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" add -- "plan_e_evidence.py"
-```
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" diff --cached --check
-```
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" commit -m "feat(evidence): add Plan E evidence executor"
-```
-
-Reread exact parent, subject, one path, unchanged RED test blob, clean tracked
-status, and empty index. Then proceed to promotion RED.
-Do not create evidence state or run `produce` until both promotion commits are
-complete and the reviewed head passes preflight.
-
-### 9.6 Windows Preparing-Promotion Retry TDD
-
-This cycle preserves the complete accepted matrix. It does not require or hold
-an evidence mutex during edits, tests, staging, or commits. Evidence generation
-later replays immutable RED and labels it `RED commit replay`; that replay and
-the original observation are process attestations, not cryptographic proof of
-wall-clock execution order.
-
-- [ ] **Step 1: Add the complete failing test class**
-
-Modify only `host/test_update_engine_resume.py` with `apply_patch`. Replace its
-current leading imports with this exact complete block:
-
-<!-- PROMOTION_IMPORT_BLOCK_START -->
+Modify only `host/test_update_engine_resume.py` with `apply_patch`. Replace the
+leading imports with this exact block, preserving the rest of the module:
 
 ```python
 import ast
@@ -7548,914 +5459,113 @@ from update_journal import (
     read_active_transaction,
 )
 ```
-<!-- PROMOTION_IMPORT_BLOCK_END -->
 
-This retains every current import and adds only `inspect`, `os`, `stat`, `time`,
-`SimpleNamespace`, `mock`, module `update_engine`, `ActiveTransaction`, and
-`read_active_transaction`. Add class
-`PreparingPromotionRetryTests(unittest.TestCase)` immediately before
-`OwnershipBoundaryTests`. Update
-`OwnershipBoundaryTests.test_unittest_class_map_is_exact` by adding exactly
-`"PreparingPromotionRetryTests"` to the expected set.
+Insert `PreparingPromotionRetryTests(unittest.TestCase)` immediately before
+`OwnershipBoundaryTests`, and add `"PreparingPromotionRetryTests"` to
+`test_unittest_class_map_is_exact`. The class must expose exactly these eight
+test methods:
 
-Restore the complete class payload byte-for-byte from committed Plan E plan blob
-`476760dee46de0273d4b3beb2b8e5452e790d6df` at
-`cba1030baf6508d08d6ce67ac40728ebdd47f199`. Extract only bytes between the
-committed `PROMOTION_TEST_CLASS_START/END` markers, including the payload's final
-LF. The exact payload is 31,014 UTF-8 bytes, 759 lines, SHA-256
-`e64ecfcaa73a7dc62ea0c9216027ac81a907ecc16069fd3076839f1492940815`,
-with 13 helper methods and 8 test methods. Before applying it, recompute all
-four facts from `git cat-file blob` and stop on drift. Do not reformat, dedent,
-rewrite, or reconstruct the class from the summary below. Restore no old
-embedded PowerShell/Python promotion executor.
-
-The committed marker pair below is the payload authority. The executor test
-suite extracts and hashes this exact committed payload before
-authoring/validation, so a summary cannot substitute for the exact bytes.
-
-<!-- PROMOTION_TEST_CLASS_START -->
-```python
-class PreparingPromotionRetryTests(unittest.TestCase):
-    PROMOTION_LABEL = "workspace:promote-preparing"
-
-    JOURNAL_MUTATIONS = {
-        "journal-schema-version": ("schema_version", 2),
-        "journal-transaction-id": (
-            "transaction_id",
-            "ffffffffffffffffffffffffffffffff",
-        ),
-        "journal-phase": ("phase", "staging"),
-        "journal-initiator": ("initiator", "installer"),
-        "journal-target-version": ("target_version", "9.9.9"),
-        "journal-prior-version": ("prior_version", "old-version"),
-        "journal-fresh-install": ("fresh_install", True),
-        "journal-ownership-digest": ("ownership_sha256", "0" * 64),
-        "journal-reason-code": ("reason_code", "host_install_failed"),
-        "journal-original-failure": (
-            "original_failure_code",
-            "host_install_failed",
-        ),
-        "journal-rollback-from": ("rollback_from", "host-installed"),
-        "journal-initiating-process": (
-            "initiating_process",
-            {"pid": 7, "creation_token": "mutated"},
-        ),
-        "journal-ownership-path": ("ownership_path", "other.json"),
-        "journal-seed-receipt": (
-            "seed_receipt",
-            {
-                "path": "config.json",
-                "expected_sha256": "1" * 64,
-                "seed_installed": False,
-                "observed_live_sha256": None,
-            },
-        ),
-    }
-
-    REVALIDATION_MUTATIONS = (
-        "source-disappears",
-        "destination-created",
-        *JOURNAL_MUTATIONS,
-        "ownership-bytes",
-        "probe-manifest",
-        "host-digest",
-        "host-inventory",
-        "extension-digest",
-        "extension-inventory",
-        "extra-workspace-topology",
-        "updates-root-symlink",
-        "updates-root-reparse",
-        "transactions-root-symlink",
-        "transactions-root-reparse",
-        "preparing-root-symlink",
-        "preparing-root-reparse",
-        "descendant-symlink",
-        "descendant-reparse",
-        "descendant-unsupported",
-        "updates-root-canonical-escape",
-        "transactions-root-canonical-escape",
-        "preparing-root-canonical-escape",
-        "destination-canonical-escape",
-        "state-read-error",
-    )
-
-    def _require_retry_implementation(self):
-        missing = [
-            name
-            for name in (
-                "_replace_path",
-                "_sleep",
-                "_is_windows",
-                "PROMOTION_RETRY_DELAYS",
-                "PROMOTION_TRANSIENT_WINERRORS",
-            )
-            if not hasattr(update_engine, name)
-        ]
-        missing.extend(
-            name
-            for name in (
-                "_promote_preparing_with_retry",
-                "_require_preparing_promotion_candidate",
-            )
-            if not hasattr(UpdateEngine, name)
-        )
-        self.assertEqual(
-            missing,
-            [],
-            "preparing-promotion retry implementation is absent",
-        )
-        self.assertIs(update_engine._replace_path, os.replace)
-        self.assertIs(update_engine._sleep, time.sleep)
-        self.assertEqual(update_engine._is_windows, os.name == "nt")
-        self.assertEqual(update_engine.PROMOTION_RETRY_DELAYS, (0.05, 0.2))
-        self.assertEqual(
-            update_engine.PROMOTION_TRANSIENT_WINERRORS,
-            frozenset((5, 32, 33)),
-        )
-
-    @staticmethod
-    def _windows_error(winerror):
-        error = OSError("synthetic promotion failure")
-        error.winerror = winerror
-        return error
-
-    @staticmethod
-    def _canonical_json_bytes(value):
-        return (
-            json.dumps(
-                value,
-                ensure_ascii=True,
-                allow_nan=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-            + "\n"
-        ).encode("utf-8")
-
-    @staticmethod
-    def _tree_snapshot(root):
-        if not root.exists():
-            return None
-        result = {"": ("directory", None)}
-        for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
-            relative = path.relative_to(root).as_posix()
-            info = path.lstat()
-            if stat.S_ISDIR(info.st_mode):
-                result[relative] = ("directory", None)
-            elif stat.S_ISREG(info.st_mode):
-                result[relative] = ("file", path.read_bytes())
-            else:
-                result[relative] = ("other", None)
-        return result
-
-    def _apply_revalidation_mutation(self, name, paths, faults, external):
-        if name == "source-disappears":
-            shutil.rmtree(paths.preparing_root)
-            return
-        if name == "destination-created":
-            paths.transaction_root.mkdir()
-            return
-        if name in self.JOURNAL_MUTATIONS:
-            key, replacement = self.JOURNAL_MUTATIONS[name]
-            value = json.loads(
-                paths.preparing_journal.read_text(encoding="utf-8")
-            )
-            value[key] = replacement
-            paths.preparing_journal.write_bytes(self._canonical_json_bytes(value))
-            return
-        if name == "ownership-bytes":
-            value = json.loads(
-                paths.preparing_ownership.read_text(encoding="utf-8")
-            )
-            value["host_backup_roots"] = ["unexpected"]
-            paths.preparing_ownership.write_bytes(
-                self._canonical_json_bytes(value)
-            )
-            return
-        if name == "probe-manifest":
-            paths.preparing_probe_manifest.write_bytes(
-                paths.preparing_probe_manifest.read_bytes() + b" "
-            )
-            return
-        if name == "host-digest":
-            (paths.preparing_staged_host / "helper.dll").write_bytes(
-                b"mutated-host"
-            )
-            return
-        if name == "host-inventory":
-            (paths.preparing_staged_host / "unexpected.dll").write_bytes(
-                b"unexpected"
-            )
-            return
-        if name == "extension-digest":
-            (paths.preparing_staged_extension / "assets/app.js").write_bytes(
-                b"mutated-extension"
-            )
-            return
-        if name == "extension-inventory":
-            (paths.preparing_staged_extension / "unexpected.js").write_bytes(
-                b"unexpected"
-            )
-            return
-        if name == "extra-workspace-topology":
-            (paths.preparing_root / "unexpected.bin").write_bytes(b"unexpected")
-            return
-
-        lstat_targets = {
-            "updates-root": paths.updates_root,
-            "transactions-root": paths.transactions_root,
-            "preparing-root": paths.preparing_root,
-            "descendant": paths.preparing_staged_host / "_internal",
-        }
-        if name.endswith("-symlink") or name.endswith("-reparse"):
-            component, kind = name.rsplit("-", 1)
-            faults["lstat"] = (lstat_targets[component], kind)
-            return
-        if name == "descendant-unsupported":
-            faults["lstat"] = (
-                paths.preparing_staged_host / "helper.dll",
-                "unsupported",
-            )
-            return
-
-        resolve_targets = {
-            "updates-root": paths.updates_root,
-            "transactions-root": paths.transactions_root,
-            "preparing-root": paths.preparing_root,
-            "destination": paths.transaction_root,
-        }
-        if name.endswith("-canonical-escape"):
-            component = name.removesuffix("-canonical-escape")
-            faults["resolve"] = (resolve_targets[component], external)
-            return
-        if name == "state-read-error":
-            faults["read_text"] = paths.preparing_journal
-            return
-        raise AssertionError(f"unknown revalidation mutation: {name}")
-
-    def _exercise_promotion(
-        self,
-        replace_outcomes,
-        *,
-        is_windows=True,
-        mutation=None,
-        hook_fault=None,
-    ):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            fixture = MatrixHarness(root, "installed")
-            paths = TransactionPaths.for_install(fixture.install, TX)
-            external = root / "external"
-            external.mkdir()
-            if hook_fault is not None:
-                fixture.controller.arm(
-                    hook_fault,
-                    self.PROMOTION_LABEL,
-                    InjectedFault,
-                )
-
-            live_before = live_snapshot(fixture.install)
-            real_replace = os.replace
-            real_lstat = Path.lstat
-            real_resolve = Path.resolve
-            real_read_text = Path.read_text
-            real_validator = fixture.engine._require_preparing_promotion_candidate
-            replace_calls = []
-            replacement_errors = []
-            delays = []
-            sequence = []
-            validation_count = 0
-            candidate_snapshot = None
-            mutation_applied = False
-            faults = {"lstat": None, "resolve": None, "read_text": None}
-
-            def apply_mutation_once():
-                nonlocal mutation_applied
-                if mutation_applied:
-                    return
-                self._apply_revalidation_mutation(
-                    mutation[1],
-                    paths,
-                    faults,
-                    external,
-                )
-                mutation_applied = True
-
-            def validating(*args):
-                nonlocal candidate_snapshot, validation_count
-                validation_count += 1
-                sequence.append(("validate", validation_count))
-                if candidate_snapshot is None:
-                    candidate_snapshot = self._tree_snapshot(paths.preparing_root)
-                if (
-                    mutation is not None
-                    and mutation[0] == "initial"
-                    and validation_count == 1
-                ):
-                    apply_mutation_once()
-                if (
-                    mutation is not None
-                    and mutation[0] == "pre-sleep"
-                    and validation_count == 2
-                ):
-                    apply_mutation_once()
-                return real_validator(*args)
-
-            def replacing(source, destination):
-                attempt = len(replace_calls) + 1
-                replace_calls.append((Path(source), Path(destination)))
-                sequence.append(("replace", attempt))
-                if callable(replace_outcomes):
-                    action = replace_outcomes(attempt)
-                elif attempt <= len(replace_outcomes):
-                    action = replace_outcomes[attempt - 1]
-                else:
-                    action = AssertionError(
-                        "unexpected additional promotion attempt"
-                    )
-                if action is None:
-                    return real_replace(source, destination)
-                if not isinstance(action, BaseException):
-                    raise AssertionError("invalid replacement outcome")
-                replacement_errors.append(action)
-                raise action
-
-            def sleeping(delay):
-                delays.append(delay)
-                sequence.append(("sleep", delay))
-                if mutation is not None and mutation[0] == "post-sleep":
-                    apply_mutation_once()
-
-            def lstat(path, *args, **kwargs):
-                target = faults["lstat"]
-                if target is None or path != target[0]:
-                    return real_lstat(path, *args, **kwargs)
-                info = real_lstat(path, *args, **kwargs)
-                kind = target[1]
-                if kind == "symlink":
-                    return SimpleNamespace(
-                        st_mode=stat.S_IFLNK | stat.S_IMODE(info.st_mode),
-                        st_file_attributes=0,
-                    )
-                if kind == "reparse":
-                    return SimpleNamespace(
-                        st_mode=info.st_mode,
-                        st_file_attributes=0x400,
-                    )
-                return SimpleNamespace(
-                    st_mode=stat.S_IFIFO,
-                    st_file_attributes=0,
-                )
-
-            def resolve(path, *args, **kwargs):
-                target = faults["resolve"]
-                if target is not None and path == target[0]:
-                    return target[1]
-                return real_resolve(path, *args, **kwargs)
-
-            def read_text(path, *args, **kwargs):
-                if (
-                    faults["read_text"] is not None
-                    and path == faults["read_text"]
-                ):
-                    raise OSError("synthetic state-read failure")
-                return real_read_text(path, *args, **kwargs)
-
-            result = None
-            outcome_error = None
-            with (
-                mock.patch.object(update_engine, "_replace_path", replacing),
-                mock.patch.object(update_engine, "_sleep", sleeping),
-                mock.patch.object(update_engine, "_is_windows", is_windows),
-                mock.patch.object(
-                    fixture.engine,
-                    "_require_preparing_promotion_candidate",
-                    side_effect=validating,
-                ),
-                mock.patch.object(Path, "lstat", lstat),
-                mock.patch.object(Path, "resolve", resolve),
-                mock.patch.object(Path, "read_text", read_text),
-            ):
-                try:
-                    result = fixture.prepare()
-                except Exception as error:
-                    outcome_error = error
-
-            active_value = None
-            active_error = None
-            if paths.active.exists():
-                try:
-                    active_value = read_active_transaction(paths.active)
-                except Exception as error:
-                    active_error = error
-            events = tuple(fixture.recording.events)
-            return {
-                "result": result,
-                "error": outcome_error,
-                "cause": (
-                    outcome_error.__cause__
-                    if outcome_error is not None
-                    else None
-                ),
-                "attempts": len(replace_calls),
-                "replace_calls": tuple(replace_calls),
-                "expected_replace": (
-                    paths.preparing_root,
-                    paths.transaction_root,
-                ),
-                "replacement_errors": tuple(replacement_errors),
-                "delays": tuple(delays),
-                "validations": validation_count,
-                "sequence": tuple(sequence),
-                "candidate_snapshot": candidate_snapshot,
-                "preparing_snapshot": self._tree_snapshot(paths.preparing_root),
-                "final_snapshot": self._tree_snapshot(paths.transaction_root),
-                "preparing_exists": paths.preparing_root.exists(),
-                "final_exists": paths.transaction_root.exists(),
-                "active_exists": paths.active.exists(),
-                "active": active_value,
-                "active_error": active_error,
-                "live_before": live_before,
-                "live_after": live_snapshot(fixture.install),
-                "hook_before": sum(
-                    kind == "before" and label == self.PROMOTION_LABEL
-                    for kind, label in events
-                ),
-                "hook_after": sum(
-                    kind == "after" and label == self.PROMOTION_LABEL
-                    for kind, label in events
-                ),
-            }
-
-    def _assert_replace_calls(self, case, count, label):
-        self.assertEqual(
-            case["replace_calls"],
-            (case["expected_replace"],) * count,
-            label,
-        )
-
-    def _assert_active_is_exact(self, case, label):
-        self.assertIsNone(case["active_error"], label)
-        self.assertEqual(
-            case["active"],
-            ActiveTransaction(1, TX, f"transactions/{TX}/journal.json"),
-            label,
-        )
-
-    def _assert_first_success(self, case, label):
-        self.assertIsNone(case["error"], label)
-        self.assertEqual(case["result"].phase, JournalPhase.PREPARED, label)
-        self.assertEqual(case["attempts"], 1, label)
-        self.assertEqual(case["delays"], (), label)
-        self.assertEqual(case["validations"], 1, label)
-        self._assert_replace_calls(case, 1, label)
-        self.assertFalse(case["preparing_exists"], label)
-        self.assertTrue(case["final_exists"], label)
-        self.assertEqual(case["final_snapshot"], case["candidate_snapshot"], label)
-        self.assertTrue(case["active_exists"], label)
-        self._assert_active_is_exact(case, label)
-        self.assertEqual(case["live_after"], case["live_before"], label)
-        self.assertEqual(case["hook_before"], 1, label)
-        self.assertEqual(case["hook_after"], 1, label)
-
-    def _assert_retry_success(self, case, label):
-        self.assertIsNone(case["error"], label)
-        self.assertEqual(case["result"].phase, JournalPhase.PREPARED, label)
-        self.assertEqual(case["attempts"], 2, label)
-        self.assertEqual(case["delays"], (0.05,), label)
-        self.assertEqual(case["validations"], 3, label)
-        self._assert_replace_calls(case, 2, label)
-        self.assertFalse(case["preparing_exists"], label)
-        self.assertTrue(case["final_exists"], label)
-        self.assertEqual(case["final_snapshot"], case["candidate_snapshot"], label)
-        self.assertTrue(case["active_exists"], label)
-        self._assert_active_is_exact(case, label)
-        self.assertEqual(case["live_after"], case["live_before"], label)
-        self.assertEqual(case["hook_before"], 1, label)
-        self.assertEqual(case["hook_after"], 1, label)
-
-    def _assert_exhausted(self, case, label):
-        self.assertEqual(case["attempts"], 3, label)
-        self.assertEqual(case["delays"], (0.05, 0.2), label)
-        self.assertEqual(case["validations"], 5, label)
-        self._assert_replace_calls(case, 3, label)
-        self.assertIs(type(case["error"]), PreparedTransactionConflict, label)
-        self.assertEqual(len(case["replacement_errors"]), 3, label)
-        self.assertIs(case["cause"], case["replacement_errors"][-1], label)
-        self.assertTrue(case["preparing_exists"], label)
-        self.assertFalse(case["final_exists"], label)
-        self.assertFalse(case["active_exists"], label)
-        self.assertEqual(
-            case["preparing_snapshot"],
-            case["candidate_snapshot"],
-            label,
-        )
-        self.assertEqual(case["live_after"], case["live_before"], label)
-        self.assertEqual(case["hook_before"], 1, label)
-        self.assertEqual(case["hook_after"], 0, label)
-
-    def _assert_not_retried(self, case, original_error, label):
-        self.assertEqual(case["attempts"], 1, label)
-        self.assertEqual(case["delays"], (), label)
-        self.assertEqual(case["validations"], 1, label)
-        self._assert_replace_calls(case, 1, label)
-        self.assertIs(type(case["error"]), PreparedTransactionConflict, label)
-        self.assertIs(case["cause"], original_error, label)
-        self.assertTrue(case["preparing_exists"], label)
-        self.assertFalse(case["final_exists"], label)
-        self.assertFalse(case["active_exists"], label)
-        self.assertEqual(
-            case["preparing_snapshot"],
-            case["candidate_snapshot"],
-            label,
-        )
-        self.assertEqual(case["live_after"], case["live_before"], label)
-        self.assertEqual(case["hook_before"], 1, label)
-        self.assertEqual(case["hook_after"], 0, label)
-
-    def _write_promotion_evidence(self, value):
-        raw_path = os.environ.get("DH_PROMOTION_EVIDENCE")
-        if raw_path is None:
-            return
-        path = Path(raw_path)
-        self.assertTrue(path.is_absolute())
-        self.assertTrue(path.parent.is_dir())
-        self.assertFalse(path.exists())
-        encoded = self._canonical_json_bytes(value)
-        self.assertEqual(json.loads(encoded.decode("utf-8")), value)
-        with path.open("xb") as stream:
-            stream.write(encoded)
-            stream.flush()
-            os.fsync(stream.fileno())
-
-    def test_windows_access_denied_retries_atomic_preparing_promotion(self):
-        self._require_retry_implementation()
-        access_denied = self._windows_error(5)
-        retry = self._exercise_promotion((access_denied, None))
-        self._assert_retry_success(retry, "WinError 5 retry success")
-        first_success = self._exercise_promotion((None,))
-        self._assert_first_success(first_success, "first-attempt promotion success")
-        exhausted = self._exercise_promotion(
-            lambda _attempt: self._windows_error(32)
-        )
-        self._assert_exhausted(exhausted, "aggregate exhausted promotion")
-        self._write_promotion_evidence(
-            {
-                "attempts": {
-                    "transient_then_success": retry["attempts"],
-                    "exhausted": exhausted["attempts"],
-                },
-                "delays": {
-                    "transient_then_success": list(retry["delays"]),
-                    "exhausted": list(exhausted["delays"]),
-                },
-                "checkpoint_calls": {
-                    "first_success": first_success["validations"],
-                    "one_retry": retry["validations"],
-                    "exhausted": exhausted["validations"],
-                },
-                "hook_counts": {
-                    "retry_success": {
-                        "before": retry["hook_before"],
-                        "after": retry["hook_after"],
-                    },
-                    "exhausted": {
-                        "before": exhausted["hook_before"],
-                        "after": exhausted["hook_after"],
-                    },
-                },
-                "state_and_cause": "passed",
-            }
-        )
-
-    def test_windows_sharing_errors_32_and_33_are_retryable(self):
-        self._require_retry_implementation()
-        for winerror in (32, 33):
-            injected = self._windows_error(winerror)
-            case = self._exercise_promotion((injected, None))
-            self._assert_retry_success(case, f"WinError {winerror} retry")
-        permission_error = PermissionError("synthetic access denied")
-        permission_error.winerror = 5
-        permission_case = self._exercise_promotion((permission_error, None))
-        self._assert_retry_success(
-            permission_case,
-            "PermissionError WinError 5 retry",
-        )
-
-    def test_persistent_windows_promotion_lock_stops_after_three_attempts(self):
-        self._require_retry_implementation()
-        case = self._exercise_promotion(lambda _attempt: self._windows_error(32))
-        self._assert_exhausted(case, "persistent sharing violation")
-
-    def test_non_windows_or_unlisted_promotion_errors_are_not_retried(self):
-        self._require_retry_implementation()
-
-        class IntSubclass(int):
-            pass
-
-        non_os_error = RuntimeError("generic promotion failure")
-        non_os_error.winerror = 5
-        cases = (
-            ("non-Windows", False, self._windows_error(5)),
-            ("unlisted", True, self._windows_error(87)),
-            ("missing-winerror", True, OSError("generic promotion failure")),
-            ("non-OSError", True, non_os_error),
-            ("boolean-winerror", True, self._windows_error(True)),
-            (
-                "int-subclass-winerror",
-                True,
-                self._windows_error(IntSubclass(5)),
-            ),
-        )
-        for label, is_windows, injected in cases:
-            case = self._exercise_promotion((injected,), is_windows=is_windows)
-            self._assert_not_retried(case, injected, label)
-
-    def test_preparing_promotion_revalidates_before_and_after_sleep(self):
-        self._require_retry_implementation()
-        first = self._exercise_promotion((None,))
-        self.assertEqual(first["sequence"], (("validate", 1), ("replace", 1)))
-        self._assert_first_success(first, "first-success sequence")
-        retry = self._exercise_promotion((self._windows_error(5), None))
-        self.assertEqual(
-            retry["sequence"],
-            (
-                ("validate", 1),
-                ("replace", 1),
-                ("validate", 2),
-                ("sleep", 0.05),
-                ("validate", 3),
-                ("replace", 2),
-            ),
-        )
-        self._assert_retry_success(retry, "one-retry sequence")
-        exhausted = self._exercise_promotion(
-            lambda _attempt: self._windows_error(33)
-        )
-        self.assertEqual(
-            exhausted["sequence"],
-            (
-                ("validate", 1),
-                ("replace", 1),
-                ("validate", 2),
-                ("sleep", 0.05),
-                ("validate", 3),
-                ("replace", 2),
-                ("validate", 4),
-                ("sleep", 0.2),
-                ("validate", 5),
-                ("replace", 3),
-            ),
-        )
-        self._assert_exhausted(exhausted, "exhausted sequence")
-        initial_corruption = self._exercise_promotion(
-            lambda _attempt: self._windows_error(5),
-            mutation=("initial", "extra-workspace-topology"),
-        )
-        self.assertEqual(initial_corruption["sequence"], (("validate", 1),))
-        self.assertIs(
-            type(initial_corruption["error"]),
-            PreparedTransactionConflict,
-        )
-        self.assertEqual(initial_corruption["attempts"], 0)
-        self.assertEqual(initial_corruption["delays"], ())
-        self.assertEqual(initial_corruption["validations"], 1)
-        self.assertTrue(initial_corruption["preparing_exists"])
-        self.assertFalse(initial_corruption["final_exists"])
-        self.assertFalse(initial_corruption["active_exists"])
-        self.assertEqual(
-            initial_corruption["live_after"],
-            initial_corruption["live_before"],
-        )
-        self.assertEqual(initial_corruption["hook_before"], 1)
-        self.assertEqual(initial_corruption["hook_after"], 0)
-
-    def test_preparing_promotion_revalidation_rejects_every_authority_mismatch(
-        self,
-    ):
-        self._require_retry_implementation()
-        for checkpoint in ("pre-sleep", "post-sleep"):
-            for mutation in self.REVALIDATION_MUTATIONS:
-                label = f"{checkpoint}:{mutation}"
-                case = self._exercise_promotion(
-                    lambda _attempt: self._windows_error(5),
-                    mutation=(checkpoint, mutation),
-                )
-                self.assertIs(
-                    type(case["error"]),
-                    PreparedTransactionConflict,
-                    label,
-                )
-                self._assert_replace_calls(case, 1, label)
-                self.assertEqual(
-                    case["delays"],
-                    () if checkpoint == "pre-sleep" else (0.05,),
-                    label,
-                )
-                self.assertEqual(
-                    case["validations"],
-                    2 if checkpoint == "pre-sleep" else 3,
-                    label,
-                )
-                self.assertFalse(case["active_exists"], label)
-                self.assertEqual(case["live_after"], case["live_before"], label)
-                self.assertEqual(case["hook_before"], 1, label)
-                self.assertEqual(case["hook_after"], 0, label)
-                self.assertEqual(
-                    case["preparing_exists"],
-                    mutation != "source-disappears",
-                    label,
-                )
-                self.assertEqual(
-                    case["final_exists"],
-                    mutation == "destination-created",
-                    label,
-                )
-
-    def test_preparing_promotion_hooks_wrap_the_logical_operation_once(self):
-        self._require_retry_implementation()
-        retry = self._exercise_promotion((self._windows_error(5), None))
-        self._assert_retry_success(retry, "retry hook counts")
-        exhausted = self._exercise_promotion(
-            lambda _attempt: self._windows_error(32)
-        )
-        self._assert_exhausted(exhausted, "exhausted hook counts")
-        before_failure = self._exercise_promotion((None,), hook_fault="before")
-        self.assertIs(type(before_failure["error"]), PreparedTransactionConflict)
-        self.assertIsInstance(before_failure["cause"], InjectedFault)
-        self.assertEqual(before_failure["attempts"], 0)
-        self.assertEqual(before_failure["delays"], ())
-        self.assertEqual(before_failure["validations"], 0)
-        self.assertEqual(before_failure["hook_before"], 1)
-        self.assertEqual(before_failure["hook_after"], 0)
-        self.assertTrue(before_failure["preparing_exists"])
-        self.assertFalse(before_failure["final_exists"])
-        self.assertFalse(before_failure["active_exists"])
-        after_failure = self._exercise_promotion((None,), hook_fault="after")
-        self.assertIs(type(after_failure["error"]), PreparedTransactionConflict)
-        self.assertIsInstance(after_failure["cause"], InjectedFault)
-        self._assert_replace_calls(after_failure, 1, "after-hook failure")
-        self.assertEqual(after_failure["attempts"], 1)
-        self.assertEqual(after_failure["delays"], ())
-        self.assertEqual(after_failure["validations"], 1)
-        self.assertEqual(after_failure["hook_before"], 1)
-        self.assertEqual(after_failure["hook_after"], 1)
-        self.assertFalse(after_failure["preparing_exists"])
-        self.assertTrue(after_failure["final_exists"])
-        self.assertFalse(after_failure["active_exists"])
-        self.assertEqual(after_failure["live_after"], after_failure["live_before"])
-
-    def test_update_engine_constructor_signature_remains_frozen(self):
-        signature = inspect.signature(UpdateEngine)
-        parameters = signature.parameters
-        self.assertEqual(
-            tuple(parameters),
-            ("install_root", "mutex_factory", "hooks"),
-        )
-        self.assertIs(
-            parameters["install_root"].kind,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        )
-        self.assertIs(
-            parameters["install_root"].default,
-            inspect.Parameter.empty,
-        )
-        self.assertIs(
-            parameters["mutex_factory"].kind,
-            inspect.Parameter.KEYWORD_ONLY,
-        )
-        self.assertIs(
-            parameters["mutex_factory"].default,
-            update_engine.create_windows_mutation_mutex,
-        )
-        self.assertIs(
-            parameters["hooks"].kind,
-            inspect.Parameter.KEYWORD_ONLY,
-        )
-        self.assertIsNone(parameters["hooks"].default)
-        self.assertIs(signature.return_annotation, inspect.Signature.empty)
+```text
+test_windows_access_denied_retries_atomic_preparing_promotion
+test_windows_sharing_errors_32_and_33_are_retryable
+test_persistent_windows_promotion_lock_stops_after_three_attempts
+test_non_windows_or_unlisted_promotion_errors_are_not_retried
+test_preparing_promotion_revalidates_before_and_after_sleep
+test_preparing_promotion_revalidation_rejects_every_authority_mismatch
+test_preparing_promotion_hooks_wrap_the_logical_operation_once
+test_update_engine_constructor_signature_remains_frozen
 ```
-<!-- PROMOTION_TEST_CLASS_END -->
 
-Extraction command identity is fixed: absolute Git `cat-file blob
-476760dee46de0273d4b3beb2b8e5452e790d6df`, strict UTF-8 marker cardinality one,
-and exact byte slice through the LF immediately before the closing fence.
+Use the existing `MatrixHarness`, `live_snapshot`, and operation recorder. Keep
+the fixture compact: patch module seams with `mock.patch.object`, record replace,
+sleep, validation, and hook calls, use disposable `TemporaryDirectory` roots,
+and restore patches through context managers. Use helpers such as
+`_exercise_promotion`, `_apply_revalidation_mutation`, `_assert_retry_success`,
+`_assert_exhausted`, and `_assert_not_retried` so the matrix stays readable.
+Do not add evidence-output code.
 
-In historical blob `476760dee46de0273d4b3beb2b8e5452e790d6df`, exact LF lines
-6331-6381 inclusive are 1,200 bytes with SHA-256
-`3fabf4319681a2ca20d315fb6dba013fa64202c68a77aede9efddb4d80749d05`.
-Exact LF lines 7146-7152 inclusive are 164 bytes with SHA-256
-`90034442966928b182c55bf6e2116a48bc179f467e9e4bbf5f718d70052e780b`.
-Recompute both historical regions through absolute `git cat-file blob`, then
-require their fenced code payloads to equal the current marked payloads above
-and below byte-for-byte. Apply current-file indentation: imports remain at
-module column zero; the one class-map string is indented exactly like the
-existing set members.
+| Test | Exact required behavior |
+|---|---|
+| Access denied | A synthetic `OSError` with exact integer `winerror=5` fails once, then the second exact preparing-to-final replace succeeds. Assert attempts `2`, delays `[0.05]`, validation calls `3`, final tree equals the candidate, `.preparing` is absent, exact active state exists, and live product bytes are unchanged. Also assert first-attempt success has one validation and no delay. |
+| Sharing errors | Independently prove exact integer `32` and `33`, plus `PermissionError` carrying integer `5`, retry and succeed. |
+| Exhaustion | Persistent `winerror=32` makes exactly three replace attempts and delays `[0.05, 0.2]`; fixed `PreparedTransactionConflict` retains the third `OSError` as `__cause__`; active/final remain absent, candidate remains exact, and live bytes do not change. |
+| Rejections | `_is_windows=False`, unlisted integer `87`, missing `winerror`, non-`OSError`, boolean `True`, and an `int` subclass each make one attempt, no delay, and preserve the original cause under the fixed conflict. |
+| Checkpoint order | Assert first-success sequence `validate, replace`; one-retry sequence `validate, replace, validate, sleep(0.05), validate, replace`; exhaustion has five validations, three replaces, and the two exact sleeps. Corrupt initial topology to prove zero replace attempts. |
+| Revalidation matrix | At both `pre-sleep` and `post-sleep`, reject source disappearance, destination creation, every prepared journal field including `seed_receipt`, ownership/probe bytes, Host/Extension digest or inventory, extra topology, root/parent/descendant symlink or reparse state, unsupported descendants, canonical escapes, and state-read failures. Pre-sleep faults sleep zero times; post-sleep faults sleep once; neither retries or writes active/live bytes. |
+| Hooks | Promotion has one before/after operation pair across successful retries. Exhaustion has one before and no after. Before-hook failure makes no replace; after-hook failure is not retried and leaves promoted state without active state. |
+| Constructor | `inspect.signature(UpdateEngine)` remains positional `install_root`, keyword-only `mutex_factory=create_windows_mutation_mutex`, keyword-only `hooks=None`, and no return annotation or retry dependency parameter. |
 
-<!-- PROMOTION_CLASS_MAP_EDIT_START -->
-```python
-"PreparingPromotionRetryTests",
-```
-<!-- PROMOTION_CLASS_MAP_EDIT_END -->
+The tests must first assert that `_replace_path`, `_sleep`, `_is_windows`,
+`PROMOTION_TRANSIENT_WINERRORS`, `PROMOTION_RETRY_DELAYS`,
+`_require_preparing_promotion_candidate`, and
+`_promote_preparing_with_retry` exist and have their locked defaults. That
+assertion creates genuine behavior RED without import or collection failure.
 
-The payload's eight tests are exactly:
-`test_windows_access_denied_retries_atomic_preparing_promotion`,
-`test_windows_sharing_errors_32_and_33_are_retryable`,
-`test_persistent_windows_promotion_lock_stops_after_three_attempts`,
-`test_non_windows_or_unlisted_promotion_errors_are_not_retried`,
-`test_preparing_promotion_revalidates_before_and_after_sleep`,
-`test_preparing_promotion_revalidation_rejects_every_authority_mismatch`,
-`test_preparing_promotion_hooks_wrap_the_logical_operation_once`, and
-`test_update_engine_constructor_signature_remains_frozen`. Its helpers/matrices
-are the complete accepted behavior; no reduction is permitted.
+- [ ] **Step 2: Run the constructor control and seven independent RED selectors**
 
-- [ ] **Step 2: Run RED and prove the failure classification**
-
-Run the class-map constructor control separately, then the following seven
-literal stateless RED commands independently. Each command runs one selector,
-requires exit `1`, `Ran 1 test`, one assertion `FAIL`, final
-`FAILED (failures=1)`, and no import/collection/setup/error/skip/timeout/signal/
-zero-match failure. The controller validates that output immediately; the later
-promotion producer repeats these commands at immutable RED.
+The constructor is a separate passing control:
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0, str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.test_update_engine_constructor_signature_remains_frozen" -v
+$ErrorActionPreference='Stop'; $python='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe'; $selector='test_update_engine_constructor_signature_remains_frozen'; $output=(& $python -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.$selector" -v 2>&1 | Out-String); $exit=$LASTEXITCODE; $output; if($exit -ne 0 -or ([regex]::Matches($output,'Ran 1 test')).Count -ne 1 -or $output -notmatch '(?m)^OK$' -or $output -match '(?m)^FAIL: |^ERROR: |skipped'){ throw 'Constructor control did not pass exactly once' }
 ```
 
-Expected: exit `0`, exactly one test and `OK`.
+Expected: exit `0`, `Ran 1 test`, `OK`, no error or skip.
+
+Run each behavioral selector as its own command:
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.test_windows_access_denied_retries_atomic_preparing_promotion" -v
+$ErrorActionPreference='Stop'; $python='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe'; $selector='test_windows_access_denied_retries_atomic_preparing_promotion'; $output=(& $python -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.$selector" -v 2>&1 | Out-String); $exit=$LASTEXITCODE; $output; $fails=@($output -split "`r?`n" | Where-Object { $_ -like "FAIL: $selector *" }); if($exit -ne 1 -or ([regex]::Matches($output,'Ran 1 test')).Count -ne 1 -or $fails.Count -ne 1 -or ([regex]::Matches($output,'FAILED \(failures=1\)')).Count -ne 1 -or $output -match '(?m)^ERROR: |errors=|skipped'){ throw "Invalid RED for $selector" }
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.test_windows_sharing_errors_32_and_33_are_retryable" -v
+$ErrorActionPreference='Stop'; $python='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe'; $selector='test_windows_sharing_errors_32_and_33_are_retryable'; $output=(& $python -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.$selector" -v 2>&1 | Out-String); $exit=$LASTEXITCODE; $output; $fails=@($output -split "`r?`n" | Where-Object { $_ -like "FAIL: $selector *" }); if($exit -ne 1 -or ([regex]::Matches($output,'Ran 1 test')).Count -ne 1 -or $fails.Count -ne 1 -or ([regex]::Matches($output,'FAILED \(failures=1\)')).Count -ne 1 -or $output -match '(?m)^ERROR: |errors=|skipped'){ throw "Invalid RED for $selector" }
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.test_persistent_windows_promotion_lock_stops_after_three_attempts" -v
+$ErrorActionPreference='Stop'; $python='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe'; $selector='test_persistent_windows_promotion_lock_stops_after_three_attempts'; $output=(& $python -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.$selector" -v 2>&1 | Out-String); $exit=$LASTEXITCODE; $output; $fails=@($output -split "`r?`n" | Where-Object { $_ -like "FAIL: $selector *" }); if($exit -ne 1 -or ([regex]::Matches($output,'Ran 1 test')).Count -ne 1 -or $fails.Count -ne 1 -or ([regex]::Matches($output,'FAILED \(failures=1\)')).Count -ne 1 -or $output -match '(?m)^ERROR: |errors=|skipped'){ throw "Invalid RED for $selector" }
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.test_non_windows_or_unlisted_promotion_errors_are_not_retried" -v
+$ErrorActionPreference='Stop'; $python='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe'; $selector='test_non_windows_or_unlisted_promotion_errors_are_not_retried'; $output=(& $python -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.$selector" -v 2>&1 | Out-String); $exit=$LASTEXITCODE; $output; $fails=@($output -split "`r?`n" | Where-Object { $_ -like "FAIL: $selector *" }); if($exit -ne 1 -or ([regex]::Matches($output,'Ran 1 test')).Count -ne 1 -or $fails.Count -ne 1 -or ([regex]::Matches($output,'FAILED \(failures=1\)')).Count -ne 1 -or $output -match '(?m)^ERROR: |errors=|skipped'){ throw "Invalid RED for $selector" }
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.test_preparing_promotion_revalidates_before_and_after_sleep" -v
+$ErrorActionPreference='Stop'; $python='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe'; $selector='test_preparing_promotion_revalidates_before_and_after_sleep'; $output=(& $python -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.$selector" -v 2>&1 | Out-String); $exit=$LASTEXITCODE; $output; $fails=@($output -split "`r?`n" | Where-Object { $_ -like "FAIL: $selector *" }); if($exit -ne 1 -or ([regex]::Matches($output,'Ran 1 test')).Count -ne 1 -or $fails.Count -ne 1 -or ([regex]::Matches($output,'FAILED \(failures=1\)')).Count -ne 1 -or $output -match '(?m)^ERROR: |errors=|skipped'){ throw "Invalid RED for $selector" }
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.test_preparing_promotion_revalidation_rejects_every_authority_mismatch" -v
+$ErrorActionPreference='Stop'; $python='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe'; $selector='test_preparing_promotion_revalidation_rejects_every_authority_mismatch'; $output=(& $python -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.$selector" -v 2>&1 | Out-String); $exit=$LASTEXITCODE; $output; $fails=@($output -split "`r?`n" | Where-Object { $_ -like "FAIL: $selector *" }); if($exit -ne 1 -or ([regex]::Matches($output,'Ran 1 test')).Count -ne 1 -or $fails.Count -ne 1 -or ([regex]::Matches($output,'FAILED \(failures=1\)')).Count -ne 1 -or $output -match '(?m)^ERROR: |errors=|skipped'){ throw "Invalid RED for $selector" }
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.test_preparing_promotion_hooks_wrap_the_logical_operation_once" -v
+$ErrorActionPreference='Stop'; $python='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe'; $selector='test_preparing_promotion_hooks_wrap_the_logical_operation_once'; $output=(& $python -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests.$selector" -v 2>&1 | Out-String); $exit=$LASTEXITCODE; $output; $fails=@($output -split "`r?`n" | Where-Object { $_ -like "FAIL: $selector *" }); if($exit -ne 1 -or ([regex]::Matches($output,'Ran 1 test')).Count -ne 1 -or $fails.Count -ne 1 -or ([regex]::Matches($output,'FAILED \(failures=1\)')).Count -ne 1 -or $output -match '(?m)^ERROR: |errors=|skipped'){ throw "Invalid RED for $selector" }
 ```
 
-Each command must exit `1` with exactly the required
-`FAIL`/`Ran 1 test`/`FAILED (failures=1)` output; any other exit is invalid RED.
+Each behavioral command must exit `1`, report `Ran 1 test`, exactly one assertion
+failure, and `FAILED (failures=1)`, with no error, import/collection/setup
+failure, skip, timeout, signal, or zero match. Record the actual failing
+assertion for the final report.
+
+- [ ] **Step 3: Commit the one-path RED**
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0, str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests" -v
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $git='C:\Program Files\Git\cmd\git.exe'; $actual=@(& $git -C $root status --short); if ($actual.Count -ne 1 -or $actual[0] -notmatch '^ M host/test_update_engine_resume\.py$') { throw 'RED worktree must contain only the test path' }; & $git -C $root add -- 'host/test_update_engine_resume.py'; if ($LASTEXITCODE -ne 0) { throw 'Could not stage retry RED' }; $staged=@(& $git -C $root diff --cached --name-only --); if ($staged.Count -ne 1 -or $staged[0] -cne 'host/test_update_engine_resume.py') { throw 'Retry RED staged path mismatch' }; & $git -C $root diff --cached --check; if ($LASTEXITCODE -ne 0) { throw 'Retry RED diff check failed' }; & $git -C $root commit -m 'test(update): cover locked preparing promotion'; if ($LASTEXITCODE -ne 0) { throw 'Retry RED commit failed' }
 ```
 
-Expected aggregate diagnostic: exit `1`, `Ran 8 tests`, seven assertion failures, one pass, no
-errors/skips; summary remains `FAILED (failures=7)`. Imports and collection
-succeed. Before accepting RED, prove the only dirty path is
-`host/test_update_engine_resume.py`, the index is empty,
-`host/update_engine.py` equals executor-implementation HEAD, and both executor
-paths equal their implementation-head blobs.
-Reject any untracked third file created by test authoring before the RED commit.
+Expected: exactly `host/test_update_engine_resume.py` is committed; production
+is unchanged and status is clean.
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0, str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.OwnershipBoundaryTests.test_unittest_class_map_is_exact" -v
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $git='C:\Program Files\Git\cmd\git.exe'; $subject=(& $git -C $root show -s --format=%s HEAD).Trim(); $paths=@(& $git -C $root diff-tree --no-commit-id --name-only -r HEAD); if($subject -cne 'test(update): cover locked preparing promotion' -or $paths.Count -ne 1 -or $paths[0] -cne 'host/test_update_engine_resume.py'){ throw 'Retry RED commit mismatch' }; & $git -C $root diff --quiet HEAD^ HEAD -- 'host/update_engine.py'; if($LASTEXITCODE -ne 0){ throw 'Production changed in retry RED' }; if(@(& $git -C $root status --porcelain=v1 -uall).Count -ne 0){ throw 'Worktree is not clean after retry RED' }
 ```
 
-Expected: exit `0`, exactly one test and `OK`; the class-map update is complete.
+### 9.4 Implement the Windows Retry GREEN
 
-- [ ] **Step 3: Commit the one-path promotion RED**
+- [ ] **Step 1: Modify only `host/update_engine.py`**
 
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" add -- "host/test_update_engine_resume.py"
-```
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" diff --cached --check
-```
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" commit -m "test(update): cover locked preparing promotion"
-```
-
-Reread exact parent, subject, sole path, unchanged production blob, clean
-tracked status, and empty index.
-Also reread the exact eight-method class and class-map member from the committed
-test blob; no helper/selector disappeared during commit normalization.
-
-- [ ] **Step 4: Implement the minimal retry in one production path**
-
-Modify only `host/update_engine.py` with `apply_patch`. Add standard `time` import and exactly
-these module-private production seams/constants:
+Use `apply_patch`. Add exact standard import `import time`. Define the three
+private seams immediately after imports, and define the two constants there as
+well; no constructor dependency is added:
 
 ```python
 _replace_path = os.replace
@@ -8465,925 +5575,696 @@ PROMOTION_TRANSIENT_WINERRORS = frozenset((5, 32, 33))
 PROMOTION_RETRY_DELAYS = (0.05, 0.2)
 ```
 
-Keep the public `UpdateEngine` constructor byte-for-byte compatible. Add private
-`_require_preparing_promotion_candidate(package, candidate, candidate_bytes,
-paths, staging) -> None`. It requires absent lexical/canonical destination;
-real contained non-reparse install/updates/transactions/preparing parents;
-prepared journal equal to complete `transition(staging,
-JournalPhase.PREPARED)` including every identity/failure/process/seed field;
-exact ownership bytes/digest, probe bytes, Host and Extension tree inventories
-and digests; and exact workspace topology containing only `journal.json`,
-`ownership.json`, `probe/update-manifest.json`, `staged/host/**`, and
-`staged/extension/**` with no unsupported/reparse descendant.
+Do not change `UpdateEngine.__init__`. Add these exact signatures:
 
-Add private `_promote_preparing_with_retry(package, candidate, candidate_bytes,
-paths, staging) -> None`. It:
+```python
+def _require_preparing_promotion_candidate(
+    self,
+    package: ValidatedPackage,
+    candidate: OwnershipPlan,
+    candidate_bytes: bytes,
+    paths: TransactionPaths,
+    staging: UpdateJournal,
+) -> None:
 
-1. Calls the complete validator before the first attempt.
-2. Calls `_replace_path(paths.preparing_root, paths.transaction_root)` at most
-   three total times.
-3. Retries only when `_is_windows`, the exception is an `OSError`,
-   `type(error.winerror) is int`, winerror is exactly `5`, `32`, or `33`, and a
-   retry remains.
-4. After each classified failure, runs complete validation before sleep, calls
-   `_sleep(0.05)` or `_sleep(0.2)`, then runs complete validation again
-   immediately before the next replace.
-5. On third allowlisted failure, re-raises that original operation error so the
-   existing `_run_preparation_operation` wrapper produces the fixed
-   `PreparedTransactionConflict` with that error as cause.
-6. Lets validation conflict/read/reparse/destination changes fail immediately;
-   never retry hook, active write, journal, ownership, copy, probe, candidate,
-   or general conflict failures.
-The helper returns only after atomic replace succeeds; it does not write active
-state or call hooks itself.
-
-Catch only `OSError` around `_replace_path`. The classifier requires
-`type(error.winerror) is int`; bool and integer subclasses are rejected. Do not
-sleep or revalidate after the final attempt because no next replace remains.
-
-The complete validator runs exactly once on first-attempt success, three times
-for one retry, and five times for exhausted three attempts. A validation failure
-is already the existing fixed `PreparedTransactionConflict`; an allowlisted
-operation failure is wrapped once by the existing preparation wrapper with its
-final original error as cause. No raw OS message is persisted, returned, or
-newly logged.
-
-Keep exact source comments `# promotion-checkpoint: initial`,
-`# promotion-checkpoint: pre-sleep`, and
-`# promotion-checkpoint: post-sleep` immediately above the three validator call
-sites; the five mutation transformations and semantic source audit bind those
-markers plus AST call placement.
-Retry delays are constants, not elapsed-time assertions; tests inject `_sleep`
-and compare exact calls without waiting in real time.
-
-The validator may reuse existing strict journal/ownership/tree parsers and path
-classifiers but must not weaken them. Keep validation in one private method so
-initial, pre-sleep, and post-sleep checkpoints cannot drift.
-
-Replace only the existing promotion lambda's `os.replace` call with the private
-retry helper inside the same one logical `_run_preparation_operation` call.
-Before/after hooks therefore execute once around logical promotion. Active state
-is written only after success. Never copy/delete/rebuild the verified candidate
-or introduce a non-atomic fallback.
-Do not alter labels, journal transitions, ownership/probe/staging logic, active
-record shape, or any later update phase.
-
-- [ ] **Step 5: Run GREEN, full resume module, and compile**
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0, str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests" -v
+def _promote_preparing_with_retry(
+    self,
+    package: ValidatedPackage,
+    candidate: OwnershipPlan,
+    candidate_bytes: bytes,
+    paths: TransactionPaths,
+    staging: UpdateJournal,
+) -> None:
 ```
 
-Expected: all eight tests pass, no skips.
+`_require_preparing_promotion_candidate` must fail with
+`PreparedTransactionConflict` unless all checks pass:
+
+- `transaction_root` is absent both lexically and canonically.
+- `install_root`, `updates_root`, `transactions_root`, `preparing_root`, and
+  every lexical parent between them resolve beneath the fixed install root and
+  are real directories, not symlinks or Windows reparse points.
+- `preparing_journal` parses and equals the complete
+  `transition(staging, JournalPhase.PREPARED)` value, including transaction ID,
+  schema version, initiator, target/prior versions, fresh flag, ownership digest,
+  reason code, original failure code, rollback source, initiating process,
+  ownership path, and `seed_receipt`.
+- `preparing_ownership` bytes equal `candidate_bytes`; `read_ownership_plan`
+  returns `candidate`, and `ownership_plan_sha256(candidate)` equals the prepared
+  journal's ownership digest.
+- Probe-manifest bytes equal canonical `package.manifest` bytes.
+- Staged Host and Extension trees have exact inventories and hashes.
+- The full preparing workspace contains only the expected directory topology
+  and `journal.json`, `ownership.json`, `probe/update-manifest.json`,
+  `staged/host/**`, and `staged/extension/**`; no extra, unsupported, symlink,
+  or reparse descendant is accepted.
+- Missing, changed, raced, or unreadable state fails closed as the same fixed
+  conflict. Never expose a raw filesystem message.
+
+`_promote_preparing_with_retry` must use this exact control flow:
+
+```python
+# promotion-checkpoint: initial
+self._require_preparing_promotion_candidate(
+    package, candidate, candidate_bytes, paths, staging
+)
+for attempt in range(len(PROMOTION_RETRY_DELAYS) + 1):
+    try:
+        _replace_path(paths.preparing_root, paths.transaction_root)
+        return
+    except OSError as error:
+        winerror = getattr(error, "winerror", None)
+        if (
+            not _is_windows
+            or type(winerror) is not int
+            or winerror not in PROMOTION_TRANSIENT_WINERRORS
+            or attempt >= len(PROMOTION_RETRY_DELAYS)
+        ):
+            raise
+        # promotion-checkpoint: pre-sleep
+        self._require_preparing_promotion_candidate(
+            package, candidate, candidate_bytes, paths, staging
+        )
+        _sleep(PROMOTION_RETRY_DELAYS[attempt])
+        # promotion-checkpoint: post-sleep
+        self._require_preparing_promotion_candidate(
+            package, candidate, candidate_bytes, paths, staging
+        )
+```
+
+Catch only `OSError` from `_replace_path`. There are at most three attempts and
+exact delays `0.05`, then `0.2`. Do not validate or sleep after the final failed
+attempt. Re-raise the final OS error so the existing
+`_run_preparation_operation` wraps it once as the fixed conflict and preserves
+it as `__cause__`.
+
+Replace only the current promotion operation with:
+
+```python
+self._run_preparation_operation(
+    "workspace:promote-preparing",
+    lambda: self._promote_preparing_with_retry(
+        package, candidate, candidate_bytes, paths, staging
+    ),
+)
+```
+
+Keep `_replace_path(paths.preparing_root, paths.transaction_root)` as the sole
+publication. Do not copy, delete, rebuild, or introduce a non-atomic fallback.
+Do not retry hooks, journal/ownership/probe/copy/candidate validation, active
+writes, general conflicts, non-Windows errors, or unlisted errors. Operation
+hooks stay outside the retry helper and wrap the logical promotion once. Active
+state is written only after successful publication.
+
+- [ ] **Step 2: Run GREEN and update-engine regressions**
+
+```powershell
+& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests" -v
+```
+
+Expected: `Ran 8 tests`, all pass, no skip.
 
 ```powershell
 & "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -m unittest discover -s "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host" -p "test_update_engine_resume.py" -v
 ```
 
-Expected: every current test in the complete module passes, including the exact
-class-map test. Record the observed total rather than hard-coding it in prose.
+Expected: every resume-module test passes with no skip; record the actual total.
+This is the required whole resume-module run.
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "from pathlib import Path; compile(Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\update_engine.py').read_bytes(), r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\update_engine.py', 'exec'); compile(Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\test_update_engine_resume.py').read_bytes(), r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\test_update_engine_resume.py', 'exec')"
+& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -m unittest discover -s "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host" -p "test_update_engine*.py" -v
 ```
 
-Expected: exit `0`, no output.
+Expected: all update-engine tests pass with no skip; record the actual total.
 
-No authoring-time mutation of `host/update_engine.py` is permitted. The five
-promotion mutation definitions belong to the tracked
-`host/test_plan_e_evidence.py` contract and are executed only by the promotion
-producer after both promotion commits exist. The exact matrix remains:
+```powershell
+$ErrorActionPreference='Stop'; $path='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\update_engine.py'; $source=[IO.File]::ReadAllText($path); $required=@('import time','_replace_path = os.replace','_sleep = time.sleep','_is_windows = os.name == "nt"','PROMOTION_TRANSIENT_WINERRORS = frozenset((5, 32, 33))','PROMOTION_RETRY_DELAYS = (0.05, 0.2)','def _require_preparing_promotion_candidate(','def _promote_preparing_with_retry(','# promotion-checkpoint: initial','# promotion-checkpoint: pre-sleep','# promotion-checkpoint: post-sleep','_replace_path(paths.preparing_root, paths.transaction_root)'); foreach($value in $required){ if(([regex]::Matches($source,[regex]::Escape($value))).Count -ne 1){ throw "Required retry source form missing or duplicated: $value" } }; if($source -notmatch '(?s)"workspace:promote-preparing",\s*lambda: self\._promote_preparing_with_retry\('){ throw 'Logical promotion wrapper does not call retry helper' }; if(([regex]::Matches($source,'os\.replace\(paths\.preparing_root, paths\.transaction_root\)')).Count -ne 0){ throw 'Direct preparing promotion bypasses private replace seam' }
+```
 
-| Mutation ID | Temporary source mutation | Required failing selector |
+Expected: exit `0`, no output. This static check supplements behavior tests by
+locking the exact private seams, constants, checkpoints, and atomic call site.
+
+- [ ] **Step 3: Prove five mutations in one foreground Python harness**
+
+Run one foreground Python harness, not five manual edits or multiple tools. It
+must retain the original `host/update_engine.py` bytes, require each source
+anchor exactly once, apply one mutation, run its selector, require exit `1`,
+`Ran 1 test`, one assertion `FAIL`, `FAILED (failures=1)`, and no error or skip.
+Run it in the primary worktree with a clean index and no other tracked change;
+restore bytes in `finally`, prove byte equality, and rerun that selector GREEN.
+An outer `finally` must restore the original bytes after any failure. If the
+source uses CRLF, derive mutation anchors with CRLF; otherwise use LF. Perform
+byte substitutions only, so the mutation cannot normalize unrelated lines.
+
+| Mutation name | Exact temporary change | Selector that must fail |
 |---|---|---|
-| `classification` | Disable the exact Windows/int/allowlist classification | `test_windows_access_denied_retries_atomic_preparing_promotion` |
-| `bound` | Add a third delay/permit a fourth attempt | `test_persistent_windows_promotion_lock_stops_after_three_attempts` |
-| `initial` | Omit initial complete validation | `test_preparing_promotion_revalidates_before_and_after_sleep` |
-| `pre-sleep` | Omit validation after classified failure and before sleep | `test_preparing_promotion_revalidation_rejects_every_authority_mismatch` |
-| `post-sleep` | Omit validation after sleep and before replace | `test_preparing_promotion_revalidation_rejects_every_authority_mismatch` |
+| `classification` | Replace the exact Windows/integer/allowlist/retry-budget condition with `if True:`. | `test_windows_access_denied_retries_atomic_preparing_promotion` |
+| `attempt bound` | Change `PROMOTION_RETRY_DELAYS = (0.05, 0.2)` to `(0.05, 0.2, 0.4)`. | `test_persistent_windows_promotion_lock_stops_after_three_attempts` |
+| `initial validation` | Replace the initial checkpoint and validator call with `pass  # mutation: omit initial revalidation`. | `test_preparing_promotion_revalidates_before_and_after_sleep` |
+| `pre-sleep validation` | Replace the pre-sleep checkpoint and validator call with `pass  # mutation: omit pre-sleep revalidation`. | `test_preparing_promotion_revalidation_rejects_every_authority_mismatch` |
+| `post-sleep validation` | Replace the post-sleep checkpoint and validator call with `pass  # mutation: omit post-sleep revalidation`. | `test_preparing_promotion_revalidation_rejects_every_authority_mismatch` |
 
-The temporary transformations are exact and each source region must occur once:
+The executable one-line harness encodes the script below directly in its
+`python -c` argument; it creates no repository file or persistent evidence
+output. The Python fence is review-only. Run only the one-line command, after
+confirming its payload decodes byte-for-byte to the fenced script.
 
-- `classification`: replace
-  `if not _is_windows or type(winerror) is not int or winerror not in
-  PROMOTION_TRANSIENT_WINERRORS or attempt >= len(PROMOTION_RETRY_DELAYS):`
-  with `if True:`.
-- `bound`: replace `PROMOTION_RETRY_DELAYS = (0.05, 0.2)` with
-  `PROMOTION_RETRY_DELAYS = (0.05, 0.2, 0.4)`.
-- `initial`: replace the `# promotion-checkpoint: initial` marker plus its one
-  complete validator call with `pass  # mutation: omit initial revalidation` at
-  the same indentation.
-- `pre-sleep`: replace the matching marker plus call with
-  `pass  # mutation: omit pre-sleep revalidation`.
-- `post-sleep`: replace the matching marker plus call with
-  `pass  # mutation: omit post-sleep revalidation`.
+The encoded payload is exactly this script:
 
-`test_promotion_result_requires_red_replay_green_mutations_and_sources` and
-`test_promotion_source_semantics_lock_seams_checkpoints_and_atomic_callsite`
-in the tracked `host/test_plan_e_evidence.py` lock all five exact
-transformations, their one-match AST/text anchors, selector mapping, expected
-assertion-only failure, restored GREEN result, transcript paths, and
-original/restored blob hashes. The production `promotion` handler
-creates one owner-bound detached worktree at reviewed HEAD, records its exact
-clean source blobs, temporarily materializes the exact immutable-RED test and
-production blobs for RED replay, and restores reviewed-head blobs in `finally`
-before GREEN. It then applies all five rows sequentially inside the same
-foreground CLI invocation.
-For each row it writes only the allowed worktree source, runs the fixed selector,
-requires exit `1` with one `FAIL`/`Ran 1 test` and no error/skip, and restores
-the original bytes in the handler's `finally` before the next row. It reruns the
-selector GREEN, proves exact blob/SHA-256 identity, and records the two
-transcripts. After all rows, the same invocation reruns all eight GREEN tests,
-requires clean detached status/exact head, removes the worktree non-force through
-the tested owner lifecycle, and only then publishes the terminal receipt. Any
-mutation, selector, restoration, cleanup, or removal failure retains the
-lease/owner/worktree and blocks; it never touches the primary checkout. There is
-no authoring-time mutation command, external mutation script execution, or
-cross-process restoration claim.
+```python
+from pathlib import Path
+import os
+import re
+import subprocess
+import sys
+import tempfile
 
-- [ ] **Step 6: Commit the one-path promotion implementation**
+root = Path(r"C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec")
+source = root / "host/update_engine.py"
+original = source.read_bytes()
+python = Path(sys.executable)
+newline = b"\r\n" if b"\r\n" in original else b"\n"
 
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" add -- "host/update_engine.py"
+
+def lines(*values):
+    return newline.join(value.encode("ascii") for value in values)
+
+
+def validator_call(name, indent):
+    pad = " " * indent
+    return lines(
+        f"{pad}# promotion-checkpoint: {name}",
+        f"{pad}self._require_preparing_promotion_candidate(",
+        f"{pad}    package, candidate, candidate_bytes, paths, staging",
+        f"{pad})",
+    )
+
+
+mutations = (
+    (
+        "classification",
+        lines(
+            "            if (",
+            "                not _is_windows",
+            "                or type(winerror) is not int",
+            "                or winerror not in PROMOTION_TRANSIENT_WINERRORS",
+            "                or attempt >= len(PROMOTION_RETRY_DELAYS)",
+            "            ):",
+        ),
+        b"            if True:",
+        "test_windows_access_denied_retries_atomic_preparing_promotion",
+    ),
+    (
+        "attempt bound",
+        b"PROMOTION_RETRY_DELAYS = (0.05, 0.2)",
+        b"PROMOTION_RETRY_DELAYS = (0.05, 0.2, 0.4)",
+        "test_persistent_windows_promotion_lock_stops_after_three_attempts",
+    ),
+    (
+        "initial validation",
+        validator_call("initial", 8),
+        b"        pass  # mutation: omit initial revalidation",
+        "test_preparing_promotion_revalidates_before_and_after_sleep",
+    ),
+    (
+        "pre-sleep validation",
+        validator_call("pre-sleep", 16),
+        b"                pass  # mutation: omit pre-sleep revalidation",
+        "test_preparing_promotion_revalidation_rejects_every_authority_mismatch",
+    ),
+    (
+        "post-sleep validation",
+        validator_call("post-sleep", 16),
+        b"                pass  # mutation: omit post-sleep revalidation",
+        "test_preparing_promotion_revalidation_rejects_every_authority_mismatch",
+    ),
+)
+
+
+def run(selector, environment):
+    return subprocess.run(
+        [
+            str(python),
+            "-c",
+            (
+                "import pathlib,sys,unittest; "
+                "sys.path.insert(0,str(pathlib.Path("
+                "r'C:\\MyWorkbench\\Repository\\Dynamics-Helper-prompt-scope-spec\\host'"
+                "))); unittest.main(module=None)"
+            ),
+            f"host.test_update_engine_resume.PreparingPromotionRetryTests.{selector}",
+            "-v",
+        ],
+        cwd=root,
+        env=environment,
+        text=True,
+        capture_output=True,
+        timeout=180,
+    )
+
+
+try:
+    with tempfile.TemporaryDirectory(
+        dir=r"C:\Users\zhaobo\AppData\Local\Temp\opencode"
+    ) as temporary:
+        sandbox = Path(temporary)
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(root / "host")
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        for name in ("LOCALAPPDATA", "APPDATA", "USERPROFILE", "HOME", "TEMP", "TMP"):
+            value = sandbox / name.lower()
+            value.mkdir()
+            environment[name] = str(value)
+        for name, old, new, selector in mutations:
+            if original.count(old) != 1:
+                raise AssertionError(f"{name}: source anchor count mismatch")
+            try:
+                source.write_bytes(original.replace(old, new))
+                red = run(selector, environment)
+                output = red.stdout + red.stderr
+                fail_lines = [
+                    line for line in output.splitlines() if line.startswith("FAIL: ")
+                ]
+                summary = re.search(r"FAILED \(failures=(\d+)\)", output)
+                if (
+                    red.returncode != 1
+                    or output.count("Ran 1 test") != 1
+                    or len(fail_lines) != 1
+                    or summary is None
+                    or int(summary.group(1)) != 1
+                    or selector not in fail_lines[0]
+                    or "\nERROR: " in output
+                    or "errors=" in output
+                    or "skipped" in output.lower()
+                ):
+                    raise AssertionError(f"{name}: invalid mutation result\n{output}")
+            finally:
+                source.write_bytes(original)
+            if source.read_bytes() != original:
+                raise AssertionError(f"{name}: byte restoration failed")
+            green = run(selector, environment)
+            output = green.stdout + green.stderr
+            if (
+                green.returncode != 0
+                or output.count("Ran 1 test") != 1
+                or not output.rstrip().endswith("OK")
+            ):
+                raise AssertionError(f"{name}: restored GREEN failed\n{output}")
+            print(f"{name}: mutation FAIL, restored GREEN PASS")
+finally:
+    source.write_bytes(original)
+
+if source.read_bytes() != original:
+    raise AssertionError("final byte restoration failed")
 ```
 
 ```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" diff --cached --check
+& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "exec(__import__('base64').b64decode('ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCBvcwppbXBvcnQgcmUKaW1wb3J0IHN1YnByb2Nlc3MKaW1wb3J0IHN5cwppbXBvcnQgdGVtcGZpbGUKCnJvb3QgPSBQYXRoKHIiQzpcTXlXb3JrYmVuY2hcUmVwb3NpdG9yeVxEeW5hbWljcy1IZWxwZXItcHJvbXB0LXNjb3BlLXNwZWMiKQpzb3VyY2UgPSByb290IC8gImhvc3QvdXBkYXRlX2VuZ2luZS5weSIKb3JpZ2luYWwgPSBzb3VyY2UucmVhZF9ieXRlcygpCnB5dGhvbiA9IFBhdGgoc3lzLmV4ZWN1dGFibGUpCm5ld2xpbmUgPSBiIlxyXG4iIGlmIGIiXHJcbiIgaW4gb3JpZ2luYWwgZWxzZSBiIlxuIgoKCmRlZiBsaW5lcygqdmFsdWVzKToKICAgIHJldHVybiBuZXdsaW5lLmpvaW4odmFsdWUuZW5jb2RlKCJhc2NpaSIpIGZvciB2YWx1ZSBpbiB2YWx1ZXMpCgoKZGVmIHZhbGlkYXRvcl9jYWxsKG5hbWUsIGluZGVudCk6CiAgICBwYWQgPSAiICIgKiBpbmRlbnQKICAgIHJldHVybiBsaW5lcygKICAgICAgICBmIntwYWR9IyBwcm9tb3Rpb24tY2hlY2twb2ludDoge25hbWV9IiwKICAgICAgICBmIntwYWR9c2VsZi5fcmVxdWlyZV9wcmVwYXJpbmdfcHJvbW90aW9uX2NhbmRpZGF0ZSgiLAogICAgICAgIGYie3BhZH0gICAgcGFja2FnZSwgY2FuZGlkYXRlLCBjYW5kaWRhdGVfYnl0ZXMsIHBhdGhzLCBzdGFnaW5nIiwKICAgICAgICBmIntwYWR9KSIsCiAgICApCgoKbXV0YXRpb25zID0gKAogICAgKAogICAgICAgICJjbGFzc2lmaWNhdGlvbiIsCiAgICAgICAgbGluZXMoCiAgICAgICAgICAgICIgICAgICAgICAgICBpZiAoIiwKICAgICAgICAgICAgIiAgICAgICAgICAgICAgICBub3QgX2lzX3dpbmRvd3MiLAogICAgICAgICAgICAiICAgICAgICAgICAgICAgIG9yIHR5cGUod2luZXJyb3IpIGlzIG5vdCBpbnQiLAogICAgICAgICAgICAiICAgICAgICAgICAgICAgIG9yIHdpbmVycm9yIG5vdCBpbiBQUk9NT1RJT05fVFJBTlNJRU5UX1dJTkVSUk9SUyIsCiAgICAgICAgICAgICIgICAgICAgICAgICAgICAgb3IgYXR0ZW1wdCA+PSBsZW4oUFJPTU9USU9OX1JFVFJZX0RFTEFZUykiLAogICAgICAgICAgICAiICAgICAgICAgICAgKToiLAogICAgICAgICksCiAgICAgICAgYiIgICAgICAgICAgICBpZiBUcnVlOiIsCiAgICAgICAgInRlc3Rfd2luZG93c19hY2Nlc3NfZGVuaWVkX3JldHJpZXNfYXRvbWljX3ByZXBhcmluZ19wcm9tb3Rpb24iLAogICAgKSwKICAgICgKICAgICAgICAiYXR0ZW1wdCBib3VuZCIsCiAgICAgICAgYiJQUk9NT1RJT05fUkVUUllfREVMQVlTID0gKDAuMDUsIDAuMikiLAogICAgICAgIGIiUFJPTU9USU9OX1JFVFJZX0RFTEFZUyA9ICgwLjA1LCAwLjIsIDAuNCkiLAogICAgICAgICJ0ZXN0X3BlcnNpc3RlbnRfd2luZG93c19wcm9tb3Rpb25fbG9ja19zdG9wc19hZnRlcl90aHJlZV9hdHRlbXB0cyIsCiAgICApLAogICAgKAogICAgICAgICJpbml0aWFsIHZhbGlkYXRpb24iLAogICAgICAgIHZhbGlkYXRvcl9jYWxsKCJpbml0aWFsIiwgOCksCiAgICAgICAgYiIgICAgICAgIHBhc3MgICMgbXV0YXRpb246IG9taXQgaW5pdGlhbCByZXZhbGlkYXRpb24iLAogICAgICAgICJ0ZXN0X3ByZXBhcmluZ19wcm9tb3Rpb25fcmV2YWxpZGF0ZXNfYmVmb3JlX2FuZF9hZnRlcl9zbGVlcCIsCiAgICApLAogICAgKAogICAgICAgICJwcmUtc2xlZXAgdmFsaWRhdGlvbiIsCiAgICAgICAgdmFsaWRhdG9yX2NhbGwoInByZS1zbGVlcCIsIDE2KSwKICAgICAgICBiIiAgICAgICAgICAgICAgICBwYXNzICAjIG11dGF0aW9uOiBvbWl0IHByZS1zbGVlcCByZXZhbGlkYXRpb24iLAogICAgICAgICJ0ZXN0X3ByZXBhcmluZ19wcm9tb3Rpb25fcmV2YWxpZGF0aW9uX3JlamVjdHNfZXZlcnlfYXV0aG9yaXR5X21pc21hdGNoIiwKICAgICksCiAgICAoCiAgICAgICAgInBvc3Qtc2xlZXAgdmFsaWRhdGlvbiIsCiAgICAgICAgdmFsaWRhdG9yX2NhbGwoInBvc3Qtc2xlZXAiLCAxNiksCiAgICAgICAgYiIgICAgICAgICAgICAgICAgcGFzcyAgIyBtdXRhdGlvbjogb21pdCBwb3N0LXNsZWVwIHJldmFsaWRhdGlvbiIsCiAgICAgICAgInRlc3RfcHJlcGFyaW5nX3Byb21vdGlvbl9yZXZhbGlkYXRpb25fcmVqZWN0c19ldmVyeV9hdXRob3JpdHlfbWlzbWF0Y2giLAogICAgKSwKKQoKCmRlZiBydW4oc2VsZWN0b3IsIGVudmlyb25tZW50KToKICAgIHJldHVybiBzdWJwcm9jZXNzLnJ1bigKICAgICAgICBbCiAgICAgICAgICAgIHN0cihweXRob24pLAogICAgICAgICAgICAiLWMiLAogICAgICAgICAgICAoCiAgICAgICAgICAgICAgICAiaW1wb3J0IHBhdGhsaWIsc3lzLHVuaXR0ZXN0OyAiCiAgICAgICAgICAgICAgICAic3lzLnBhdGguaW5zZXJ0KDAsc3RyKHBhdGhsaWIuUGF0aCgiCiAgICAgICAgICAgICAgICAicidDOlxcTXlXb3JrYmVuY2hcXFJlcG9zaXRvcnlcXER5bmFtaWNzLUhlbHBlci1wcm9tcHQtc2NvcGUtc3BlY1xcaG9zdCciCiAgICAgICAgICAgICAgICAiKSkpOyB1bml0dGVzdC5tYWluKG1vZHVsZT1Ob25lKSIKICAgICAgICAgICAgKSwKICAgICAgICAgICAgZiJob3N0LnRlc3RfdXBkYXRlX2VuZ2luZV9yZXN1bWUuUHJlcGFyaW5nUHJvbW90aW9uUmV0cnlUZXN0cy57c2VsZWN0b3J9IiwKICAgICAgICAgICAgIi12IiwKICAgICAgICBdLAogICAgICAgIGN3ZD1yb290LAogICAgICAgIGVudj1lbnZpcm9ubWVudCwKICAgICAgICB0ZXh0PVRydWUsCiAgICAgICAgY2FwdHVyZV9vdXRwdXQ9VHJ1ZSwKICAgICAgICB0aW1lb3V0PTE4MCwKICAgICkKCgp0cnk6CiAgICB3aXRoIHRlbXBmaWxlLlRlbXBvcmFyeURpcmVjdG9yeSgKICAgICAgICBkaXI9ciJDOlxVc2Vyc1x6aGFvYm9cQXBwRGF0YVxMb2NhbFxUZW1wXG9wZW5jb2RlIgogICAgKSBhcyB0ZW1wb3Jhcnk6CiAgICAgICAgc2FuZGJveCA9IFBhdGgodGVtcG9yYXJ5KQogICAgICAgIGVudmlyb25tZW50ID0gb3MuZW52aXJvbi5jb3B5KCkKICAgICAgICBlbnZpcm9ubWVudFsiUFlUSE9OUEFUSCJdID0gc3RyKHJvb3QgLyAiaG9zdCIpCiAgICAgICAgZW52aXJvbm1lbnRbIlBZVEhPTkRPTlRXUklURUJZVEVDT0RFIl0gPSAiMSIKICAgICAgICBmb3IgbmFtZSBpbiAoIkxPQ0FMQVBQREFUQSIsICJBUFBEQVRBIiwgIlVTRVJQUk9GSUxFIiwgIkhPTUUiLCAiVEVNUCIsICJUTVAiKToKICAgICAgICAgICAgdmFsdWUgPSBzYW5kYm94IC8gbmFtZS5sb3dlcigpCiAgICAgICAgICAgIHZhbHVlLm1rZGlyKCkKICAgICAgICAgICAgZW52aXJvbm1lbnRbbmFtZV0gPSBzdHIodmFsdWUpCiAgICAgICAgZm9yIG5hbWUsIG9sZCwgbmV3LCBzZWxlY3RvciBpbiBtdXRhdGlvbnM6CiAgICAgICAgICAgIGlmIG9yaWdpbmFsLmNvdW50KG9sZCkgIT0gMToKICAgICAgICAgICAgICAgIHJhaXNlIEFzc2VydGlvbkVycm9yKGYie25hbWV9OiBzb3VyY2UgYW5jaG9yIGNvdW50IG1pc21hdGNoIikKICAgICAgICAgICAgdHJ5OgogICAgICAgICAgICAgICAgc291cmNlLndyaXRlX2J5dGVzKG9yaWdpbmFsLnJlcGxhY2Uob2xkLCBuZXcpKQogICAgICAgICAgICAgICAgcmVkID0gcnVuKHNlbGVjdG9yLCBlbnZpcm9ubWVudCkKICAgICAgICAgICAgICAgIG91dHB1dCA9IHJlZC5zdGRvdXQgKyByZWQuc3RkZXJyCiAgICAgICAgICAgICAgICBmYWlsX2xpbmVzID0gWwogICAgICAgICAgICAgICAgICAgIGxpbmUgZm9yIGxpbmUgaW4gb3V0cHV0LnNwbGl0bGluZXMoKSBpZiBsaW5lLnN0YXJ0c3dpdGgoIkZBSUw6ICIpCiAgICAgICAgICAgICAgICBdCiAgICAgICAgICAgICAgICBzdW1tYXJ5ID0gcmUuc2VhcmNoKHIiRkFJTEVEIFwoZmFpbHVyZXM9KFxkKylcKSIsIG91dHB1dCkKICAgICAgICAgICAgICAgIGlmICgKICAgICAgICAgICAgICAgICAgICByZWQucmV0dXJuY29kZSAhPSAxCiAgICAgICAgICAgICAgICAgICAgb3Igb3V0cHV0LmNvdW50KCJSYW4gMSB0ZXN0IikgIT0gMQogICAgICAgICAgICAgICAgICAgIG9yIGxlbihmYWlsX2xpbmVzKSAhPSAxCiAgICAgICAgICAgICAgICAgICAgb3Igc3VtbWFyeSBpcyBOb25lCiAgICAgICAgICAgICAgICAgICAgb3IgaW50KHN1bW1hcnkuZ3JvdXAoMSkpICE9IDEKICAgICAgICAgICAgICAgICAgICBvciBzZWxlY3RvciBub3QgaW4gZmFpbF9saW5lc1swXQogICAgICAgICAgICAgICAgICAgIG9yICJcbkVSUk9SOiAiIGluIG91dHB1dAogICAgICAgICAgICAgICAgICAgIG9yICJlcnJvcnM9IiBpbiBvdXRwdXQKICAgICAgICAgICAgICAgICAgICBvciAic2tpcHBlZCIgaW4gb3V0cHV0Lmxvd2VyKCkKICAgICAgICAgICAgICAgICk6CiAgICAgICAgICAgICAgICAgICAgcmFpc2UgQXNzZXJ0aW9uRXJyb3IoZiJ7bmFtZX06IGludmFsaWQgbXV0YXRpb24gcmVzdWx0XG57b3V0cHV0fSIpCiAgICAgICAgICAgIGZpbmFsbHk6CiAgICAgICAgICAgICAgICBzb3VyY2Uud3JpdGVfYnl0ZXMob3JpZ2luYWwpCiAgICAgICAgICAgIGlmIHNvdXJjZS5yZWFkX2J5dGVzKCkgIT0gb3JpZ2luYWw6CiAgICAgICAgICAgICAgICByYWlzZSBBc3NlcnRpb25FcnJvcihmIntuYW1lfTogYnl0ZSByZXN0b3JhdGlvbiBmYWlsZWQiKQogICAgICAgICAgICBncmVlbiA9IHJ1bihzZWxlY3RvciwgZW52aXJvbm1lbnQpCiAgICAgICAgICAgIG91dHB1dCA9IGdyZWVuLnN0ZG91dCArIGdyZWVuLnN0ZGVycgogICAgICAgICAgICBpZiAoCiAgICAgICAgICAgICAgICBncmVlbi5yZXR1cm5jb2RlICE9IDAKICAgICAgICAgICAgICAgIG9yIG91dHB1dC5jb3VudCgiUmFuIDEgdGVzdCIpICE9IDEKICAgICAgICAgICAgICAgIG9yIG5vdCBvdXRwdXQucnN0cmlwKCkuZW5kc3dpdGgoIk9LIikKICAgICAgICAgICAgKToKICAgICAgICAgICAgICAgIHJhaXNlIEFzc2VydGlvbkVycm9yKGYie25hbWV9OiByZXN0b3JlZCBHUkVFTiBmYWlsZWRcbntvdXRwdXR9IikKICAgICAgICAgICAgcHJpbnQoZiJ7bmFtZX06IG11dGF0aW9uIEZBSUwsIHJlc3RvcmVkIEdSRUVOIFBBU1MiKQpmaW5hbGx5OgogICAgc291cmNlLndyaXRlX2J5dGVzKG9yaWdpbmFsKQoKaWYgc291cmNlLnJlYWRfYnl0ZXMoKSAhPSBvcmlnaW5hbDoKICAgIHJhaXNlIEFzc2VydGlvbkVycm9yKCJmaW5hbCBieXRlIHJlc3RvcmF0aW9uIGZhaWxlZCIpCg=='))"
+```
+
+Expected: five named `mutation FAIL, restored GREEN PASS` lines and exit `0`.
+Then rerun the eight-test class and all update-engine tests. Confirm the source
+bytes are identical to the pre-mutation bytes and only `host/update_engine.py`
+is dirty relative to RED HEAD. The harness must produce no durable file; its
+base64 payload is only an inline encoding of the readable contract above.
+
+- [ ] **Step 4: Commit the one-path GREEN**
+
+```powershell
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $git='C:\Program Files\Git\cmd\git.exe'; $actual=@(& $git -C $root status --short); if ($actual.Count -ne 1 -or $actual[0] -notmatch '^ M host/update_engine\.py$') { throw 'GREEN worktree must contain only the source path' }; & $git -C $root add -- 'host/update_engine.py'; if ($LASTEXITCODE -ne 0) { throw 'Could not stage retry GREEN' }; $staged=@(& $git -C $root diff --cached --name-only --); if ($staged.Count -ne 1 -or $staged[0] -cne 'host/update_engine.py') { throw 'Retry GREEN staged path mismatch' }; & $git -C $root diff --cached --check; if ($LASTEXITCODE -ne 0) { throw 'Retry GREEN diff check failed' }; & $git -C $root commit -m 'fix(update): retry locked preparing promotion'; if ($LASTEXITCODE -ne 0) { throw 'Retry GREEN commit failed' }
+```
+
+Expected: exactly `host/update_engine.py` is committed; the RED test blob is
+unchanged and status is clean.
+
+```powershell
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $git='C:\Program Files\Git\cmd\git.exe'; $subject=(& $git -C $root show -s --format=%s HEAD).Trim(); $paths=@(& $git -C $root diff-tree --no-commit-id --name-only -r HEAD); if($subject -cne 'fix(update): retry locked preparing promotion' -or $paths.Count -ne 1 -or $paths[0] -cne 'host/update_engine.py'){ throw 'Retry GREEN commit mismatch' }; & $git -C $root diff --quiet HEAD^ HEAD -- 'host/test_update_engine_resume.py'; if($LASTEXITCODE -ne 0){ throw 'RED test changed in retry GREEN' }; if(@(& $git -C $root status --porcelain=v1 -uall).Count -ne 0){ throw 'Worktree is not clean after retry GREEN' }
+```
+
+### 9.5 Verify the Reviewed Product Head
+
+Run every command independently from the repository root. Record actual command,
+exit code, test count, pass/fail/skip count, build result, and hashes in the
+report. Do not use package-runner or package-exec fallbacks, install
+dependencies, or access a network. Use only lock-installed npm scripts or
+absolute local Node entries. If a build
+updates only ignored `extension/dist`, that output is permitted; do not stage it.
+
+- [ ] **Step 1: Public asset contract, build, and source/dist identity**
+
+```powershell
+& "C:\Program Files\nodejs\node.exe" --test "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension\test\defaultItems.test.mjs"
 ```
 
 ```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" commit -m "fix(update): retry locked preparing promotion"
-```
-
-Reread exact direct parent, subject, sole production path, unchanged RED test
-blob, clean tracked worktree, and empty index. This commit is the initial
-reviewed product/tool head unless a separately accepted fix is later committed.
-Rerun all eight promotion selectors from the committed implementation head and
-the complete `host.test_update_engine_resume` module before selecting that head.
-Use the exact class/module commands printed in Step 5; record observed totals.
-Run the read-only CLI `preflight` next; evidence production cannot start until
-it returns `preflight_ok` for this literal head.
-
-### 9.7 Scripted Evidence Execution
-
-Each head-bearing command resolves `HEAD` once through the absolute system Git
-executable in that same one-line invocation. PowerShell evaluates the
-subexpression before starting Python, so the CLI receives one concrete full
-40-hex argument; the CLI independently requires that object to remain the
-current exact reviewed/final head before mutation. No command depends on a prior
-variable, external environment value, branch-name argument, or controller
-memory.
-The command-level Git lookup is a controller preargument read; the CLI's own
-closed preflight still performs all authoritative Git/config/state validation.
-
-```powershell
-& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD
-```
-
-Expected: one lowercase 40-hex reviewed-head line. Each command below resolves
-and passes that same current object independently.
-
-Run preflight and status first. Both are read-only.
-If either command returns nonzero, do not run any producer.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" preflight
-```
-
-Expected: exit `0`; one canonical JSON line with `schema_version: 1`,
-`command: "preflight"`, `status: "ok"`, `code: "preflight_ok"`, exact plan/spec chronology, clean
-source/index, six report hashes, Task 6/7 absence, and no incompatible state.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" status
-```
-
-Expected before production: exit `0`; `command: "status"`, `status: "ok"`,
-`code: "state_absent"`, and an empty authority-path list. Between producers,
-expected code is `state_ready` with exact succeeded/rejected terminal producer
-IDs and candidate hashes. Malformed/unknown retained state is exit `3`, code
-`retained_state`, with only fixed classifications and authority paths.
-
-Run each producer as a separate foreground process in this dependency order.
-After each succeeds, run `status` read-only and require `state_ready` with the
-new exact terminal ID plus all prior expected IDs before launching the next.
-Use the one-line `status` command printed above; it has no head argument or prior
-shell dependency.
-Producers and review ingestions never stage/commit/change HEAD/ref/index; only
-`finalize` owns the final Git mutation.
-Do not rerun an already-succeeded producer; status supplies its terminal proof.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" produce --kind promotion --reviewed-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD)
+& "C:\Program Files\nodejs\npm.cmd" run build --prefix "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension"
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" produce --kind focused-extension --reviewed-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD)
+$ErrorActionPreference='Stop'; $source='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension\items.json'; $built='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension\dist\items.json'; if (-not (Test-Path -LiteralPath $built -PathType Leaf)) { throw 'Built public asset is absent' }; $sourceHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $source).Hash.ToLowerInvariant(); $builtHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $built).Hash.ToLowerInvariant(); if ($sourceHash -cne '839ef34acce528efff3a64a563070942fc228326730d390aa7d467c3df83ce25' -or $builtHash -cne $sourceHash) { throw "Public asset hash mismatch: source=$sourceHash dist=$builtHash" }
+```
+
+Expected: five Node tests pass, production build succeeds, and source/dist hashes
+both equal `839ef34acce528efff3a64a563070942fc228326730d390aa7d467c3df83ce25`.
+
+- [ ] **Step 2: Task 6 current-state tests and TypeScript**
+
+```powershell
+& "C:\Program Files\nodejs\npm.cmd" run test:run --prefix "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension" -- src/utils/pageIdentity.test.ts src/components/FAB.pageIdentity.test.tsx src/components/FAB.spinner.test.tsx src/hooks/useAnalysisHydration.test.ts --reporter=verbose
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" produce --kind full-extension --reviewed-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD)
+& "C:\Program Files\nodejs\node.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension\node_modules\typescript\bin\tsc" --noEmit -p "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension\tsconfig.json"
+```
+
+Expected: all selected tests pass and TypeScript exits `0`. This is current-state
+coverage only; record no historical reconstruction claim. Confirm the Task 6
+titles `switches identity from A to B while Analyze is busy`, `contains throwing
+identity accessors`, `replaces a user-edited A textarea with B after busy Analyze
+completes`, and `clears A hydration while deferred B hydration is pending` pass.
+
+- [ ] **Step 3: Task 7 current-state Extension and isolated Host tests**
+
+```powershell
+& "C:\Program Files\nodejs\npm.cmd" run test:run --prefix "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension" -- src/utils/analyzeRequest.test.ts src/background/contextMenu.test.ts src/components/FAB.analyzeRequest.test.tsx src/components/FAB.spinner.test.tsx src/components/FAB.promptSourceErrors.test.tsx src/components/FAB.userPrompt.test.tsx src/components/FAB.bookmarkTelemetry.test.tsx --reporter=verbose
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" produce --kind host --reviewed-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD)
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $sandbox=Join-Path 'C:\Users\zhaobo\AppData\Local\Temp\opencode' ('plan-e-task7-'+[guid]::NewGuid().ToString('N')); $names=@('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP'); $managed=@($names+'PYTHONPATH'); $saved=@{}; $present=@{}; $processEnv=[Environment]::GetEnvironmentVariables('Process'); $exit=99; try { New-Item -ItemType Directory -Path $sandbox | Out-Null; foreach($name in $managed){ $present[$name]=$processEnv.Contains($name); $saved[$name]=if($present[$name]){[string]$processEnv[$name]}else{$null} }; foreach($name in $names){ $path=Join-Path $sandbox $name.ToLowerInvariant(); New-Item -ItemType Directory -Path $path | Out-Null; [Environment]::SetEnvironmentVariable($name,$path,'Process') }; $env:PYTHONPATH=Join-Path $root 'host'; & "$root\host\venv\Scripts\python.exe" -m unittest host.test_session_workspace host.test_prompt_session -v; $exit=$LASTEXITCODE } finally { foreach($name in $managed){ if($present[$name]){ [Environment]::SetEnvironmentVariable($name,$saved[$name],'Process') } else { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue } }; if(Test-Path -LiteralPath $sandbox){ Remove-Item -LiteralPath $sandbox -Recurse -Force } }; if($exit -ne 0){ throw "Task 7 Host tests failed: $exit" }
+```
+
+Expected: all selected Extension and Host tests pass, no skip, and the Host runs
+with six distinct fresh disposable state/temp directories. Record the Extension
+title `applies an explicit empty Root to exactly one request` and these four
+Task 7 Host selectors as passing within the module output:
+`test_explicit_empty_analyze_root_overrides_config_for_one_request`,
+`test_request_after_explicit_empty_without_marker_uses_configured_root`,
+`test_malformed_explicit_marker_uses_legacy_fallback`, and
+`test_explicit_marker_with_non_string_root_uses_legacy_fallback`.
+
+- [ ] **Step 4: Retry and all update-engine tests**
+
+```powershell
+& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "import pathlib,sys,unittest; sys.path.insert(0,str(pathlib.Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host'))); unittest.main(module=None)" "host.test_update_engine_resume.PreparingPromotionRetryTests" -v
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" produce --kind static --reviewed-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD)
+& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -m unittest discover -s "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host" -p "test_update_engine*.py" -v
+```
+
+Expected: focused `8/8` and all update-engine tests pass with no skip.
+
+- [ ] **Step 5: All Extension tests and production build**
+
+```powershell
+& "C:\Program Files\nodejs\npm.cmd" run test:run --prefix "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension" -- --reporter=verbose
+```
+
+Expected: all Extension tests pass with no failed/pending tests.
+
+```powershell
+& "C:\Program Files\nodejs\npm.cmd" run build --prefix "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\extension"
+```
+
+Expected: the production build exits `0` after the complete Extension suite.
+
+- [ ] **Step 6: Full isolated Host discovery and compile**
+
+Run discovery through one parsing harness so the allowed skip is enforced, not
+merely inspected by eye. The harness creates six fresh sibling directories,
+passes them to the Host child, captures complete output, and removes only that
+owned sandbox in `finally`:
+
+```powershell
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $sandbox=Join-Path 'C:\Users\zhaobo\AppData\Local\Temp\opencode' ('plan-e-host-'+[guid]::NewGuid().ToString('N')); $names=@('LOCALAPPDATA','APPDATA','USERPROFILE','HOME','TEMP','TMP'); $managed=@($names+'PYTHONPATH'+'PYTHONDONTWRITEBYTECODE'+'DH_PLAN_C_FROZEN_ONEDIR'); $saved=@{}; $present=@{}; $processEnv=[Environment]::GetEnvironmentVariables('Process'); $output=''; $exit=99; try { New-Item -ItemType Directory -Path $sandbox | Out-Null; foreach($name in $managed){ $present[$name]=$processEnv.Contains($name); $saved[$name]=if($present[$name]){[string]$processEnv[$name]}else{$null} }; foreach($name in $names){ $value=Join-Path $sandbox $name.ToLowerInvariant(); New-Item -ItemType Directory -Path $value | Out-Null; [Environment]::SetEnvironmentVariable($name,$value,'Process') }; $env:PYTHONPATH=Join-Path $root 'host'; $env:PYTHONDONTWRITEBYTECODE='1'; Remove-Item -LiteralPath 'Env:DH_PLAN_C_FROZEN_ONEDIR' -ErrorAction SilentlyContinue; $output=(& "$root\host\venv\Scripts\python.exe" -m unittest discover -s "$root\host" -p 'test_*.py' -v 2>&1 | Out-String); $exit=$LASTEXITCODE } finally { foreach($name in $managed){ if($present[$name]){ [Environment]::SetEnvironmentVariable($name,$saved[$name],'Process') } else { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue } }; if(Test-Path -LiteralPath $sandbox){ Remove-Item -LiteralPath $sandbox -Recurse -Force } }; $output; $skips=@($output -split "`r?`n" | Where-Object { $_ -match ' \.\.\. skipped ' }); $selector='test_complete_built_runtime_starts_and_matches_target_without_live_mutation'; if($exit -ne 0 -or $skips.Count -ne 1 -or $skips[0] -notlike "*$selector*" -or $skips[0] -notlike "*DH_PLAN_C_FROZEN_ONEDIR not set*"){ throw "Full Host discovery or exact skip validation failed: exit=$exit skips=$($skips -join ' | ')" }
+```
+
+Expected: all tests pass. Exactly one skip is required and authorized:
+`host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation`
+with reason `DH_PLAN_C_FROZEN_ONEDIR not set`; zero skips, more than one skip, or
+any other selector/reason blocks completion. Capture the complete output when
+checking this condition.
+
+```powershell
+$ErrorActionPreference='Stop'; $cache=Join-Path 'C:\Users\zhaobo\AppData\Local\Temp\opencode' ('plan-e-pycache-'+[guid]::NewGuid().ToString('N')); $processEnv=[Environment]::GetEnvironmentVariables('Process'); $present=$processEnv.Contains('PYTHONPYCACHEPREFIX'); $saved=if($present){[string]$processEnv['PYTHONPYCACHEPREFIX']}else{$null}; $exit=99; try { New-Item -ItemType Directory -Path $cache | Out-Null; $env:PYTHONPYCACHEPREFIX=$cache; & "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -m compileall -q "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host"; $exit=$LASTEXITCODE } finally { if($present){ [Environment]::SetEnvironmentVariable('PYTHONPYCACHEPREFIX',$saved,'Process') } else { Remove-Item -LiteralPath 'Env:PYTHONPYCACHEPREFIX' -ErrorAction SilentlyContinue }; if(Test-Path -LiteralPath $cache){ Remove-Item -LiteralPath $cache -Recurse -Force } }; if($exit -ne 0){ throw "Host compileall failed: $exit" }
+```
+
+Expected: exit `0`, no diagnostics.
+
+- [ ] **Step 7: Native-message structural safety scans**
+
+The one-line Python command below uses explicit `SystemExit` checks, scans
+`ownData.ts`, `safeErrorText.ts`, `analyzeRequestHandler.ts`,
+`nativeMessageWire.ts`, and the `NATIVE_MSG` Worker branch, and self-mutates each
+required detector in memory to prove a disabled descriptor, coercion,
+reserved-key, Analyze route, non-Analyze route, wire-helper route, or sender
+allowlist check is rejected. Decode the inline payload before execution if
+inspection is needed; it writes no file:
+
+The decoded script has these reviewable checks:
+
+```python
+def fail(message):
+    raise SystemExit(message)
+
+
+required = (
+    ("own", "Object.getOwnPropertyDescriptor"),
+    ("own", "Object.hasOwn(descriptor, 'value')"),
+    ("guard", "Object.getOwnPropertyDescriptors(inner)"),
+    ("guard", "key === '_persist' || key === 'extension_warnings' || key === 'toJSON'"),
+    ("guard", "Object.freeze(output)"),
+    ("wire", "Object.getOwnPropertyDescriptors(forwarded)"),
+    ("wire", "Object.defineProperty(wire, 'requestId'"),
+    ("wire", "Object.freeze(wire)"),
+    ("worker", "postNativeMessageWire(forwarded"),
+)
+no_coercion_inputs = ("ownData.ts", "safeErrorText.ts", "analyzeRequestHandler.ts", "nativeMessageWire.ts")
+required_route_calls = (
+    "isAnalyzePayload(inner)",
+    "handleAnalyzeRequest(inner",
+    "guardNonAnalyzeNativeMessage(inner)",
+    "sendNativeMessage(guarded.forwarded)",
+)
+allowed_direct_sends = (
+    ("background/nativeMessageWire.ts", "deps.postMessage(wire)"),
+    ("background/serviceWorker.ts", "port.postMessage(message)"),
+)
+self_check_mutations = (
+    "disable own-property descriptor check",
+    "inject String coercion",
+    "disable reserved metadata rejection",
+    "disable final-wire freeze",
+    "disable Analyze route",
+    "disable non-Analyze guard route",
+    "disable Worker final-wire helper call",
+    "add a rogue direct port send",
+)
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" produce --kind task-audits --reviewed-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD)
+& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "exec(__import__('base64').b64decode('ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCByZQoKCmRlZiBmYWlsKG1lc3NhZ2UpOgogICAgcmFpc2UgU3lzdGVtRXhpdChtZXNzYWdlKQoKCnJvb3QgPSBQYXRoKHIiQzpcTXlXb3JrYmVuY2hcUmVwb3NpdG9yeVxEeW5hbWljcy1IZWxwZXItcHJvbXB0LXNjb3BlLXNwZWNcZXh0ZW5zaW9uXHNyYyIpCnJlYWQgPSBsYW1iZGEgdmFsdWU6IChyb290IC8gdmFsdWUpLnJlYWRfdGV4dChlbmNvZGluZz0idXRmLTgiKQpvd24gPSByZWFkKCJ1dGlscy9vd25EYXRhLnRzIikKc2FmZSA9IHJlYWQoInV0aWxzL3NhZmVFcnJvclRleHQudHMiKQpndWFyZCA9IHJlYWQoImJhY2tncm91bmQvYW5hbHl6ZVJlcXVlc3RIYW5kbGVyLnRzIikKd2lyZSA9IHJlYWQoImJhY2tncm91bmQvbmF0aXZlTWVzc2FnZVdpcmUudHMiKQp3b3JrZXIgPSByZWFkKCJiYWNrZ3JvdW5kL3NlcnZpY2VXb3JrZXIudHMiKQoKCmRlZiBhY2NlcHRzKHNvdXJjZXMsIGV4cGVjdGVkX3Bvc3RzKToKICAgIHZhbHVlcyA9IGRpY3QoemlwKCgib3duIiwgInNhZmUiLCAiZ3VhcmQiLCAid2lyZSIsICJ3b3JrZXIiKSwgc291cmNlcykpCiAgICByZXF1aXJlZCA9ICgKICAgICAgICAoIm93biIsICJPYmplY3QuZ2V0T3duUHJvcGVydHlEZXNjcmlwdG9yIiksCiAgICAgICAgKCJvd24iLCAiT2JqZWN0Lmhhc093bihkZXNjcmlwdG9yLCAndmFsdWUnKSIpLAogICAgICAgICgiZ3VhcmQiLCAiT2JqZWN0LmdldE93blByb3BlcnR5RGVzY3JpcHRvcnMoaW5uZXIpIiksCiAgICAgICAgKCJndWFyZCIsICJrZXkgPT09ICdfcGVyc2lzdCcgfHwga2V5ID09PSAnZXh0ZW5zaW9uX3dhcm5pbmdzJyB8fCBrZXkgPT09ICd0b0pTT04nIiksCiAgICAgICAgKCJndWFyZCIsICJPYmplY3QuZnJlZXplKG91dHB1dCkiKSwKICAgICAgICAoIndpcmUiLCAiT2JqZWN0LmdldE93blByb3BlcnR5RGVzY3JpcHRvcnMoZm9yd2FyZGVkKSIpLAogICAgICAgICgid2lyZSIsICJPYmplY3QuZGVmaW5lUHJvcGVydHkod2lyZSwgJ3JlcXVlc3RJZCciKSwKICAgICAgICAoIndpcmUiLCAiT2JqZWN0LmZyZWV6ZSh3aXJlKSIpLAogICAgICAgICgid29ya2VyIiwgInBvc3ROYXRpdmVNZXNzYWdlV2lyZShmb3J3YXJkZWQiKSwKICAgICkKICAgIGlmIG5vdCBhbGwobmVlZGxlIGluIHZhbHVlc1tuYW1lXSBmb3IgbmFtZSwgbmVlZGxlIGluIHJlcXVpcmVkKToKICAgICAgICByZXR1cm4gRmFsc2UKICAgIGlmIHJlLnNlYXJjaCgKICAgICAgICByIlxiKD86U3RyaW5nfEpTT05cLnN0cmluZ2lmeSlccypcKHxcLnRvU3RyaW5nXHMqXCgiLAogICAgICAgIHZhbHVlc1sib3duIl0gKyB2YWx1ZXNbInNhZmUiXSArIHZhbHVlc1siZ3VhcmQiXSArIHZhbHVlc1sid2lyZSJdLAogICAgKToKICAgICAgICByZXR1cm4gRmFsc2UKICAgIHJvdXRlID0gcmUuc2VhcmNoKAogICAgICAgIHInaWYgXChtZXNzYWdlXC50eXBlID09PSAiTkFUSVZFX01TRyJcKSBceyg/UDxib2R5Pi4qPylcbiAgICBcfScsCiAgICAgICAgdmFsdWVzWyJ3b3JrZXIiXSwKICAgICAgICByZS5TLAogICAgKQogICAgaWYgcm91dGUgaXMgTm9uZSBvciBub3QgYWxsKAogICAgICAgIG5lZWRsZSBpbiByb3V0ZS5ncm91cCgiYm9keSIpCiAgICAgICAgZm9yIG5lZWRsZSBpbiAoCiAgICAgICAgICAgICJpc0FuYWx5emVQYXlsb2FkKGlubmVyKSIsCiAgICAgICAgICAgICJoYW5kbGVBbmFseXplUmVxdWVzdChpbm5lciIsCiAgICAgICAgICAgICJndWFyZE5vbkFuYWx5emVOYXRpdmVNZXNzYWdlKGlubmVyKSIsCiAgICAgICAgICAgICJzZW5kTmF0aXZlTWVzc2FnZShndWFyZGVkLmZvcndhcmRlZCkiLAogICAgICAgICkKICAgICk6CiAgICAgICAgcmV0dXJuIEZhbHNlCiAgICByZXR1cm4gZXhwZWN0ZWRfcG9zdHMgPT0gWwogICAgICAgICgiYmFja2dyb3VuZC9uYXRpdmVNZXNzYWdlV2lyZS50cyIsICJkZXBzLnBvc3RNZXNzYWdlKHdpcmUpIiksCiAgICAgICAgKCJiYWNrZ3JvdW5kL3NlcnZpY2VXb3JrZXIudHMiLCAicG9ydC5wb3N0TWVzc2FnZShtZXNzYWdlKSIpLAogICAgXQoKCmZpbGVzID0gKAogICAgcGF0aAogICAgZm9yIHBhdGggaW4gcm9vdC5yZ2xvYigiKiIpCiAgICBpZiBwYXRoLnN1ZmZpeCBpbiAoIi50cyIsICIudHN4IikgYW5kICIudGVzdC4iIG5vdCBpbiBwYXRoLm5hbWUKKQpwb3N0cyA9IFsKICAgIChwYXRoLnJlbGF0aXZlX3RvKHJvb3QpLmFzX3Bvc2l4KCksIGxpbmUuc3RyaXAoKSkKICAgIGZvciBwYXRoIGluIGZpbGVzCiAgICBmb3IgbGluZSBpbiBwYXRoLnJlYWRfdGV4dChlbmNvZGluZz0idXRmLTgiKS5zcGxpdGxpbmVzKCkKICAgIGlmIHJlLnNlYXJjaChyIlwucG9zdE1lc3NhZ2VccypcKCIsIGxpbmUpCl0KYmFzZWxpbmUgPSAob3duLCBzYWZlLCBndWFyZCwgd2lyZSwgd29ya2VyKQppZiBub3QgYWNjZXB0cyhiYXNlbGluZSwgcG9zdHMpOgogICAgZmFpbCgiYmFzZWxpbmUgTmF0aXZlLW1lc3NhZ2Ugc3RydWN0dXJhbCBwcmVkaWNhdGUgZmFpbGVkIikKbXV0YXRpb25zID0gKAogICAgKDAsICJPYmplY3QuZ2V0T3duUHJvcGVydHlEZXNjcmlwdG9yIiwgIk9iamVjdC5nZXRQcm90b3R5cGVPZiIpLAogICAgKDEsICJyZXR1cm4gY2FuZGlkYXRlIiwgInJldHVybiBTdHJpbmcoY2FuZGlkYXRlKSIpLAogICAgKDIsICJrZXkgPT09ICdfcGVyc2lzdCciLCAia2V5ID09PSAnX3VudXNlZCciKSwKICAgICgzLCAiT2JqZWN0LmZyZWV6ZSh3aXJlKSIsICJ2b2lkIHdpcmUiKSwKICAgICg0LCAiaGFuZGxlQW5hbHl6ZVJlcXVlc3QoaW5uZXIiLCAiaGFuZGxlQW5hbHl6ZVJlcXVlc3REaXNhYmxlZChpbm5lciIpLAogICAgKDQsICJndWFyZE5vbkFuYWx5emVOYXRpdmVNZXNzYWdlKGlubmVyKSIsICJndWFyZERpc2FibGVkKGlubmVyKSIpLAogICAgKDQsICJwb3N0TmF0aXZlTWVzc2FnZVdpcmUoZm9yd2FyZGVkIiwgInBvc3ROYXRpdmVNZXNzYWdlV2lyZURpc2FibGVkKGZvcndhcmRlZCIpLAopCmZvciBpbmRleCwgb2xkLCBuZXcgaW4gbXV0YXRpb25zOgogICAgaWYgYmFzZWxpbmVbaW5kZXhdLmNvdW50KG9sZCkgIT0gMToKICAgICAgICBmYWlsKGYic2VsZi1jaGVjayBhbmNob3IgbWlzbWF0Y2g6IHtvbGR9IikKICAgIGNoYW5nZWQgPSBsaXN0KGJhc2VsaW5lKQogICAgY2hhbmdlZFtpbmRleF0gPSBjaGFuZ2VkW2luZGV4XS5yZXBsYWNlKG9sZCwgbmV3KQogICAgaWYgYWNjZXB0cyh0dXBsZShjaGFuZ2VkKSwgcG9zdHMpOgogICAgICAgIGZhaWwoZiJzZWxmLWNoZWNrIG11dGF0aW9uIGVzY2FwZWQ6IHtvbGR9IikKZXh0cmFfcG9zdHMgPSBwb3N0cyArIFsoImJhY2tncm91bmQvcm9ndWUudHMiLCAicG9ydC5wb3N0TWVzc2FnZShtZXNzYWdlKSIpXQppZiBhY2NlcHRzKGJhc2VsaW5lLCBleHRyYV9wb3N0cyk6CiAgICBmYWlsKCJkaXJlY3Qtc2VuZCBhbGxvd2xpc3Qgc2VsZi1jaGVjayBlc2NhcGVkIikKcHJpbnQoIk5hdGl2ZS1tZXNzYWdlIHN0cnVjdHVyYWwgc2FmZXR5OiBQQVNTIikK'))"
+```
+
+Expected: exactly `Native-message structural safety: PASS`. The Python payload
+contains no `assert`; every failed invariant exits explicitly through
+`SystemExit`. This checks the
+descriptor-safe own-property primitive, no-coercion fallback/guard boundary,
+reserved metadata rejection, frozen final-wire construction, Worker routing
+through `postNativeMessageWire`, and the sole reviewed direct
+`port.postMessage(message)` adapter call. Any additional direct production
+`.postMessage(` call blocks completion.
+
+- [ ] **Step 8: Diff and status**
+
+```powershell
+& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" diff --check "0dbb4852931b50153fb898b03129ae0092c46404..HEAD"
 ```
 
 ```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" produce --kind plan-e-review-package --reviewed-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD)
+& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" status --short
 ```
 
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" produce --kind whole-review-package --reviewed-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD)
-```
+Expected: diff check exits `0`; status is empty before review/report authoring.
 
-Expected for each producer: exit `0`; one canonical object with
-`command: "produce"`, `status: "ok"`, `code: "producer_succeeded"`, the exact
-kind/reviewed head, closed receipt path, exact sorted candidate map, and command
-receipt summary. It must not print raw child output. A test/evidence mismatch is
-exit `4`; process/I/O failure is exit `5`; both preserve owned state as required.
-For `promotion`, this one command is the sole GREEN/mutation evidence operation:
-its receipt must prove one owner/lease, one detached-worktree lifecycle, all
-seven RED replays plus constructor control, all eight GREEN selectors, all five
-mutation failures and restored GREEN reruns, exact source restoration, non-force
-worktree removal, and no primary-checkout mutation. Do not run a separate
-mutation command before or after it.
+### 9.6 Obtain One Fresh Independent Review
 
-Producer output maps each logical final artifact name to its fixed head-scoped
-candidate authority and hash. Review dispatch reads the package, diff, and audit
-bytes only from those receipt-authorized candidate authorities after `status`
-revalidation; `.superpowers/sdd` fixed paths do not exist yet. The controller
-does not invent or relocate a candidate path.
-Candidate absolute paths are output-only fixed-map resolutions, not accepted
-back as arbitrary CLI arguments; ingestion identifies dependencies by kind/head.
+- [ ] Dispatch one fresh reviewer after all product/test commits and verification
 
-Dispatch reviews only after both package producers and frozen audits succeed.
-Give each fresh review session the exact package and diff for its range, both
-audit files/hashes, both latest scripted/build-Vitest specs, evidence-loss and
-Windows retry specs, this
-plan, all 70 reviewed paths, relevant source/tests, and the criteria in section
-9.8. The controller records the opaque session
-ID returned by the orchestration platform and writes the exact returned review
-text, byte zero through EOF, to an approved absolute input path. Review input is
-outside the repository and is not a candidate. The two commands below contain
-the permitted session placeholders; replace each with observed literal values
-before execution. Do not trust a remembered summary: the CLI
-strictly validates complete input bytes, package/diff/audit hashes, head/range,
-grammar, disposition, and the different-session rule.
-The CLI's package-producer success JSON supplies the exact candidate paths to
-dispatch; the controller uses those observed literal paths only after matching
-kind/head/hash, without treating them as later cleanup authority.
-Review sessions receive read-only copies/attachments from those exact bytes if
-the orchestration system cannot attach Git-common paths directly; the controller
-hashes any transport copy and requires equality before dispatch, and the CLI
-still validates original candidate hashes during ingestion/finalization.
-
-The two review session markers plus the one validated pre-CAS reviewed-head
-marker are the complete command-placeholder allowlist. The controller replaces
-the reviewed-head marker from `status.reviewed_head`; it is not review input.
-Before replacement, validate each observed session ID against exact regex
-`^[A-Za-z0-9][A-Za-z0-9._:@/+\-=]{0,127}$`, require the IDs differ, and place
-each observed validated literal between the existing single quotes. Leading
-hyphen and apostrophe are excluded, so the value is neither an option nor a
-PowerShell expression and no cross-process escaping helper or shell variable is
-needed.
-The fixed absolute review input paths are populated with exact observed response
-bytes; each path is already literal and is not a marker. The controller verifies
-each populated input is a regular non-reparse file outside the repository before
-calling the CLI. No placeholder is passed literally to the CLI.
-Before execution, require no marker prefix remains in the command text.
-Review input must be a drive-qualified local path under the approved temporary
-parent, never UNC/device/alternate-stream or inside the repository.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" ingest-review --kind plan-e --reviewed-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD) --session-id 'REPLACE_WITH_OBSERVED_PLAN_E_SESSION_ID' --input "C:\Users\zhaobo\AppData\Local\Temp\opencode\plan-e-review-returned.md"
-```
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" ingest-review --kind whole --reviewed-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD) --session-id 'REPLACE_WITH_OBSERVED_WHOLE_SESSION_ID' --input "C:\Users\zhaobo\AppData\Local\Temp\opencode\whole-review-returned.md"
-```
-
-Expected accepted Plan-E review: exit `0`, `command: "ingest-review"`,
-`status: "ok"`, `code: "review_ingested"`, kind `plan-e`, disposition `PASS`,
-and exact findings/input/package/diff/audit hashes. Expected accepted whole
-review: same status/code with kind `whole` and disposition
-`INTERIM PASS THROUGH PLAN E`. Rejected review: exit `4`, `status: "blocked"`,
-`code: "review_rejected"`, no findings candidate, and one clean terminal
-rejected record.
-Only the two accepted/succeeded records proceed to finalization; rejection
-requires an accepted correction/regeneration or leaves Plan E blocked.
-The CLI reads the complete input once as strict UTF-8 bytes, hashes those exact
-bytes, validates byte zero through EOF, and never follows a symlink/reparse
-input. It records the input hash but not the external input path as cleanup
-authority.
-After each accepted/rejected ingestion, run `status`: accepted state is
-`state_ready` with the corresponding review terminal and findings hash; clean
-rejection is `state_ready` with `rejected` and no candidate, while any retained
-owner/temp is `retained_state` and blocks.
-Use the fixed one-line status command already printed; no review text/session
-value is carried into that invocation.
-
-If a separately accepted fix creates a later reviewed head, first leave old
-state untouched for inspection and obtain explicit operator authorization. Then
-retire the complete old-head dependency closure in one call. Do not run
-retirement for the initial
-head, an unapproved descendant, or crash-retained state.
-Before running the command, populate `old-head` from the strict `status` record
-and `new-head` from the same-command fresh Git resolution; compare the status
-record and current head with the accepted fix spec before execution.
-Retire before producing any candidate for the new head; fixed-path publication
-still waits for finalization, so retirement moves only Git-common head-scoped
-authority and never deletes tracked final evidence.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" retire --old-head $((& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" status | ConvertFrom-Json).reviewed_head) --new-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD)
-```
-
-Expected: exit `0`, `command: "retire"`, `status: "ok"`, code
-`head_retired`, both literal heads, and exact retired terminal producer IDs.
-Any prevalidation failure changes nothing. Post-quarantine deletion failure is
-exit `5` with retained quarantine/lease authority and blocks all automation.
-Retirement never stages, commits, or changes HEAD/ref/index.
-After successful retirement, rerun `status`; expected `state_absent` when the
-complete old closure was retired, or `state_ready` only for an exact unretired
-compatible terminal subset. Then rerun every producer at the new literal head.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" status
-```
-
-After both accepted review ingestions at one immutable reviewed head, run the
-single checkpointed final transaction. First run `status`, require
-`state_ready`, copy its validated non-null `reviewed_head`, and substitute that
-exact immutable 40-hex literal into the command below. Record that literal
-outside process memory. Every resume after CAS uses the same reviewed-head
-literal; never substitute current `HEAD`, which is then the evidence commit.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" finalize --reviewed-head REPLACE_WITH_VALIDATED_PRE_CAS_REVIEWED_HEAD_40HEX
-```
-
-Expected: exit `0`, `command: "finalize"`, `status: "ok"`, code `finalized`,
-the immutable reviewed head, prospective evidence subject/tree/staged blob map,
-exact staged manifest/report SHA-256 values, artifact count `58`, commit path
-count `60`, and prospective union count `130`. It must not emit actual
-final-commit or base-to-final-union PASS, or emit/require/place the final commit
-SHA in the committed report. If
-interrupted, rerun this exact same literal reviewed-head command only after
-`status` identifies a strictly resumable same-token finalizer checkpoint;
-otherwise stop for manual authorization.
-On resumed success, the canonical result additionally reports the resumed
-checkpoint and proves no commit/ref transition was repeated.
-
-Resolve the final commit through absolute Git only for the separate read-only
-command below. This is a
-read-only clean-clone-verifiable gate and does not depend on local producer state.
-It may create/remove only its owned disposable clone while the Git/evidence
-validation itself is read-only; it never mutates the source checkout, index,
-refs, or retained evidence state and does not acquire the mutation mutex.
-It reads no ignored `.superpowers/sdd/.gitignore`, local `plan-e-base.txt`, or
-producer state and performs no post-commit `git check-ignore`.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" verify-final --final-head $(& "C:\Program Files\Git\cmd\git.exe" -C "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec" rev-parse HEAD)
-```
-
-Expected: exit `0`, `command: "verify-final"`, `status: "ok"`, code
-`final_verified`, exact final head/parent/subject, artifact count `58`, evidence
-count `60`, reviewed count `70`, union count `130`, exact committed manifest and
-report SHA-256 values, `final_commit_validation: "PASS"`, and
-`base_to_final_union_validation: "PASS"`. These are the only actual final-commit
-and 130-path-union PASS claims; they are canonical command output, not committed
-report text.
-
-```powershell
-& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\plan_e_evidence.py" status
-```
-
-Expected after successful finalization: exit `0`, canonical `status` result with
-`status: "ok"`, `code: "state_absent"`, no authority paths, and no retained
-lease/owner/quarantine/worktree/candidate state. Committed evidence is tracked
-Git content, not state. Any retained-state classification makes completion
-`BLOCKED`.
-
-At this point require: latest commit is the exact 60-path evidence child of the
-reviewed head; literal-base range is 130 paths; clean clone validates all 58
-manifest entries and report/audit/review/machine/history bindings; no later HEAD
-change exists. Plan E is review-ready only, with final whole-branch review still
-pending the exact post-D rerun.
-
-### 9.8 Independent Reviews
-
-**Ranges and inputs:**
-
-- `plan_e_only`: base `0dbb4852931b50153fb898b03129ae0092c46404`,
-  head the immutable reviewed product/tool head, range
-  `0dbb4852931b50153fb898b03129ae0092c46404..<reviewed-head>`, exact 70 paths.
-- `original_whole_branch_interim`: base
-  `0040b1de1bc196b203014a8e4f94a53babb7e9aa`, same head, range
-  `0040b1de1bc196b203014a8e4f94a53babb7e9aa..<reviewed-head>`.
-
-Dispatch prompt for `plan_e_only`: review the complete Plan E range and frozen
-audits for Critical/Important correctness, security, data-loss, race/crash,
-Windows, protocol, regression, and test gaps; apply all five evidence-loss
-criteria; return only the exact 17-heading record below with overall `PASS` or
-`BLOCKED`. Dispatch prompt for `original_whole_branch_interim`: independently
-review the original-base range through the same head under the same criteria,
-do not copy the first review, return only the exact 18-heading record, and use
-`INTERIM PASS THROUGH PLAN E` or `BLOCKED`; never claim final Plan D coverage.
-If an orchestration platform returns an ID outside the safe regex, do not alter
-or escape it into acceptance; redispatch in a session whose observed ID satisfies
-the subset or stop for a spec/plan revision.
-
-Both reviewers inspect exact package/diff bytes, the latest spec at
-`1efb528282a2fd6a5c926f09d417a30d72f45897`, the scripted spec at
-`cba1030baf6508d08d6ce67ac40728ebdd47f199`, the evidence-loss spec at
-`d51ca4aabd4a40b91818191424993a8d3ab3cd27`, the Windows retry spec at
-`249b1a3750b50db1336fb39661db9306355a1a18`, both frozen audit JSON files,
-relevant current-state tests, executor tests, and all reviewed implementation.
-The Plan-E reviewer must not inspect only the latest commit. The whole reviewer
-must independently inspect the original-base range and must not copy the first
-review's findings.
-
-The exact Plan-E findings heading order is:
-
-The file starts at byte zero with the first heading and ends immediately after
-the disposition body plus one LF; no title, preamble, epilogue, or hidden text.
+Resolve the full current product HEAD immediately before dispatch. Review the
+exact range from Plan E base `0dbb4852931b50153fb898b03129ae0092c46404` to that
+literal full SHA, not only the latest commit. Supply the authoritative
+correction, Windows retry design, this plan, complete range diff, and relevant
+tests. Require the review output to repeat that exact SHA and use this exact
+heading order; save its exact UTF-8 text outside the repository at
+`C:\Users\zhaobo\AppData\Local\Temp\opencode\plan-e-task9-review.md`:
 
 ```text
-## Review Session
 ## Review Base
-## Review Head
-## Review Range
-## Task 6 Audit SHA-256
-## Task 7 Audit SHA-256
-## Historical-Report Availability Honesty
-## No Reconstructed Historical TDD Claim
-## Git Lineage and Source-Blob Accuracy
-## Current-State Test and Mutation Sufficiency
-## Artifact-Durability Contract Adequacy and Prospective 58-Path Inventory Composition
+## Reviewed Product HEAD
 ## Critical
 ## Important
 ## Minor
 ## Testing Gaps
-## Declared Session Proof Boundary
 ## Disposition
 ```
 
-The whole-branch findings use the same first 16 headings, then exactly:
+The review prioritizes correctness bugs, security/trust boundaries, data loss,
+race/crash safety, Windows behavior, regressions, and missing tests. Record the
+review session identifier if the review system supplies one. `Review Base` must
+be the literal Plan E base; `Reviewed Product HEAD` must be one lowercase
+40-hex SHA; `Critical` and `Important` must each be exactly `None.` for
+acceptance; `Minor` and `Testing Gaps` contain `None.` or concrete findings; and
+`Disposition` must be exactly `PASS`. One fresh reviewer is required; do not
+claim cryptographic proof of identity or independence.
 
-```text
-## Plan D Rerun Requirement
-## Disposition
+Any Critical or Important finding blocks. Fix it with focused TDD only after its
+scope is authorized, commit the fix normally, rerun all affected focused tests
+plus section 9.5, then obtain a fresh review of the new complete range. Minor
+findings and testing gaps remain explicit residual risks unless fixed and
+rereviewed. This review proves current Plan E state only. Final whole-branch and
+release-readiness review remains pending until Plan D is complete.
+
+- [ ] **Verify the review is bound to unchanged HEAD before report creation**
+
+```powershell
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $git='C:\Program Files\Git\cmd\git.exe'; $review='C:\Users\zhaobo\AppData\Local\Temp\opencode\plan-e-task9-review.md'; if(-not (Test-Path -LiteralPath $review -PathType Leaf)){ throw 'Review output is absent' }; $reviewBytes=[IO.File]::ReadAllBytes($review); $text=[Text.UTF8Encoding]::new($false,$true).GetString($reviewBytes); $reviewHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($reviewBytes)).ToLowerInvariant(); $expected=@('## Review Base','## Reviewed Product HEAD','## Critical','## Important','## Minor','## Testing Gaps','## Disposition'); $headings=@([regex]::Matches($text,'(?m)^## .+$')|ForEach-Object Value); if(($headings -join "`n") -cne ($expected -join "`n")){ throw 'Review headings/order mismatch' }; $base=[regex]::Match($text,'(?m)^## Review Base\r?\n(0dbb4852931b50153fb898b03129ae0092c46404)$'); $head=[regex]::Match($text,'(?m)^## Reviewed Product HEAD\r?\n([0-9a-f]{40})$'); $critical=[regex]::Match($text,'(?ms)^## Critical\r?\n(.*?)(?=\r?\n## Important\r?$)').Groups[1].Value.Trim(); $important=[regex]::Match($text,'(?ms)^## Important\r?\n(.*?)(?=\r?\n## Minor\r?$)').Groups[1].Value.Trim(); $disposition=[regex]::Match($text,'(?ms)^## Disposition\r?\n(.*?)\s*\z').Groups[1].Value.Trim(); $current=(& $git -C $root rev-parse HEAD).Trim(); if(-not $base.Success -or -not $head.Success -or $head.Groups[1].Value -cne $current -or $critical -cne 'None.' -or $important -cne 'None.' -or $disposition -cne 'PASS' -or @(& $git -C $root status --porcelain=v1 -uall).Count -ne 0){ throw 'Review byte snapshot is not a passing review of the unchanged product HEAD' }; "Reviewed product HEAD: $current"; "Review SHA-256: $reviewHash"
 ```
 
-Expanded, the exact whole-branch order is `Review Session`, `Review Base`,
-`Review Head`, `Review Range`, `Task 6 Audit SHA-256`, `Task 7 Audit SHA-256`,
-`Historical-Report Availability Honesty`,
-`No Reconstructed Historical TDD Claim`,
-`Git Lineage and Source-Blob Accuracy`,
-`Current-State Test and Mutation Sufficiency`,
-`Artifact-Durability Contract Adequacy and Prospective 58-Path Inventory
-Composition`, `Critical`, `Important`, `Minor`,
-`Testing Gaps`, `Declared Session Proof Boundary`, `Plan D Rerun Requirement`,
-and `Disposition`. There are exactly 18 headings and no preamble/epilogue.
+Expected: prints the reviewed HEAD and same-snapshot SHA-256. It reads review bytes once,
+strict-decodes and hashes those bytes; do not create the report if HEAD differs.
 
-Scalar bodies are exact:
+### 9.7 Write and Commit the Concise Final Report
 
-- `Review Session`: the controller-observed opaque session ID.
-- `Review Base`, `Review Head`, and `Review Range`: exact package literals.
-- Task audit sections: lowercase 64-hex hashes of exact frozen audit bytes.
-- Each of the five criteria: exactly `PASS` or `FAIL`.
-- `Critical` and `Important`: exactly `None.` for acceptance.
-- `Minor` and `Testing Gaps`: exactly `None.` or one or more lines matching
-  `- [Minor] repository/relative/path:positive-line - finding text`.
-- `Declared Session Proof Boundary`: exactly `These records prove only that two
-  different declared orchestration session identifiers were recorded; they do
-  not prove reviewer identity, dispatch, independence, or non-collusion.`
-- Plan-E disposition: exactly `PASS` only when all criteria pass and no
-  Critical/Important finding exists; otherwise `BLOCKED`.
-- Whole disposition: exactly `INTERIM PASS THROUGH PLAN E` under the same pass
-  rule; otherwise `BLOCKED`.
-- Whole Plan-D body: exactly `Rerun git diff --full-index --binary
-  "0040b1de1bc196b203014a8e4f94a53babb7e9aa..<final-D-head>" and the full
-  original-base controller review after Plan D is committed and before any
-  final whole-branch/release-readiness claim.`
+- [ ] **Step 1: Create exactly one report**
 
-The five criteria are historical-report availability honesty; no reconstructed
-historical TDD claim; Git lineage and source-blob accuracy; current-state test
-and mutation sufficiency; and artifact-durability contract adequacy with the
-prospective 58-path inventory. Reviews do not claim the later 60-path evidence
-commit exists or is durable. Different declared session IDs prove only the two
-recorded values, not reviewer identity, dispatch, independence, or non-collusion.
-The reviewers also apply ordinary code-review severity: correctness, security,
-data loss, concurrency/crash safety, Windows behavior, protocol/Host-Extension
-alignment, regression risk, and missing tests. Any such Critical/Important
-finding is recorded in its severity section and blocks regardless of the five
-evidence-loss criteria.
-Each criterion section body is one scalar line exactly; explanatory findings
-belong only in severity/testing sections under their fixed grammar.
-
-Any Critical/Important finding, failed criterion, malformed text, stale hash, or
-blocked disposition stops finalization. A permitted fix requires a separately
-accepted spec and fresh TDD; the reviewed head changes, so retire the complete
-old dependency closure only through the approved CLI call, then rerun every
-producer, regenerate both audits and packages, dispatch two fresh reviews, and
-ingest both. There is no final whole-branch completion before Plan D; after Plan
-D, rerun the exact original-base review through the final D head.
-Any change to product, test, plan, audit input, package input, or reviewed head
-invalidates both audits and both reviews, even if only one reviewer found it.
-Minor or Testing Gaps findings do not change a successful disposition, but every
-row, count, and combined hash is retained in findings/report and assessed as a
-residual risk; the operator may still choose to require a correction spec.
-Review ingestion never invokes a reviewer or reads controller memory; it accepts
-only the explicit regular input file and literal session ID supplied to that one
-CLI process.
-The review-input files are controller-owned transport only. The CLI does not
-delete them; the controller may remove them after successful ingestion and
-receipt verification, outside executor state authority.
-
-### 9.9 Final Report and Evidence Contract
-
-The CLI owns report generation and validation. Do not hand-edit the report,
-manifest, audits, findings, maps, ledgers, scripts, or transcripts. The final
-report contains no executable implementation fence; it records contracts,
-observations, hashes, and command identities only. The final
-report title is exactly `# Plan E Extension Data and Request Hardening Report`
-and its level-two headings are exactly this ordered set. The report is UTF-8
-without BOM/CR and with exactly one final LF:
+Use `apply_patch` to create only
+`.superpowers/sdd/plan-e-extension-hardening-report.md`. Keep it concise and
+fact-based. Verify that this report path does not already exist; never overwrite
+or delete a pre-existing report or any recovery source. Use these exact
+title and level-two sections:
 
 ```text
-## Scope and Constraints
+# Plan E Extension Data and Request Hardening Report
+
+## Scope and Authority
 ## Commit Map
-## Requirement-to-Test Matrix
-## A-C Prerequisite and Plan D Handoff Evidence
-## Historical Report Availability and Current-State Audits
-## RED Evidence
-## Restored Mutation Evidence
-## Focused Extension Results
-## Full Extension and Build Results
-## Isolated Host Results
-## Static and Diff Results
-## Plan D Handoff Result
-## Plan-E-Only Controller Review Findings
-## Original Whole-Branch Interim Review Findings
-## Plan D Final Whole-Branch Rerun Requirement
-## Plan E Review Readiness
-## Skipped Unsafe Operations
+## Historical Evidence Boundary
+## Abandoned Executor
+## Windows Retry RED
+## Windows Retry GREEN
+## Mutation Results
+## Verification Results
+## Independent Review
 ## Residual Risks
+## Forbidden Operations
+## Verdicts
 ```
 
-Within `## Plan E Review Readiness`, the generator emits this exact four-line
-shape in order. `[0-9a-f]{64}` below is grammar notation: generated report bytes
-contain the computed lowercase SHA-256 of the frozen staged canonical manifest
-candidate, never the notation itself or author-entered text:
+Record actual observations, never prospective results:
+
+- Full SHAs and exact subjects for the accepted correction, this plan, executor
+  deletion, retry RED, retry GREEN, and any authorized review fix. The report itself records exact
+  subject `docs(verification): record Plan E hardening evidence`, not its own
+  SHA because that value cannot be embedded in its contents.
+- `ed06da102e3c11cfe53ec17ef50e97252037f624` as abandoned RED, never GREEN or
+  product evidence, plus the forward deletion commit.
+- The seven independent assertion RED results and constructor control; eight
+  GREEN tests; full resume/update-engine results; each named mutation failure
+  and restored GREEN result.
+- Exact verification commands, exit codes, observed test/build totals, source/
+  dist asset hashes, exact authorized Host skip, compile/static/diff results,
+  and reviewed product head.
+- Task 6 expected hash
+  `3158a5795b768434e069e8ef59e488e0a9ff877939728f69d9293ab0c8b9c8ef`, Task 7
+  expected hash
+  `49ee4fb0a4717f85767ed19caf5338eac1871b21deed2233d82d97337d32df2f`,
+  `UNRECOVERABLE`, and `HISTORICAL TDD TIMELINE NOT RECONSTRUCTED`.
+- Review base/head, Critical/Important/Minor/testing-gap findings, disposition,
+  fixes/reruns if any, and final whole-branch review still pending Plan D.
+- Exact lines `Reviewed product HEAD: <reviewed SHA>`,
+  `Review SHA-256: <64-lowercase-hex>`, `Critical: None.`,
+  `Important: None.`, and `Review disposition: PASS` copied from the validated
+  review facts.
+- Residual risks: unavailable Task 6/7 reports, bounded Windows filesystem or
+  antivirus timing, the environment-dependent frozen-runtime skip, accepted
+  Minor/testing-gap findings, and Plan D/final review still outstanding.
+- Confirmation that no push, release, publish, tag, install, registry, AppData,
+  browser, network, real update, MyCases, authenticated model, history rewrite,
+  recovery-source deletion, or other forbidden operation occurred.
+
+End `## Verdicts` with exactly:
 
 ```text
-**Final artifact manifest SHA-256:** `[0-9a-f]{64}`
-**Base-to-final union candidate contract:** `130 paths after successful final evidence commit validation`
-**Final evidence commit candidate contract:** `60 paths - docs(verification): record Plan E hardening evidence`
-**Plan E evidence readiness:** `CANDIDATE READY FOR FINALIZE`
+PLAN E CURRENT-STATE VERIFICATION: PASS
+TASK 6/7 HISTORICAL EVIDENCE: UNRECOVERABLE; NOT RECONSTRUCTED
+RELEASE READINESS: NOT CLAIMED
 ```
 
-The report validator requires all these facts, computed from exact receipts,
-candidates, staged blobs, Git history, and committed bytes:
+Do not include a report self-SHA, final commit SHA, future-result claim, custom
+evidence inventory, or reconstructed historical evidence.
 
-- Literal integration base and immutable reviewed product/tool head. Record the
-  fixed evidence subject, exact prospective 60-path inventory/count, and
-  requirement that the eventual one-parent evidence commit's parent equals
-  reviewed head; do not record a prospective/final tree, complete staged blob
-  map, report or manifest Git blob ID, report self-hash, or eventual final
-  head/SHA in the report. Record the exact SHA-256 of the already-frozen staged
-  canonical artifact manifest; the manifest excludes both itself and the report,
-  so this value is not recursive.
-- Every relevant commit and exact subject/path: original Plan E plan repair and
-  Tasks 1-8 implementation/controller-review-fix commits; boundary correction spec
-  `d606f4f9468ba8757bb1894368f2326c8183890d`; Windows retry spec
-  `249b1a3750b50db1336fb39661db9306355a1a18`; hardened plan revision
-  `1a80affe1b61f2138e94db5e18c99adcc1dc0b3f`; evidence-loss spec
-  `d51ca4aabd4a40b91818191424993a8d3ab3cd27`; evidence-loss plan revision
-  `782e0b091b5d9159f2eea444966abf6b8154899d`; executor-boundary spec
-  `d237ab2ea7aee73114476b3eb19db620321d349f`; latest executor spec
-  `cba1030baf6508d08d6ce67ac40728ebdd47f199`; build/Vitest correction spec
-  `1efb528282a2fd6a5c926f09d417a30d72f45897`; this plan revision; asset RED and
-  asset GREEN; executor RED and implementation; promotion RED and
-  implementation; every separately accepted review fix; and final evidence
-  subject plus exact path inventory/readiness contract. The committed report
-  does not include the prospective/final tree, complete staged blob map,
-  report or manifest Git blob ID, report self-hash, or final evidence commit SHA.
-- Explicitly record that the scripted executor spec superseded the embedded
-  executor, and the latest build/Vitest correction further amends asset TDD,
-  selector identity, promotion-class restoration, chronology, and path
-  arithmetic while preserving retry, evidence-loss, audit, review, and artifact
-  contracts.
-- Record each commit as full SHA, single parent, tree, exact subject, exact
-  sorted paths, and its role; no abbreviation or subject-only identity is
-  sufficient.
-- Task 1-5/8 historical report hashes from the locked report table in section
-  9.2, each report's exact
-  original RED classification/failing assertions, GREEN commands/results,
-  mutation names/failing assertions, byte restoration, exact commit(s), staged
-  allowlist, review/fix notes, and concerns. Report only facts parsed and
-  validated from those immutable reports; do not summarize from controller
-  memory.
-  Historical report evidence is copied semantically without embedding its old
-  executable command fences in the new report; include command identities,
-  outputs/counts/hashes, and findings, not a second executor.
-- The requirement-to-test matrix maps every Plan E product requirement and each
-  executor/retry/evidence invariant to exact test files, selectors, producer
-  receipt IDs, and artifact hashes; an unmapped requirement or duplicate
-  ownership row blocks report generation.
-- In `RED Evidence`, exact lines `Task 6 historical report unavailable` and
-  `Task 7 historical report unavailable`. Use the same exact lines in
-  `Restored Mutation Evidence`; add no Task 6/7 historical RED/GREEN/mutation/
-  edit-order/reviewer/TDD reconstruction prose.
-- Under the historical/audit heading, these exact Task 6 forms with the actual
-  audit hash: `**Task 6 historical report expected SHA-256:**` with
-  `3158a5795b768434e069e8ef59e488e0a9ff877939728f69d9293ab0c8b9c8ef`,
-  `**Task 6 historical report availability:** `UNRECOVERABLE``,
-  `**Task 6 audit scope:** `CURRENT IMMUTABLE COMMIT/STATE ONLY; HISTORICAL TDD
-  TIMELINE NOT RECONSTRUCTED``, and `**Task 6 audit evidence SHA-256:**`.
-- Equivalent Task 7 forms with expected hash
-  `49ee4fb0a4717f85767ed19caf5338eac1871b21deed2233d82d97337d32df2f`.
-  Audit JSON uses `unrecoverable` and scope
-  `current_immutable_commit_state_only`; both
-  `historical_report_reconstructed` and
-  `historical_tdd_timeline_reconstructed` are exactly false.
-- Task 6 current-state checks `PASS`, mutations `PASS - 2/2`; Task 7 checks
-  `PASS`; Task 7 current-state mutations `PASS - 1/1`; exact lineage, source
-  blobs, named assertions, mutation identities, evidence hashes, and the Task 7
-  related cleanup commit.
-  State that report absence was established from the accepted investigation's
-  historical reads, recovery data, Git objects, bundles, rescued workspaces,
-  and examined filesystem evidence, without assigning loss time or cause.
-- Promotion original RED process attestation as exactly seven behavior assertion
-  failures and one constructor pass before production edit, explicitly narrow
-  and not signed timing proof. Separately label later results `RED commit replay`;
-  include all seven replay failures, constructor pass, eight GREEN selectors,
-  five mutations/restorations, source/map/AST/script hashes, attempts `2/3`,
-  delays `0.05/0.2`, validation calls `1/3/5`, hook counts, cause/state, and the
-  clean complete resume/update/Host reruns.
-- Record the original uncontrolled production observation
-  `PermissionError: [WinError 5]` at `.preparing` promotion and the controlled
-  open-descendant-handle WinError 5 reproduction whose handle close allowed
-  immediate replay. State that these support a transient external-handle
-  hypothesis but do not identify the owning process.
-- Asset TDD evidence: canonical test/asset/attributes blobs and SHA-256 values,
-  one-path RED failure after five-test collection while asset was absent/ignored,
-  exact three-path GREEN blobs, five passing tests, local TypeScript/Vite build,
-  source/dist byte identity, and public/no-credential provenance.
-- Executor RED process attestation as 106 collected assertion failures with no
-  errors/skips, direct-child shell/source blobs, GREEN module total 106, seven
-  single-process test-helper mutations/restorations, five promotion-producer-
-  owned detached-worktree mutation/restoration results from its one invocation,
-  complete executor module/discovery totals, source compile results, and
-  release/PyInstaller exclusion.
-- Exact asset RED one-path and GREEN three-path commit identities/blobs; asset
-  provenance/build evidence precedes executor chronology and is included in
-  reviewed-source/package/release-safety checks.
-- Prior-runtime-defect regression map with each defect class, exact passing
-  selector(s), source blob, command receipt, and evidence hash.
-- Focused Extension aggregate exact observed files/scoped-selector multisets for
-  Plan E, Task 6, and Task 7; full Extension exact files/multiset; exact
-  multiplicities, fullName consistency, and all failed/pending/deferred counters
-  zero; focused multiset equals full restricted to focused files. Record observed
-  totals rather than guessed values.
-- Host exact observed totals and passed selector lists for focused,
-  Task-7-current, full, update-engine, recovery, package, executor, and compile
-  phases. Focused, Task-7-current, update-engine, package, executor, and compile
-  have zero skips. Full and recovery each have exactly one authorized skip:
-  selector
-  `host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation`,
-  reason `DH_PLAN_C_FROZEN_ONEDIR not set`. No other skip is accepted.
-- TypeScript no-emit, Extension production build to isolated output, Host source
-  compile, static/AST/no-coercion scans, tested-source blob binding, no Plan D
-  sentinels, version/dependency diff absence, and `git diff --check` all `PASS`.
-  Record that TypeScript/Vite/Vitest ran through absolute local Node entry points
-  with no npm/npx/network fallback; record source/dist public-asset hash equality.
-- Plan A-C prerequisites and the frozen Plan D handoff remain intact; Plan D is
-  not implemented by this task. State that Plan D must consume the current Plan
-  E parser/acquisition/leased-port/prompt/update contracts and rerun final whole
-  review after its own implementation.
-- For each review: exact kind, declared opaque session ID, base, head, range,
-  package/diff/findings SHA-256, both audit SHA-256 values, five `PASS` criteria,
-  exact disposition, zero open Critical/Important findings, Minor and Testing
-  Gaps counts and combined hash. Include the narrow declared-session proof
-  sentence and no stronger independence claim.
-  Recompute every summary field from exact staged findings bytes rather than
-  ingestion process memory or package prose.
-- Final report records both audit-generation receipt identity and the exact
-  review-package/ingestion receipt bindings so a matching narrative hash cannot
-  substitute for the reviewed candidate bytes.
-- Exact line `**Expanded Plan E range:** `PASS` - 70 paths` because that reviewed
-  range already exists before finalization.
-- Under `Plan E Review Readiness`, the exact prospective scalar lines are
-  the `Final artifact manifest SHA-256` scalar with exactly one lowercase
-  64-hex value;
-  `**Base-to-final union candidate contract:** `130 paths after successful final
-  evidence commit validation``; and `**Final evidence commit candidate
-  contract:** `60 paths - docs(verification): record Plan E hardening evidence``.
-  The generated report substitutes the exact staged manifest-candidate hash for
-  the hexadecimal value; the two candidate lines contain no `PASS` token.
-- Exact line `**Plan E evidence readiness:** `CANDIDATE READY FOR FINALIZE``;
-  no base-to-final/final-commit/committed/post-CAS/final-cleanup PASS line appears
-  in the report.
-- The report lists each of the exact 70 reviewed repository paths once under the
-  requirement/commit scope and each of the exact 60 evidence commit paths once
-  under final inventory; validators compare against Git and marked constants.
-- The committed report records candidate evidence readiness only: reviewed head,
-  fixed evidence subject, exact prospective path inventory/count, validated
-  artifact hashes including the exact staged manifest SHA-256, and required
-  post-commit verification contract. It contains no prospective/final tree,
-  complete staged blob map, report or manifest Git blob ID, report self-hash,
-  final evidence commit SHA, post-CAS/current-HEAD claim, or post-cleanup PASS.
-  Prospective tree/index blobs appear only in `finalize` output; actual final
-  head, parent, committed blobs, clean clone/index/worktrees, and cleanup appear
-  only in read-only `verify-final`/status output.
-- Exact SHA-256 for focused/full/Host/static results, both audits, both packages,
-  both diffs, both findings, and promotion maps/ledger/transcripts. Manifest
-  contains exactly the 58 artifact paths and maps each to exact lowercase
-  SHA-256. The report records the exact SHA-256 of those frozen canonical
-  manifest bytes. The manifest records neither itself nor the report. Finalizer
-  output separately records the staged report SHA-256 and both staged hashes;
-  `verify-final` records both committed hashes.
-- The report does not contain its own SHA-256. `finalize`/`verify-final` compute
-  the staged/committed report SHA-256 externally and emit it only in canonical
-  CLI output, eliminating report self-hash and commit-ID fixed points.
-- `Skipped Unsafe Operations` states exactly that no real Chrome storage,
-  registry, `%LOCALAPPDATA%\DynamicsHelper`, update, package, publish, install,
-  MyCases, authenticated model, push, tag, or network operation occurred.
-- Residual risks include the two unavailable historical Task 6/7 reports, narrow
-  declared-session evidence, prospective review limits, Windows filesystem/
-  antivirus timing despite bounded retry, environment-authorized frozen-probe
-  skip, every accepted Minor/Testing Gaps row, and Plan D/final whole-branch
-  review still outstanding.
-- The post-D requirement is exactly the whole-review sentence in section 9.8.
-  Never state final whole-branch or release readiness before that rerun passes.
-- Plan E Review Readiness in the report is exactly `CANDIDATE READY FOR FINALIZE`
-  after all pre-CAS inputs pass. It is not post-CAS PASS, release readiness,
-  Plan-D completion, or final whole-branch disposition.
+- [ ] **Step 2: Validate the report and immutable reviewed head**
 
-Only `verify-final` canonical output may assert actual final-commit and
-base-to-final-union PASS. It emits exact fields
-`final_commit_validation: "PASS"` and
-`base_to_final_union_validation: "PASS"` only after committed-blob, parent,
-subject, 60-addition, 130-union, manifest/report-hash, and clean-clone checks all
-succeed. Neither field nor equivalent PASS prose is present in the committed
-report or `finalize` result.
+The report has one reviewed-HEAD line. This single foreground validator reads the review
+once as bytes, strict-decodes/validates and hashes those bytes, then checks current HEAD,
+exact ordered report headings/facts/verdicts, no placeholders, and no tracked dirt:
 
-Finalization validates all producer receipts/candidates, including the auxiliary
-current-state mutation candidate outside the manifest, the six report bytes,
-Task 6/7 absence, audit/findings immutability, 58-path artifact set, and report
-before staging. It creates the manifest first and the report second using the
-frozen manifest SHA-256; it creates only those two files, no-clobber materializes
-all other non-historical candidates, force-stages exactly the literal 60 paths,
-records every index blob, validates staged hashes/report bindings, creates the
-fixed one-parent commit object and CAS-updates the branch from the reviewed
-head. Post-validation compares every committed blob with the staged map and
-validates a clean clone using only committed bytes and literal base. The exact
-reviewed/evidence sets are disjoint and their union is 130.
-Staging uses an exact literal path list with pathspec terminator, never wildcard
-or broad add.
-Candidate-to-fixed-path materialization verifies same bytes/hash and does not
-consume or mutate the head-scoped candidate before commit/post-validation.
-Both selected review terminal records must be `succeeded`; a clean `rejected`
-record is retirement authority only and cannot satisfy finalization.
-The final commit's tree is the reviewed-head tree plus exactly those staged 60
-blobs; all other tree entries remain identical to reviewed head.
-Ignore checks are pre-commit safety checks only; committed/clean-clone
-validation uses Git blobs/history and never depends on ignore rules.
-The final report is generated only after every input/review receipt is frozen
-and before staging; it is not incrementally appended or rewritten after its
-validated artifact-map snapshot. It cannot include its own future commit SHA or
-any value whose computation depends on that report blob.
+```powershell
+& "C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec\host\venv\Scripts\python.exe" -c "exec(__import__('base64').b64decode('ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCBoYXNobGliCmltcG9ydCByZQppbXBvcnQgc3VicHJvY2VzcwoKCmRlZiBmYWlsKG1lc3NhZ2UpOgogICAgcmFpc2UgU3lzdGVtRXhpdChtZXNzYWdlKQoKCmdpdCA9IHIiQzpcUHJvZ3JhbSBGaWxlc1xHaXRcY21kXGdpdC5leGUiCnJvb3QgPSBQYXRoKHIiQzpcTXlXb3JrYmVuY2hcUmVwb3NpdG9yeVxEeW5hbWljcy1IZWxwZXItcHJvbXB0LXNjb3BlLXNwZWMiKQpyZXBvcnRfcGF0aCA9IHJvb3QgLyAiLnN1cGVycG93ZXJzL3NkZC9wbGFuLWUtZXh0ZW5zaW9uLWhhcmRlbmluZy1yZXBvcnQubWQiCnJldmlld19wYXRoID0gUGF0aChyIkM6XFVzZXJzXHpoYW9ib1xBcHBEYXRhXExvY2FsXFRlbXBcb3BlbmNvZGVccGxhbi1lLXRhc2s5LXJldmlldy5tZCIpCmlmIG5vdCByZXBvcnRfcGF0aC5pc19maWxlKCkgb3Igbm90IHJldmlld19wYXRoLmlzX2ZpbGUoKToKICAgIGZhaWwoInJlcG9ydCBvciByZXZpZXcgb3V0cHV0IGlzIGFic2VudCIpCnJlcG9ydCA9IHJlcG9ydF9wYXRoLnJlYWRfdGV4dChlbmNvZGluZz0idXRmLTgiKQpyZXZpZXdfYnl0ZXMgPSByZXZpZXdfcGF0aC5yZWFkX2J5dGVzKCkKcmV2aWV3ID0gcmV2aWV3X2J5dGVzLmRlY29kZSgidXRmLTgiLCBlcnJvcnM9InN0cmljdCIpCnJldmlld19oYXNoID0gaGFzaGxpYi5zaGEyNTYocmV2aWV3X2J5dGVzKS5oZXhkaWdlc3QoKQp0aXRsZSA9ICIjIFBsYW4gRSBFeHRlbnNpb24gRGF0YSBhbmQgUmVxdWVzdCBIYXJkZW5pbmcgUmVwb3J0IgpoZWFkaW5ncyA9IFsKICAgICIjIyBTY29wZSBhbmQgQXV0aG9yaXR5IiwKICAgICIjIyBDb21taXQgTWFwIiwKICAgICIjIyBIaXN0b3JpY2FsIEV2aWRlbmNlIEJvdW5kYXJ5IiwKICAgICIjIyBBYmFuZG9uZWQgRXhlY3V0b3IiLAogICAgIiMjIFdpbmRvd3MgUmV0cnkgUkVEIiwKICAgICIjIyBXaW5kb3dzIFJldHJ5IEdSRUVOIiwKICAgICIjIyBNdXRhdGlvbiBSZXN1bHRzIiwKICAgICIjIyBWZXJpZmljYXRpb24gUmVzdWx0cyIsCiAgICAiIyMgSW5kZXBlbmRlbnQgUmV2aWV3IiwKICAgICIjIyBSZXNpZHVhbCBSaXNrcyIsCiAgICAiIyMgRm9yYmlkZGVuIE9wZXJhdGlvbnMiLAogICAgIiMjIFZlcmRpY3RzIiwKXQpyZXZpZXdfaGVhZGluZ3MgPSBbCiAgICAiIyMgUmV2aWV3IEJhc2UiLAogICAgIiMjIFJldmlld2VkIFByb2R1Y3QgSEVBRCIsCiAgICAiIyMgQ3JpdGljYWwiLAogICAgIiMjIEltcG9ydGFudCIsCiAgICAiIyMgTWlub3IiLAogICAgIiMjIFRlc3RpbmcgR2FwcyIsCiAgICAiIyMgRGlzcG9zaXRpb24iLApdCmlmIG5vdCByZXBvcnQuc3RhcnRzd2l0aCh0aXRsZSArICJcbiIpOgogICAgZmFpbCgicmVwb3J0IHRpdGxlIGlzIGludmFsaWQiKQppZiByZS5maW5kYWxsKHIiKD9tKV4jIyAuKyQiLCByZXBvcnQpICE9IGhlYWRpbmdzOgogICAgZmFpbCgicmVwb3J0IGhlYWRpbmdzL29yZGVyIGFyZSBpbnZhbGlkIikKaWYgcmUuZmluZGFsbChyIig/bSleIyMgLiskIiwgcmV2aWV3KSAhPSByZXZpZXdfaGVhZGluZ3M6CiAgICBmYWlsKCJyZXZpZXcgaGVhZGluZ3Mvb3JkZXIgYXJlIGludmFsaWQiKQpiYXNlID0gcmUuZmluZGFsbChyIig/bSleIyMgUmV2aWV3IEJhc2Vccj9cbigwZGJiNDg1MjkzMWI1MDE1M2ZiODk4YjAzMTI5YWUwMDkyYzQ2NDA0KSQiLCByZXZpZXcpCnJlcG9ydF9oZWFkcyA9IHJlLmZpbmRhbGwociIoP20pXlJldmlld2VkIHByb2R1Y3QgSEVBRDogKFswLTlhLWZdezQwfSkkIiwgcmVwb3J0KQpyZXZpZXdfaGVhZHMgPSByZS5maW5kYWxsKHIiKD9tKV4jIyBSZXZpZXdlZCBQcm9kdWN0IEhFQURccj9cbihbMC05YS1mXXs0MH0pJCIsIHJldmlldykKcmVwb3J0X2hhc2hlcyA9IHJlLmZpbmRhbGwociIoP20pXlJldmlldyBTSEEtMjU2OiAoWzAtOWEtZl17NjR9KSQiLCByZXBvcnQpCmNyaXRpY2FsID0gcmUuZmluZGFsbChyIig/bXMpXiMjIENyaXRpY2FsXHI/XG4oLio/KSg/PVxyP1xuIyMgSW1wb3J0YW50XHI/JCkiLCByZXZpZXcpCmltcG9ydGFudCA9IHJlLmZpbmRhbGwociIoP21zKV4jIyBJbXBvcnRhbnRccj9cbiguKj8pKD89XHI/XG4jIyBNaW5vclxyPyQpIiwgcmV2aWV3KQpkaXNwb3NpdGlvbiA9IHJlLmZpbmRhbGwociIoP21zKV4jIyBEaXNwb3NpdGlvblxyP1xuKC4qPylccypcWiIsIHJldmlldykKaWYgKAogICAgbGVuKGJhc2UpICE9IDEKICAgIG9yIGxlbihyZXBvcnRfaGVhZHMpICE9IDEKICAgIG9yIGxlbihyZXZpZXdfaGVhZHMpICE9IDEKICAgIG9yIHJlcG9ydF9oZWFkcyAhPSByZXZpZXdfaGVhZHMKICAgIG9yIHJlcG9ydF9oYXNoZXMgIT0gW3Jldmlld19oYXNoXQogICAgb3IgW3ZhbHVlLnN0cmlwKCkgZm9yIHZhbHVlIGluIGNyaXRpY2FsXSAhPSBbIk5vbmUuIl0KICAgIG9yIFt2YWx1ZS5zdHJpcCgpIGZvciB2YWx1ZSBpbiBpbXBvcnRhbnRdICE9IFsiTm9uZS4iXQogICAgb3IgW3ZhbHVlLnN0cmlwKCkgZm9yIHZhbHVlIGluIGRpc3Bvc2l0aW9uXSAhPSBbIlBBU1MiXQopOgogICAgZmFpbCgicmVwb3J0L3JldmlldyBieXRlLXNuYXBzaG90IGJpbmRpbmcgaXMgaW52YWxpZCIpCmN1cnJlbnQgPSBzdWJwcm9jZXNzLmNoZWNrX291dHB1dChbZ2l0LCAiLUMiLCBzdHIocm9vdCksICJyZXYtcGFyc2UiLCAiSEVBRCJdLCB0ZXh0PVRydWUpLnN0cmlwKCkKaWYgY3VycmVudCAhPSByZXBvcnRfaGVhZHNbMF06CiAgICBmYWlsKCJIRUFEIGNoYW5nZWQgYWZ0ZXIgcmV2aWV3IikKcmVxdWlyZWQgPSAoCiAgICAiMzE1OGE1Nzk1Yjc2ODQzNGUwNjllOGVmNTllNDg4ZTBhOWZmODc3OTM5NzI4ZjY5ZDkyOTNhYjBjOGI5YzhlZiIsCiAgICAiNDllZTRmYjBhNDcxN2Y4NTc2N2VkMTljYWY1MzM4ZWFjMTg3MWIyMWRlZWQyMjMzZDgyZDk3MzM3ZDMyZGYyZiIsCiAgICAiUExBTiBFIENVUlJFTlQtU1RBVEUgVkVSSUZJQ0FUSU9OOiBQQVNTIiwKICAgICJUQVNLIDYvNyBISVNUT1JJQ0FMIEVWSURFTkNFOiBVTlJFQ09WRVJBQkxFOyBOT1QgUkVDT05TVFJVQ1RFRCIsCiAgICAiUkVMRUFTRSBSRUFESU5FU1M6IE5PVCBDTEFJTUVEIiwKICAgICJSZXZpZXcgZGlzcG9zaXRpb246IFBBU1MiLAogICAgIkNyaXRpY2FsOiBOb25lLiIsCiAgICAiSW1wb3J0YW50OiBOb25lLiIsCikKZm9yIHZhbHVlIGluIHJlcXVpcmVkOgogICAgaWYgcmVwb3J0LmNvdW50KHZhbHVlKSAhPSAxOgogICAgICAgIGZhaWwoZiJtaXNzaW5nIG9yIGR1cGxpY2F0ZWQgcmVwb3J0IGZhY3Q6IHt2YWx1ZX0iKQppZiByZS5zZWFyY2goCiAgICByIig/aW0pXGIoPzpUQkR8VE9ET3xSRVBMQUNFX1dJVEh8Q0FORElEQVRFIFJFQURZfHdpbGwgcGFzc3xleHBlY3RlZCB0byBwYXNzfHRvIGJlIHJ1bilcYnw8W14+XHJcbl0rPiIsCiAgICByZXBvcnQsCik6CiAgICBmYWlsKCJyZXBvcnQgY29udGFpbnMgcGxhY2Vob2xkZXIgb3IgcHJvc3BlY3RpdmUgY2xhaW0iKQpyZXBvcnRfc3RhdHVzID0gc3VicHJvY2Vzcy5jaGVja19vdXRwdXQoCiAgICBbZ2l0LCAiLUMiLCBzdHIocm9vdCksICJzdGF0dXMiLCAiLS1wb3JjZWxhaW49djEiLCAiLXVhbGwiLCAiLS0iLCBzdHIocmVwb3J0X3BhdGgucmVsYXRpdmVfdG8ocm9vdCkpXSwKICAgIHRleHQ9VHJ1ZSwKKS5zcGxpdGxpbmVzKCkKaWYgcmVwb3J0X3N0YXR1czoKICAgIGZhaWwoZiJyZXBvcnQgcGF0aCBtdXN0IHJlbWFpbiBpZ25vcmVkL3VudHJhY2tlZCBiZWZvcmUgc3RhZ2luZzoge3JlcG9ydF9zdGF0dXN9IikKdHJhY2tlZF9zdGF0dXMgPSBzdWJwcm9jZXNzLmNoZWNrX291dHB1dCgKICAgIFtnaXQsICItQyIsIHN0cihyb290KSwgInN0YXR1cyIsICItLXBvcmNlbGFpbj12MSIsICItdW5vIl0sCiAgICB0ZXh0PVRydWUsCikuc3BsaXRsaW5lcygpCmlmIHRyYWNrZWRfc3RhdHVzOgogICAgZmFpbChmInRyYWNrZWQgd29ya3RyZWUvaW5kZXggY2hhbmdlZCBhZnRlciByZXZpZXc6IHt0cmFja2VkX3N0YXR1c30iKQpwcmludChmIlJlcG9ydCB2YWxpZGF0aW9uOiBQQVNTOyByZXZpZXdlZCBwcm9kdWN0IEhFQUQ6IHtjdXJyZW50fTsgcmV2aWV3IFNIQS0yNTY6IHtyZXZpZXdfaGFzaH0iKQo='))"
+```
 
-The final evidence commit is the sole permitted HEAD change after reviews. It
-has one parent equal to both audit subjects and both review heads. Any other
-post-review head change invalidates final readiness and requires regeneration;
-after the evidence commit, any further head change also invalidates readiness.
-Finalization verifies the primary branch ref still equals the reviewed head
-immediately before tree/commit creation and again as the old value in CAS; a
-concurrent head/ref change blocks without overwriting it.
-The commit changes all 60 paths as additions relative to reviewed head; none may
-exist in the reviewed parent tree.
+- [ ] **Step 3: Recheck HEAD, force-add exactly one report path, and commit**
 
-Before successful state cleanup, finalization atomically renames the complete
-selected reviewed-head state directory to its token-bound quarantine and updates
-the lease. Cleanup deletes only within that quarantine. Failure before rename
-changes no authority; failure after rename leaves quarantine and checkpoint for
-inspection and blocks later automation.
-Report generation describes only candidate readiness and prospective
-commit/cleanup contracts. Post-commit validator and CLI result provide actual
-commit/cleanup status; `verify-final` is the completion authority.
+Immediately before staging, this gate takes one new review byte snapshot, revalidates all
+review fields, hashes those bytes, and compares report HEAD/hash plus current HEAD. It
+cannot bind concurrently replaced bytes that it did not validate.
 
-### 9.10 Definition of Done and Fail-Stop Rules
+```powershell
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $git='C:\Program Files\Git\cmd\git.exe'; $report='.superpowers/sdd/plan-e-extension-hardening-report.md'; $review='C:\Users\zhaobo\AppData\Local\Temp\opencode\plan-e-task9-review.md'; $reportText=[IO.File]::ReadAllText((Join-Path $root $report)); $reportHeads=@([regex]::Matches($reportText,'(?m)^Reviewed product HEAD: ([0-9a-f]{40})$')|ForEach-Object { $_.Groups[1].Value }); $reportReviewHashes=@([regex]::Matches($reportText,'(?m)^Review SHA-256: ([0-9a-f]{64})$')|ForEach-Object { $_.Groups[1].Value }); $reviewBytes=[IO.File]::ReadAllBytes($review); $reviewText=[Text.UTF8Encoding]::new($false,$true).GetString($reviewBytes); $reviewHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($reviewBytes)).ToLowerInvariant(); $expected=@('## Review Base','## Reviewed Product HEAD','## Critical','## Important','## Minor','## Testing Gaps','## Disposition'); $headings=@([regex]::Matches($reviewText,'(?m)^## .+$')|ForEach-Object Value); $base=[regex]::Match($reviewText,'(?m)^## Review Base\r?\n(0dbb4852931b50153fb898b03129ae0092c46404)$'); $reviewHeads=@([regex]::Matches($reviewText,'(?m)^## Reviewed Product HEAD\r?\n([0-9a-f]{40})$')|ForEach-Object { $_.Groups[1].Value }); $critical=[regex]::Match($reviewText,'(?ms)^## Critical\r?\n(.*?)(?=\r?\n## Important\r?$)').Groups[1].Value.Trim(); $important=[regex]::Match($reviewText,'(?ms)^## Important\r?\n(.*?)(?=\r?\n## Minor\r?$)').Groups[1].Value.Trim(); $disposition=[regex]::Match($reviewText,'(?ms)^## Disposition\r?\n(.*?)\s*\z').Groups[1].Value.Trim(); $current=(& $git -C $root rev-parse HEAD).Trim(); $dirty=@(& $git -C $root status --porcelain=v1 -uall); if(($headings -join "`n") -cne ($expected -join "`n") -or -not $base.Success -or $critical -cne 'None.' -or $important -cne 'None.' -or $disposition -cne 'PASS' -or $reportHeads.Count -ne 1 -or $reportReviewHashes.Count -ne 1 -or $reviewHeads.Count -ne 1 -or $reviewHeads[0] -cne $reportHeads[0] -or $reportReviewHashes[0] -cne $reviewHash -or $current -cne $reportHeads[0] -or $dirty.Count -ne 0){ throw 'Fresh review byte snapshot, report binding, HEAD, or worktree validation failed before staging' }; & $git -C $root add -f -- '.superpowers/sdd/plan-e-extension-hardening-report.md'; if ($LASTEXITCODE -ne 0) { throw 'Could not stage final report' }; $paths=@(& $git -C $root diff --cached --name-only --); if ($paths.Count -ne 1 -or $paths[0] -cne $report) { throw 'Final report staged path mismatch' }; & $git -C $root diff --cached --check; if ($LASTEXITCODE -ne 0) { throw 'Final report diff check failed' }; & $git -C $root commit -m 'docs(verification): record Plan E hardening evidence'; if ($LASTEXITCODE -ne 0) { throw 'Final report commit failed' }
+```
 
-- [ ] Latest design authority is exact full SHA
-  `1efb528282a2fd6a5c926f09d417a30d72f45897`; this plan is its exact one-path
-  direct child with subject `docs(update): integrate Plan E build prerequisites`.
-- [ ] Asset RED is the next one-path child with canonical test blob/subject;
-  asset GREEN is its exact three-path child with canonical blobs/subject, five
-  passing Node tests, and source/dist build identity.
-- [ ] Executor RED is a two-path direct child with exactly 106 assertion failures,
-  no collection errors; executor GREEN is the next one-path child and passes all
-  behavioral tests, helper mutation suites, compile, and release exclusion.
-- [ ] Promotion RED is the next one-path child, with seven assertion failures and
-  constructor pass; committed class payload is exact 31,014 bytes/759 lines/
-  required SHA; promotion implementation is its one-path child and passes the
-  full accepted matrix, complete resume suite, and compile. Its later single
-  `produce --kind promotion` invocation owns/proves all five mutations and exact
-  restoration in one detached-worktree lifecycle before final evidence.
-- [ ] The reviewed head contains exactly the sorted 70 paths; the CLI and test
-  paths are tested-source roots; no version/dependency or Plan D path changed.
-- [ ] No unrelated product/test/doc file or guide changed; release/PyInstaller
-  exclusion tests prove the executor is not shipped.
-- [ ] Accepted authority specs remain byte-identical to their commits.
-- [ ] All eight produce records and both review-ingestion terminal records are
-  complete for one immutable reviewed head; Task 6/7 audits predate reviews and
-  prove current state only; both review packages and complete review text are
-  hash-bound.
-- [ ] Plan-E disposition is `PASS`; whole disposition is
-  `INTERIM PASS THROUGH PLAN E`; five criteria pass, Critical/Important are
-  `None.`, and declared session IDs are valid and different under the narrow
-  claim boundary.
-- [ ] Session IDs satisfy exact safe regex and are single-quoted literals;
-  first character is alphanumeric, leading hyphen/punctuation and shell
-  metacharacters are rejected by executor tests, and finalizer/resume uses the
-  same validated pre-CAS reviewed-head literal.
-- [ ] No clean rejected review remains when finalizing; rejected state is
-  retired/regenerated after an accepted fix and both final ingestions are
-  succeeded at the selected head.
-- [ ] Finalization commits exactly the literal 60 paths with fixed subject and
-  parent equal to reviewed head; manifest has exactly 58 entries; clean-clone
-  `verify-final` proves all 60 are additions, exact `70/60/130` paths, and
-  committed blob hashes. The report contains the exact SHA-256 of the staged
-  manifest candidate, which must equal the later committed manifest bytes, but
-  no report self-hash or final commit SHA; actual final-commit/union PASS exists
-  only in `verify-final` canonical output.
-- [ ] `status` after successful finalization reports no retained incompatible
-  state; `verify-final` remains independently runnable from a clean clone using
-  only the final SHA and committed bytes.
-- [ ] Controller-owned review transport inputs are removed after successful
-  receipt verification or explicitly retained outside the repository with no
-  role in completion evidence; no temporary executor/debug file remains in the
-  repository.
-- [ ] Final report contains every fact in section 9.9 and no Task 6/7 historical
-  overclaim, unresolved marker, guessed total, final commit SHA/self-reference,
-  base-to-final/final-commit/post-CAS/cleanup PASS, or final whole-branch claim.
-  It includes the staged manifest SHA-256 and candidate-contract wording only.
-- [ ] No push, publish, tag, release, install, registry, AppData, browser,
-  network, authenticated model, MyCases, real update, broad reset, forced
-  worktree removal, prune, or automatic crash cleanup occurred.
-- [ ] Primary checkout is exact final HEAD with empty index/status, expected
-  committed evidence only, and no extra/prunable linked worktree registration.
+- [ ] **Step 4: Verify parent, path, subject, blob, and clean state**
 
-On any failure, stop. Preserve the lease, owner, candidate, receipt, worktree
-registration, quarantine, index, HEAD, and checkpoint exactly as the CLI left
-them. Do not infer ownership from names, inspect PID liveness as cleanup
-authority, adopt state, overwrite a candidate, delete a retained path, unstage,
-reset, rewrite HEAD, prune, or force-remove. Run the read-only `status` command,
-record its canonical classification and exact authority paths, and obtain manual
-authorization before any recovery or retirement. `status` never repairs state.
-Only an exact same-token finalizer resume or retirement of a dependency-closed
-terminal set (including a clean rejected-review record) is automated by this
-contract.
-Do not rerun a failed ordinary producer with the same or different head while
-its crash state remains; status/manual inspection comes first.
-Do not use antivirus/process-handle investigation as deletion authority; it may
-inform human diagnosis only.
+```powershell
+$ErrorActionPreference='Stop'; $root='C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec'; $git='C:\Program Files\Git\cmd\git.exe'; $report='.superpowers/sdd/plan-e-extension-hardening-report.md'; $review='C:\Users\zhaobo\AppData\Local\Temp\opencode\plan-e-task9-review.md'; $text=[IO.File]::ReadAllText((Join-Path $root $report)); $reviewedHeads=@([regex]::Matches($text,'(?m)^Reviewed product HEAD: ([0-9a-f]{40})$')|ForEach-Object { $_.Groups[1].Value }); $reportReviewHashes=@([regex]::Matches($text,'(?m)^Review SHA-256: ([0-9a-f]{64})$')|ForEach-Object { $_.Groups[1].Value }); $reviewBytes=[IO.File]::ReadAllBytes($review); $reviewText=[Text.UTF8Encoding]::new($false,$true).GetString($reviewBytes); $reviewHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($reviewBytes)).ToLowerInvariant(); $expected=@('## Review Base','## Reviewed Product HEAD','## Critical','## Important','## Minor','## Testing Gaps','## Disposition'); $headings=@([regex]::Matches($reviewText,'(?m)^## .+$')|ForEach-Object Value); $base=[regex]::Match($reviewText,'(?m)^## Review Base\r?\n(0dbb4852931b50153fb898b03129ae0092c46404)$'); $reviewHeads=@([regex]::Matches($reviewText,'(?m)^## Reviewed Product HEAD\r?\n([0-9a-f]{40})$')|ForEach-Object { $_.Groups[1].Value }); $critical=[regex]::Match($reviewText,'(?ms)^## Critical\r?\n(.*?)(?=\r?\n## Important\r?$)').Groups[1].Value.Trim(); $important=[regex]::Match($reviewText,'(?ms)^## Important\r?\n(.*?)(?=\r?\n## Minor\r?$)').Groups[1].Value.Trim(); $disposition=[regex]::Match($reviewText,'(?ms)^## Disposition\r?\n(.*?)\s*\z').Groups[1].Value.Trim(); $subject=(& $git -C $root show -s --format=%s HEAD).Trim(); $parent=(& $git -C $root rev-parse HEAD^).Trim(); $paths=@(& $git -C $root diff-tree --no-commit-id --name-only -r HEAD); $workHash=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root $report)).Hash.ToLowerInvariant(); $blobHash=(& $git -C $root hash-object -- $report).Trim(); $headBlob=(& $git -C $root rev-parse "HEAD:$report").Trim(); if (($headings -join "`n") -cne ($expected -join "`n") -or -not $base.Success -or $reviewedHeads.Count -ne 1 -or $reportReviewHashes.Count -ne 1 -or $reviewHeads.Count -ne 1 -or $reviewHeads[0] -cne $reviewedHeads[0] -or $reportReviewHashes[0] -cne $reviewHash -or $critical -cne 'None.' -or $important -cne 'None.' -or $disposition -cne 'PASS' -or $parent -cne $reviewedHeads[0] -or $subject -cne 'docs(verification): record Plan E hardening evidence' -or $paths.Count -ne 1 -or $paths[0] -cne $report -or $blobHash -cne $headBlob) { throw 'Committed report parent/review snapshot/path/subject/blob verification failed' }; & $git -C $root diff --check HEAD^..HEAD; if ($LASTEXITCODE -ne 0) { throw 'Committed report diff check failed' }; if(@(& $git -C $root status --porcelain=v1 -uall).Count -ne 0){ throw 'Final worktree is not clean' }; "Committed report SHA-256: $workHash"
+```
 
-If review findings require a fix, status remains a reporting tool, not approval.
-The operator must first accept a new correction spec with exact paths/subject;
-only then may code TDD and the explicit old-head retirement/regeneration flow
-run. Manual authorization is recorded outside retained state and cannot be
-invented by the CLI.
-Human recovery of crash-retained state likewise requires a separate accepted
-recovery procedure; this plan defines no cleanup command beyond strict
-retirement/finalizer resume.
+Expected: direct one-path child of reviewed HEAD; committed/working report blobs and fresh
+same-snapshot review hashes match; diff/status are clean. Do not add the printed report hash.
 
-Plan E completion is `DONE` only after `verify-final` returns exit `0` and code
-`final_verified` **and** the final `status` returns `state_absent`. It is
-`DONE_WITH_CONCERNS` only for explicitly recorded
-non-blocking residual risks after all hard gates pass. Any retained/malformed
-state, failed test/mutation/review, inventory/hash/chronology mismatch, recovered
-Task 6/7 report, unauthorized head change, or forbidden operation is `BLOCKED`.
-These status words describe Task 9 execution only. `DONE` does not authorize
-push/publish/release/install and does not claim final whole-branch readiness.
-The committed report's prospective readiness line is subordinate to these
-post-commit CLI gates.
-Controller-owned review input files and other approved temporary transport files
-must also be removed or explicitly retained outside the repository before the
-clean-repository completion claim; they are never evidence authority.
+### 9.8 Out of Scope and Definition of Done
 
-After the evidence commit, the primary checkout must have exact final HEAD,
-empty index, no tracked/untracked unexpected repository file, no extra linked
-worktree/prunable registration, and only the committed evidence paths under the
-fixed final artifact locations.
+Out of scope: any replacement evidence runner; coordination state; custom
+evidence inventories; linked worktrees; custom Git finalization; Task 6/7 report
+reconstruction; modification of Tasks 1-8 or accepted specs; Plan D;
+release/readiness publication; dependency, version, package, installer,
+registry, browser, or user-state changes.
+
+Task 9 is `DONE` only when:
+
+- the plan is the exact one-path direct child of the authority commit;
+- the abandoned executor is visibly removed by the exact two-path forward commit;
+- fresh-process and clean-clone retirement checks both report `PASS` with no
+  executor/runtime residue or dirty clone; both block on pre-existing
+  `plan-e-retirement-clone-*`/`plan-e-retirement-pycache-*`/
+  `plan-e-retirement-stage-*`, never adopt/delete stale roots, and remove only
+  invocation-owned clone/cache/stage paths;
+- genuine seven-selector RED plus constructor control precedes production edit;
+- retry GREEN and all five temporary mutations pass with exact byte restoration;
+- all focused/full Extension, Host, build, compile, asset, structural, diff, and
+  clean-status gates pass at the reviewed product head;
+- one fresh independent review has no open Critical or Important findings;
+- every review gate validates/hashes one strict-decoded byte snapshot and the report records
+  that same-snapshot `Review SHA-256`;
+- the concise report is the sole final evidence path, committed with the exact
+  subject and verified against its committed blob;
+- Task 6/7 remain honestly `UNRECOVERABLE` and not reconstructed; and
+- no forbidden operation or recovery-source deletion occurred.
+
+Any failed gate, unexpected skip, open Critical/Important finding, dirty or
+unauthorized path, stale retirement root, failed byte restoration, historical overclaim,
+or forbidden operation is `BLOCKED`. Stale roots require inspection and explicit manual
+cleanup authorization; never auto-remove them. `DONE` means Plan E current-state verification only; it
+does not authorize push/publish/release/install and does not claim final
+whole-branch readiness before Plan D and its final review.
