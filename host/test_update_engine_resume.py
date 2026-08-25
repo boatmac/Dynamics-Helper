@@ -39,7 +39,10 @@ from update_journal import (
     JournalReason,
     TransactionPaths,
     UpdateInitiator,
+    journal_to_value,
     read_active_transaction,
+    read_journal,
+    transition,
 )
 
 
@@ -1724,6 +1727,96 @@ class OwnershipBoundaryTests(unittest.TestCase):
                 fixture.prepare()
             self.assertFalse(paths.active.exists())
 
+    def test_preseed_rollback_authority_rejects_forged_seed_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = MatrixHarness(Path(temporary), "fresh-seeded")
+            fixture.prepare()
+            paths = TransactionPaths.for_install(fixture.install, TX)
+            journal = read_journal(paths.journal)
+            journal = transition(
+                journal,
+                JournalPhase.WAITING_FOR_HOST_EXIT,
+                initiating_process=InitiatingProcessIdentity(7, "created"),
+            )
+            journal = transition(journal, JournalPhase.HOST_BACKED_UP)
+            journal = transition(journal, JournalPhase.HOST_INSTALLED)
+            journal = transition(
+                journal,
+                JournalPhase.ROLLING_BACK,
+                failure_code=JournalReason.EXTENSION_BACKUP_FAILED,
+            )
+            value = journal_to_value(journal)
+            value["seed_receipt"] = {
+                "path": "config.json",
+                "expected_sha256": hashlib.sha256(
+                    (paths.staged_host / "config.json").read_bytes()
+                ).hexdigest(),
+                "seed_installed": False,
+                "observed_live_sha256": None,
+            }
+            paths.journal.write_bytes(
+                (
+                    json.dumps(
+                        value,
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                ).encode("utf-8")
+            )
+            with self.assertRaises(UpdateStateConflict):
+                fixture.engine._load_transaction_authority(paths, TX)
+
+    def test_active_repair_reparse_files_are_rejected_before_read(self):
+        for name in ("journal", "ownership", "probe_manifest"):
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as temporary:
+                    fixture = MatrixHarness(Path(temporary), "fresh-preexisting")
+                    fixture.controller.arm(
+                        "after", "workspace:promote-preparing", InjectedCrash
+                    )
+                    with self.assertRaises(InjectedCrash):
+                        fixture.prepare()
+                    paths = TransactionPaths.for_install(fixture.install, TX)
+                    target = getattr(paths, name)
+                    fixture.controller.clear()
+                    fixture.rebuild_engine()
+                    real_lstat = Path.lstat
+                    real_read_bytes = Path.read_bytes
+                    real_read_text = Path.read_text
+                    reads = []
+
+                    def lstat(path, *args, **kwargs):
+                        info = real_lstat(path, *args, **kwargs)
+                        if path == target:
+                            return SimpleNamespace(
+                                st_mode=info.st_mode,
+                                st_file_attributes=0x400,
+                            )
+                        return info
+
+                    def read_bytes(path, *args, **kwargs):
+                        if path == target:
+                            reads.append(path)
+                        return real_read_bytes(path, *args, **kwargs)
+
+                    def read_text(path, *args, **kwargs):
+                        if path == target:
+                            reads.append(path)
+                        return real_read_text(path, *args, **kwargs)
+
+                    with (
+                        mock.patch.object(Path, "lstat", lstat),
+                        mock.patch.object(Path, "read_bytes", read_bytes),
+                        mock.patch.object(Path, "read_text", read_text),
+                        self.assertRaises(PreparedTransactionConflict),
+                    ):
+                        fixture.prepare()
+                    self.assertEqual(reads, [])
+                    self.assertFalse(paths.active.exists())
+
     def test_ancestor_read_failure_is_fixed_conflict(self):
         with tempfile.TemporaryDirectory() as temporary:
             fixture = MatrixHarness(Path(temporary), "installed")
@@ -1905,6 +1998,49 @@ class OwnershipBoundaryTests(unittest.TestCase):
                 (paths.preparing_staged_extension / "assets/app.js").exists()
             )
             self.assertFalse(paths.transaction_root.exists())
+            self.assertFalse(paths.active.exists())
+
+    def test_replaced_staged_target_is_rejected_before_copy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = MatrixHarness(Path(temporary), "installed")
+            paths = TransactionPaths.for_install(fixture.install, TX)
+            target = paths.preparing_staged_extension / "assets/app.js"
+            real_lstat = Path.lstat
+            copy_calls = []
+            replace_target = False
+
+            def before_operation(label):
+                nonlocal replace_target
+                fixture.recording.before_filesystem_operation(label)
+                if label == "workspace:stage-extension:assets/app.js":
+                    replace_target = True
+
+            def lstat(path, *args, **kwargs):
+                if path == target and replace_target:
+                    return SimpleNamespace(
+                        st_mode=stat.S_IFLNK,
+                        st_file_attributes=0,
+                    )
+                return real_lstat(path, *args, **kwargs)
+
+            def copy2(source, destination, *args, **kwargs):
+                copy_calls.append((source, destination))
+                return destination
+
+            object.__setattr__(
+                fixture.engine.hooks,
+                "before_filesystem_operation",
+                before_operation,
+            )
+            with (
+                mock.patch.object(Path, "lstat", lstat),
+                mock.patch.object(shutil, "copy2", copy2),
+                self.assertRaises(PreparedTransactionConflict),
+            ):
+                fixture.prepare()
+            self.assertFalse(
+                any(destination == target for _source, destination in copy_calls)
+            )
             self.assertFalse(paths.active.exists())
 
     def test_corrupt_staged_seed_is_never_installed(self):
