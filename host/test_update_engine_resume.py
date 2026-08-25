@@ -1668,6 +1668,25 @@ class PreparingPromotionRetryTests(unittest.TestCase):
 
 
 class OwnershipBoundaryTests(unittest.TestCase):
+    def test_valid_promoted_workspace_repairs_missing_active(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = MatrixHarness(Path(temporary), "fresh-preexisting")
+            fixture.controller.arm(
+                "after", "workspace:promote-preparing", InjectedCrash
+            )
+            with self.assertRaises(InjectedCrash):
+                fixture.prepare()
+            paths = TransactionPaths.for_install(fixture.install, TX)
+            self.assertFalse(paths.active.exists())
+            fixture.controller.clear()
+            fixture.rebuild_engine()
+            result = fixture.prepare()
+            self.assertEqual(result.phase, JournalPhase.PREPARED)
+            self.assertEqual(
+                read_active_transaction(paths.active),
+                ActiveTransaction(1, TX, f"transactions/{TX}/journal.json"),
+            )
+
     def test_existing_update_ancestor_reparse_is_rejected_before_preparing_writes(self):
         for component in ("updates", "transactions"):
             with self.subTest(component=component):
