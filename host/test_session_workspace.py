@@ -287,7 +287,6 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         }
         def load_explicit_empty(*, root_path_override):
             self.assertIsNone(root_path_override)
-            host.root_path = None
             return config
         host._get_session_config = MagicMock(side_effect=load_explicit_empty)
         result = await host.handle_analyze_error({
@@ -298,7 +297,7 @@ class TestSessionIdentityLifecycle(unittest.IsolatedAsyncioTestCase):
         })
         self.assertEqual(result['error'], 'No text provided for analysis.')
         host._get_session_config.assert_called_once_with(root_path_override=None)
-        self.assertIsNone(host.root_path)
+        self.assertEqual(host.root_path, configured)
 
     async def test_request_after_explicit_empty_without_marker_uses_configured_root(self):
         configured = r'C:\MyWorkbench\MyCases'
@@ -775,9 +774,61 @@ class TestRootPathNormalization(unittest.TestCase):
             with patch.object(dhm, "USER_DATA_DIR", user_dir):
                 config = host._get_session_config(root_path_override=payload_root)
 
-        self.assertEqual(host.root_path, os.path.normpath(payload_root))
+        self.assertEqual(host.root_path, os.path.normpath(disk_root))
         self.assertEqual(config["working_directory"], os.path.normpath(payload_root))
         self.assertEqual(config["skill_directories"], [os.path.normpath(payload_skills)])
+
+    def test_one_request_root_does_not_leak_into_skill_persistence(self):
+        host = NativeHost.__new__(NativeHost)
+        initialize_prompt_state(host)
+        host.root_path = None
+        host.analyze_timeout_seconds = 1200
+        host._decrypt_secrets_in_memory = MagicMock()
+        host._encrypt_secrets_before_write = MagicMock()
+
+        with tempfile.TemporaryDirectory() as user_dir, tempfile.TemporaryDirectory() as base:
+            canonical_root = os.path.join(base, "canonical")
+            request_root = os.path.join(base, "request")
+            canonical_skills = os.path.join(canonical_root, ".github", "skills")
+            request_skills = os.path.join(request_root, ".github", "skills")
+            global_skills = os.path.join(base, "global-skills")
+            os.makedirs(canonical_skills)
+            os.makedirs(request_skills)
+            os.makedirs(global_skills)
+            config_path = os.path.join(user_dir, "config.json")
+            with open(config_path, "w", encoding="utf-8") as stream:
+                json.dump(
+                    {
+                        "root_path": canonical_root,
+                        "skill_directories": [global_skills],
+                        "extension_preferences": {"use_workspace_only": False},
+                    },
+                    stream,
+                )
+
+            with patch.object(dhm, "USER_DATA_DIR", user_dir):
+                canonical = host._get_session_config()
+                request = host._get_session_config(root_path_override=request_root)
+                host._write_user_config(
+                    {
+                        "root_path": canonical_root,
+                        "skill_directories": canonical["skill_directories"],
+                        "extension_preferences": {"use_workspace_only": False},
+                    }
+                )
+                with open(config_path, "r", encoding="utf-8") as stream:
+                    persisted = json.load(stream)
+
+        self.assertEqual(host.root_path, os.path.normpath(canonical_root))
+        self.assertEqual(request["working_directory"], os.path.normpath(request_root))
+        self.assertEqual(
+            set(request["skill_directories"]),
+            {
+                os.path.normpath(global_skills),
+                os.path.normpath(request_skills),
+            },
+        )
+        self.assertEqual(persisted["skill_directories"], [os.path.normpath(global_skills)])
 
     def test_corrupt_user_config_does_not_fallback_to_host_cwd(self):
         host = NativeHost.__new__(NativeHost)
