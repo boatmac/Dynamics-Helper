@@ -1128,6 +1128,7 @@ describe('handleAnalyzeForward persistence outcomes', () => {
         expect.soft(result).toEqual({
             status: 'success',
             data: { markdown: '# Report', saved_to: 'report.md' },
+            extension_warnings: ['analysis_result_not_persisted'],
         })
         expect.soft(chromeMockSpies.storageSet).toHaveBeenCalledTimes(1)
         expect.soft(chromeMockSpies.storageGet).toHaveBeenCalledTimes(3)

@@ -713,6 +713,7 @@ export async function completeAnalyzePersistence(
                     LATEST_ANALYSIS_OWNER_KEY,
                 ));
             } catch {
+                observed.add('analysis_result_not_persisted');
                 // An unreadable owner cannot authorize a singleton result write.
             }
             if (

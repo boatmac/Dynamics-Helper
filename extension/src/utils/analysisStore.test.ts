@@ -706,7 +706,9 @@ describe('latest-started persistence ownership', () => {
             warnings => ({ warnings }),
             error => ({ error }),
         )
-        expect.soft(outcome).toEqual({ warnings: [] })
+        expect.soft(outcome).toEqual({
+            warnings: ['analysis_result_not_persisted'],
+        })
         expect(raw.toString).not.toHaveBeenCalled()
         expect.soft(chromeMockSpies.storageGet).toHaveBeenCalledTimes(2)
         expect.soft(chromeMockSpies.storageSet).toHaveBeenCalledTimes(1)
