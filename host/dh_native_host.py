@@ -1253,10 +1253,10 @@ class NativeHost:
         # Extract root path
         if root_path_override is _WORKING_DIRECTORY_UNSET:
             current_root = self._normalize_root_path(final_data.get("root_path"))
+            self.root_path = current_root
         else:
             current_root = self._normalize_root_path(root_path_override)
         has_root_path = bool(current_root)
-        self.root_path = current_root
 
         # --- SKILL DIRECTORIES ---
         # Strategy:
@@ -1371,8 +1371,8 @@ class NativeHost:
 
         # B. Load Workspace MCP Config (.github/mcp-config.json)
         # This overrides Global tools with the same name
-        if self.root_path and os.path.exists(self.root_path):
-            ws_mcp_path = os.path.join(self.root_path, ".github", "mcp-config.json")
+        if current_root and os.path.exists(current_root):
+            ws_mcp_path = os.path.join(current_root, ".github", "mcp-config.json")
             if os.path.exists(ws_mcp_path):
                 try:
                     with open(ws_mcp_path, "r") as f:
@@ -1419,7 +1419,7 @@ class NativeHost:
         # wire; omission would let resume restore stale metadata (often the
         # Native Host install directory). A configured root wins; otherwise
         # use the process cwd as an explicit compatibility fallback.
-        working_directory = self.root_path or os.getcwd()
+        working_directory = current_root or os.getcwd()
         session_config["working_directory"] = working_directory
         logger.info(f"Set working_directory to: {working_directory}")
 
@@ -2252,12 +2252,6 @@ class NativeHost:
         # 2. Session name changed (different case)
         needs_refresh = self.session is None or self.client is None
 
-        if self.root_path != payload_root_path:
-            logger.info(
-                f"Configured root path changed: {self.root_path} -> {payload_root_path}."
-            )
-            self.root_path = payload_root_path
-
         desired_session_root = full_config.get("working_directory")
         if getattr(self, "current_session_root_path", None) != desired_session_root:
             logger.info(
@@ -2513,7 +2507,8 @@ class NativeHost:
             logger.info("Received full response from Copilot.")
 
             # Determine Save Location
-            if self.root_path and os.path.exists(self.root_path):
+            effective_root = full_config.get("_effective_root")
+            if effective_root and os.path.exists(effective_root):
                 safe_case = "".join(
                     c for c in case_number if c.isalnum() or c in ("-", "_")
                 ).strip()
@@ -2524,8 +2519,8 @@ class NativeHost:
                 # to guarantee dh_case_report.md lands in the same directory.
                 save_dir = None
                 try:
-                    for entry in os.listdir(self.root_path):
-                        candidate = os.path.join(self.root_path, entry, safe_case)
+                    for entry in os.listdir(effective_root):
+                        candidate = os.path.join(effective_root, entry, safe_case)
                         if os.path.isdir(candidate):
                             save_dir = candidate
                             logger.info(f"Found Copilot-created folder: {save_dir}")
@@ -2559,7 +2554,7 @@ class NativeHost:
                     if not safe_product:
                         safe_product = "General"
 
-                    save_dir = os.path.join(self.root_path, safe_product, safe_case)
+                    save_dir = os.path.join(effective_root, safe_product, safe_case)
 
                 os.makedirs(save_dir, exist_ok=True)
                 output_file = os.path.join(save_dir, "dh_case_report.md")
@@ -2586,7 +2581,7 @@ class NativeHost:
                 if self.current_session_id:
                     resume_command = self._build_resume_command(
                         self.current_session_id,
-                        self.root_path,
+                        effective_root,
                     )
                     f.write(
                         "> Resume in Copilot CLI: "

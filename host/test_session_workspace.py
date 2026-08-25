@@ -772,6 +772,7 @@ class TestRootPathNormalization(unittest.TestCase):
                     f,
                 )
             with patch.object(dhm, "USER_DATA_DIR", user_dir):
+                host._get_session_config()
                 config = host._get_session_config(root_path_override=payload_root)
 
         self.assertEqual(host.root_path, os.path.normpath(disk_root))
