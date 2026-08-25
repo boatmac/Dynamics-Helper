@@ -1852,6 +1852,33 @@ class OwnershipBoundaryTests(unittest.TestCase):
             self.assertFalse(paths.transaction_root.exists())
             self.assertFalse(paths.active.exists())
 
+    def test_preparing_probe_reparse_is_rejected_before_manifest_write(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = MatrixHarness(Path(temporary), "installed")
+            paths = TransactionPaths.for_install(fixture.install, TX)
+            probe_root = paths.preparing_probe_manifest.parent
+            real_lstat = Path.lstat
+            checks = 0
+
+            def lstat(path, *args, **kwargs):
+                nonlocal checks
+                info = real_lstat(path, *args, **kwargs)
+                if path == probe_root:
+                    checks += 1
+                    if checks > 1:
+                        return SimpleNamespace(
+                            st_mode=info.st_mode,
+                            st_file_attributes=0x400,
+                        )
+                return info
+
+            with mock.patch.object(Path, "lstat", lstat):
+                with self.assertRaises(PreparedTransactionConflict):
+                    fixture.prepare()
+            self.assertFalse(paths.preparing_probe_manifest.exists())
+            self.assertFalse(paths.transaction_root.exists())
+            self.assertFalse(paths.active.exists())
+
     def test_replaced_updates_ancestor_is_revalidated_before_copy(self):
         with tempfile.TemporaryDirectory() as temporary:
             fixture = MatrixHarness(Path(temporary), "installed")
