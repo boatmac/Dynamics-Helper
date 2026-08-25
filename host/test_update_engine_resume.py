@@ -1817,6 +1817,69 @@ class OwnershipBoundaryTests(unittest.TestCase):
                     self.assertEqual(reads, [])
                     self.assertFalse(paths.active.exists())
 
+    def test_active_reparse_is_rejected_before_read(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = MatrixHarness(Path(temporary), "fresh-preexisting")
+            fixture.prepare()
+            paths = TransactionPaths.for_install(fixture.install, TX)
+            real_lstat = Path.lstat
+            real_read_text = Path.read_text
+            reads = []
+
+            def lstat(path, *args, **kwargs):
+                info = real_lstat(path, *args, **kwargs)
+                if path == paths.active:
+                    return SimpleNamespace(
+                        st_mode=info.st_mode,
+                        st_file_attributes=0x400,
+                    )
+                return info
+
+            def read_text(path, *args, **kwargs):
+                if path == paths.active:
+                    reads.append(path)
+                return real_read_text(path, *args, **kwargs)
+
+            with (
+                mock.patch.object(Path, "lstat", lstat),
+                mock.patch.object(Path, "read_text", read_text),
+                self.assertRaises(PreparedTransactionConflict),
+            ):
+                fixture.prepare()
+            self.assertEqual(reads, [])
+
+    def test_active_present_rejects_extra_transaction_topology(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = MatrixHarness(Path(temporary), "fresh-preexisting")
+            fixture.prepare()
+            paths = TransactionPaths.for_install(fixture.install, TX)
+            extra = paths.transaction_root / "backup" / "unexpected.bin"
+            extra.parent.mkdir()
+            extra.write_bytes(b"unexpected")
+            with self.assertRaises(PreparedTransactionConflict):
+                fixture.prepare()
+            self.assertTrue(extra.exists())
+
+    def test_appeared_active_is_not_overwritten(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = MatrixHarness(Path(temporary), "installed")
+            paths = TransactionPaths.for_install(fixture.install, TX)
+            sentinel = b"external-active\n"
+
+            def before_operation(label):
+                fixture.recording.before_filesystem_operation(label)
+                if label == "active:write" and not paths.active.exists():
+                    paths.active.write_bytes(sentinel)
+
+            object.__setattr__(
+                fixture.engine.hooks,
+                "before_filesystem_operation",
+                before_operation,
+            )
+            with self.assertRaises(PreparedTransactionConflict):
+                fixture.prepare()
+            self.assertEqual(paths.active.read_bytes(), sentinel)
+
     def test_ancestor_read_failure_is_fixed_conflict(self):
         with tempfile.TemporaryDirectory() as temporary:
             fixture = MatrixHarness(Path(temporary), "installed")
