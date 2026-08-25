@@ -2,6 +2,7 @@ import os
 import shutil
 import stat
 import tempfile
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -49,6 +50,13 @@ from update_ownership import (
     write_ownership_plan_atomic,
 )
 from package_manifest import sha256_file
+
+
+_replace_path = os.replace
+_sleep = time.sleep
+_is_windows = os.name == "nt"
+PROMOTION_TRANSIENT_WINERRORS = frozenset((5, 32, 33))
+PROMOTION_RETRY_DELAYS = (0.05, 0.2)
 
 
 class UpdateEngineError(UpdateError):
@@ -156,6 +164,15 @@ class UpdateEngine:
     def _load_authority(self, transaction_id: str):
         paths = self._paths(transaction_id)
         try:
+            canonical_install = self._require_plain_directory(
+                self.install_root, None, UpdateStateConflict
+            )
+            canonical_updates = self._require_plain_directory(
+                paths.updates_root, canonical_install, UpdateStateConflict
+            )
+            self._require_plain_file(
+                paths.active, canonical_updates, UpdateStateConflict
+            )
             active = read_active_transaction(paths.active)
             if active.transaction_id != transaction_id:
                 raise UpdateStateConflict()
@@ -174,8 +191,30 @@ class UpdateEngine:
         transaction_id: str,
     ) -> tuple[UpdateJournal, OwnershipPlan]:
         try:
+            canonical_install = self._require_plain_directory(
+                self.install_root, None, UpdateStateConflict
+            )
+            canonical_updates = self._require_plain_directory(
+                paths.updates_root, canonical_install, UpdateStateConflict
+            )
+            canonical_transactions = self._require_plain_directory(
+                paths.transactions_root, canonical_updates, UpdateStateConflict
+            )
+            canonical_root = self._require_plain_directory(
+                paths.transaction_root,
+                canonical_transactions,
+                UpdateStateConflict,
+            )
+            self._require_plain_file(
+                paths.journal, canonical_root, UpdateStateConflict
+            )
+            self._require_plain_file(
+                paths.ownership, canonical_root, UpdateStateConflict
+            )
             journal = read_journal(paths.journal)
             plan = read_ownership_plan(paths.ownership)
+        except UpdateStateConflict:
+            raise
         except Exception as error:
             raise UpdateStateConflict() from error
         if journal.transaction_id != transaction_id or plan.transaction_id != transaction_id:
@@ -215,6 +254,30 @@ class UpdateEngine:
                 JournalPhase.PROBING,
             )
         )
+        receipt_forbidden = journal.phase in (
+            JournalPhase.STAGING,
+            JournalPhase.PREPARED,
+            JournalPhase.WAITING_FOR_HOST_EXIT,
+            JournalPhase.HOST_BACKED_UP,
+            JournalPhase.HOST_INSTALLED,
+        ) or (
+            journal.phase
+            in (
+                JournalPhase.ROLLING_BACK,
+                JournalPhase.ROLLED_BACK,
+                JournalPhase.RECOVERY_REQUIRED,
+            )
+            and journal.rollback_from
+            in (
+                JournalPhase.STAGING,
+                JournalPhase.PREPARED,
+                JournalPhase.WAITING_FOR_HOST_EXIT,
+                JournalPhase.HOST_BACKED_UP,
+                JournalPhase.HOST_INSTALLED,
+            )
+        )
+        if receipt_forbidden and journal.seed_receipt is not None:
+            raise UpdateStateConflict()
         if plan.seed_files and receipt_required and journal.seed_receipt is None:
             raise UpdateStateConflict()
         return journal, plan
@@ -258,6 +321,7 @@ class UpdateEngine:
             )
             if ownership_plan_bytes(locked_candidate) != candidate_bytes:
                 raise PreparedTransactionConflict()
+            self._require_existing_preparation_ancestors(paths)
             if paths.active.exists():
                 try:
                     _paths, journal, persisted = self._load_authority(tx)
@@ -268,11 +332,20 @@ class UpdateEngine:
                         candidate_bytes,
                         initiator,
                     )
-                    self._verify_prepared_workspace(
+                    active_staging = new_staging_journal(
+                        transaction_id=tx,
+                        initiator=initiator,
+                        target_version=candidate.target_version,
+                        prior_version=candidate.prior_version,
+                        fresh_install=candidate.source is OwnershipSource.FRESH,
+                        ownership_sha256=ownership_plan_sha256(candidate),
+                    )
+                    self._require_promotion_workspace(
                         package,
                         candidate,
                         candidate_bytes,
                         paths,
+                        active_staging,
                         preparing=False,
                     )
                     return journal
@@ -282,8 +355,9 @@ class UpdateEngine:
                     raise PreparedTransactionConflict() from error
             if paths.transaction_root.exists():
                 try:
-                    journal = read_journal(paths.journal)
-                    persisted = read_ownership_plan(paths.ownership)
+                    journal, persisted = self._load_transaction_authority(
+                        paths, tx
+                    )
                     self._require_prepared_candidate(
                         journal,
                         persisted,
@@ -291,20 +365,30 @@ class UpdateEngine:
                         candidate_bytes,
                         initiator,
                     )
-                    self._verify_prepared_workspace(
+                    repair_staging = new_staging_journal(
+                        transaction_id=tx,
+                        initiator=initiator,
+                        target_version=candidate.target_version,
+                        prior_version=candidate.prior_version,
+                        fresh_install=candidate.source is OwnershipSource.FRESH,
+                        ownership_sha256=ownership_plan_sha256(candidate),
+                    )
+                    self._require_promotion_workspace(
                         package,
                         candidate,
                         candidate_bytes,
                         paths,
+                        repair_staging,
                         preparing=False,
                     )
                     self._run_preparation_operation(
                         "active:write",
-                        lambda: write_active_transaction_atomic(
-                            paths.active,
-                            ActiveTransaction(
-                                1, tx, f"transactions/{tx}/journal.json"
-                            ),
+                        lambda: self._write_active_after_final_validation(
+                            package,
+                            candidate,
+                            candidate_bytes,
+                            paths,
+                            repair_staging,
                         ),
                     )
                     return journal
@@ -487,6 +571,395 @@ class UpdateEngine:
         ):
             raise PreparedTransactionConflict()
 
+    def _require_plain_directory(
+        self,
+        path: Path,
+        expected_parent: Path | None,
+        conflict_type: type[Exception] = PreparedTransactionConflict,
+    ) -> Path:
+        try:
+            info = path.lstat()
+            attributes = getattr(info, "st_file_attributes", 0)
+            reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+            if not stat.S_ISDIR(info.st_mode) or attributes & reparse:
+                raise conflict_type()
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(self.install_root)
+            if expected_parent is not None and resolved.parent != expected_parent:
+                raise conflict_type()
+            return resolved
+        except conflict_type:
+            raise
+        except Exception as error:
+            raise conflict_type() from error
+
+    def _require_plain_file(
+        self,
+        path: Path,
+        root: Path,
+        conflict_type: type[Exception] = PreparedTransactionConflict,
+    ) -> None:
+        try:
+            info = path.lstat()
+            attributes = getattr(info, "st_file_attributes", 0)
+            reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+            if not stat.S_ISREG(info.st_mode) or attributes & reparse:
+                raise conflict_type()
+            path.resolve(strict=True).relative_to(root)
+        except conflict_type:
+            raise
+        except Exception as error:
+            raise conflict_type() from error
+
+    def _require_absent_target(self, path: Path) -> None:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return
+        except Exception as error:
+            raise PreparedTransactionConflict() from error
+        raise PreparedTransactionConflict()
+
+    def _require_existing_preparation_ancestors(
+        self,
+        paths: TransactionPaths,
+    ) -> None:
+        try:
+            canonical_install = self._require_plain_directory(
+                self.install_root, None
+            )
+            if canonical_install != self.install_root:
+                raise PreparedTransactionConflict()
+            if paths.updates_root.exists():
+                canonical_updates = self._require_plain_directory(
+                    paths.updates_root, canonical_install
+                )
+                if paths.transactions_root.exists():
+                    canonical_transactions = self._require_plain_directory(
+                        paths.transactions_root, canonical_updates
+                    )
+                    for root in (paths.preparing_root, paths.transaction_root):
+                        try:
+                            root.lstat()
+                        except FileNotFoundError:
+                            continue
+                        self._require_plain_directory(
+                            root, canonical_transactions
+                        )
+        except PreparedTransactionConflict:
+            raise
+        except Exception as error:
+            raise PreparedTransactionConflict() from error
+
+    def _create_plain_preparing_workspace(self, paths: TransactionPaths) -> None:
+        canonical_install = self._require_plain_directory(self.install_root, None)
+        chain = (
+            (paths.updates_root, canonical_install),
+            (paths.transactions_root, paths.updates_root),
+            (paths.preparing_root, paths.transactions_root),
+            (paths.preparing_staged_root, paths.preparing_root),
+            (paths.preparing_staged_host, paths.preparing_staged_root),
+            (paths.preparing_staged_extension, paths.preparing_staged_root),
+            (paths.preparing_probe_manifest.parent, paths.preparing_root),
+        )
+        canonical: dict[Path, Path] = {self.install_root: canonical_install}
+        for path, parent_path in chain:
+            try:
+                path.mkdir()
+            except FileExistsError:
+                pass
+            parent = canonical.get(parent_path)
+            if parent is None:
+                parent = self._require_plain_directory(parent_path, None)
+            canonical[path] = self._require_plain_directory(path, parent)
+
+    def _require_plain_target_parent(self, root: Path, target: Path) -> None:
+        canonical_install = self._require_plain_directory(self.install_root, None)
+        canonical_updates = self._require_plain_directory(
+            root.parent.parent, canonical_install
+        )
+        canonical_transactions = self._require_plain_directory(
+            root.parent, canonical_updates
+        )
+        canonical_parent = self._require_plain_directory(
+            root, canonical_transactions
+        )
+        current = root
+        for component in target.parent.relative_to(root).parts:
+            child = current / component
+            try:
+                child.mkdir()
+            except FileExistsError:
+                pass
+            canonical_parent = self._require_plain_directory(child, canonical_parent)
+            current = child
+
+    def _write_active_after_final_validation(
+        self,
+        package: ValidatedPackage,
+        candidate: OwnershipPlan,
+        candidate_bytes: bytes,
+        paths: TransactionPaths,
+        staging: UpdateJournal,
+    ) -> None:
+        self._require_promotion_workspace(
+            package,
+            candidate,
+            candidate_bytes,
+            paths,
+            staging,
+            preparing=False,
+        )
+        self._require_absent_target(paths.active)
+        write_active_transaction_atomic(
+            paths.active,
+            ActiveTransaction(
+                1,
+                staging.transaction_id,
+                f"transactions/{staging.transaction_id}/journal.json",
+            ),
+        )
+
+    def _write_absent_bytes(
+        self,
+        root: Path,
+        target: Path,
+        payload: bytes,
+    ) -> None:
+        self._require_plain_target_parent(root, target)
+        self._require_absent_target(target)
+        self._write_bytes_replace(target, payload)
+
+    def _write_absent_journal(
+        self,
+        paths: TransactionPaths,
+        journal: UpdateJournal,
+    ) -> None:
+        self._require_plain_target_parent(
+            paths.preparing_root, paths.preparing_journal
+        )
+        self._require_absent_target(paths.preparing_journal)
+        write_journal_atomic(paths.preparing_journal, journal)
+
+    def _replace_staging_journal(
+        self,
+        paths: TransactionPaths,
+        staging: UpdateJournal,
+        prepared: UpdateJournal,
+    ) -> None:
+        canonical_root = self._require_plain_directory(
+            paths.preparing_root,
+            self._require_plain_directory(
+                paths.transactions_root,
+                self._require_plain_directory(
+                    paths.updates_root,
+                    self._require_plain_directory(self.install_root, None),
+                ),
+            ),
+        )
+        self._require_plain_file(paths.preparing_journal, canonical_root)
+        if read_journal(paths.preparing_journal) != staging:
+            raise PreparedTransactionConflict()
+        write_journal_atomic(paths.preparing_journal, prepared)
+
+    def _write_absent_ownership(
+        self,
+        paths: TransactionPaths,
+        candidate: OwnershipPlan,
+    ) -> None:
+        self._require_plain_target_parent(
+            paths.preparing_root, paths.preparing_ownership
+        )
+        self._require_absent_target(paths.preparing_ownership)
+        write_ownership_plan_atomic(paths.preparing_ownership, candidate)
+
+    def _require_promotion_workspace(
+        self,
+        package: ValidatedPackage,
+        candidate: OwnershipPlan,
+        candidate_bytes: bytes,
+        paths: TransactionPaths,
+        staging: UpdateJournal,
+        *,
+        preparing: bool,
+    ) -> None:
+        root = paths.preparing_root if preparing else paths.transaction_root
+        journal_path = paths.preparing_journal if preparing else paths.journal
+        ownership_path = paths.preparing_ownership if preparing else paths.ownership
+        probe_path = (
+            paths.preparing_probe_manifest if preparing else paths.probe_manifest
+        )
+        other_root = paths.transaction_root if preparing else paths.preparing_root
+        expected_paths = self._paths(staging.transaction_id)
+        if paths != expected_paths or paths.install_root != self.install_root:
+            raise PreparedTransactionConflict()
+
+        canonical_install = self._require_plain_directory(self.install_root, None)
+        canonical_updates = self._require_plain_directory(
+            paths.updates_root, canonical_install
+        )
+        canonical_transactions = self._require_plain_directory(
+            paths.transactions_root, canonical_updates
+        )
+        canonical_root = self._require_plain_directory(root, canonical_transactions)
+
+        try:
+            other_root.lstat()
+        except FileNotFoundError:
+            pass
+        except Exception as error:
+            raise PreparedTransactionConflict() from error
+        else:
+            raise PreparedTransactionConflict()
+
+        prepared = (
+            staging
+            if staging.phase is JournalPhase.PREPARED
+            else transition(staging, JournalPhase.PREPARED)
+        )
+        self._require_plain_file(journal_path, canonical_root)
+        self._require_plain_file(ownership_path, canonical_root)
+        self._require_plain_file(probe_path, canonical_root)
+        if read_journal(journal_path) != prepared:
+            raise PreparedTransactionConflict()
+        if (
+            ownership_path.read_bytes() != candidate_bytes
+            or ownership_plan_bytes(candidate) != candidate_bytes
+            or read_ownership_plan(ownership_path) != candidate
+            or ownership_plan_sha256(candidate) != prepared.ownership_sha256
+        ):
+            raise PreparedTransactionConflict()
+        probe_bytes = canonical_json_bytes(update_manifest_to_dict(package.manifest))
+        if probe_path.read_bytes() != probe_bytes:
+            raise PreparedTransactionConflict()
+
+        host_files = (
+            *candidate.host_files,
+            *candidate.seed_files,
+            *candidate.metadata_files,
+        )
+        expected_files = {
+            "journal.json",
+            "ownership.json",
+            "probe/update-manifest.json",
+            *(f"staged/host/{item.path}" for item in host_files),
+            *(f"staged/extension/{item.path}" for item in candidate.extension_files),
+        }
+        expected_directories = {
+            "probe",
+            "staged",
+            "staged/host",
+            "staged/extension",
+        }
+        for relative in expected_files:
+            parts = relative.split("/")
+            expected_directories.update(
+                "/".join(parts[:index]) for index in range(1, len(parts))
+            )
+
+        reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        actual_files: set[str] = set()
+        actual_directories: set[str] = set()
+
+        def visit(directory: Path) -> None:
+            for child in sorted(directory.iterdir(), key=lambda item: item.name):
+                info = child.lstat()
+                attributes = getattr(info, "st_file_attributes", 0)
+                if attributes & reparse:
+                    raise PreparedTransactionConflict()
+                resolved = child.resolve(strict=True)
+                try:
+                    resolved.relative_to(canonical_root)
+                except ValueError as error:
+                    raise PreparedTransactionConflict() from error
+                relative = child.relative_to(root).as_posix()
+                if stat.S_ISDIR(info.st_mode):
+                    actual_directories.add(relative)
+                    visit(child)
+                elif stat.S_ISREG(info.st_mode):
+                    actual_files.add(relative)
+                else:
+                    raise PreparedTransactionConflict()
+
+        visit(root)
+        if (
+            actual_files != expected_files
+            or actual_directories != expected_directories
+        ):
+            raise PreparedTransactionConflict()
+        self._verify_prepared_workspace(
+            package,
+            candidate,
+            candidate_bytes,
+            paths,
+            preparing=preparing,
+        )
+
+    def _require_preparing_promotion_candidate(
+        self,
+        package: ValidatedPackage,
+        candidate: OwnershipPlan,
+        candidate_bytes: bytes,
+        paths: TransactionPaths,
+        staging: UpdateJournal,
+    ) -> None:
+        try:
+            self._require_promotion_workspace(
+                package,
+                candidate,
+                candidate_bytes,
+                paths,
+                staging,
+                preparing=True,
+            )
+        except PreparedTransactionConflict:
+            raise
+        except Exception as error:
+            raise PreparedTransactionConflict() from error
+
+    def _promote_preparing_with_retry(
+        self,
+        package: ValidatedPackage,
+        candidate: OwnershipPlan,
+        candidate_bytes: bytes,
+        paths: TransactionPaths,
+        staging: UpdateJournal,
+    ) -> None:
+        # promotion-checkpoint: initial
+        self._require_preparing_promotion_candidate(
+            package, candidate, candidate_bytes, paths, staging
+        )
+        for attempt in range(len(PROMOTION_RETRY_DELAYS) + 1):
+            try:
+                _replace_path(paths.preparing_root, paths.transaction_root)
+                self._require_promotion_workspace(
+                    package,
+                    candidate,
+                    candidate_bytes,
+                    paths,
+                    staging,
+                    preparing=False,
+                )
+                return
+            except OSError as error:
+                winerror = getattr(error, "winerror", None)
+                if (
+                    not _is_windows
+                    or type(winerror) is not int
+                    or winerror not in PROMOTION_TRANSIENT_WINERRORS
+                    or attempt >= len(PROMOTION_RETRY_DELAYS)
+                ):
+                    raise
+                # promotion-checkpoint: pre-sleep
+                self._require_preparing_promotion_candidate(
+                    package, candidate, candidate_bytes, paths, staging
+                )
+                _sleep(PROMOTION_RETRY_DELAYS[attempt])
+                # promotion-checkpoint: post-sleep
+                self._require_preparing_promotion_candidate(
+                    package, candidate, candidate_bytes, paths, staging
+                )
+
     def _resume_preparation(
         self,
         package: ValidatedPackage,
@@ -506,11 +979,7 @@ class UpdateEngine:
         if not paths.preparing_root.exists():
             self._run_preparation_operation(
                 "workspace:create-preparing",
-                lambda: (
-                    paths.preparing_staged_host.mkdir(parents=True),
-                    paths.preparing_staged_extension.mkdir(parents=True),
-                    paths.preparing_probe_manifest.parent.mkdir(parents=True),
-                ),
+                lambda: self._create_plain_preparing_workspace(paths),
             )
 
         if paths.preparing_journal.exists():
@@ -531,7 +1000,7 @@ class UpdateEngine:
         else:
             self._run_preparation_operation(
                 "workspace:write-staging-journal",
-                lambda: write_journal_atomic(paths.preparing_journal, staging),
+                lambda: self._write_absent_journal(paths, staging),
             )
             self.hooks.after_journal_transition(JournalPhase.STAGING)
             journal = staging
@@ -543,8 +1012,10 @@ class UpdateEngine:
         if probe_state is PathState.ABSENT:
             self._run_preparation_operation(
                 "workspace:write-probe-manifest",
-                lambda: self._write_bytes_replace(
-                    paths.preparing_probe_manifest, probe_bytes
+                lambda: self._write_absent_bytes(
+                    paths.preparing_root,
+                    paths.preparing_probe_manifest,
+                    probe_bytes,
                 ),
             )
 
@@ -557,7 +1028,10 @@ class UpdateEngine:
                 self._run_preparation_operation(
                     label,
                     lambda source=source, target=target: (
-                        target.parent.mkdir(parents=True, exist_ok=True),
+                        self._require_plain_target_parent(
+                            paths.preparing_root, target
+                        ),
+                        self._require_absent_target(target),
                         shutil.copy2(source, target),
                     ),
                 )
@@ -570,16 +1044,16 @@ class UpdateEngine:
         if ownership_state is PathState.ABSENT:
             self._run_preparation_operation(
                 "workspace:write-ownership",
-                lambda: write_ownership_plan_atomic(
-                    paths.preparing_ownership, candidate
-                ),
+                lambda: self._write_absent_ownership(paths, candidate),
             )
 
         if journal.phase is JournalPhase.STAGING:
             prepared = transition(journal, JournalPhase.PREPARED)
             self._run_preparation_operation(
                 "workspace:write-prepared-journal",
-                lambda: write_journal_atomic(paths.preparing_journal, prepared),
+                lambda: self._replace_staging_journal(
+                    paths, journal, prepared
+                ),
             )
             self.hooks.after_journal_transition(JournalPhase.PREPARED)
             journal = prepared
@@ -603,17 +1077,18 @@ class UpdateEngine:
             raise PreparedTransactionConflict()
         self._run_preparation_operation(
             "workspace:promote-preparing",
-            lambda: os.replace(paths.preparing_root, paths.transaction_root),
+            lambda: self._promote_preparing_with_retry(
+                package, candidate, candidate_bytes, paths, staging
+            ),
         )
         self._run_preparation_operation(
             "active:write",
-            lambda: write_active_transaction_atomic(
-                paths.active,
-                ActiveTransaction(
-                    1,
-                    staging.transaction_id,
-                    f"transactions/{staging.transaction_id}/journal.json",
-                ),
+            lambda: self._write_active_after_final_validation(
+                package,
+                candidate,
+                candidate_bytes,
+                paths,
+                staging,
             ),
         )
         return read_journal(paths.journal)
