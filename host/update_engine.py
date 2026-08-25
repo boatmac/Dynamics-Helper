@@ -446,13 +446,26 @@ class UpdateEngine:
             "probe",
         }
         try:
-            for child in paths.preparing_root.rglob("*"):
-                relative = child.relative_to(paths.preparing_root).as_posix()
-                if child.is_symlink() or not child.is_dir():
-                    return False
-                if relative not in allowed_directories:
-                    return False
-        except OSError:
+            reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+            root_info = paths.preparing_root.lstat()
+            root_attributes = getattr(root_info, "st_file_attributes", 0)
+            if not stat.S_ISDIR(root_info.st_mode) or root_attributes & reparse:
+                return False
+            pending = [paths.preparing_root]
+            while pending:
+                directory = pending.pop()
+                for child in directory.iterdir():
+                    info = child.lstat()
+                    attributes = getattr(info, "st_file_attributes", 0)
+                    if not stat.S_ISDIR(info.st_mode) or attributes & reparse:
+                        return False
+                    relative = child.relative_to(
+                        paths.preparing_root
+                    ).as_posix()
+                    if relative not in allowed_directories:
+                        return False
+                    pending.append(child)
+        except (OSError, ValueError):
             return False
         return True
 
