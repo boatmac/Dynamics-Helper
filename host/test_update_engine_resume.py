@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import inspect
 import json
 import os
@@ -1686,6 +1687,63 @@ class OwnershipBoundaryTests(unittest.TestCase):
                 read_active_transaction(paths.active),
                 ActiveTransaction(1, TX, f"transactions/{TX}/journal.json"),
             )
+
+    def test_active_repair_rejects_forged_seed_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = MatrixHarness(Path(temporary), "fresh-seeded")
+            fixture.controller.arm(
+                "after", "workspace:promote-preparing", InjectedCrash
+            )
+            with self.assertRaises(InjectedCrash):
+                fixture.prepare()
+            paths = TransactionPaths.for_install(fixture.install, TX)
+            value = json.loads(paths.journal.read_text(encoding="utf-8"))
+            value["seed_receipt"] = {
+                "path": "config.json",
+                "expected_sha256": hashlib.sha256(
+                    (paths.staged_host / "config.json").read_bytes()
+                ).hexdigest(),
+                "seed_installed": False,
+                "observed_live_sha256": None,
+            }
+            paths.journal.write_bytes(
+                (
+                    json.dumps(
+                        value,
+                        ensure_ascii=True,
+                        allow_nan=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                ).encode("utf-8")
+            )
+            fixture.controller.clear()
+            fixture.rebuild_engine()
+            with self.assertRaises(PreparedTransactionConflict):
+                fixture.prepare()
+            self.assertFalse(paths.active.exists())
+
+    def test_ancestor_read_failure_is_fixed_conflict(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = MatrixHarness(Path(temporary), "installed")
+            paths = TransactionPaths.for_install(fixture.install, TX)
+            paths.updates_root.mkdir()
+            real_lstat = Path.lstat
+            denied = PermissionError("secret ancestor path")
+
+            def lstat(path, *args, **kwargs):
+                if path == paths.updates_root:
+                    raise denied
+                return real_lstat(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "lstat", lstat):
+                with self.assertRaises(PreparedTransactionConflict) as raised:
+                    fixture.prepare()
+            self.assertIs(raised.exception.__cause__, denied)
+            self.assertNotIn("secret ancestor path", str(raised.exception))
+            self.assertFalse(paths.preparing_root.exists())
+            self.assertFalse(paths.active.exists())
 
     def test_existing_update_ancestor_reparse_is_rejected_before_preparing_writes(self):
         for component in ("updates", "transactions"):
