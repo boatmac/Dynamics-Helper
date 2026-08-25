@@ -1672,6 +1672,38 @@ class PreparingPromotionRetryTests(unittest.TestCase):
 
 
 class OwnershipBoundaryTests(unittest.TestCase):
+    def test_preparing_orphan_reparse_child_is_rejected_before_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = MatrixHarness(Path(temporary), "installed")
+            paths = TransactionPaths.for_install(fixture.install, TX)
+            paths.preparing_root.mkdir(parents=True)
+            target = paths.preparing_root / "staged"
+            target.mkdir()
+            real_lstat = Path.lstat
+            reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+            def lstat(path, *args, **kwargs):
+                info = real_lstat(path, *args, **kwargs)
+                if path == target:
+                    return SimpleNamespace(
+                        st_mode=info.st_mode,
+                        st_file_attributes=reparse,
+                    )
+                return info
+
+            blocked = AssertionError("unsafe orphan cleanup attempted")
+            with (
+                mock.patch.object(Path, "lstat", lstat),
+                mock.patch.object(shutil, "rmtree", side_effect=blocked) as remove,
+                self.assertRaises(PreparedTransactionConflict) as raised,
+            ):
+                fixture.prepare()
+            remove.assert_not_called()
+            self.assertIs(type(raised.exception), PreparedTransactionConflict)
+            self.assertIsNone(raised.exception.__cause__)
+            self.assertTrue(paths.preparing_root.exists())
+            self.assertFalse(paths.active.exists())
+
     def test_valid_promoted_workspace_repairs_missing_active(self):
         with tempfile.TemporaryDirectory() as temporary:
             fixture = MatrixHarness(Path(temporary), "fresh-preexisting")
