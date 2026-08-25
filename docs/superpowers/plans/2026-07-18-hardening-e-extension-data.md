@@ -4613,7 +4613,6 @@ async def test_explicit_empty_analyze_root_overrides_config_for_one_request(self
     }
     def load_explicit_empty(*, root_path_override):
         self.assertIsNone(root_path_override)
-        host.root_path = None
         return config
     host._get_session_config = MagicMock(side_effect=load_explicit_empty)
     result = await host.handle_analyze_error({
@@ -4624,7 +4623,7 @@ async def test_explicit_empty_analyze_root_overrides_config_for_one_request(self
     })
     self.assertEqual(result['error'], 'No text provided for analysis.')
     host._get_session_config.assert_called_once_with(root_path_override=None)
-    self.assertIsNone(host.root_path)
+    self.assertEqual(host.root_path, configured)
 
 async def test_request_after_explicit_empty_without_marker_uses_configured_root(self):
     configured = r'C:\MyWorkbench\MyCases'
