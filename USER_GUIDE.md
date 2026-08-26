@@ -275,7 +275,7 @@ Each team's bookmark file at its `url`:
     "version": 1,
     "team": "sales",
     "items": [
-        { "type": "url", "label": "Sales Dashboard", "url": "https://..." }
+        { "type": "link", "label": "Sales Dashboard", "url": "https://..." }
     ]
 }
 ```
@@ -285,6 +285,8 @@ Each team's bookmark file at its `url`:
 **Disabling** the toggle hides team data and stops all team-related network requests, but does not delete the local cache — turning it back on restores your previous selection.
 
 **Personal bookmarks** (drag-and-drop in the **Bookmark Manager** tab) work independently of the team catalog and are not affected by the toggle.
+
+**Built-in defaults:** New browser profiles start with public Dynamics Helper documentation, release, and issue-reporting links. An upgrade does not replace saved personal bookmark state, including an intentionally empty menu. Only missing personal bookmark storage loads the shipped defaults; malformed storage is reported without overwriting it. Clearing browser storage or clicking **Reset** loads the currently shipped public defaults again.
 
 ---
 

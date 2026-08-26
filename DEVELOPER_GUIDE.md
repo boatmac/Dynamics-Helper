@@ -388,6 +388,12 @@ The current fix computes the merged snapshot, updates refs/state, and schedules 
 * Use `import.meta.env.DEV` checks sparingly in source code being tested; jsdom doesn't set MV3 service-worker globals so anything gated on those will throw.
 * The `items.json` fetch warnings in test output are harmless (`unknown scheme` errors from jsdom's fetch implementation). Don't try to silence them in source — they're a jsdom limitation, not a real bug.
 
+### Required Packaged Assets
+
+`extension/items.json` is the tracked public bootstrap menu consumed by both Options and FAB and copied by CRXJS into `extension/dist/items.json`. It must never contain internal URLs, credentials, query strings, or organization-specific content. Personal bookmarks live in `dh_items`; Team Catalog data is fetched separately.
+
+Every file referenced by `extension/manifest.json` must either be tracked or be produced deterministically by a reviewed build step before release tagging. `release_helper.py` currently commits and tags before invoking its own build, so the operator MUST start from a clean worktree and successfully run `npm run build --prefix extension` before invoking the helper. That preflight, including the `extension/items.json`/`extension/dist/items.json` byte-identity check, is the pre-tag gate; the helper's later build is a second check, not the pre-tag gate.
+
 ---
 
 ## Preferences State Management
