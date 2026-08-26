@@ -4,6 +4,25 @@
 
 This file is the durable continuation point for moving Dynamics Helper development to a remote Windows VM. Read it before making changes; do not rely on prior chat context.
 
+## Current Continuation Checkpoint - 2026-08-26
+
+- Current branch: `docs/prompt-scope-cleanup-design`.
+- Plan E evidence head: `a0fcf618e4c0d6e3e7693207df47cf5c7d0982b0`.
+- `origin/master` public-default-menu hardening head:
+  `bfedc9ff1768a675450ae25846dcb9ad2ed14a7d`.
+- Normal two-parent integration commit:
+  `cac76cb95743f3bb1ab810b8030db8a1953d0e7d`; no rebase, force push, or
+  history rewrite was used.
+- Post-merge verification and fresh integration review: PASS. See
+  `.superpowers/sdd/plan-e-post-master-merge-verification.md`.
+- Public source/dist `items.json` SHA-256:
+  `839ef34acce528efff3a64a563070942fc228326730d390aa7d467c3df83ce25`.
+- Task 6/7 historical evidence remains `UNRECOVERABLE; NOT RECONSTRUCTED`.
+- Plan D and final whole-branch/release-readiness review remain pending.
+- Draft PR: `https://github.com/boatmac/Dynamics-Helper/pull/1`.
+- The historical paths and intermediate status below are retained as chronology;
+  this checkpoint supersedes them for current continuation.
+
 ## Repository State
 
 - Repository: `boatmac/Dynamics-Helper`
