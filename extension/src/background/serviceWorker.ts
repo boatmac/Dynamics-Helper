@@ -8,11 +8,52 @@ import { setupContextMenu } from './contextMenu';
 // teamCatalog is imported statically: dynamic import() is disallowed in
 // ServiceWorkerGlobalScope per the HTML spec
 // (https://github.com/w3c/ServiceWorker/issues/1356).
-import { syncTeamBookmarks, clearTeamSelection, fetchManifest } from '../utils/teamCatalog';
-import { handleAnalyzeForward } from './analyzeBridge';
-import type { AnalyzePersistContext } from '../utils/analysisStore';
+import {
+    beginTeamSyncGeneration,
+    clearTeamBookmarksAtGeneration,
+    clearTeamSelectionAtGeneration,
+    clearTeamSelectionIfChanged,
+    currentTeamIdentityMatches,
+    fetchManifest,
+    readTeamManifestState,
+    syncTeamBookmarks,
+    writeTeamManifestForUrl,
+} from '../utils/teamCatalog';
+import {
+    handleTeamCatalogSyncRequest,
+    shouldReportTeamSyncFailure,
+    syncManifestOnly,
+    type TeamCatalogSyncRequest,
+} from './teamManifestSync';
+import {
+    isAnalyzePayload,
+    normalizeNativeHostResponse,
+    summarizeNativeHostMessage,
+    type AnalyzeForwardResponse,
+} from './analyzeBridge';
+import { resetAnalysisState } from '../utils/analysisStore';
+import {
+    guardNonAnalyzeNativeMessage,
+    handleAnalyzeRequest,
+} from './analyzeRequestHandler';
+import { postNativeMessageWire } from './nativeMessageWire';
+import { handleResetExtensionState } from './resetExtensionState';
+import { ownDataProperty } from '../utils/ownData';
+import {
+    handleNativeUpdateError,
+    type NativeUpdateErrorDeliveryDeps,
+} from '../utils/nativeUpdateError';
 
 const NATIVE_HOST_NAME = "com.dynamics.helper.native";
+
+const productionUpdateErrorDeps: NativeUpdateErrorDeliveryDeps = {
+    sendRuntime: event => chrome.runtime.sendMessage(event),
+    queryActiveTabs: () => chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+    }),
+    sendTab: (tabId, event) => chrome.tabs.sendMessage(tabId, event),
+};
 
 // Initialize Context Menu
 setupContextMenu();
@@ -119,7 +160,13 @@ function connectToNativeHost() {
         nativePort = chrome.runtime.connectNative(NATIVE_HOST_NAME);
         
         nativePort.onMessage.addListener((msg) => {
-            console.log("[DH-SW] Received message from host:", msg);
+            const action = ownDataProperty(msg, 'action')
+            if (action.kind === 'value' && action.value === 'update_error') {
+                void handleNativeUpdateError(msg, productionUpdateErrorDeps)
+                return
+            }
+
+            console.log("[DH-SW] Received message from host:", summarizeNativeHostMessage(msg));
             
             // Handle Progress Updates (Streamed)
             if (msg.status === "progress") {
@@ -166,16 +213,6 @@ function connectToNativeHost() {
                 return;
             }
 
-            // Handle Update Error
-            if (msg.action === "update_error") {
-                console.warn("[DH-SW] Update Check Failed:", msg.payload);
-                chrome.runtime.sendMessage({
-                    type: "NATIVE_UPDATE_ERROR",
-                    payload: msg.payload
-                }).catch(() => {});
-                return;
-            }
-
             // Handle Update Not Available
             if (msg.action === "update_not_available") {
                 console.log("[DH-SW] Update Not Available (User is up to date)");
@@ -192,15 +229,12 @@ function connectToNativeHost() {
 
             // Handle Final Responses (Success/Error)
             if (msg.requestId && pendingRequests.has(msg.requestId)) {
-                const { resolve, reject } = pendingRequests.get(msg.requestId)!;
+                const { resolve } = pendingRequests.get(msg.requestId)!;
                 pendingRequests.delete(msg.requestId);
-                
-                if (msg.status === "success") {
-                    resolve({ status: "success", data: msg.data });
-                } else {
-                    // We resolve with error status to let frontend handle it gracefully
-                    resolve({ status: "error", error: msg.error || msg.message });
-                }
+
+                // Resolve errors instead of rejecting so the frontend can surface
+                // Host fallbacks and machine-readable codes gracefully.
+                resolve(normalizeNativeHostResponse(msg));
             }
         });
 
@@ -220,30 +254,34 @@ function connectToNativeHost() {
 }
 
 // Helper to send message via Port
-function sendNativeMessage(message: any): Promise<any> {
+function sendNativeMessage(
+    forwarded: Readonly<Record<string, unknown>>,
+): Promise<unknown> {
     return new Promise((resolve, reject) => {
-        if (!nativePort) {
-            connectToNativeHost();
-        }
-        
-        if (!nativePort) {
-            reject(new Error("Could not establish connection to Native Host"));
+        if (!nativePort) connectToNativeHost()
+        const port = nativePort
+        if (!port) {
+            reject(new Error('Could not establish connection to Native Host'))
             return;
         }
-
-        const requestId = message.requestId || crypto.randomUUID();
-        // Ensure requestId is in the payload for the host to echo back
-        const msgWithId = { ...message, requestId };
-
-        pendingRequests.set(requestId, { resolve, reject });
-        
+        let postAttempted = false
         try {
-            nativePort.postMessage(msgWithId);
-        } catch (e: any) {
-            pendingRequests.delete(requestId);
-            reject(e);
-            // Retry connection next time
-            nativePort = null;
+            postNativeMessageWire(forwarded, {
+                createRequestId: () => crypto.randomUUID(),
+                register: requestId => {
+                    pendingRequests.set(requestId, { resolve, reject })
+                },
+                unregister: requestId => {
+                    pendingRequests.delete(requestId)
+                },
+                postMessage: message => {
+                    postAttempted = true
+                    port.postMessage(message)
+                },
+            })
+        } catch (error) {
+            if (postAttempted) nativePort = null
+            reject(error)
         }
     });
 }
@@ -252,32 +290,28 @@ function sendNativeMessage(message: any): Promise<any> {
 // Listen for messages from Content Script or Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "NATIVE_MSG") {
-        // Extract optional persistence context from the payload. FAB sets
-        // _persist when initiating an analyze_error request so the SW can
-        // mirror the result into chrome.storage.local (see
-        // docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md).
-        // Other actions pass through with ctx=null — no storage writes.
-        const inner = message.payload ?? {};
-        const persistMeta = inner._persist;
-        const isAnalyze = inner.action === 'analyze_error';
-        let ctx: AnalyzePersistContext | null = null;
-        if (isAnalyze && persistMeta && typeof persistMeta === 'object') {
-            ctx = {
-                caseNumber: String(persistMeta.caseNumber || ''),
-                requestId: String(inner.requestId || persistMeta.requestId || ''),
-                successTitle: String(persistMeta.successTitle || 'Analysis Result'),
-                errorTitle: String(persistMeta.errorTitle || 'Analysis Failed'),
-            };
+        const inner = message.payload ?? {}
+        let request: Promise<AnalyzeForwardResponse | unknown>
+        if (isAnalyzePayload(inner)) {
+            request = handleAnalyzeRequest(inner, {
+                acquireAuthorizedTransport: async () => ({
+                    allowed: true,
+                    transport: { send: sendNativeMessage },
+                }),
+            })
+        } else {
+            const guarded = guardNonAnalyzeNativeMessage(inner)
+            request = guarded.ok
+                ? sendNativeMessage(guarded.forwarded)
+                : Promise.resolve(guarded.response)
         }
-        // Strip _persist before forwarding so the native host never sees
-        // extension-internal metadata.
-        const forwarded = { ...inner };
-        delete forwarded._persist;
-
-        handleAnalyzeForward(forwarded, ctx, { send: sendNativeMessage })
-            .then(response => sendResponse(response))
-            .catch(error => sendResponse({ status: "error", error: error.message }));
-        return true; // Keep channel open for async response
+        request
+            .then(sendResponse)
+            .catch(() => sendResponse({
+                status: 'error',
+                error: 'Native Host error',
+            }))
+        return true
     }
     
     if (message.type === "OPEN_OPTIONS") {
@@ -298,92 +332,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // Team Bookmark Catalog: manual sync from Options page
     if (message.type === "SYNC_TEAM_CATALOG") {
-        (async () => {
-            try {
-                const teamId = message.payload?.teamId;
-                const manifestOnly = message.payload?.manifestOnly === true;
-                if (manifestOnly) {
-                    // Manifest-only fetch: refresh dh_team_manifest from the URL stored
-                    // in dh_prefs.teamManifestUrl without touching the user's current
-                    // team selection. Triggered when the user saves a new manifest URL
-                    // so the team dropdown can populate before they pick one.
-                    const prefsData = await new Promise<any>((resolve) => {
-                        chrome.storage.local.get(['dh_prefs', 'dh_team_manifest_etag'], resolve);
-                    });
-                    const manifestUrl = prefsData.dh_prefs?.teamManifestUrl || '';
-                    if (!manifestUrl) {
-                        sendResponse({ status: "error", error: "Manifest URL not configured" });
-                        return;
-                    }
-                    const result = await fetchManifest(manifestUrl, prefsData.dh_team_manifest_etag);
-
-                    // Propagate classified fetch failure so Options can display
-                    // actionable UX (auth-expired / not-found / network etc).
-                    // Prior to this branch, `!result || !result.ok` was silently
-                    // coerced to status:success, hiding SAS-token expiries and
-                    // similar HTTP failures from the user entirely.
-                    if (!result) {
-                        sendResponse({ status: "error", error: "Manifest URL not configured" });
-                        return;
-                    }
-                    if (!result.ok) {
-                        sendResponse({
-                            status: "error",
-                            error: result.failure.message,
-                            errorKind: result.failure.kind,
-                            httpStatus: result.failure.httpStatus,
-                        });
-                        return;
-                    }
-                    if (result.changed) {
-                        await new Promise<void>((resolve) => {
-                            chrome.storage.local.set({
-                                dh_team_manifest: result.manifest,
-                                dh_team_manifest_etag: result.etag,
-                            }, resolve);
-                        });
-                    }
-                    // result.changed === false means 304 (cached manifest still valid).
-                    // The Options page can render the existing dropdown from the
-                    // storage-side cache.
-                    sendResponse({ status: "success", data: { manifestOnly: true, changed: result.changed } });
-                } else if (!teamId) {
-                    await clearTeamSelection();
-                    sendResponse({ status: "success", data: { items: [] } });
-                } else {
-                    const prefsData = await new Promise<any>((resolve) => {
-                        chrome.storage.local.get(['dh_prefs'], resolve);
-                    });
-                    const manifestUrl = prefsData.dh_prefs?.teamManifestUrl || '';
-                    if (!manifestUrl) {
-                        sendResponse({ status: "error", error: "Manifest URL not configured" });
-                    } else {
-                        const result = await syncTeamBookmarks(manifestUrl, teamId);
-                        // Forward classified failure so a caller (currently
-                        // hypothetical — no non-Options code uses this
-                        // response payload) can distinguish silent degradation
-                        // from a real sync. Items always carry the cache
-                        // fallback so UI never sees an empty list on failure.
-                        if (result.failure) {
-                            sendResponse({
-                                status: "error",
-                                error: result.failure.message,
-                                errorKind: result.failure.kind,
-                                httpStatus: result.failure.httpStatus,
-                                failureStage: result.failureStage,
-                                data: { items: result.items, teamId },
-                            });
-                        } else {
-                            sendResponse({ status: "success", data: { items: result.items, teamId } });
-                        }
-                    }
-                }
-            } catch (e: any) {
-                console.error('[DH-SW] Team catalog sync error:', e);
-                sendResponse({ status: "error", error: e.message });
-            }
-        })();
+        const request = message.payload as TeamCatalogSyncRequest;
+        if (!request?.identity || !Number.isInteger(request.requestGeneration)) {
+            sendResponse({ status: "error", error: "Invalid team catalog request" });
+            return false;
+        }
+        handleTeamCatalogSyncRequest(request, {
+            beginGeneration: beginTeamSyncGeneration,
+            identityIsCurrent: currentTeamIdentityMatches,
+            clearAll: (identity, generation) => clearTeamBookmarksAtGeneration(generation, identity),
+            clearSelection: (identity, generation) => clearTeamSelectionAtGeneration(generation, identity),
+            clearSelectionIfChanged: clearTeamSelectionIfChanged,
+            syncManifest: (captured, generation) => syncManifestOnly(captured, {
+                readInitialState: () => readTeamManifestState(captured.identity, generation),
+                identityIsCurrent: () => currentTeamIdentityMatches(captured.identity, generation),
+                fetchManifest,
+                writeManifest: (manifest, etag) => writeTeamManifestForUrl(
+                    captured.identity,
+                    manifest,
+                    etag,
+                    generation,
+                ),
+            }),
+            syncSelected: (identity, generation) =>
+                syncTeamBookmarks(identity, generation),
+        })
+            .then(sendResponse)
+            .catch(() => {
+                console.error('[DH-SW] Team catalog sync failed unexpectedly.');
+                sendResponse({ status: "error", error: "Team catalog sync failed" });
+            });
         return true; // Keep channel open for async response
+    }
+
+    if (message.type === "CLEAR_TEAM_CATALOG") {
+        sendResponse({ status: "error", error: "Captured team identity required" });
+        return false;
+    }
+
+    if (message.type === "RESET_EXTENSION_STATE") {
+        handleResetExtensionState(message.payload, {
+            beginGeneration: beginTeamSyncGeneration,
+            identityIsCurrent: currentTeamIdentityMatches,
+            clearTeamState: (identity, generation) =>
+                clearTeamBookmarksAtGeneration(generation, identity),
+            clearAnalysisState: resetAnalysisState,
+        }).then(sendResponse);
+        return true;
     }
 });
 
@@ -391,6 +386,7 @@ console.log("[DH] Background Service Worker Loaded");
 
 // --- Team Bookmark Catalog: Background Sync ---
 async function syncTeamCatalogOnStartup() {
+    const startupGeneration = beginTeamSyncGeneration();
     try {
         const data = await new Promise<any>((resolve) => {
             chrome.storage.local.get(['dh_prefs'], resolve);
@@ -408,36 +404,65 @@ async function syncTeamCatalogOnStartup() {
             // Toggle on but URL not yet configured - no-op.
             return;
         }
+        const startupIdentity = {
+            enabled: true,
+            manifestUrl,
+            teamId: teamId || '',
+        };
+        if (!await currentTeamIdentityMatches(startupIdentity, startupGeneration)) return;
         if (!teamId) {
-            // No team selected - still refresh manifest so the dropdown gets
-            // populated next time the user opens Options.
-            const cached = await new Promise<any>((resolve) => {
-                chrome.storage.local.get(['dh_team_manifest_etag'], resolve);
+            // Use the same post-fetch preference gate as the Options-triggered
+            // path so Reset cannot resurrect a stale manifest.
+            await syncManifestOnly({
+                identity: startupIdentity,
+                requestGeneration: 0,
+                manifestOnly: true,
+                storageGeneration: startupGeneration,
+            }, {
+                readInitialState: () => readTeamManifestState(startupIdentity, startupGeneration),
+                identityIsCurrent: () => currentTeamIdentityMatches(startupIdentity, startupGeneration),
+                fetchManifest,
+                writeManifest: (nextManifest, etag) =>
+                    writeTeamManifestForUrl(
+                        startupIdentity,
+                        nextManifest,
+                        etag,
+                        startupGeneration,
+                    ),
             });
-            const result = await fetchManifest(manifestUrl, cached.dh_team_manifest_etag);
-            // Startup-hook manifest refresh — degrade silently on failure since
-            // there is no UI to notify. Errors already logged in fetchManifest.
-            if (result && result.ok && result.changed) {
-                await new Promise<void>((resolve) => {
-                    chrome.storage.local.set({
-                        dh_team_manifest: result.manifest,
-                        dh_team_manifest_etag: result.etag,
-                    }, resolve);
-                });
-            }
             return;
         }
 
-        const result = await syncTeamBookmarks(manifestUrl, teamId);
+        const result = await syncTeamBookmarks(startupIdentity, startupGeneration);
         // Startup hook has no UI to notify — log the outcome including any
         // classified failure. Cached items still get returned so the popup
         // has something to render.
-        if (result.failure) {
-            console.warn(`[DH-SW] Startup team sync failed (${result.failureStage}: ${result.failure.kind}): ${result.failure.message}`);
+        if (result.status === 'stale' || result.status === 'skipped') return;
+        const current = await chrome.storage.local.get('dh_prefs');
+        if (shouldReportTeamSyncFailure(result, current.dh_prefs || {})) {
+            const failure = result.failure!;
+            console.warn('[DH-SW] Startup team sync failed', {
+                stage: result.failureStage,
+                kind: failure.kind,
+                ...(failure.httpStatus === undefined
+                    ? {}
+                    : { httpStatus: failure.httpStatus }),
+            });
+            return;
         }
-        console.log(`[DH-SW] Team catalog synced: ${result.items.length} items for team '${teamId}'`);
-    } catch (e) {
-        console.warn('[DH-SW] Team catalog sync failed:', e);
+        const currentPrefs = (current.dh_prefs || {}) as {
+            teamCatalogEnabled?: boolean;
+            teamManifestUrl?: string;
+            team?: string;
+        };
+        if (
+            currentPrefs.teamCatalogEnabled !== result.identity.enabled
+            || currentPrefs.teamManifestUrl !== result.identity.manifestUrl
+            || currentPrefs.team !== result.identity.teamId
+        ) return;
+        console.log(`[DH-SW] Team catalog sync completed with ${result.items.length} items.`);
+    } catch {
+        console.warn('[DH-SW] Team catalog sync failed unexpectedly.');
     }
 }
 

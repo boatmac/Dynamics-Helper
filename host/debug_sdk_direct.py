@@ -32,7 +32,7 @@ async def main():
         client = CopilotClient(options)
 
         logging.info("Creating session...")
-        session = await client.create_session()
+        session = await client.create_session(skip_custom_instructions=True)
         logging.info("Session created.")
 
         scraped_title = "Case #12345: Solution Import Failed"

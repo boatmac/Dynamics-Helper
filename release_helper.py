@@ -5,18 +5,49 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import uuid
+from pathlib import Path
 
 # Configuration
-# Run from root of repo
-ROOT_DIR = os.getcwd()
-EXT_DIR = os.path.join(ROOT_DIR, "extension")
-HOST_DIR = os.path.join(ROOT_DIR, "host")
-PACKAGE_JSON = os.path.join(EXT_DIR, "package.json")
-MANIFEST_JSON = os.path.join(EXT_DIR, "manifest.json")
-HOST_FILE = os.path.join(HOST_DIR, "dh_native_host.py")
-EXT_DIST_DIR = os.path.join(EXT_DIR, "dist")
-INSTALL_SCRIPT = os.path.join(ROOT_DIR, "installer_core.ps1")
-INSTALL_WRAPPER = os.path.join(ROOT_DIR, "install.bat")
+ROOT_DIR = Path(__file__).resolve().parent
+EXT_DIR = ROOT_DIR / "extension"
+HOST_DIR = ROOT_DIR / "host"
+PACKAGE_JSON = EXT_DIR / "package.json"
+MANIFEST_JSON = EXT_DIR / "manifest.json"
+HOST_FILE = HOST_DIR / "product_info.py"
+EXT_DIST_DIR = EXT_DIR / "dist"
+INSTALL_SCRIPT = ROOT_DIR / "installer_core.ps1"
+INSTALL_WRAPPER = ROOT_DIR / "install.bat"
+VENV_PYTHON = (
+    ROOT_DIR / "host" / "venv" / "Scripts" / "python.exe"
+).resolve()
+PYINSTALLER_VERSION = "6.18.0"
+PYINSTALLER_HIDDEN_IMPORTS = (
+    "early_cli",
+    "install_integrity",
+    "native_messaging",
+    "native_registration",
+    "package_archive",
+    "package_manifest",
+    "product_info",
+    "update_engine",
+    "update_entrypoint",
+    "update_journal",
+    "update_mutex",
+    "update_ownership",
+    "update_platform",
+    "update_recovery",
+    "update_status_host",
+)
+
+_HOST_IMPORT_PATH = HOST_DIR.resolve()
+sys.path[:] = [
+    entry
+    for entry in sys.path
+    if Path(entry or os.curdir).resolve() != _HOST_IMPORT_PATH
+]
+sys.path.insert(0, str(_HOST_IMPORT_PATH))
 
 
 def update_json_version(file_path, new_version):
@@ -134,113 +165,122 @@ def build_extension():
         sys.exit(1)
 
 
+def pyinstaller_build_command() -> list[str]:
+    command = [
+        str(VENV_PYTHON),
+        "-m",
+        "PyInstaller",
+        "--onedir",
+        "--clean",
+        "-y",
+        "--name",
+        "dh_native_host",
+        "--paths",
+        str(HOST_DIR.resolve()),
+    ]
+    for module in PYINSTALLER_HIDDEN_IMPORTS:
+        command.extend(("--hidden-import", module))
+    command.append(str((HOST_DIR / "dh_native_host.py").resolve()))
+    return command
+
+
 def build_host():
     print("\n--- Building Native Host ---")
-    # CRITICAL: must use the venv's pyinstaller, NOT the system one. The venv
-    # pins github-copilot-sdk to the supported version (host/requirements.txt);
-    # the system Python may have a different SDK version installed and will
-    # silently bundle the wrong one, causing ImportError at runtime in user
-    # installations. See docs/sdk-upgrade-2026-05-0.3.0.md § 8.1.
-    venv_pyinstaller = os.path.join(
-        ROOT_DIR, "host", "venv", "Scripts", "pyinstaller.exe"
-    )
-    if not os.path.exists(venv_pyinstaller):
+    if not VENV_PYTHON.is_file():
         print(
-            f"ERROR: venv pyinstaller not found at {venv_pyinstaller}\n"
-            "Run `& host/venv/Scripts/python.exe -m pip install pyinstaller` "
-            "to provision it. Using the system-PATH pyinstaller is unsafe "
-            "because it binds to a Python interpreter with possibly the wrong "
-            "SDK version (see docs/sdk-upgrade-2026-05-0.3.0.md § 8.1)."
+            "ERROR: release virtual-environment Python is unavailable."
         )
         sys.exit(1)
 
     try:
-        # Sanity-check by asking for --version. argv-list form (no shell=True)
-        # avoids quoting issues with the path containing spaces.
-        subprocess.run(
-            [venv_pyinstaller, "--version"],
+        version = subprocess.run(
+            [str(VENV_PYTHON), "-m", "PyInstaller", "--version"],
             check=True,
-            stdout=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
         )
-
-        # Build command: pyinstaller --onedir (avoids WDAC temp extraction blocks)
-        # Output goes to dist/dh_native_host/ folder with exe + DLLs alongside
-        cmd = [
-            venv_pyinstaller,
-            "--onedir",
-            "--clean",
-            "-y",
-            "--name", "dh_native_host",
-            os.path.join("host", "dh_native_host.py"),
-        ]
+        if version.stdout.strip() != PYINSTALLER_VERSION:
+            print("ERROR: required PyInstaller 6.18.0 is unavailable.")
+            sys.exit(1)
+        cmd = pyinstaller_build_command()
         print(f"Executing: {' '.join(cmd)}")
         subprocess.run(cmd, cwd=ROOT_DIR, check=True)
         print("Host build successful.")
-    except subprocess.CalledProcessError as e:
-        print(f"Host build failed: {e}")
+    except subprocess.CalledProcessError:
+        print("ERROR: required PyInstaller 6.18.0 is unavailable.")
         sys.exit(1)
 
 
-def create_zip(version):
+def stage_release(source_root: Path, stage_root: Path, version: str) -> Path:
+    from package_archive import validate_staged_package
+    from package_manifest import (
+        _require_regular_file,
+        _walk_regular_relative_paths,
+        generate_release_documents,
+        write_release_documents,
+    )
+
+    source_root = source_root.resolve(strict=True)
+    required = (
+        source_root / "extension" / "dist",
+        source_root / "dist" / "dh_native_host",
+        source_root / "host" / "config.json",
+        source_root / "host" / "system_prompt.md",
+        source_root / "host" / "register.py",
+        source_root / "installer_core.ps1",
+        source_root / "install.bat",
+    )
+    for path in required:
+        if not path.exists():
+            raise FileNotFoundError(path)
+    _walk_regular_relative_paths(required[0])
+    _walk_regular_relative_paths(required[1])
+    for path in required[2:]:
+        _require_regular_file(path)
+    if stage_root.exists():
+        raise FileExistsError(stage_root)
+    temporary = Path(tempfile.mkdtemp(prefix=".stg-", dir=stage_root.parent))
+    try:
+        shutil.copytree(required[0], temporary / "extension")
+        shutil.copytree(required[1], temporary / "host")
+        for source in required[2:5]:
+            shutil.copy2(source, temporary / "host" / source.name)
+        for source in required[5:]:
+            shutil.copy2(source, temporary / source.name)
+        documents = generate_release_documents(temporary, version)
+        write_release_documents(temporary, documents)
+        validate_staged_package(temporary, expected_version=version)
+        os.replace(temporary, stage_root)
+        return stage_root
+    except Exception:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+
+
+def create_zip(
+    version: str,
+    *,
+    source_root: Path | None = None,
+    output_dir: Path | None = None,
+):
     print("\n--- Creating Release Zip ---")
-    zip_name = f"DynamicsHelper_v{version}"
-    output_dir = os.path.join(ROOT_DIR, "releases")
+    from package_archive import write_deterministic_archive
 
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    # Temporary staging directory for zip content
-    stage_dir = os.path.join(output_dir, "temp_stage")
-    if os.path.exists(stage_dir):
-        shutil.rmtree(stage_dir)
-    os.makedirs(stage_dir)
-
-    # 1. Copy Extension (dist -> extension)
-    print("Copying Extension...")
-    shutil.copytree(EXT_DIST_DIR, os.path.join(stage_dir, "extension"))
-
-    # 2. Copy Host (dist/dh_native_host/ folder contents -> host/)
-    print("Copying Host...")
-    host_stage_dir = os.path.join(stage_dir, "host")
-    os.makedirs(host_stage_dir)
-
-    # PyInstaller --onedir output is in dist/dh_native_host/ (a folder with exe + DLLs)
-    host_onedir_src = os.path.join(ROOT_DIR, "dist", "dh_native_host")
-    if not os.path.isdir(host_onedir_src):
-        print(f"Error: Host build folder not found at {host_onedir_src}")
-        sys.exit(1)
-
-    # Copy all files from the --onedir output (exe + DLLs + bundled modules)
-    for item in os.listdir(host_onedir_src):
-        s = os.path.join(host_onedir_src, item)
-        d = os.path.join(host_stage_dir, item)
-        if os.path.isdir(s):
-            shutil.copytree(s, d)
-        else:
-            shutil.copy2(s, d)
-
-    # Copy other host files (config.json, system_prompt.md, register.py)
-    # They are in host/ source folder
-    shutil.copy2(os.path.join(HOST_DIR, "config.json"), host_stage_dir)
-    shutil.copy2(os.path.join(HOST_DIR, "system_prompt.md"), host_stage_dir)
-    shutil.copy2(os.path.join(HOST_DIR, "register.py"), host_stage_dir)
-
-    # 3. Copy Installer Script
-    print("Copying Installer...")
-    shutil.copy2(INSTALL_SCRIPT, stage_dir)
-    shutil.copy2(INSTALL_WRAPPER, stage_dir)
-
-    # 4. Zip it up
-    zip_file_base = os.path.join(output_dir, zip_name)
-    print(f"Zipping to {zip_file_base}.zip...")
-    shutil.make_archive(zip_file_base, "zip", stage_dir)
-
-    # Cleanup
-    shutil.rmtree(stage_dir)
-
-    zip_file_path = f"{zip_file_base}.zip"
-    print(f"Zip created: {zip_file_path}")
-    return zip_file_path
+    source = (source_root or ROOT_DIR).resolve(strict=True)
+    output = (output_dir or source / "releases").resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    archive = output / f"DynamicsHelper_v{version}.zip"
+    stage = output / f".pkg-{uuid.uuid4().hex[:8]}"
+    stage_owned = False
+    try:
+        stage_release(source, stage, version)
+        stage_owned = True
+        write_deterministic_archive(stage, archive)
+        print(f"Zip created: {archive}")
+        return str(archive)
+    finally:
+        if stage_owned:
+            shutil.rmtree(stage, ignore_errors=True)
 
 
 def publish_to_github(version, zip_path, prerelease=False, notes_file=None):

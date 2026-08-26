@@ -13,6 +13,7 @@ Covers:
 
 import inspect
 import unittest
+from unittest.mock import AsyncMock, MagicMock
 
 from host.dh_native_host import NativeHost
 import host.dh_native_host as dhm
@@ -59,6 +60,42 @@ class TestClassifyListModelsError(unittest.TestCase):
             NativeHost._classify_list_models_error(Exception("weird nonspecific error")),
             "unknown",
         )
+
+
+class TestListModelsSecrecy(unittest.IsolatedAsyncioTestCase):
+    async def test_sdk_exception_text_is_classified_but_never_logged_or_returned(self):
+        marker = "LIST-MODELS-SECRET-MARKER /private/prompt"
+        host = NativeHost.__new__(NativeHost)
+        host.client = MagicMock()
+        host.client.list_models = AsyncMock(
+            side_effect=RuntimeError(f"authentication failed {marker}")
+        )
+
+        with self.assertLogs("dh", level="WARNING") as captured:
+            result = await host.handle_list_models()
+
+        self.assertEqual(result["errorKind"], "auth")
+        observed = str(result) + "\n".join(captured.output)
+        self.assertNotIn(marker, observed)
+        self.assertEqual(result["error"], "list Copilot models failed (RuntimeError).")
+
+
+class TestOuterSdkErrorSecrecy(unittest.IsolatedAsyncioTestCase):
+    async def test_process_message_outer_exception_never_exposes_marker(self):
+        marker = "OUTER-PROCESS-SECRET-MARKER /private/prompt"
+        host = NativeHost.__new__(NativeHost)
+        host.current_request_id = None
+        host.send_progress = MagicMock()
+        host.send_message = MagicMock()
+        host.handle_list_models = AsyncMock(side_effect=RuntimeError(marker))
+
+        with self.assertLogs("dh", level="ERROR") as captured:
+            await host.process_message({"action": "list_models", "requestId": "r1"})
+
+        response = host.send_message.call_args.args[0]
+        observed = str(response) + "\n".join(captured.output)
+        self.assertNotIn(marker, observed)
+        self.assertEqual(response["error"], "internal_error")
 
 
 class TestModelConfigContract(unittest.TestCase):

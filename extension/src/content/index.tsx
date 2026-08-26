@@ -3,11 +3,15 @@ import { createRoot } from 'react-dom/client';
 import FAB from '../components/FAB';
 import { startClipboardListener, setupSapTextAreaWatcher } from '../utils/legacyFeatures';
 import { LEGACY_CSS } from '../components/LegacyStyles';
+import { forwardNativeUpdateErrorToWindow } from './updateErrorBridge';
 
 console.log("[DH] Content Script Loaded");
 
 // Listen for broadcasted Native Progress updates from Background
 chrome.runtime.onMessage.addListener((msg) => {
+    if (forwardNativeUpdateErrorToWindow(msg)) {
+        return;
+    }
     if (msg.type === "NATIVE_PROGRESS") {
         // Dispatch a custom DOM event so the React component (FAB) can listen to it
         // We use window because the React app is in Shadow DOM, but the script runs in the main context (mostly)

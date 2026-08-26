@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { mergeMenus, MenuItem } from './MenuLogic';
+import {
+    mergeMenus,
+    MenuItem,
+    teamCacheIsCurrent,
+    type BookmarkLoadIssue,
+} from './MenuLogic';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { 
@@ -38,6 +43,90 @@ import { Preferences, DEFAULT_PREFS, usePrefs } from '../utils/prefs';
 import MarkdownPreview from './MarkdownPreview';
 import { trackEvent } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
+import { localizePromptSourceError } from '../utils/promptSourceErrors';
+import { safeErrorText } from '../utils/safeErrorText';
+import { ownDataProperty } from '../utils/ownData';
+import {
+    collapseBookmarkFolders,
+    loadBookmarkItems,
+    parseBookmarkDocument,
+    parseOwnBookmarkItems,
+    readDefaultItems,
+    writeStoredItems,
+} from '../utils/bookmarkItems';
+export { collapseBookmarkFolders } from '../utils/bookmarkItems';
+import {
+    acknowledgePromptRevision,
+    acknowledgeInstructionRevision,
+    classifyConfigUpdateResponse,
+    createConfigUpdateIntent,
+    shouldIncludeUserPrompt,
+    shouldIncludeUserInstructions,
+    type ConfigUpdateIntent,
+    type ConfigUpdateIssue,
+    type InstructionUpdateToken,
+    type PromptUpdateToken,
+} from '../utils/configUpdateResult';
+
+type PromptSourceIssue = {
+    errorCode?: string;
+    fallback: string;
+};
+
+type TeamMirrorIdentity = Readonly<{
+    enabled: boolean;
+    manifestUrl: string;
+    teamId: string;
+}>;
+
+type ResetPhase =
+    | 'host-pending'
+    | 'host-committed'
+    | 'sw-pending'
+    | 'local-cleanup-pending'
+    | 'complete';
+
+type ResetRetryAction = 'sw' | 'local-cleanup' | 'team-cleanup' | null;
+
+type ResetTransaction = Readonly<{
+    token: number;
+    identity: TeamMirrorIdentity;
+    requestGeneration: number;
+    bookmarkGeneration: number;
+    phase: ResetPhase;
+    retryAction: ResetRetryAction;
+}>;
+
+type ResetCleanupAttempt = Readonly<{
+    id: number;
+    token: number;
+}>;
+
+type BookmarkWriteIntent = Readonly<{
+    id: number;
+    ownerGeneration: number;
+    items: MenuItem[];
+}>;
+
+type PrefsMirrorAction = Readonly<{
+    id: number;
+    kind: 'team-sync' | 'team-clear' | 'manifest-fetch' | 'reset';
+    identity: TeamMirrorIdentity;
+    resetToken?: number;
+    canRun?: () => boolean;
+    run: () => void;
+}>;
+
+type PrefsMirrorIntent = {
+    generation: number;
+    prefs: Readonly<Preferences>;
+    actions: readonly PrefsMirrorAction[];
+    onLatestCommit?: () => void;
+};
+
+type PendingHydrationMirror = PrefsMirrorIntent & {
+    userGenerationAtRequest: number;
+};
 
 // Helper
 function cn(...inputs: (string | undefined | null | false)[]) {
@@ -49,47 +138,8 @@ function cn(...inputs: (string | undefined | null | false)[]) {
 // initial mount load AND the Reset handler so default folders never appear
 // in a fully-expanded state. Previously inlined inside the mount useEffect,
 // which caused Reset to skip collapsing — see commit log.
-export function collapseFolders(list: MenuItem[]): MenuItem[] {
-    return list.map(item => {
-        if (item.type === 'folder') {
-            return {
-                ...item,
-                collapsed: item.collapsed ?? true,
-                children: item.children ? collapseFolders(item.children) : []
-            };
-        }
-        return item;
-    });
-}
-
-async function loadItems(): Promise<MenuItem[]> {
-    // 1. Try local storage
-    try {
-        if (chrome?.storage?.local) {
-            const obj = await new Promise<{ dh_items?: MenuItem[] }>((resolve) => {
-                chrome.storage.local.get("dh_items", (items) => resolve(items as { dh_items?: MenuItem[] }));
-            });
-            if (Array.isArray(obj.dh_items) && obj.dh_items.length > 0) return obj.dh_items;
-        }
-    } catch (_) { }
-
-    // 2. Fallback to items.json (packaged)
-    try {
-        const url = chrome.runtime.getURL("items.json");
-        const res = await fetch(url);
-        if (res.ok) {
-            const text = await res.text();
-            if (text.trim().startsWith("<")) {
-                throw new Error("Received HTML instead of JSON");
-            }
-            const data = JSON.parse(text);
-            return Array.isArray(data) ? data : (data.items || []);
-        }
-    } catch (e) {
-        console.warn("[DH] Failed to load items.json", e);
-    }
-    return [];
-}
+export const collapseFolders = (items: MenuItem[]) =>
+    collapseBookmarkFolders(items) ?? [];
 
 const ItemEditor: React.FC<{
     item: MenuItem;
@@ -187,7 +237,7 @@ interface DraggableItemProps {
     path: number[];
     moveItem: (dragPath: number[], hoverPath: number[], placement: 'before' | 'after' | 'inside') => void;
     renderList: (list: MenuItem[], pathPrefix: number[], labelPathPrefix?: string[]) => React.ReactNode;
-    setItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
+    mutateItems: React.Dispatch<React.SetStateAction<MenuItem[]>>;
     setEditingItemPath: React.Dispatch<React.SetStateAction<number[] | null>>;
     editingItemPath: number[] | null;
     updateItemAt: (path: number[], newItem: MenuItem, list: MenuItem[]) => MenuItem[];
@@ -212,7 +262,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     path, 
     moveItem, 
     renderList, 
-    setItems, 
+    mutateItems,
     setEditingItemPath, 
     editingItemPath, 
     updateItemAt, 
@@ -233,8 +283,8 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
     const isTeamItem = item.source === 'team';
     // Team folders ignore item.collapsed (next SW sync would wipe a write anyway)
     // and read from the ephemeral teamCollapsedLabels Set. Personal folders keep
-    // using item.collapsed which persists into dh_items via the setItems
-    // useEffect (instant persistence; no Save button as of Plan A).
+    // using item.collapsed which mutatePersonalItems persists into dh_items
+    // immediately (no Save button as of Plan A).
     const teamCollapseKey = isTeamItem && item.type === 'folder'
         ? currentTeamId + '\0' + [...labelPath, item.label].join('\0')
         : '';
@@ -368,7 +418,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                 <ItemEditor 
                     item={item} 
                     onSave={(newItem) => {
-                        setItems(prev => updateItemAt(currentPath, newItem, prev));
+                        mutateItems(prev => updateItemAt(currentPath, newItem, prev));
                         setEditingItemPath(null);
                     }}
                     onCancel={() => setEditingItemPath(null)}
@@ -392,7 +442,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                 toggleTeamCollapsed(key);
                             } else {
                                 const newItem = { ...item, collapsed: !item.collapsed };
-                                setItems(prev => updateItemAt(currentPath, newItem, prev));
+                                mutateItems(prev => updateItemAt(currentPath, newItem, prev));
                             }
                             setSelectedPath(isSelected ? null : currentPath);
                         } else {
@@ -423,7 +473,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                         onClick={(e) => {
                                              e.stopPropagation();
                                              const newItem: MenuItem = { type: 'link', label: t('newLinkLabel'), url: 'https://' };
-                                             setItems(prev => addItemAt(currentPath, newItem, prev));
+                                             mutateItems(prev => addItemAt(currentPath, newItem, prev));
                                         }}
                                         className="p-1.5 text-slate-500 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors" title={t('addChild')}
                                     >
@@ -443,7 +493,7 @@ const DraggableItem: React.FC<DraggableItemProps> = ({
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         if (confirm(t('deleteItemConfirm'))) {
-                                            setItems(prev => deleteItemAt(currentPath, prev));
+                                            mutateItems(prev => deleteItemAt(currentPath, prev));
                                         }
                                     }}
                                     className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title={t('deleteTooltip')}
@@ -503,25 +553,104 @@ const OptionsInner: React.FC = () => {
     // State
     const { t } = useTranslation();
     const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
-    const [items, setItems] = useState<MenuItem[]>([]);
-    // Plan A: bookmark editor mutations (add / edit / delete / drag / toggle
-    // collapse) persist instantly via this effect. Guard prevents the initial
-    // mount writing an empty array over the storage's real data before the
-    // load completes.
-    const itemsLoadedRef = useRef(false);
-    useEffect(() => {
-        if (!itemsLoadedRef.current) return;
-        chrome.storage.local.set({ dh_items: items });
-    }, [items]);
+    const hasRootPath = Boolean(prefs.rootPath?.trim());
+    const effectiveRepositoryOnly = hasRootPath && prefs.useWorkspaceOnly !== false;
+    const [items, setItemsState] = useState<MenuItem[]>([]);
+    const itemsRef = useRef<MenuItem[]>([]);
+    const bookmarkGenerationRef = useRef(0);
+    const bookmarkStorageIntentRef = useRef(0);
+    const bookmarkStorageQueueRef = useRef<Promise<void>>(Promise.resolve());
+    const latestBookmarkStorageIntentRef = useRef<BookmarkWriteIntent | null>(null);
+    const [bookmarkPersistenceIssue, setBookmarkPersistenceIssue] = useState(false);
+    const [bookmarkLoadIssue, setBookmarkLoadIssue] = useState<BookmarkLoadIssue>(null);
+    const bookmarkPersistenceIssueRef = useRef(false);
+
+    const setBookmarkPersistenceFailed = (failed: boolean) => {
+        if (bookmarkPersistenceIssueRef.current === failed) return;
+        bookmarkPersistenceIssueRef.current = failed;
+        setBookmarkPersistenceIssue(failed);
+    };
+
+    const applyItemsSnapshot = (nextItems: MenuItem[]) => {
+        itemsRef.current = nextItems;
+        setItemsState(nextItems);
+    };
+
+    const queueBookmarkStorage = (
+        items: MenuItem[],
+        ownerGeneration = bookmarkGenerationRef.current,
+    ): Promise<'committed' | 'stale'> => {
+        const intent: BookmarkWriteIntent = Object.freeze({
+            id: ++bookmarkStorageIntentRef.current,
+            ownerGeneration,
+            items: structuredClone(items),
+        });
+        latestBookmarkStorageIntentRef.current = intent;
+        const run = async (): Promise<'committed' | 'stale'> => {
+            if (bookmarkGenerationRef.current !== intent.ownerGeneration) {
+                return 'stale';
+            }
+            return writeStoredItems(
+                intent.items,
+                () => bookmarkGenerationRef.current === intent.ownerGeneration
+                    && latestBookmarkStorageIntentRef.current !== null
+                    && latestBookmarkStorageIntentRef.current.id === intent.id,
+            );
+        };
+        const queued = bookmarkStorageQueueRef.current.then(run, run);
+        bookmarkStorageQueueRef.current = queued.then(() => undefined, () => undefined);
+        return queued.then(
+            result => {
+                if (latestBookmarkStorageIntentRef.current?.id === intent.id) {
+                    latestBookmarkStorageIntentRef.current = null;
+                    setBookmarkPersistenceFailed(false);
+                }
+                return result;
+            },
+            error => {
+                // Keep a rejected current snapshot available for retry. An
+                // older failure cannot replace a newer intent or its warning.
+                if (latestBookmarkStorageIntentRef.current?.id === intent.id) {
+                    setBookmarkPersistenceFailed(true);
+                }
+                throw error;
+            },
+        );
+    };
+
+    // The only entry point for personal bookmark edits and Reset intent.
+    const mutatePersonalItems = (
+        update?: React.SetStateAction<MenuItem[]>,
+    ): number => {
+        const generation = ++bookmarkGenerationRef.current;
+        onBookmarkGenerationAdvanced();
+        if (update === undefined) return generation;
+        const nextItems = typeof update === 'function'
+            ? update(itemsRef.current)
+            : update;
+        applyItemsSnapshot(nextItems);
+        void queueBookmarkStorage(nextItems, generation).then(
+            result => {
+                if (result === 'committed') setBookmarkLoadIssue(null);
+            },
+            () => undefined,
+        );
+        return generation;
+    };
     type StatusMessage = { message: string; type: 'success' | 'error' } | null;
     const [status, setStatus] = useState<StatusMessage>(null);
     const statusTimerRef = useRef<number | null>(null);
-    // Track the manifest URL of the last successful fetch. When persistPrefs
-    // sees a different teamManifestUrl come through, it triggers a fresh
-    // manifest fetch. Sentinel '__unset__' means "no load/save has happened
-    // yet" so the very first storage hydration (which writes prefs back
-    // unchanged) does not spuriously count as a URL change.
-    const lastFetchedManifestUrlRef = useRef<string>('__unset__');
+    // Successful and in-flight manifest identities are intentionally separate.
+    // A failed/stale/skipped request must not suppress a later blur retry.
+    const lastSuccessfulManifestUrlRef = useRef<string>('');
+    const manifestFetchTokenRef = useRef(0);
+    const manifestFetchInFlightRef = useRef<null | Readonly<{
+        token: number;
+        manifestUrl: string;
+    }>>(null);
+    const teamRefreshGenerationRef = useRef(0);
+    const teamUiLoadGenerationRef = useRef(0);
+    const teamUiRequestedIdentityRef = useRef<TeamMirrorIdentity | null>(null);
 
     // Hydration guard: prefs state is fully populated only AFTER the host
     // get_config response merges its fields into state (see mount useEffect
@@ -544,12 +673,45 @@ const OptionsInner: React.FC = () => {
     //   3. host get_config response → merged into state → ref = true
     //   4. Any subsequent user-triggered persistPrefs() proceeds normally
     //
-    // If hydration fails (host down, error response, etc.) the ref stays
-    // false and persistPrefs is no-op'd. Local state still updates so the
-    // UI is responsive, but nothing is written to disk until hydration
-    // succeeds on a later session. This is the right trade-off: writing
-    // unhydrated state is the failure mode we are trying to prevent.
+    // Failure branches mark the local mirror hydrated so Options remains
+    // usable, then schedule any missed Host update through the same catch-up
+    // effect as a successful response.
     const prefsHydratedRef = useRef(false);
+
+    const [promptHealthIssue, setPromptHealthIssue] = useState<PromptSourceIssue | null>(null);
+    const [configUpdateIssue, setConfigUpdateIssue] = useState<ConfigUpdateIssue | null>(null);
+    const [prefsMirrorIssue, setPrefsMirrorIssue] = useState<ConfigUpdateIssue | null>(null);
+    const [resetIncomplete, setResetIncomplete] = useState(false);
+    const userInstructionsEditTokenRef = useRef<InstructionUpdateToken>({
+        revision: 0,
+        value: DEFAULT_PREFS.userInstructions ?? '',
+    });
+    const userInstructionsAckRevisionRef = useRef(0);
+    const userPromptEditTokenRef = useRef<PromptUpdateToken>({
+        revision: 0,
+        value: DEFAULT_PREFS.userPrompt ?? '',
+    });
+    const userPromptAckRevisionRef = useRef(0);
+    const configUpdateRequestRevisionRef = useRef(0);
+    const promptHealthRequestRevisionRef = useRef(0);
+    const prefsMirrorGenerationRef = useRef(0);
+    const prefsMirrorActionIdRef = useRef(0);
+    const prefsMirrorWriteInFlightRef = useRef(false);
+    const queuedPrefsMirrorIntentRef = useRef<PrefsMirrorIntent | null>(null);
+    const settledPrefsMirrorActionsRef = useRef<Set<number>>(new Set());
+    const latestPrefsMirrorIntentRef = useRef<PrefsMirrorIntent | null>(null);
+    const resetTokenRef = useRef(0);
+    const resetTransactionRef = useRef<ResetTransaction | null>(null);
+    const resetCleanupAttemptIdRef = useRef(0);
+    const resetCleanupAttemptRef = useRef<ResetCleanupAttempt | null>(null);
+    const prefsRef = useRef<Preferences>(DEFAULT_PREFS);
+    const userTouchedRevisionRef = useRef(0);
+    const [catchUpRevision, setCatchUpRevision] = useState(0);
+    const catchUpRequestedRevisionRef = useRef(0);
+    const catchUpProcessedRevisionRef = useRef(0);
+    const [hydrationMirrorEpoch, setHydrationMirrorEpoch] = useState(0);
+    const hydrationMirrorRequestedEpochRef = useRef(0);
+    const pendingHydrationMirrorRef = useRef<PendingHydrationMirror | null>(null);
 
     // Hydration-window edit protection. Tracks which dh_prefs keys the user
     // has edited during this Options session. Used by:
@@ -601,6 +763,11 @@ const OptionsInner: React.FC = () => {
     };
     const showSuccess = (message: string, autoDismissMs?: number) => showStatus(message, 'success', autoDismissMs);
     const showError = (message: string, autoDismissMs?: number) => showStatus(message, 'error', autoDismissMs);
+    useEffect(() => () => {
+        if (statusTimerRef.current !== null) {
+            clearTimeout(statusTimerRef.current);
+        }
+    }, []);
     const [hostVersion, setHostVersion] = useState<string>("");
     const [updateAvailable, setUpdateAvailable] = useState<{version: string, url: string} | null>(null);
     const [isUpdating, setIsUpdating] = useState(false);
@@ -615,7 +782,7 @@ const OptionsInner: React.FC = () => {
     const [isSyncingTeam, setIsSyncingTeam] = useState(false);
     const [teamItems, setTeamItems] = useState<MenuItem[]>([]);
     const [teamFetchError, setTeamFetchError] = useState<null | {
-        kind: 'auth' | 'notFound' | 'http' | 'network' | 'parse' | 'unknown';
+        kind: 'auth' | 'notFound' | 'http' | 'network' | 'parse' | 'storage' | 'unknown';
         httpStatus?: number;
     }>(null);
     // Plan A onBlur validation feedback for the manifest URL field. True
@@ -655,7 +822,7 @@ const OptionsInner: React.FC = () => {
     // Switching teams keeps Set state but each team's keys are isolated by
     // their distinct teamId prefix.
     const [teamCollapsedLabels, setTeamCollapsedLabels] = useState<Set<string>>(new Set());
-    // Mirrors itemsLoadedRef: prevents the initial empty-Set mount from
+    // Guards the initial empty-Set mount from
     // overwriting stored collapse state before chrome.storage.local.get
     // resolves. Flipped to true once the initial load completes.
     const teamCollapsedLoadedRef = useRef(false);
@@ -673,44 +840,647 @@ const OptionsInner: React.FC = () => {
     const [previewInstructions, setPreviewInstructions] = useState(true);
     const [previewPrompt, setPreviewPrompt] = useState(true);
 
+    useEffect(() => {
+        prefsRef.current = prefs;
+    }, [prefs]);
+
+    const setCurrentPrefs = (nextPrefs: Preferences) => {
+        prefsRef.current = nextPrefs;
+        setPrefs(nextPrefs);
+    };
+
+    const updateCurrentPrefs = (patch: Partial<Preferences>) => {
+        const nextPrefs = { ...prefsRef.current, ...patch };
+        setCurrentPrefs(nextPrefs);
+        return nextPrefs;
+    };
+
+    const teamUiIdentity = (candidate: Readonly<Preferences>) => ({
+        enabled: candidate.teamCatalogEnabled === true,
+        manifestUrl: candidate.teamManifestUrl || '',
+        teamId: candidate.team || '',
+    });
+
+    const teamUiIdentityIsCurrent = (
+        identity: ReturnType<typeof teamUiIdentity>,
+    ) => {
+        const current = teamUiIdentity(prefsRef.current);
+        return current.enabled === identity.enabled
+            && current.manifestUrl === identity.manifestUrl
+            && current.teamId === identity.teamId;
+    };
+
+    const loadTeamUiSnapshot = (candidate: Readonly<Preferences>) => {
+        const identity = teamUiIdentity(candidate);
+        const generation = ++teamUiLoadGenerationRef.current;
+        const previousIdentity = teamUiRequestedIdentityRef.current;
+        const identityChanged = !previousIdentity
+            || previousIdentity.enabled !== identity.enabled
+            || previousIdentity.manifestUrl !== identity.manifestUrl
+            || previousIdentity.teamId !== identity.teamId;
+        teamUiRequestedIdentityRef.current = identity;
+        if (identityChanged) {
+            setTeamItems([]);
+            setTeamSynced('');
+        }
+        setTeamFetchError(null);
+        if (!identity.enabled || !identity.manifestUrl) {
+            setTeamList([]);
+            setTeamItems([]);
+            setTeamSynced('');
+            return;
+        }
+        chrome.storage.local.get([
+            'dh_team_synced',
+            'dh_team_items',
+            'dh_team_manifest',
+            'dh_team_manifest_url',
+            'dh_team',
+        ], data => {
+            if (
+                generation !== teamUiLoadGenerationRef.current
+                || !teamUiIdentityIsCurrent(identity)
+            ) return;
+            const parsedTeamItems = parseOwnBookmarkItems(
+                data,
+                'dh_team_items',
+            );
+            const manifest = data.dh_team_manifest as {
+                teams?: Array<{ id: string; label: string }>;
+            } | undefined;
+            const manifestCurrent =
+                data.dh_team_manifest_url === identity.manifestUrl;
+            setTeamList(
+                manifestCurrent && manifest && Array.isArray(manifest.teams)
+                    ? manifest.teams.map(team => ({
+                        id: team.id,
+                        label: team.label,
+                    }))
+                    : [],
+            );
+            const current = {
+                dh_team_manifest_url:
+                    typeof data.dh_team_manifest_url === 'string'
+                        ? data.dh_team_manifest_url
+                        : undefined,
+                dh_team: typeof data.dh_team === 'string'
+                    ? data.dh_team
+                    : undefined,
+                dh_prefs: {
+                    teamCatalogEnabled: identity.enabled,
+                    teamManifestUrl: identity.manifestUrl,
+                    team: identity.teamId,
+                },
+            };
+            if (teamCacheIsCurrent(current)) {
+                if (!parsedTeamItems) return;
+                setTeamItems(parsedTeamItems);
+                setTeamSynced(
+                    typeof data.dh_team_synced === 'string'
+                        ? data.dh_team_synced
+                        : '',
+                );
+            } else {
+                setTeamItems([]);
+                setTeamSynced('');
+            }
+        });
+    };
+
+    const markUserTouched = (keys: Array<keyof Preferences>) => {
+        keys.forEach(key => userTouchedFieldsRef.current.add(key));
+        userTouchedRevisionRef.current += 1;
+    };
+
+    const buildHostConfigPayload = (
+        nextPrefs: Readonly<Preferences>,
+        instruction?: { value: string },
+        prompt?: { value: string },
+        resetToken?: number,
+    ) => {
+        const payload: Record<string, unknown> = {
+            config: {
+                root_path: nextPrefs.rootPath,
+                skill_directories: nextPrefs.skillDirectories
+                    ? nextPrefs.skillDirectories
+                        .split(',')
+                        .map(value => value.trim())
+                        .filter(Boolean)
+                    : [],
+                mcp_config_path: nextPrefs.mcpConfigPath,
+                extension_preferences: {
+                    auto_analyze_mode: nextPrefs.autoAnalyzeMode,
+                    enable_status_bubble: nextPrefs.enableStatusBubble,
+                    beta_channel_enabled: nextPrefs.betaChannelEnabled,
+                    use_workspace_only: nextPrefs.useWorkspaceOnly,
+                    log_level: nextPrefs.logLevel,
+                    language: nextPrefs.language,
+                    primary_color: nextPrefs.primaryColor,
+                    button_text: nextPrefs.buttonText,
+                    offset_bottom: nextPrefs.offsetBottom,
+                    offset_right: nextPrefs.offsetRight,
+                    team_catalog_enabled: nextPrefs.teamCatalogEnabled,
+                    team_manifest_url: nextPrefs.teamManifestUrl,
+                    team: nextPrefs.team,
+                    team_label: nextPrefs.teamLabel,
+                    analyze_timeout_seconds: nextPrefs.analyzeTimeoutSeconds,
+                    model: nextPrefs.model,
+                    reasoning_effort: nextPrefs.reasoningEffort,
+                    context_tier: nextPrefs.contextTier,
+                },
+            },
+        };
+        if (instruction) {
+            payload.user_instructions = instruction.value;
+        }
+        if (prompt) {
+            payload.user_prompt = prompt.value;
+        }
+        if (resetToken !== undefined) {
+            payload.reset_token = resetToken;
+        }
+        return { action: 'update_config', payload };
+    };
+
+    const refreshPromptHealth = (configGeneration: number) => {
+        const healthGeneration = ++promptHealthRequestRevisionRef.current;
+        chrome.runtime.sendMessage({
+            type: 'NATIVE_MSG',
+            payload: { action: 'get_config' },
+        }, (response) => {
+            if (chrome.runtime.lastError) return;
+            if (
+                healthGeneration !== promptHealthRequestRevisionRef.current
+                || configGeneration !== configUpdateRequestRevisionRef.current
+            ) {
+                return;
+            }
+            if (response?.status !== 'success' || !response.data) return;
+
+            const promptSourceStatus = response.data.prompt_source_status;
+            if (promptSourceStatus?.status === 'ok') {
+                setPromptHealthIssue(null);
+            } else if (promptSourceStatus?.status === 'error') {
+                setPromptHealthIssue({
+                    errorCode: typeof promptSourceStatus.error_code === 'string'
+                        ? promptSourceStatus.error_code
+                        : undefined,
+                    fallback: safeErrorText([
+                        promptSourceStatus.error,
+                        promptSourceStatus.message,
+                    ], ''),
+                });
+            }
+        });
+    };
+
+    const sendHostConfigUpdate = (
+        intent: ConfigUpdateIntent<Preferences>,
+        options: {
+            suppressTransportWarning?: boolean;
+            resetToken?: number;
+            onResult?: (
+                decision: ReturnType<typeof classifyConfigUpdateResponse>,
+            ) => void;
+        } = {},
+    ) => {
+        const instruction = intent.instruction;
+        const prompt = intent.prompt;
+
+        chrome.runtime.sendMessage({
+            type: 'NATIVE_MSG',
+            payload: buildHostConfigPayload(
+                intent.prefs,
+                instruction,
+                prompt,
+                options.resetToken,
+            ),
+        }, (response) => {
+            const transportError = chrome.runtime.lastError;
+            if (transportError) {
+                const decision = {
+                    acknowledged: false,
+                    issue: {
+                        fallback: safeErrorText([transportError.message], ''),
+                        configSaved: false,
+                    },
+                };
+                if (
+                    !options.suppressTransportWarning
+                    && intent.generation === configUpdateRequestRevisionRef.current
+                ) {
+                    setConfigUpdateIssue(decision.issue);
+                }
+                options.onResult?.(decision);
+                return;
+            }
+
+            const decision = classifyConfigUpdateResponse(response);
+            if (instruction) {
+                userInstructionsAckRevisionRef.current = acknowledgeInstructionRevision(
+                    userInstructionsAckRevisionRef.current,
+                    instruction.revision,
+                    decision.acknowledged,
+                );
+            }
+            if (prompt) {
+                userPromptAckRevisionRef.current = acknowledgePromptRevision(
+                    userPromptAckRevisionRef.current,
+                    prompt.revision,
+                    decision.acknowledged,
+                );
+            }
+            if (intent.generation === configUpdateRequestRevisionRef.current) {
+                setConfigUpdateIssue(decision.issue);
+                if (decision.acknowledged) {
+                    refreshPromptHealth(intent.generation);
+                }
+            }
+            options.onResult?.(decision);
+        });
+    };
+
+    const createIntent = (nextPrefs: Preferences) => {
+        const generation = ++configUpdateRequestRevisionRef.current;
+        const instructionToken = userInstructionsEditTokenRef.current;
+        const instruction = shouldIncludeUserInstructions(
+            instructionToken.revision,
+            userInstructionsAckRevisionRef.current,
+        )
+            ? instructionToken
+            : undefined;
+        const promptToken = userPromptEditTokenRef.current;
+        const prompt = shouldIncludeUserPrompt(
+            promptToken.revision,
+            userPromptAckRevisionRef.current,
+        )
+            ? promptToken
+            : undefined;
+        return createConfigUpdateIntent(
+            generation,
+            nextPrefs,
+            instruction,
+            prompt,
+        );
+    };
+
+    const requestHydrationCatchUp = () => {
+        const touchedRevision = userTouchedRevisionRef.current;
+        if (
+            touchedRevision === 0
+            || touchedRevision <= catchUpRequestedRevisionRef.current
+        ) {
+            return;
+        }
+        catchUpRequestedRevisionRef.current = touchedRevision;
+        setCatchUpRevision(touchedRevision);
+    };
+
+    const createPrefsMirrorIntent = (
+        nextPrefs: Readonly<Preferences>,
+        newActions: readonly PrefsMirrorAction[] = [],
+        onLatestCommit?: () => void,
+    ): PrefsMirrorIntent => {
+        const previousIntents = [
+            latestPrefsMirrorIntentRef.current,
+            queuedPrefsMirrorIntentRef.current,
+        ].filter(
+            (intent): intent is PrefsMirrorIntent => intent !== null,
+        );
+        const actionMap = new Map<number, PrefsMirrorAction>();
+        for (const action of [
+            ...previousIntents.flatMap(intent => intent.actions),
+            ...newActions,
+        ]) {
+            if (settledPrefsMirrorActionsRef.current.has(action.id)) continue;
+            if (!mirrorActionMatchesPrefs(action, nextPrefs)) {
+                settledPrefsMirrorActionsRef.current.add(action.id);
+                continue;
+            }
+            actionMap.set(action.id, action);
+        }
+        const intent = Object.freeze({
+            generation: ++prefsMirrorGenerationRef.current,
+            prefs: Object.freeze({ ...nextPrefs }),
+            actions: Object.freeze([...actionMap.values()]),
+            onLatestCommit,
+        });
+        latestPrefsMirrorIntentRef.current = intent;
+        return intent;
+    };
+
+    const createPrefsMirrorAction = (
+        kind: PrefsMirrorAction['kind'],
+        identity: TeamMirrorIdentity,
+        run: () => void,
+        canRun?: () => boolean,
+        reset?: Readonly<{
+            token: number;
+        }>,
+    ): PrefsMirrorAction => Object.freeze({
+        id: ++prefsMirrorActionIdRef.current,
+        kind,
+        identity: Object.freeze({ ...identity }),
+        resetToken: reset?.token,
+        canRun,
+        run,
+    });
+
+    const mirrorIdentityMatchesPrefs = (
+        identity: TeamMirrorIdentity,
+        candidate: Readonly<Preferences>,
+    ) => identity.enabled === (candidate.teamCatalogEnabled === true)
+        && identity.manifestUrl === (candidate.teamManifestUrl || '')
+        && identity.teamId === (candidate.team || '');
+
+    const mirrorActionMatchesPrefs = (
+        action: PrefsMirrorAction,
+        candidate: Readonly<Preferences>,
+    ) => mirrorIdentityMatchesPrefs(action.identity, candidate)
+        && (
+            action.kind !== 'reset'
+            || action.resetToken === resetTokenRef.current
+        );
+
+    const settlePrefsMirrorActions = (intent: PrefsMirrorIntent) => {
+        for (const action of intent.actions) {
+            if (settledPrefsMirrorActionsRef.current.has(action.id)) continue;
+            if (action.kind === 'reset') continue;
+            if (action.canRun && !action.canRun()) continue;
+            settledPrefsMirrorActionsRef.current.add(action.id);
+            if (mirrorActionMatchesPrefs(action, intent.prefs)) {
+                action.run();
+            }
+        }
+    };
+
+    const sendCommittedHostConfigUpdate = (
+        configIntent: ConfigUpdateIntent<Preferences>,
+        mirrorIntent: PrefsMirrorIntent,
+        options: { suppressTransportWarning?: boolean } = {},
+    ) => {
+        const resetAction = mirrorIntent.actions.find(action =>
+            action.kind === 'reset'
+            && !settledPrefsMirrorActionsRef.current.has(action.id)
+            && mirrorActionMatchesPrefs(action, mirrorIntent.prefs),
+        );
+        if (resetAction) {
+            // The mirror action owns only the first Host dispatch. Retry state
+            // lives in resetTransactionRef and can never re-enter this queue.
+            settledPrefsMirrorActionsRef.current.add(resetAction.id);
+        }
+        sendHostConfigUpdate(configIntent, {
+            ...options,
+            resetToken: resetAction?.resetToken,
+            onResult: decision => {
+                if (
+                    !resetAction
+                    || resetAction.resetToken !== resetTokenRef.current
+                ) return;
+                const transaction = resetTransactionRef.current;
+                if (
+                    !transaction
+                    || transaction.token !== resetAction.resetToken
+                    || transaction.phase !== 'host-pending'
+                ) return;
+                if (!decision.acknowledged) {
+                    setResetIncomplete(true);
+                    return;
+                }
+                const committed = updateResetTransaction(transaction.token, {
+                    phase: 'host-committed',
+                    retryAction: 'sw',
+                });
+                if (committed) {
+                    const attempt = beginResetCleanupAttempt(committed.token);
+                    if (attempt) dispatchResetServiceWorker(committed, attempt);
+                }
+            },
+        });
+    };
+
+    const drainPrefsMirrorQueue = () => {
+        if (prefsMirrorWriteInFlightRef.current) return;
+        const intent = queuedPrefsMirrorIntentRef.current;
+        if (!intent) return;
+
+        queuedPrefsMirrorIntentRef.current = null;
+        prefsMirrorWriteInFlightRef.current = true;
+        chrome.storage.local.set({ dh_prefs: intent.prefs }, () => {
+            const storageError = chrome.runtime.lastError;
+            prefsMirrorWriteInFlightRef.current = false;
+            const newerIntent = queuedPrefsMirrorIntentRef.current;
+
+            if (storageError) {
+                setPrefsMirrorIssue({
+                    configSaved: false,
+                    fallback: safeErrorText([storageError.message], ''),
+                });
+                if (!newerIntent) {
+                    // Keep the exact failed intent, including unsettled actions,
+                    // until a later user write retries or supersedes it.
+                    queuedPrefsMirrorIntentRef.current = intent;
+                    return;
+                }
+                drainPrefsMirrorQueue();
+                return;
+            }
+
+            if (newerIntent) {
+                drainPrefsMirrorQueue();
+                return;
+            }
+            if (latestPrefsMirrorIntentRef.current?.generation !== intent.generation) {
+                const latestIntent = latestPrefsMirrorIntentRef.current;
+                if (latestIntent) {
+                    queuedPrefsMirrorIntentRef.current = latestIntent;
+                    drainPrefsMirrorQueue();
+                }
+                return;
+            }
+
+            setPrefsMirrorIssue(null);
+            settlePrefsMirrorActions(intent);
+            intent.onLatestCommit?.();
+        });
+    };
+
+    const writePrefsMirror = (intent: PrefsMirrorIntent) => {
+        queuedPrefsMirrorIntentRef.current = intent;
+        drainPrefsMirrorQueue();
+    };
+
+    const createManifestFetchAction = (
+        nextPrefs: Readonly<Preferences>,
+    ): PrefsMirrorAction | undefined => {
+        if (!nextPrefs.teamCatalogEnabled || !nextPrefs.teamManifestUrl) {
+            return undefined;
+        }
+        const identity = {
+            enabled: true,
+            manifestUrl: nextPrefs.teamManifestUrl,
+            teamId: nextPrefs.team || '',
+        };
+        return createPrefsMirrorAction(
+            'manifest-fetch',
+            identity,
+            () => {
+                if (
+                    prefsRef.current.teamCatalogEnabled !== true
+                    || prefsRef.current.teamManifestUrl !== identity.manifestUrl
+                    || (prefsRef.current.team || '') !== identity.teamId
+                ) return;
+                if (identity.manifestUrl === lastSuccessfulManifestUrlRef.current) return;
+                if (
+                    manifestFetchInFlightRef.current?.manifestUrl
+                    === identity.manifestUrl
+                ) return;
+                // Every URL-change request uses resetCache, so once a
+                // different URL starts the prior successful cache is no longer
+                // authoritative even if this new request later fails.
+                lastSuccessfulManifestUrlRef.current = '';
+                const request = Object.freeze({
+                    token: ++manifestFetchTokenRef.current,
+                    manifestUrl: identity.manifestUrl,
+                });
+                manifestFetchInFlightRef.current = request;
+                const generation = ++teamRefreshGenerationRef.current;
+                chrome.runtime.sendMessage(
+                    {
+                        type: "SYNC_TEAM_CATALOG",
+                        payload: teamRequestPayload(
+                            generation,
+                            identity,
+                            { manifestOnly: true, resetCache: true },
+                        ),
+                    },
+                    (response) => {
+                        const ownsInFlight =
+                            manifestFetchInFlightRef.current?.token === request.token
+                            && manifestFetchInFlightRef.current?.manifestUrl
+                                === request.manifestUrl;
+                        if (ownsInFlight) {
+                            manifestFetchInFlightRef.current = null;
+                        }
+                        // An older callback cannot clear or complete a newer
+                        // URL request, even if its own Host response succeeded.
+                        if (!ownsInFlight) return;
+                        if (!teamSyncIsCurrent(
+                            generation,
+                            identity.manifestUrl,
+                            identity.teamId,
+                        )) return;
+                        if (chrome.runtime.lastError) {
+                            showError(t('manifestFetchFailed'), 5000);
+                            setTeamFetchError({ kind: 'network' });
+                            return;
+                        }
+                        const responseIdentity = response?.data?.identity;
+                        const responseMatches =
+                            response?.data?.requestGeneration === generation
+                            && responseIdentity?.enabled === identity.enabled
+                            && responseIdentity?.manifestUrl === identity.manifestUrl
+                            && (responseIdentity?.teamId || '') === identity.teamId;
+                        const hasResponseIdentity =
+                            response?.data?.requestGeneration !== undefined
+                            || responseIdentity !== undefined;
+                        if (hasResponseIdentity && !responseMatches) return;
+                        if (!response || response.status !== "success") {
+                            const kind = (response?.errorKind as any) || 'unknown';
+                            const httpStatus = response?.httpStatus as number | undefined;
+                            setTeamFetchError({ kind, httpStatus });
+                            if (kind === 'auth') {
+                                showError(t('manifestFetchAuthToast'), 6000);
+                            }
+                        } else if (!responseMatches) {
+                            return;
+                        } else if (
+                            response?.data?.syncStatus === 'committed'
+                            || response?.data?.syncStatus === 'unchanged'
+                        ) {
+                            lastSuccessfulManifestUrlRef.current = identity.manifestUrl;
+                            setTeamFetchError(null);
+                        }
+                    },
+                );
+            },
+            () => prefsHydratedRef.current,
+        );
+    };
+
+    const requestHydrationMirror = (nextPrefs: Readonly<Preferences>) => {
+        const epoch = ++hydrationMirrorRequestedEpochRef.current;
+        pendingHydrationMirrorRef.current = Object.freeze({
+            generation: epoch,
+            prefs: Object.freeze({ ...nextPrefs }),
+            actions: Object.freeze([]),
+            userGenerationAtRequest: configUpdateRequestRevisionRef.current,
+        });
+        setHydrationMirrorEpoch(epoch);
+    };
+
+    useEffect(() => {
+        const request = pendingHydrationMirrorRef.current;
+        if (
+            !request
+            || hydrationMirrorEpoch === 0
+            || request.generation !== hydrationMirrorEpoch
+            || request.generation !== hydrationMirrorRequestedEpochRef.current
+            || request.userGenerationAtRequest !== configUpdateRequestRevisionRef.current
+        ) {
+            return;
+        }
+        const intent = createPrefsMirrorIntent(request.prefs);
+        writePrefsMirror(intent);
+    }, [hydrationMirrorEpoch]);
+
+    useEffect(() => {
+        if (
+            catchUpRevision === 0
+            || catchUpRevision !== catchUpRequestedRevisionRef.current
+            || catchUpProcessedRevisionRef.current >= catchUpRevision
+        ) {
+            return;
+        }
+        catchUpProcessedRevisionRef.current = catchUpRevision;
+        console.log('[DH] Hydration catch-up: pushing', userTouchedFieldsRef.current.size, 'user-touched field(s) to host');
+        const configIntent = createIntent(prefsRef.current);
+        const mirrorIntent = createPrefsMirrorIntent(
+            configIntent.prefs,
+            [],
+            () => {
+                if (configIntent.generation !== configUpdateRequestRevisionRef.current) {
+                    return;
+                }
+                sendCommittedHostConfigUpdate(configIntent, mirrorIntent, {
+                    suppressTransportWarning: true,
+                });
+            },
+        );
+        writePrefsMirror(mirrorIntent);
+    }, [catchUpRevision]);
+
     // Initial Load
     useEffect(() => {
+        const initialPromptHealthGeneration =
+            ++promptHealthRequestRevisionRef.current;
         // Load Prefs
         chrome.storage.local.get("dh_prefs", (result) => {
             if (result.dh_prefs) {
                 // Auto-migrate old default blue to new teal if user hasn't changed it
-                const loadedPrefs = result.dh_prefs as Preferences; // Cast to Preferences type
+                const loadedPrefs = {
+                    ...(result.dh_prefs as Preferences),
+                };
                 if (loadedPrefs.primaryColor === "#2563eb") { // Old default blue
                     loadedPrefs.primaryColor = "#0D9488"; // New default teal
                 }
-                // Seed the change-detection ref with whatever is on disk so the
-                // very first save after page open is a no-op for manifest fetch
-                // (only an explicit user-driven URL change should trigger fetch).
-                lastFetchedManifestUrlRef.current = loadedPrefs.teamManifestUrl || '';
-                
-                setPrefs(prev => {
-                    // Merge strategy: Default -> Loaded -> User Edits (prev)
-                    // We must be careful not to let 'prev' (which starts as Default) overwrite 'loaded' 
-                    // unless the user actually changed it.
-                    
-                    const base = { ...DEFAULT_PREFS, ...loadedPrefs };
-                    const final: any = { ...base };
-
-                    // Apply only changed fields from prev
-                    (Object.keys(prev) as Array<keyof Preferences>).forEach(k => {
-                        const key = k as keyof Preferences;
-                        if (prev[key] !== DEFAULT_PREFS[key]) {
-                            // User has modified this field, preserve it
-                            final[key] = prev[key];
-                        }
-                    });
-
-                    return final as Preferences;
+                const current = prefsRef.current;
+                const final = { ...DEFAULT_PREFS, ...loadedPrefs };
+                userTouchedFieldsRef.current.forEach(key => {
+                    (final as any)[key] = current[key];
                 });
-            } else {
-                // No saved prefs yet (first run). The ref defaults to '' so the
-                // first save with a non-empty manifest URL triggers a fetch.
-                lastFetchedManifestUrlRef.current = '';
+
+                setCurrentPrefs(final);
             }
 
             // Sync with Native Host (Source of Truth for backend config)
@@ -733,48 +1503,81 @@ const OptionsInner: React.FC = () => {
                      // Host is unreachable so this RPC will almost certainly
                      // also fail, but it's a no-op cost and recovers when
                      // host comes back within the same Options session.
-                     if (userTouchedFieldsRef.current.size > 0) {
-                         setPrefs(currentPrefs => {
-                             chrome.runtime.sendMessage({
-                                 type: "NATIVE_MSG",
-                                 payload: buildHostConfigPayload(currentPrefs)
-                             }, () => {
-                                 if (chrome.runtime.lastError) {
-                                     // Expected — host is down. Storage is correct.
-                                 }
-                             });
-                             return currentPrefs;
-                         });
-                     }
+                     requestHydrationMirror(prefsRef.current);
+                     requestHydrationCatchUp();
                      return;
                 }
                 
                 if (response && response.status === "success" && response.data) {
                     const hostConfig = response.data;
-                    console.log("[Options] Synced config from Host:", hostConfig);
+                    const promptSourceStatus = hostConfig.prompt_source_status;
+                    console.log("[Options] Synced config from Host:", {
+                        host_version: hostConfig.host_version,
+                        prompt_source_status: promptSourceStatus
+                            ? {
+                                status: promptSourceStatus.status,
+                                error_code: promptSourceStatus.error_code,
+                            }
+                            : undefined,
+                    });
+
+                    if (
+                        initialPromptHealthGeneration === promptHealthRequestRevisionRef.current
+                        && promptSourceStatus?.status === 'error'
+                    ) {
+                        setPromptHealthIssue({
+                            errorCode: typeof promptSourceStatus.error_code === 'string'
+                                ? promptSourceStatus.error_code
+                                : undefined,
+                            fallback: safeErrorText([
+                                promptSourceStatus.error,
+                                promptSourceStatus.message,
+                            ], ''),
+                        });
+                    } else if (
+                        initialPromptHealthGeneration === promptHealthRequestRevisionRef.current
+                        && promptSourceStatus?.status === 'ok'
+                    ) {
+                        setPromptHealthIssue(null);
+                    }
 
                     if (hostConfig.host_version) {
                         setHostVersion(hostConfig.host_version);
                     }
 
-                    setPrefs(prev => {
+                    const prev = prefsRef.current;
+                    {
                         const newPrefs = { ...prev };
                         let changed = false;
                         const touched = userTouchedFieldsRef.current;
+                        const incomingRoot = touched.has('rootPath') || !('root_path' in hostConfig)
+                            ? (typeof prev.rootPath === 'string' ? prev.rootPath : '')
+                            : (typeof hostConfig.root_path === 'string' ? hostConfig.root_path : '');
 
-                        // 1. Root Path — skip if user edited rootPath during hydration window
-                        if (hostConfig.root_path && hostConfig.root_path !== prev.rootPath && !touched.has('rootPath')) {
-                            newPrefs.rootPath = hostConfig.root_path;
-                            changed = true;
+                        // 1. Root Path — presence-aware so an explicit empty/null
+                        // Host value clears a stale chrome.storage mirror.
+                        if ('root_path' in hostConfig && !touched.has('rootPath')) {
+                            if (incomingRoot !== prev.rootPath) {
+                                newPrefs.rootPath = incomingRoot;
+                                changed = true;
+                            }
                         }
 
                         // 2. Skill Directories (Array -> CSV String)
-                        if (Array.isArray(hostConfig.skill_directories) && !touched.has('skillDirectories')) {
+                        if (
+                            Array.isArray(hostConfig.skill_directories)
+                            && !touched.has('skillDirectories')
+                            && !touched.has('rootPath')
+                            && !touched.has('useWorkspaceOnly')
+                        ) {
                             // Check incoming preference first
-                            const incomingWorkspaceOnly = hostConfig.extension_preferences?.use_workspace_only ?? prev.useWorkspaceOnly;
+                            const incomingWorkspaceOnly = touched.has('useWorkspaceOnly')
+                                ? prev.useWorkspaceOnly
+                                : (hostConfig.extension_preferences?.use_workspace_only ?? prev.useWorkspaceOnly);
+                            const incomingEffectiveRepositoryOnly = Boolean(incomingRoot.trim()) && incomingWorkspaceOnly !== false;
 
-                            // Only sync skillDirectories if we are NOT in workspace-only mode
-                            if (incomingWorkspaceOnly !== true) {
+                            // Only sync skillDirectories if Repository ONLY is not effective.
+                            if (!incomingEffectiveRepositoryOnly) {
                                 const skillsStr = hostConfig.skill_directories.join(", ");
                                 if (skillsStr !== prev.skillDirectories) {
                                     newPrefs.skillDirectories = skillsStr;
@@ -790,15 +1593,20 @@ const OptionsInner: React.FC = () => {
                         }
 
                         // 4. User Instructions (Split Prompt)
-                        // Host now returns _user_instructions_raw for the editable part
-                        // Fallback to system_message if raw is missing (legacy host)
+                        // Modern Hosts omit raw content when the DH-specific file is
+                        // unreadable. In that case keep the Chrome mirror rather than
+                        // hydrating Core content through the legacy fallback.
                         if (!touched.has('userInstructions')) {
-                            if (hostConfig._user_instructions_raw !== undefined) {
+                            if ('_user_instructions_raw' in hostConfig) {
                                 if (hostConfig._user_instructions_raw !== prev.userInstructions) {
                                     newPrefs.userInstructions = hostConfig._user_instructions_raw;
                                     changed = true;
                                 }
-                            } else if (hostConfig.system_message && hostConfig.system_message.content) {
+                            } else if (
+                                !('prompt_source_status' in hostConfig)
+                                && hostConfig.system_message
+                                && hostConfig.system_message.content
+                            ) {
                                 // Legacy fallback
                                 if (hostConfig.system_message.content !== prev.userInstructions) {
                                     newPrefs.userInstructions = hostConfig.system_message.content;
@@ -830,9 +1638,6 @@ const OptionsInner: React.FC = () => {
                             if (extPrefs.team_catalog_enabled !== undefined && !touched.has('teamCatalogEnabled')) { newPrefs.teamCatalogEnabled = extPrefs.team_catalog_enabled; changed = true; }
                             if (extPrefs.team_manifest_url !== undefined && !touched.has('teamManifestUrl')) {
                                 newPrefs.teamManifestUrl = extPrefs.team_manifest_url;
-                                // Re-seed the change-detection ref so a host-driven URL
-                                // does not look like a user edit on the next save.
-                                lastFetchedManifestUrlRef.current = extPrefs.team_manifest_url || '';
                                 changed = true;
                             }
                             if (extPrefs.team !== undefined && !touched.has('team')) { newPrefs.team = extPrefs.team; changed = true; }
@@ -864,10 +1669,6 @@ const OptionsInner: React.FC = () => {
                         // but host config.json already has language='zh').
                         // Storage-only write (no host update_config) avoids echoing
                         // back the same data we just read.
-                        if (changed) {
-                            chrome.storage.local.set({ dh_prefs: newPrefs });
-                        }
-
                         // Mark prefs as hydrated so subsequent user-triggered
                         // persistPrefs calls proceed. See prefsHydratedRef
                         // declaration for the failure mode this guards against.
@@ -875,42 +1676,15 @@ const OptionsInner: React.FC = () => {
                         // even if `changed` was false (e.g. host config already
                         // matches dh_prefs), state is now known-good.
                         //
-                        // Placed INSIDE the updater so it runs synchronously
-                        // with the state merge. React 19 + StrictMode-style
-                        // double-invoke can schedule updaters across multiple
-                        // microtask ticks; placing the ref flip and catch-up
-                        // RPC inside the same updater closure guarantees they
-                        // observe the just-merged value.
-                        prefsHydratedRef.current = true;
-
-                        // Catch-up RPC: if the user edited any field during the
-                        // hydration window, persistPrefs skipped the host RPC
-                        // for those writes. Push the merged state to host now
-                        // so config.json matches what the user actually
-                        // clicked. See spec § 4.4. Empty touched set = no edits
-                        // during window = no RPC needed (avoid noise).
-                        //
-                        // Inside the updater closure so we read `newPrefs`
-                        // (or `prev` when nothing changed) directly without
-                        // relying on a closure variable assigned by the
-                        // updater — that pattern is racy when React schedules
-                        // the updater on a later microtask tick (verified by
-                        // T7 Options hydration test in jsdom + React 19).
+                        // Keep this updater free of Host side effects. Catch-up
+                        // is requested below and runs after this state has
+                        // committed, so StrictMode replay cannot duplicate it.
                         const merged = changed ? newPrefs : prev;
-                        if (userTouchedFieldsRef.current.size > 0) {
-                            console.log('[DH] Hydration catch-up: pushing', userTouchedFieldsRef.current.size, 'user-touched field(s) to host');
-                            chrome.runtime.sendMessage({
-                                type: "NATIVE_MSG",
-                                payload: buildHostConfigPayload(merged)
-                            }, () => {
-                                if (chrome.runtime.lastError) {
-                                    console.warn('[DH] Catch-up RPC failed:', chrome.runtime.lastError.message, '— storage holds truth; next Options open will retry.');
-                                }
-                            });
-                        }
-
-                        return merged;
-                    });
+                        setCurrentPrefs(merged);
+                        prefsHydratedRef.current = true;
+                        requestHydrationMirror(merged);
+                    }
+                    requestHydrationCatchUp();
                 } else {
                     // Host responded but not with success+data. Same
                     // rationale as the lastError branch above — don't
@@ -918,7 +1692,10 @@ const OptionsInner: React.FC = () => {
                     console.warn(
                         "[Options] Host get_config returned non-success; " +
                         "marking prefs hydrated to unblock user actions.",
-                        response,
+                        {
+                            status: response?.status,
+                            error_code: response?.error_code,
+                        },
                     );
                     prefsHydratedRef.current = true;
 
@@ -928,50 +1705,42 @@ const OptionsInner: React.FC = () => {
                     // probably also fail (host is broken), but it's a no-op
                     // cost and keeps storage-vs-host eventually consistent
                     // when host recovers within the same Options session.
-                    if (userTouchedFieldsRef.current.size > 0) {
-                        // Read state via functional setPrefs (state may not be
-                        // committed yet from the merge above; we ran with prev
-                        // and bailed). Re-enter setPrefs to capture current
-                        // value as 'prev'.
-                        setPrefs(currentPrefs => {
-                            chrome.runtime.sendMessage({
-                                type: "NATIVE_MSG",
-                                payload: buildHostConfigPayload(currentPrefs)
-                            }, () => {
-                                if (chrome.runtime.lastError) {
-                                    console.warn('[DH] Catch-up RPC failed (host non-success path):', chrome.runtime.lastError.message);
-                                }
-                            });
-                            return currentPrefs;
-                        });
-                    }
+                    requestHydrationMirror(prefsRef.current);
+                    requestHydrationCatchUp();
                 }
             });
         });
 
         // Load Items and ensure collapsed by default. collapseFolders is the
         // module-level helper so handleReset can reuse it.
-        loadItems().then(loadedItems => {
-            setItems(collapseFolders(loadedItems));
-            // Mark hydration complete — subsequent setItems calls will now
-            // fall through the persist-on-change useEffect above.
-            itemsLoadedRef.current = true;
+        const itemsLoadGeneration = bookmarkGenerationRef.current;
+        void loadBookmarkItems().then(loaded => {
+            const isCurrent = () => bookmarkGenerationRef.current
+                === itemsLoadGeneration;
+            if (!isCurrent()) return;
+            if (loaded.kind !== 'loaded') {
+                setBookmarkLoadIssue(loaded.code);
+                return;
+            }
+            const collapsedItems = collapseBookmarkFolders(
+                loaded.items,
+                isCurrent,
+            );
+            if (!collapsedItems || !isCurrent()) return;
+            setBookmarkLoadIssue(null);
+            applyItemsSnapshot(collapsedItems);
+            void queueBookmarkStorage(
+                collapsedItems,
+                itemsLoadGeneration,
+            ).catch(() => undefined);
         });
 
-        // Load team catalog metadata
+        // Restore team-folder collapse state independently from team cache
+        // identity. Team list/items/synced are loaded by the generation-gated
+        // identity effect below after local/Host preferences settle.
         chrome.storage.local.get(
-            ['dh_team_synced', 'dh_team_items', 'dh_team_manifest', 'dh_team_collapsed_labels'],
+            ['dh_team_collapsed_labels'],
             (data: any) => {
-                if (data.dh_team_synced) setTeamSynced(data.dh_team_synced);
-                if (Array.isArray(data.dh_team_items)) setTeamItems(data.dh_team_items);
-                // Populate dropdown from cached manifest. No fetch here - the service
-                // worker startup hook is the only auto-fetch trigger (spec § 3.4).
-                // To force a refresh, the user clicks the Refresh button below.
-                if (data.dh_team_manifest && Array.isArray(data.dh_team_manifest.teams)) {
-                    setTeamList(
-                        data.dh_team_manifest.teams.map((t: any) => ({ id: t.id, label: t.label })),
-                    );
-                }
                 // Restore collapsed-folder labels for team items. Stored as an
                 // array because Sets don't survive JSON / chrome.storage round-
                 // trip. Keys take the form `${teamId}\0${...labelPath}\0${label}`
@@ -996,6 +1765,10 @@ const OptionsInner: React.FC = () => {
         });
     }, [teamCollapsedLabels]);
 
+    useEffect(() => {
+        loadTeamUiSnapshot(prefs);
+    }, [prefs.teamCatalogEnabled, prefs.teamManifestUrl, prefs.team]);
+
     // Watch chrome.storage for team-catalog writes from elsewhere — most
     // importantly the Service Worker's manifestOnly fetch (triggered by
     // the URL field onBlur) writing dh_team_manifest. Before this hook,
@@ -1009,28 +1782,14 @@ const OptionsInner: React.FC = () => {
             areaName: string
         ) => {
             if (areaName !== 'local') return;
-            if (changes.dh_team_manifest) {
-                const newVal: any = changes.dh_team_manifest.newValue;
-                if (newVal && Array.isArray(newVal.teams)) {
-                    setTeamList(
-                        newVal.teams.map((t: any) => ({ id: t.id, label: t.label })),
-                    );
-                } else {
-                    // dh_team_manifest was deleted (e.g. clearTeamBookmarks).
-                    // Clearing teamList here is redundant with the explicit
-                    // setTeamList([]) in the case (a) onBlur path, but
-                    // covers any future call site that forgets to do it.
-                    setTeamList([]);
-                }
-            }
-            if (changes.dh_team_items) {
-                const newVal: any = changes.dh_team_items.newValue;
-                setTeamItems(Array.isArray(newVal) ? newVal : []);
-            }
-            if (changes.dh_team_synced) {
-                const newVal: any = changes.dh_team_synced.newValue;
-                setTeamSynced(typeof newVal === 'string' ? newVal : '');
-            }
+            const hasRelevantChange = changes.dh_team_manifest
+                || changes.dh_team_items
+                || changes.dh_team_synced
+                || changes.dh_team_manifest_url
+                || changes.dh_team
+                || changes.dh_prefs;
+            if (!hasRelevantChange) return;
+            loadTeamUiSnapshot(prefsRef.current);
         };
         chrome.storage.onChanged.addListener(onStorageChanged);
         return () => chrome.storage.onChanged.removeListener(onStorageChanged);
@@ -1049,21 +1808,17 @@ const OptionsInner: React.FC = () => {
         // ref must be set NOW: if hydration completes mid-typing, the
         // host's stale value would otherwise clobber what the user is
         // currently editing.
-        userTouchedFieldsRef.current.add(name as keyof Preferences);
+        markUserTouched([name as keyof Preferences]);
         const isNumeric = name.startsWith('offset') || name === 'analyzeTimeoutSeconds';
-        setPrefs(prev => ({
-            ...prev,
-            [name]: isNumeric ? Number(value) : value
-        }));
+        updateCurrentPrefs({
+            [name]: isNumeric ? Number(value) : value,
+        });
     };
 
     // onBlur sibling of handlePrefChange — commits whatever the user typed
     // by routing through persistPrefs against the latest state snapshot.
     const handlePrefBlur = () => {
-        setPrefs(prev => {
-            persistPrefs(prev);
-            return prev;
-        });
+        persistPrefs(prefsRef.current);
     };
 
     // --- Persistence: single entry point for ALL prefs writes ---
@@ -1073,52 +1828,21 @@ const OptionsInner: React.FC = () => {
     // persistPrefs(), which:
     //
     //   1. Writes dh_prefs to chrome.storage.local
-    //   2. Fires update_config to the host (fire-and-forget; host loads the
-    //      file on startup anyway so transient failure is recoverable)
-    //   3. If teamManifestUrl differs from lastFetchedManifestUrlRef AND
+    //   2. Sends update_config to the host and inspects the structured result
+    //   3. If teamManifestUrl differs from the last successful URL AND
     //      team catalog is enabled, asks the SW to fetch the manifest.
     //      Caller opts into this with { fetchManifest: true } so e.g. a
     //      colour-picker change does not waste an HTTP call.
     //
-    // Items (dh_items) are NOT written here — the bookmark editor uses
-    // setItems directly into chrome.storage via its own useEffect (see
-    // dh_items persistence above). Mixing the two would create double-writes
-    // on every editor click. Spec § 3.5 / AGENTS.md § 3 (after C7 update).
-    const buildHostConfigPayload = (nextPrefs: Preferences) => ({
-        action: "update_config",
-        payload: {
-            user_instructions: nextPrefs.userInstructions,
-            user_prompt: nextPrefs.userPrompt,
-            config: {
-                root_path: nextPrefs.rootPath,
-                skill_directories: nextPrefs.skillDirectories ? nextPrefs.skillDirectories.split(',').map(s => s.trim()).filter(Boolean) : [],
-                mcp_config_path: nextPrefs.mcpConfigPath,
-                extension_preferences: {
-                    auto_analyze_mode: nextPrefs.autoAnalyzeMode,
-                    user_prompt: nextPrefs.userPrompt,
-                    enable_status_bubble: nextPrefs.enableStatusBubble,
-                    beta_channel_enabled: nextPrefs.betaChannelEnabled,
-                    use_workspace_only: nextPrefs.useWorkspaceOnly,
-                    log_level: nextPrefs.logLevel,
-                    language: nextPrefs.language,
-                    primary_color: nextPrefs.primaryColor,
-                    button_text: nextPrefs.buttonText,
-                    offset_bottom: nextPrefs.offsetBottom,
-                    offset_right: nextPrefs.offsetRight,
-                    team_catalog_enabled: nextPrefs.teamCatalogEnabled,
-                    team_manifest_url: nextPrefs.teamManifestUrl,
-                    team: nextPrefs.team,
-                    team_label: nextPrefs.teamLabel,
-                    analyze_timeout_seconds: nextPrefs.analyzeTimeoutSeconds,
-                    model: nextPrefs.model,
-                    reasoning_effort: nextPrefs.reasoningEffort,
-                    context_tier: nextPrefs.contextTier,
-                }
-            }
-        }
-    });
-
-    const persistPrefs = (nextPrefs: Preferences, opts?: { fetchManifest?: boolean }) => {
+    // Items (dh_items) are NOT written here. Personal bookmark mutations use
+    // mutatePersonalItems and its serialized storage queue above.
+    const persistPrefs = (
+        nextPrefs: Preferences,
+        opts?: {
+            fetchManifest?: boolean;
+            mirrorAction?: PrefsMirrorAction;
+        },
+    ) => {
         // Three-segment persist (see spec § 4.1):
         //
         //   Segment 1: storage write — always runs (safe, storage is just a
@@ -1139,68 +1863,31 @@ const OptionsInner: React.FC = () => {
         // The pre-hydration warn that used to live here was removed because
         // hitting it during normal cold start is expected, not exceptional.
         // See docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md
-        chrome.storage.local.set({ dh_prefs: nextPrefs }, () => {
-            if (!prefsHydratedRef.current) {
-                // Window edit — touched ref will route it through the
-                // catch-up RPC once hydration completes. Storage is
-                // up-to-date; host will catch up.
-                return;
-            }
-
-            // Host update — fire-and-forget. Failures are logged but don't
-            // surface to the user because the host re-reads config.json on
-            // next startup. A red toast would be noisy for every keystroke
-            // in dev when the host isn't running.
-            chrome.runtime.sendMessage({
-                type: "NATIVE_MSG",
-                payload: buildHostConfigPayload(nextPrefs)
-            }, () => {
-                if (chrome.runtime.lastError) {
-                    console.warn("Could not update host immediately:", chrome.runtime.lastError.message);
+        const hostUpdateAllowed = prefsHydratedRef.current;
+        const intent = createIntent(nextPrefs);
+        const manifestAction = opts?.fetchManifest
+            ? createManifestFetchAction(intent.prefs)
+            : undefined;
+        const mirrorIntent = createPrefsMirrorIntent(
+            intent.prefs,
+            [opts?.mirrorAction, manifestAction].filter(
+                (action): action is PrefsMirrorAction => action != null,
+            ),
+            () => {
+                if (intent.generation !== configUpdateRequestRevisionRef.current) {
+                    return;
                 }
-            });
-
-            // Manifest fetch — only when caller opts in AND URL actually
-            // changed since last fetch. Diff guard prevents a refetch when
-            // the user toggles e.g. teamCatalogEnabled without touching URL.
-            if (opts?.fetchManifest && nextPrefs.teamCatalogEnabled && nextPrefs.teamManifestUrl) {
-                const previousUrl = lastFetchedManifestUrlRef.current;
-                const currentUrl = nextPrefs.teamManifestUrl;
-                if (currentUrl !== previousUrl) {
-                    lastFetchedManifestUrlRef.current = currentUrl;
-                    chrome.runtime.sendMessage(
-                        { type: "SYNC_TEAM_CATALOG", payload: { manifestOnly: true } },
-                        (response) => {
-                            if (chrome.runtime.lastError) {
-                                showError(t('manifestFetchFailed'), 5000);
-                                setTeamFetchError({ kind: 'network' });
-                                return;
-                            }
-                            if (!response || response.status !== "success") {
-                                // Classified failure from SW: response.errorKind /
-                                // response.httpStatus were added 2026-07-03 so the
-                                // UI can show auth-vs-notFound-vs-generic copy
-                                // instead of a single opaque "manifest fetch failed".
-                                const kind = (response?.errorKind as any) || 'unknown';
-                                const httpStatus = response?.httpStatus as number | undefined;
-                                setTeamFetchError({ kind, httpStatus });
-                                // Only surface a toast for auth failures — the
-                                // inline red text under the URL field is enough
-                                // for other cases and prevents duplicate noise.
-                                if (kind === 'auth') {
-                                    showError(t('manifestFetchAuthToast'), 6000);
-                                }
-                            } else {
-                                // Fetch succeeded — clear any stale error banner
-                                // from a prior try (e.g. user pasted a working URL
-                                // after fixing a bad one).
-                                setTeamFetchError(null);
-                            }
-                        }
-                    );
+                if (!hostUpdateAllowed) {
+                    // Window edit — touched ref will route it through the
+                    // catch-up RPC once hydration completes. Storage is
+                    // up-to-date; host will catch up.
+                    return;
                 }
-            }
-        });
+
+                sendCommittedHostConfigUpdate(intent, mirrorIntent);
+            },
+        );
+        writePrefsMirror(mirrorIntent);
     };
 
     // Convenience: setPrefs + persist in one call. All instant-persist
@@ -1210,90 +1897,566 @@ const OptionsInner: React.FC = () => {
         // Mark every patched key as user-touched so the host hydration merge
         // (if still pending) does not overwrite our value, and so the
         // catch-up RPC knows to push these fields after hydration.
-        (Object.keys(patch) as Array<keyof Preferences>).forEach(k => userTouchedFieldsRef.current.add(k));
-        setPrefs(prev => {
-            const next = { ...prev, ...patch };
-            persistPrefs(next, opts);
-            return next;
+        markUserTouched(Object.keys(patch) as Array<keyof Preferences>);
+        const next = updateCurrentPrefs(patch);
+        persistPrefs(next, opts);
+    };
+
+    const invalidateTeamRefresh = () => {
+        teamRefreshGenerationRef.current += 1;
+        manifestFetchInFlightRef.current = null;
+        setIsSyncingTeam(false);
+    };
+
+    const teamSyncIsCurrent = (
+        generation: number,
+        manifestUrl: string,
+        teamId: string,
+    ) => generation === teamRefreshGenerationRef.current
+        && prefsRef.current.teamCatalogEnabled === true
+        && prefsRef.current.teamManifestUrl === manifestUrl
+        && (prefsRef.current.team || '') === (teamId || '');
+
+    const teamRequestPayload = (
+        generation: number,
+        identity: { enabled: boolean; manifestUrl: string; teamId: string },
+        extra: Record<string, unknown> = {},
+    ) => ({
+        ...extra,
+        identity: Object.freeze({ ...identity }),
+        requestGeneration: generation,
+    });
+
+    const createResetMirrorAction = (
+        transaction: ResetTransaction,
+    ): PrefsMirrorAction => createPrefsMirrorAction(
+        'reset',
+        transaction.identity,
+        () => undefined,
+        undefined,
+        { token: transaction.token },
+    );
+
+    function updateResetTransaction(
+        token: number,
+        patch: Partial<Pick<ResetTransaction, 'phase' | 'retryAction'>>,
+    ): ResetTransaction | null {
+        const current = resetTransactionRef.current;
+        if (!current || current.token !== token) return null;
+        const next = Object.freeze({ ...current, ...patch });
+        resetTransactionRef.current = next;
+        return next;
+    }
+
+    function beginResetCleanupAttempt(token: number): ResetCleanupAttempt | null {
+        const transaction = resetTransactionRef.current;
+        if (
+            !transaction
+            || transaction.token !== token
+            || transaction.phase === 'complete'
+        ) return null;
+        if (resetCleanupAttemptRef.current?.token === token) return null;
+        const attempt = Object.freeze({
+            id: ++resetCleanupAttemptIdRef.current,
+            token,
         });
+        resetCleanupAttemptRef.current = attempt;
+        return attempt;
+    }
+
+    function resetCleanupAttemptIsCurrent(
+        attempt: ResetCleanupAttempt,
+    ): boolean {
+        return resetCleanupAttemptRef.current?.id === attempt.id
+            && resetCleanupAttemptRef.current.token === attempt.token
+            && resetTransactionRef.current?.token === attempt.token
+            && resetTransactionRef.current.phase !== 'complete';
+    }
+
+    function finishResetCleanupAttempt(attempt: ResetCleanupAttempt): void {
+        if (resetCleanupAttemptRef.current?.id === attempt.id) {
+            resetCleanupAttemptRef.current = null;
+        }
+    }
+
+    function retainResetRetry(
+        transaction: ResetTransaction,
+        retryAction: Exclude<ResetRetryAction, null>,
+    ) {
+        const current = resetTransactionRef.current;
+        if (
+            !current
+            || current.token !== transaction.token
+            || current.phase === 'complete'
+        ) return;
+
+        if (retryAction === 'local-cleanup') {
+            const scope = resetBookmarkScope(transaction);
+            if (scope === 'not-owner') return;
+            if (scope === 'superseded') {
+                supersedeResetLocalCleanup(transaction);
+                return;
+            }
+        }
+
+        updateResetTransaction(transaction.token, {
+            phase: retryAction === 'sw'
+                ? 'sw-pending'
+                : 'local-cleanup-pending',
+            retryAction,
+        });
+        setResetIncomplete(true);
+    }
+
+    type ResetBookmarkScope = 'current' | 'superseded' | 'not-owner';
+
+    function resetBookmarkScope(
+        transaction: ResetTransaction,
+    ): ResetBookmarkScope {
+        const current = resetTransactionRef.current;
+        if (!current || current.token !== transaction.token) {
+            return 'not-owner';
+        }
+        return bookmarkGenerationRef.current === transaction.bookmarkGeneration
+            ? 'current'
+            : 'superseded';
+    }
+
+    function supersedeResetLocalCleanup(transaction: ResetTransaction): void {
+        const current = resetTransactionRef.current;
+        if (
+            !current
+            || current.token !== transaction.token
+            || current.phase !== 'local-cleanup-pending'
+            || current.retryAction !== 'local-cleanup'
+            || bookmarkGenerationRef.current === current.bookmarkGeneration
+        ) return;
+        resetTransactionRef.current = null;
+        resetCleanupAttemptRef.current = null;
+        setResetIncomplete(false);
+    }
+
+    function onBookmarkGenerationAdvanced(): void {
+        const current = resetTransactionRef.current;
+        if (current && current.phase === 'local-cleanup-pending') {
+            supersedeResetLocalCleanup(current);
+        }
+    }
+
+    function resetTeamScopeIsCurrent(transaction: ResetTransaction): boolean {
+        return resetTransactionRef.current?.token === transaction.token
+            && resetTokenRef.current === transaction.token
+            && teamRefreshGenerationRef.current === transaction.requestGeneration
+            && mirrorIdentityMatchesPrefs(transaction.identity, prefsRef.current);
+    }
+
+    function resetBookmarkScopeIsCurrent(transaction: ResetTransaction): boolean {
+        const scope = resetBookmarkScope(transaction);
+        if (scope === 'superseded') supersedeResetLocalCleanup(transaction);
+        return scope === 'current';
+    }
+
+    function resetDefaultsAreCurrent(): boolean {
+        return (Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>)
+            .every(key => prefsRef.current[key] === DEFAULT_PREFS[key]);
+    }
+
+    function completeResetCleanup(
+        transaction: ResetTransaction,
+        completion: 'full-reset' | 'newer-bookmarks-preserved' = 'full-reset',
+    ) {
+        if (resetTransactionRef.current?.token !== transaction.token) return;
+        updateResetTransaction(transaction.token, {
+            phase: 'complete',
+            retryAction: null,
+        });
+        resetCleanupAttemptRef.current = null;
+        setResetIncomplete(false);
+        showSuccess(
+            t(completion === 'newer-bookmarks-preserved'
+                ? 'resetCleanupComplete'
+                : (resetDefaultsAreCurrent()
+                    ? 'resetComplete'
+                    : 'resetCleanupComplete')),
+            2000,
+        );
+    }
+
+    function runResetTeamCleanupAfterBookmarkSupersession(
+        transaction: ResetTransaction,
+        attempt: ResetCleanupAttempt,
+    ) {
+        if (!resetCleanupAttemptIsCurrent(attempt)) return;
+        const pending = updateResetTransaction(transaction.token, {
+            phase: 'local-cleanup-pending',
+            retryAction: 'team-cleanup',
+        });
+        if (!pending) {
+            finishResetCleanupAttempt(attempt);
+            return;
+        }
+        if (!resetTeamScopeIsCurrent(pending)) {
+            finishResetCleanupAttempt(attempt);
+            completeResetCleanup(pending, 'newer-bookmarks-preserved');
+            return;
+        }
+        try {
+            chrome.storage.local.remove(
+                'dh_team_collapsed_labels',
+                () => {
+                    if (!resetCleanupAttemptIsCurrent(attempt)) return;
+                    if (chrome.runtime.lastError) {
+                        finishResetCleanupAttempt(attempt);
+                        if (resetTeamScopeIsCurrent(pending)) {
+                            retainResetRetry(pending, 'team-cleanup');
+                        } else {
+                            completeResetCleanup(
+                                pending,
+                                'newer-bookmarks-preserved',
+                            );
+                        }
+                        return;
+                    }
+                    if (resetTeamScopeIsCurrent(pending)) {
+                        setTeamItems([]);
+                        setTeamSynced("");
+                        setTeamCollapsedLabels(new Set());
+                    }
+                    finishResetCleanupAttempt(attempt);
+                    completeResetCleanup(
+                        pending,
+                        'newer-bookmarks-preserved',
+                    );
+                },
+            );
+        } catch {
+            if (!resetCleanupAttemptIsCurrent(attempt)) return;
+            finishResetCleanupAttempt(attempt);
+            if (resetTeamScopeIsCurrent(pending)) {
+                retainResetRetry(pending, 'team-cleanup');
+            } else {
+                completeResetCleanup(pending, 'newer-bookmarks-preserved');
+            }
+        }
+    }
+
+    function runResetLocalCleanup(
+        transaction: ResetTransaction,
+        attempt: ResetCleanupAttempt,
+    ) {
+        if (!resetCleanupAttemptIsCurrent(attempt)) return;
+        const pending = updateResetTransaction(transaction.token, {
+            phase: 'local-cleanup-pending',
+            retryAction: 'local-cleanup',
+        });
+        if (!pending) return;
+
+        void (async () => {
+            try {
+                const defaultsResult = await readDefaultItems();
+                if (!resetCleanupAttemptIsCurrent(attempt)) return;
+                if (defaultsResult.kind === 'failed') {
+                    if (resetBookmarkScopeIsCurrent(pending)) {
+                        finishResetCleanupAttempt(attempt);
+                        retainResetRetry(pending, 'local-cleanup');
+                    }
+                    return;
+                }
+                if (!resetBookmarkScopeIsCurrent(pending)) return;
+                const defaults = collapseBookmarkFolders(
+                    defaultsResult.items,
+                    () => resetBookmarkScopeIsCurrent(pending),
+                );
+                if (!defaults) {
+                    if (resetBookmarkScopeIsCurrent(pending)) {
+                        finishResetCleanupAttempt(attempt);
+                        retainResetRetry(pending, 'local-cleanup');
+                    }
+                    return;
+                }
+
+                if (resetTeamScopeIsCurrent(pending)) {
+                    try {
+                        await new Promise<void>((resolve, reject) => {
+                            try {
+                                chrome.storage.local.remove(
+                                    'dh_team_collapsed_labels',
+                                    () => {
+                                        if (chrome.runtime.lastError) {
+                                            reject(new Error(
+                                                'Reset team collapse cleanup failed',
+                                            ));
+                                            return;
+                                        }
+                                        resolve();
+                                    },
+                                );
+                            } catch {
+                                reject(new Error(
+                                    'Reset team collapse cleanup failed',
+                                ));
+                            }
+                        });
+                        if (!resetCleanupAttemptIsCurrent(attempt)) return;
+                        if (resetTeamScopeIsCurrent(pending)) {
+                            setTeamItems([]);
+                            setTeamSynced("");
+                            setTeamCollapsedLabels(new Set());
+                        }
+                    } catch {
+                        if (!resetCleanupAttemptIsCurrent(attempt)) return;
+                        if (resetBookmarkScopeIsCurrent(pending)) {
+                            finishResetCleanupAttempt(attempt);
+                            retainResetRetry(pending, 'local-cleanup');
+                        }
+                        return;
+                    }
+                }
+
+                const writeResult = await queueBookmarkStorage(
+                    defaults,
+                    pending.bookmarkGeneration,
+                );
+                if (!resetCleanupAttemptIsCurrent(attempt)) return;
+                if (writeResult !== 'committed') {
+                    finishResetCleanupAttempt(attempt);
+                    resetBookmarkScopeIsCurrent(pending);
+                    return;
+                }
+                if (!resetBookmarkScopeIsCurrent(pending)) return;
+                applyItemsSnapshot(defaults);
+                finishResetCleanupAttempt(attempt);
+                completeResetCleanup(pending);
+            } catch {
+                if (!resetCleanupAttemptIsCurrent(attempt)) return;
+                if (resetBookmarkScopeIsCurrent(pending)) {
+                    finishResetCleanupAttempt(attempt);
+                    retainResetRetry(pending, 'local-cleanup');
+                }
+            }
+        })();
+    }
+
+    function dispatchResetServiceWorker(
+        transaction: ResetTransaction,
+        attempt: ResetCleanupAttempt,
+    ) {
+        if (!resetCleanupAttemptIsCurrent(attempt)) return;
+        const pending = updateResetTransaction(transaction.token, {
+            phase: 'sw-pending',
+            retryAction: 'sw',
+        });
+        if (!pending) return;
+        const userRevisionAtDispatch = userTouchedRevisionRef.current;
+
+        chrome.runtime.sendMessage({
+            type: "RESET_EXTENSION_STATE",
+            payload: {
+                ...teamRequestPayload(
+                    pending.requestGeneration,
+                    pending.identity,
+                ),
+                resetToken: pending.token,
+            },
+        }, (response) => {
+            if (!resetCleanupAttemptIsCurrent(attempt)) return;
+            const responseIdentity = response?.data?.identity;
+            const responseMatches = response?.data?.resetToken === pending.token
+                && response?.data?.requestGeneration === pending.requestGeneration
+                && responseIdentity?.enabled === pending.identity.enabled
+                && responseIdentity?.manifestUrl === pending.identity.manifestUrl
+                && (responseIdentity?.teamId || '') === pending.identity.teamId;
+            if (
+                chrome.runtime.lastError
+                || response?.status !== 'success'
+                || response?.data?.syncStatus !== 'committed'
+                || !responseMatches
+            ) {
+                finishResetCleanupAttempt(attempt);
+                retainResetRetry(pending, 'sw');
+                return;
+            }
+
+            const localPending = updateResetTransaction(pending.token, {
+                phase: 'local-cleanup-pending',
+                retryAction: 'local-cleanup',
+            });
+            if (!localPending) return;
+            const bookmarksSuperseded = bookmarkGenerationRef.current
+                !== pending.bookmarkGeneration;
+            if (
+                userTouchedRevisionRef.current !== userRevisionAtDispatch
+                && !bookmarksSuperseded
+            ) {
+                finishResetCleanupAttempt(attempt);
+                setResetIncomplete(true);
+                return;
+            }
+            if (bookmarksSuperseded) {
+                runResetTeamCleanupAfterBookmarkSupersession(
+                    localPending,
+                    attempt,
+                );
+                return;
+            }
+            runResetLocalCleanup(localPending, attempt);
+        });
+    }
+
+    const handleResetCleanupRetry = () => {
+        const transaction = resetTransactionRef.current;
+        if (!transaction) return;
+        const attempt = beginResetCleanupAttempt(transaction.token);
+        if (!attempt) return;
+        clearStatus();
+        if (transaction.retryAction === 'sw') {
+            dispatchResetServiceWorker(transaction, attempt);
+        } else if (transaction.retryAction === 'local-cleanup') {
+            runResetLocalCleanup(transaction, attempt);
+        } else if (transaction.retryAction === 'team-cleanup') {
+            runResetTeamCleanupAfterBookmarkSupersession(transaction, attempt);
+        } else {
+            finishResetCleanupAttempt(attempt);
+        }
     };
 
     const handleReset = () => {
         if (confirm(t('resetConfirm'))) {
+            clearStatus();
+            invalidateTeamRefresh();
+            userInstructionsEditTokenRef.current = {
+                revision: userInstructionsEditTokenRef.current.revision + 1,
+                value: DEFAULT_PREFS.userInstructions ?? '',
+            };
+            userPromptEditTokenRef.current = {
+                revision: userPromptEditTokenRef.current.revision + 1,
+                value: DEFAULT_PREFS.userPrompt ?? '',
+            };
             // Mark ALL prefs keys as user-touched so a late host hydration
             // response cannot un-reset us. DEFAULT_PREFS is the user's
             // explicit choice — protect it from being merged-over. Without
             // this, a reset during the hydration window would be reverted
             // when host get_config returns the pre-reset values.
-            (Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>).forEach(
-                k => userTouchedFieldsRef.current.add(k)
-            );
-            setPrefs(DEFAULT_PREFS);
-            chrome.storage.local.remove(["dh_prefs", "dh_items", "dh_team", "dh_team_items", "dh_team_etag", "dh_team_manifest", "dh_team_manifest_etag", "dh_team_synced", "dh_team_collapsed_labels", "dh_last_analysis", "dh_pending_analysis"], () => {
-                // Wrap loaded items in collapseFolders so Reset produces the
-                // same folded-by-default tree the mount path produces. Without
-                // this, items.json defaults render fully expanded after Reset
-                // because items.json ships no `collapsed` keys — every folder
-                // resolves to `undefined`, which `effectiveCollapsed` treats
-                // as expanded.
-                loadItems().then(loaded => setItems(collapseFolders(loaded)));
-                setTeamItems([]);
-                setTeamSynced("");
-                setTeamCollapsedLabels(new Set());
-                // Sync host with default prefs so config.json matches the
-                // freshly-reset extension state. persistPrefs writes dh_prefs
-                // back too — that's OK because we just removed it; the
-                // overwrite is the same defaults we'd otherwise hydrate from
-                // DEFAULT_PREFS on next load.
-                persistPrefs(DEFAULT_PREFS);
-                showSuccess(t('resetComplete'), 2000);
+            markUserTouched(Object.keys(DEFAULT_PREFS) as Array<keyof Preferences>);
+            setCurrentPrefs(DEFAULT_PREFS);
+            const resetGeneration = teamRefreshGenerationRef.current;
+            const resetIdentity = {
+                enabled: false,
+                manifestUrl: '',
+                teamId: '',
+            };
+            const resetToken = ++resetTokenRef.current;
+            resetCleanupAttemptRef.current = null;
+            const bookmarkResetGeneration = mutatePersonalItems();
+            const transaction = Object.freeze({
+                token: resetToken,
+                identity: Object.freeze({ ...resetIdentity }),
+                requestGeneration: resetGeneration,
+                bookmarkGeneration: bookmarkResetGeneration,
+                phase: 'host-pending' as const,
+                retryAction: null,
+            });
+            resetTransactionRef.current = transaction;
+            setResetIncomplete(false);
+            lastSuccessfulManifestUrlRef.current = '';
+            persistPrefs(DEFAULT_PREFS, {
+                mirrorAction: createResetMirrorAction(transaction),
             });
         }
     };
 
     // --- Team Catalog Handlers ---
     const handleTeamChange = (teamId: string) => {
+        invalidateTeamRefresh();
+        const generation = teamRefreshGenerationRef.current;
+        const manifestUrl = prefsRef.current.teamManifestUrl || '';
         const selectedTeam = teamList.find(t => t.id === teamId);
+        setTeamItems([]);
+        setTeamSynced("");
+        setTeamFetchError(null);
         // Plan A: team selection is "instant persist". Symptom 3 fix —
         // previously this only called setPrefs (React state), so refreshing
         // the page would show the dropdown reverted to the old team while
         // dh_team_items was already cleared (the SW message below ran
         // immediately). Now updatePref writes dh_prefs to storage AND fires
         // update_config to host in a single shot, keeping state aligned.
-        updatePref({
+        const dispatchTeamSync = () => {
+            if (!teamSyncIsCurrent(generation, manifestUrl, teamId)) return;
+            setIsSyncingTeam(true);
+            chrome.runtime.sendMessage({
+                type: "SYNC_TEAM_CATALOG",
+                payload: teamRequestPayload(generation, {
+                    enabled: true,
+                    manifestUrl,
+                    teamId,
+                }),
+            }, (response) => {
+                if (!teamSyncIsCurrent(generation, manifestUrl, teamId)) return;
+                setIsSyncingTeam(false);
+                if (chrome.runtime.lastError) {
+                    showError(`${t('teamSyncFailed')}: ${chrome.runtime.lastError.message}`, 3000);
+                    return;
+                }
+                const syncStatus = response?.data?.syncStatus;
+                const responseIdentity = response?.data?.identity;
+                if (
+                    (response?.data?.requestGeneration !== undefined
+                        && response.data.requestGeneration !== generation)
+                    || (responseIdentity !== undefined && (
+                        responseIdentity?.enabled !== true
+                        || responseIdentity?.manifestUrl !== manifestUrl
+                        || (responseIdentity?.teamId || '') !== (teamId || '')
+                    ))
+                ) return;
+                if (response?.status === "success") {
+                    if (syncStatus === 'committed' || syncStatus === 'unchanged') {
+                        setTeamItems(response.data.items || []);
+                        setTeamSynced(response.data.syncedAt || new Date().toISOString());
+                    }
+                } else {
+                    showError(`${t('teamSyncFailed')}: ${safeErrorText(
+                        [response?.error, response?.message],
+                        t('unknownError'),
+                    )}`, 3000);
+                }
+            });
+        };
+        const dispatchTeamClear = () => {
+            if (
+                generation !== teamRefreshGenerationRef.current
+                || prefsRef.current.teamCatalogEnabled !== true
+                || prefsRef.current.teamManifestUrl !== manifestUrl
+                || (prefsRef.current.team || '') !== ''
+            ) return;
+            chrome.runtime.sendMessage({
+                type: "SYNC_TEAM_CATALOG",
+                payload: teamRequestPayload(generation, {
+                    enabled: true,
+                    manifestUrl,
+                    teamId: '',
+                }),
+            });
+        };
+        const next = updateCurrentPrefs({
             team: teamId || undefined,
             teamLabel: selectedTeam?.label || undefined,
         });
-
-        if (!teamId) {
-            // Clear team data
-            setTeamItems([]);
-            setTeamSynced("");
-            chrome.runtime.sendMessage({
-                type: "SYNC_TEAM_CATALOG",
-                payload: { teamId: null }
-            });
-            return;
-        }
-
-        // Trigger sync
-        setIsSyncingTeam(true);
-        chrome.runtime.sendMessage({
-            type: "SYNC_TEAM_CATALOG",
-            payload: { teamId }
-        }, (response) => {
-            setIsSyncingTeam(false);
-            if (chrome.runtime.lastError) {
-                showError(`${t('teamSyncFailed')}: ${chrome.runtime.lastError.message}`, 3000);
-                return;
-            }
-            if (response?.status === "success") {
-                setTeamItems(response.data.items || []);
-                setTeamSynced(new Date().toISOString());
-            } else {
-                showError(`${t('teamSyncFailed')}: ${response?.error || t('unknownError')}`, 3000);
-            }
+        markUserTouched(['team', 'teamLabel']);
+        persistPrefs(next, {
+            mirrorAction: createPrefsMirrorAction(
+                teamId ? 'team-sync' : 'team-clear',
+                {
+                    enabled: true,
+                    manifestUrl,
+                    teamId,
+                },
+                teamId ? dispatchTeamSync : dispatchTeamClear,
+            ),
         });
+
+        if (!teamId) return;
+
+        // Sync starts only after the matching dh_prefs mirror is committed.
     };
 
     // Model & Performance: fetch the available Copilot models from the host
@@ -1352,51 +2515,76 @@ const OptionsInner: React.FC = () => {
     }, []);
 
     const handleTeamRefresh = async () => {
-        if (!prefs.teamManifestUrl || !prefs.team) return;
+        const manifestUrl = prefsRef.current.teamManifestUrl;
+        const teamId = prefsRef.current.team || '';
+        if (!manifestUrl || !teamId) return;
+        const generation = ++teamRefreshGenerationRef.current;
+        const refreshIsCurrent = () => teamSyncIsCurrent(
+            generation,
+            manifestUrl,
+            teamId,
+        );
         setIsSyncingTeam(true);
         setTeamFetchError(null);
-        try {
-            const { syncTeamBookmarks } = await import('../utils/teamCatalog');
-            const result = await syncTeamBookmarks(prefs.teamManifestUrl, prefs.team);
-
-            // Always render whatever items came back (cache-on-failure) so
-            // the user isn't left with an empty list.
-            setTeamItems(result.items);
-
-            if (result.failure) {
+        chrome.runtime.sendMessage({
+            type: "SYNC_TEAM_CATALOG",
+            payload: teamRequestPayload(generation, {
+                enabled: true,
+                manifestUrl,
+                teamId,
+            }),
+        }, async (response) => {
+            if (!refreshIsCurrent()) return;
+            if (chrome.runtime.lastError) {
+                setTeamFetchError({ kind: 'network' });
+                setIsSyncingTeam(false);
+                return;
+            }
+            const syncStatus = response?.data?.syncStatus;
+            const responseIdentity = response?.data?.identity;
+            if (
+                (response?.data?.requestGeneration !== undefined
+                    && response.data.requestGeneration !== generation)
+                || (responseIdentity !== undefined && (
+                    responseIdentity?.enabled !== true
+                    || responseIdentity?.manifestUrl !== manifestUrl
+                    || (responseIdentity?.teamId || '') !== teamId
+                ))
+            ) {
+                setIsSyncingTeam(false);
+                return;
+            }
+            if (response?.status !== 'success') {
+                setTeamItems([]);
+                setTeamSynced('');
                 // Refresh actually failed. Show the classified error and
                 // — crucially — do NOT bump the synced-at timestamp. The
                 // pre-fix behaviour of setTeamSynced(now) on a silently-
                 // failed refresh was exactly what the SAS-expiry bug
                 // report was about.
                 setTeamFetchError({
-                    kind: result.failure.kind,
-                    httpStatus: result.failure.httpStatus,
+                    kind: response?.errorKind || 'unknown',
+                    httpStatus: response?.httpStatus,
                 });
-                if (result.failure.kind === 'auth') {
+                if (response?.errorKind === 'auth') {
                     showError(t('manifestFetchAuthToast'), 6000);
                 }
-            } else {
-                setTeamSynced(new Date().toISOString());
+            } else if (syncStatus === 'committed' || syncStatus === 'unchanged') {
                 // Refresh the dropdown if the manifest changed during this sync
                 const cached = await new Promise<any>((resolve) => {
                     chrome.storage.local.get(['dh_team_manifest'], resolve);
                 });
+                if (!refreshIsCurrent()) return;
+                setTeamItems(response.data.items || []);
+                setTeamSynced(response.data.syncedAt || new Date().toISOString());
                 if (cached.dh_team_manifest && Array.isArray(cached.dh_team_manifest.teams)) {
                     setTeamList(
                         cached.dh_team_manifest.teams.map((t: any) => ({ id: t.id, label: t.label })),
                     );
                 }
             }
-        } catch (e) {
-            console.warn('[Options] Team refresh failed:', e);
-            // Exception here (not caught inside syncTeamBookmarks) means
-            // module load / storage access broke — more severe than a
-            // fetch failure. Report generic.
-            setTeamFetchError({ kind: 'unknown' });
-        } finally {
-            setIsSyncingTeam(false);
-        }
+            if (refreshIsCurrent()) setIsSyncingTeam(false);
+        });
     };
 
     // Listen for updates
@@ -1417,25 +2605,36 @@ const OptionsInner: React.FC = () => {
     }, [t]);
 
     useEffect(() => {
-        const handleRuntimeMsg = (message: any) => {
-            if (message.type === "NATIVE_UPDATE_AVAILABLE") {
+        const handleRuntimeMsg = (message: unknown) => {
+            const type = ownDataProperty(message, 'type');
+            if (type.kind !== 'value') return;
+            if (type.value === "NATIVE_UPDATE_AVAILABLE") {
+                const updateMessage = message as {
+                    payload: { version: string; url: string };
+                };
                 const currentVer = getExtensionVersion();
-                if (message.payload.version === currentVer) {
+                if (updateMessage.payload.version === currentVer) {
                     setUpdateAvailable(null);
                     chrome.storage.local.remove("pending_update");
                     return;
                 }
-                console.log("[Options] Received update available:", message.payload);
-                setUpdateAvailable(message.payload);
-                showSuccess(`${message.payload.version.replace(/^v?/, 'v')} ${tRef.current('availableForUpdate')}`, 5000);
+                console.log("[Options] Received update available:", updateMessage.payload);
+                setUpdateAvailable(updateMessage.payload);
+                showSuccess(`${updateMessage.payload.version.replace(/^v?/, 'v')} ${tRef.current('availableForUpdate')}`, 5000);
             }
             
-            if (message.type === "NATIVE_UPDATE_NOT_AVAILABLE") {
+            if (type.value === "NATIVE_UPDATE_NOT_AVAILABLE") {
                 showSuccess(tRef.current('upToDate'), 3000);
             }
 
-            if (message.type === "NATIVE_UPDATE_ERROR") {
-                showError(`${tRef.current('checkFailed')}: ${message.payload.error}`, 5000);
+            if (type.value === "NATIVE_UPDATE_ERROR") {
+                const payload = ownDataProperty(message, 'payload');
+                const candidate = payload.kind === 'value'
+                    ? ownDataProperty(payload.value, 'error')
+                    : { kind: 'invalid' as const };
+                showError(safeErrorText([
+                    candidate.kind === 'value' ? candidate.value : undefined,
+                ], tRef.current('updateCheckFailed')), 5000);
             }
         };
 
@@ -1495,7 +2694,10 @@ const OptionsInner: React.FC = () => {
                     chrome.runtime.reload();
                 }, 1000);
             } else {
-                showError(`${t('updateFailed')}: ` + (response?.error || t('unknownError')));
+                showError(`${t('updateFailed')}: ${safeErrorText(
+                    [response?.error, response?.message],
+                    t('unknownError'),
+                )}`);
             }
         });
     };
@@ -1529,14 +2731,14 @@ const OptionsInner: React.FC = () => {
     // team items render with a Lock icon (existing isTeamItem branch in
     // renderRow at line ~419) and cannot be dragged (canDrag: !isTeamItem
     // at line ~259). Personal items always occupy the first items.length
-    // slots so path-based handlers (setItems(prev => updateItemAt(...)))
+    // slots so path-based mutation handlers remain correct
     // remain correct without translation.
     // Spec § 3.3 / § 3.5.
     //
     // CRITICAL: read-only handlers (getSelectedFolderName, isSelectedPathTeam)
     // resolve paths against THIS merged list because selectedPath comes from
     // the rendered tree which is also merged. Mutation handlers (addItemAt,
-    // updateItemAt, deleteItemAt + setItems) continue to operate on personal
+    // updateItemAt, deleteItemAt + mutatePersonalItems) operate on personal
     // `items` only. Calling sites are responsible for blocking mutations
     // against team paths (see Add button at L~1825).
     const mergedItems = useMemo(() => {
@@ -1635,7 +2837,7 @@ const OptionsInner: React.FC = () => {
     const moveItem = (dragPath: number[], hoverPath: number[], placement: 'before' | 'after' | 'inside') => {
         // Defense in depth: team items live at indices >= items.length in
         // the merged view. Mutation handlers operate on personal-only state
-        // (items) via setItems. If a drop accidentally targets a team item
+        // (items) via mutatePersonalItems. If a drop targets a team item
         // path, the resulting updateItemAt / addItemAt call would silently
         // miss (out-of-bounds into personal items). canDrop on the team
         // rows is the primary defense; this guard is the belt-and-braces.
@@ -1726,7 +2928,7 @@ const OptionsInner: React.FC = () => {
         };
         
         const finalItems = insertOp(finalInsertPath, removed, itemsAfterRemoval, placement);
-        setItems(finalItems);
+        mutatePersonalItems(finalItems);
     };
 
     // Bulk Actions
@@ -1743,7 +2945,7 @@ const OptionsInner: React.FC = () => {
                 return item;
             });
         };
-        setItems(prev => traverse(prev));
+        mutatePersonalItems(prev => traverse(prev));
 
         // Team folders can't persist collapsed via item.collapsed (next SW
         // sync wipes dh_team_items), so DraggableItem keys them into the
@@ -1780,9 +2982,9 @@ const OptionsInner: React.FC = () => {
         reader.onload = (ev) => {
             try {
                 const text = ev.target?.result as string;
-                const json = JSON.parse(text);
-                const newItems = Array.isArray(json) ? json : (json.items || []);
-                setItems(newItems);
+                const newItems = parseBookmarkDocument(JSON.parse(text));
+                if (!newItems) throw new Error('Bookmark schema validation failed');
+                mutatePersonalItems(newItems);
                 showSuccess(t('importSuccess'), 2000);
             } catch (err) {
                 alert(t('parseJsonFailed'));
@@ -1817,7 +3019,7 @@ const OptionsInner: React.FC = () => {
                         path={pathPrefix}
                         moveItem={moveItem}
                         renderList={renderList}
-                        setItems={setItems}
+                        mutateItems={mutatePersonalItems}
                         setEditingItemPath={setEditingItemPath}
                         editingItemPath={editingItemPath}
                         updateItemAt={updateItemAt}
@@ -1834,6 +3036,42 @@ const OptionsInner: React.FC = () => {
             </ul>
         );
     };
+
+    const activeIssue = prefsMirrorIssue ?? configUpdateIssue ?? promptHealthIssue;
+    const issueDetail = activeIssue
+        ? localizePromptSourceError(
+            activeIssue.errorCode,
+            safeErrorText([activeIssue.fallback], t('configNotSaved')),
+            t,
+        )
+        : '';
+    const issuePrefix = prefsMirrorIssue || configUpdateIssue
+        ? t((prefsMirrorIssue ?? configUpdateIssue)!.configSaved
+            ? 'configSavedRefreshFailed'
+            : 'configNotSaved')
+        : '';
+    const resetIssue = resetIncomplete ? t('resetIncomplete') : '';
+    const bookmarkIssue = bookmarkPersistenceIssue
+        ? t('bookmarkPersistenceWarning')
+        : '';
+    const bookmarkLoadWarning = bookmarkLoadIssue === 'bookmark_storage_read_failed'
+        ? t('bookmarkStorageReadFailed')
+        : bookmarkLoadIssue === 'bookmark_storage_invalid'
+            ? t('bookmarkStorageInvalid')
+            : bookmarkLoadIssue === 'bookmark_defaults_unreadable'
+                ? t('bookmarkDefaultsUnreadable')
+                : '';
+    const configIssue = activeIssue
+        ? `${issuePrefix}${issuePrefix && issueDetail ? ' ' : ''}${issueDetail}`
+        : '';
+    const persistenceWarning = [
+        resetIssue,
+        bookmarkIssue,
+        bookmarkLoadWarning,
+        configIssue,
+    ]
+        .filter(Boolean)
+        .join(' ');
 
     return (
             <DndProvider backend={HTML5Backend}>
@@ -1878,6 +3116,27 @@ const OptionsInner: React.FC = () => {
                             </button>
                         </div>
                     </div>
+
+                    {persistenceWarning && (
+                        <div
+                            className="bg-amber-50 text-amber-800 text-center py-3 px-4 font-medium text-sm border-b border-amber-200 flex items-center justify-center gap-2"
+                            role="alert"
+                        >
+                            <div className="w-2 h-2 bg-amber-500 rounded-full shrink-0"></div>
+                            <span>{persistenceWarning}</span>
+                            {resetIncomplete
+                                && resetTransactionRef.current?.retryAction
+                                && (
+                                    <button
+                                        type="button"
+                                        onClick={handleResetCleanupRetry}
+                                        className="ml-2 rounded-md border border-amber-400 bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                                    >
+                                        {t('retryResetCleanup')}
+                                    </button>
+                                )}
+                        </div>
+                    )}
 
                     {status && (
                         <div
@@ -2108,15 +3367,12 @@ const OptionsInner: React.FC = () => {
                                                     // clamped value on next get_config (e.g. restart),
                                                     // which would otherwise be a surprising silent
                                                     // change for the user.
-                                                    setPrefs(prev => {
-                                                        const raw = Number(prev.analyzeTimeoutSeconds ?? 1200);
-                                                        const clamped = Number.isFinite(raw)
-                                                            ? Math.max(60, Math.min(3600, Math.round(raw)))
-                                                            : 1200;
-                                                        const next = { ...prev, analyzeTimeoutSeconds: clamped };
-                                                        persistPrefs(next);
-                                                        return next;
-                                                    });
+                                                    const raw = Number(prefsRef.current.analyzeTimeoutSeconds ?? 1200);
+                                                    const clamped = Number.isFinite(raw)
+                                                        ? Math.max(60, Math.min(3600, Math.round(raw)))
+                                                        : 1200;
+                                                    const next = updateCurrentPrefs({ analyzeTimeoutSeconds: clamped });
+                                                    persistPrefs(next);
                                                 }}
                                                 className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm"
                                             />
@@ -2155,9 +3411,13 @@ const OptionsInner: React.FC = () => {
                                                     type="checkbox"
                                                     id="teamCatalogEnabled"
                                                     checked={prefs.teamCatalogEnabled === true}
-                                                    onChange={(e) => {
-                                                        const enabled = e.target.checked;
-                                                        updatePref({ teamCatalogEnabled: enabled });
+                                                            onChange={(e) => {
+                                                                const enabled = e.target.checked;
+                                                                invalidateTeamRefresh();
+                                                                setTeamItems([]);
+                                                                setTeamSynced('');
+                                                                setTeamFetchError(null);
+                                                                updatePref({ teamCatalogEnabled: enabled });
                                                         try {
                                                             trackEvent('Team Catalog Toggled', { enabled });
                                                         } catch { /* telemetry never blocks UX */ }
@@ -2186,8 +3446,13 @@ const OptionsInner: React.FC = () => {
                                                             // staring at it after they've already started
                                                             // fixing the typo.
                                                             if (manifestUrlInvalid) setManifestUrlInvalid(false);
-                                                            userTouchedFieldsRef.current.add('teamManifestUrl');
-                                                            setPrefs(prev => ({ ...prev, teamManifestUrl: e.target.value }));
+                                                            invalidateTeamRefresh();
+                                                            setTeamList([]);
+                                                            setTeamItems([]);
+                                                            setTeamSynced('');
+                                                            setTeamFetchError(null);
+                                                            markUserTouched(['teamManifestUrl']);
+                                                            updateCurrentPrefs({ teamManifestUrl: e.target.value });
                                                         }}
                                                         onBlur={() => {
                                                             // Plan A: persist on focus loss. Three cases:
@@ -2211,15 +3476,32 @@ const OptionsInner: React.FC = () => {
                                                                 // (a) clear-out
                                                                 setManifestUrlInvalid(false);
                                                                 (async () => {
-                                                                    const { clearTeamBookmarks } = await import('../utils/teamCatalog');
-                                                                    await clearTeamBookmarks();
+                                                                    const generation = teamRefreshGenerationRef.current;
+                                                                    const next = updateCurrentPrefs({ teamManifestUrl: '', team: undefined, teamLabel: undefined });
+                                                                    markUserTouched(['teamManifestUrl', 'team', 'teamLabel']);
+                                                                    persistPrefs(next, { mirrorAction: createPrefsMirrorAction(
+                                                                    'team-clear',
+                                                                    {
+                                                                        enabled: true,
+                                                                        manifestUrl: '',
+                                                                        teamId: '',
+                                                                    },
+                                                                    () => { void chrome.runtime.sendMessage({
+                                                                        type: 'SYNC_TEAM_CATALOG',
+                                                                        payload: teamRequestPayload(generation, {
+                                                                            enabled: true,
+                                                                            manifestUrl: '',
+                                                                            teamId: '',
+                                                                        }, { resetCache: true }),
+                                                                    });
                                                                     setTeamList([]);
                                                                     setTeamItems([]);
                                                                     setTeamCollapsedLabels(new Set());
                                                                     setTeamSynced('');
                                                                     setTeamFetchError(null);
-                                                                    lastFetchedManifestUrlRef.current = '';
-                                                                    updatePref({ teamManifestUrl: '', team: '', teamLabel: '' });
+                                                                    lastSuccessfulManifestUrlRef.current = '';
+                                                                    },
+                                                                    ) });
                                                                 })();
                                                                 return;
                                                             }
@@ -2234,7 +3516,7 @@ const OptionsInner: React.FC = () => {
                                                             }
                                                             // (b) valid: persist + fetch if changed.
                                                             setManifestUrlInvalid(false);
-                                                            persistPrefs(prefs, { fetchManifest: true });
+                                                            persistPrefs(prefsRef.current, { fetchManifest: true });
                                                         }}
                                                         className={`w-full px-3 py-2 border rounded-lg outline-none transition-all text-sm bg-white ${
                                                             manifestUrlInvalid
@@ -2323,24 +3605,32 @@ const OptionsInner: React.FC = () => {
                                                 </p>
                                                 <input
                                                     type="text"
+                                                    name="rootPath"
+                                                    aria-label={t('rootPath')}
                                                     value={prefs.rootPath || ""}
-                                                    onChange={(e) => { userTouchedFieldsRef.current.add('rootPath'); setPrefs(prev => ({ ...prev, rootPath: e.target.value })); }} onBlur={handlePrefBlur}
+                                                    onChange={(e) => { markUserTouched(['rootPath']); updateCurrentPrefs({ rootPath: e.target.value }); }} onBlur={handlePrefBlur}
                                                     className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono"
-                                                placeholder="C:\MyCases"
-                                            />
-                                        </div>
+                                                    placeholder="C:\MyCases"
+                                                />
+                                            </div>
 
-                                        <div className="mt-2 flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                id="useWorkspaceOnly"
-                                                checked={prefs.useWorkspaceOnly !== false}
-                                                onChange={(e) => updatePref({ useWorkspaceOnly: e.target.checked })}
-                                                className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
-                                            />
-                                            <label htmlFor="useWorkspaceOnly" className="text-xs font-semibold text-slate-700 select-none cursor-pointer">
-                                                {t('useWorkspaceOnly') || "Use repository SKILLS and MCP ONLY"}
-                                            </label>
+                                        <div className="mt-2">
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="checkbox"
+                                                    id="useWorkspaceOnly"
+                                                    checked={prefs.useWorkspaceOnly !== false}
+                                                    disabled={!hasRootPath}
+                                                    onChange={(e) => updatePref({ useWorkspaceOnly: e.target.checked })}
+                                                    className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                                />
+                                                <label htmlFor="useWorkspaceOnly" className={`text-xs font-semibold select-none ${hasRootPath ? 'text-slate-700 cursor-pointer' : 'text-slate-400 cursor-not-allowed'}`}>
+                                                    {t('useWorkspaceOnly')}
+                                                </label>
+                                            </div>
+                                            <p className="text-[10px] text-slate-500 mt-1 ml-6">
+                                                {t('useWorkspaceOnlyDesc')}
+                                            </p>
                                         </div>
 
                                             {/* 3. Skills Directory */}
@@ -2351,10 +3641,12 @@ const OptionsInner: React.FC = () => {
                                                 </p>
                                                 <input
                                                     type="text"
+                                                    name="skillDirectories"
+                                                    aria-label={t('skillDirectories')}
                                                     value={prefs.skillDirectories || ""}
-                                                    onChange={(e) => { userTouchedFieldsRef.current.add('skillDirectories'); setPrefs(prev => ({ ...prev, skillDirectories: e.target.value })); }} onBlur={handlePrefBlur}
-                                                    disabled={prefs.useWorkspaceOnly !== false}
-                                                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${prefs.useWorkspaceOnly !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
+                                                    onChange={(e) => { markUserTouched(['skillDirectories']); updateCurrentPrefs({ skillDirectories: e.target.value }); }} onBlur={handlePrefBlur}
+                                                    disabled={effectiveRepositoryOnly}
+                                                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/skills"
                                                 />
                                             </div>
@@ -2367,10 +3659,12 @@ const OptionsInner: React.FC = () => {
                                                 </p>
                                                 <input
                                                     type="text"
+                                                    name="mcpConfigPath"
+                                                    aria-label={t('mcpConfigPath')}
                                                     value={prefs.mcpConfigPath || ""}
-                                                    onChange={(e) => { userTouchedFieldsRef.current.add('mcpConfigPath'); setPrefs(prev => ({ ...prev, mcpConfigPath: e.target.value })); }} onBlur={handlePrefBlur}
-                                                    disabled={prefs.useWorkspaceOnly !== false}
-                                                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${prefs.useWorkspaceOnly !== false ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
+                                                    onChange={(e) => { markUserTouched(['mcpConfigPath']); updateCurrentPrefs({ mcpConfigPath: e.target.value }); }} onBlur={handlePrefBlur}
+                                                    disabled={effectiveRepositoryOnly}
+                                                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                     placeholder="~/.copilot/mcp-config.json"
                                                 />
                                             </div>
@@ -2406,11 +3700,19 @@ const OptionsInner: React.FC = () => {
                                                     />
                                                 ) : (
                                                     <textarea
+                                                        name="userInstructions"
+                                                        aria-label={t('userInstructions')}
                                                         value={prefs.userInstructions || ""}
-                                                        onChange={(e) => { userTouchedFieldsRef.current.add('userInstructions'); setPrefs(prev => ({ ...prev, userInstructions: e.target.value })); }} onBlur={handlePrefBlur}
-                                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
+                                                        onChange={(e) => { userInstructionsEditTokenRef.current = { revision: userInstructionsEditTokenRef.current.revision + 1, value: e.target.value }; markUserTouched(['userInstructions']); updateCurrentPrefs({ userInstructions: e.target.value }); }} onBlur={handlePrefBlur}
+                                                        disabled={effectiveRepositoryOnly}
+                                                        className={`w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y ${effectiveRepositoryOnly ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : ''}`}
                                                         placeholder={t('userInstructionsPlaceholder')}
                                                     />
+                                                )}
+                                                {effectiveRepositoryOnly && (
+                                                    <p className="text-[10px] text-amber-700 mt-2">
+                                                        {t('dhSpecificInstructionsInactive')}
+                                                    </p>
                                                 )}
                                             </div>
 
@@ -2445,8 +3747,10 @@ const OptionsInner: React.FC = () => {
                                                     />
                                                 ) : (
                                                     <textarea
+                                                        name="userPrompt"
+                                                        aria-label={t('userPrompt')}
                                                         value={prefs.userPrompt || ""}
-                                                        onChange={(e) => { userTouchedFieldsRef.current.add('userPrompt'); setPrefs(prev => ({ ...prev, userPrompt: e.target.value })); }} onBlur={handlePrefBlur}
+                                                        onChange={(e) => { userPromptEditTokenRef.current = { revision: userPromptEditTokenRef.current.revision + 1, value: e.target.value }; markUserTouched(['userPrompt']); updateCurrentPrefs({ userPrompt: e.target.value }); }} onBlur={handlePrefBlur}
                                                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all text-sm font-mono h-52 resize-y"
                                                         placeholder={t('userPromptPlaceholder')}
                                                     />
@@ -2594,9 +3898,9 @@ const OptionsInner: React.FC = () => {
                                             if (isSelectedPathTeam()) return;
                                             const newItem: MenuItem = { type: 'link', label: t('newItemLabel'), url: 'https://' };
                                             if (selectedPath) {
-                                                setItems(prev => addItemAt(selectedPath, newItem, prev));
+                                                mutatePersonalItems(prev => addItemAt(selectedPath, newItem, prev));
                                             } else {
-                                                setItems(prev => [...prev, newItem]);
+                                                mutatePersonalItems(prev => [...prev, newItem]);
                                             }
                                         }}
                                         disabled={isSelectedPathTeam()}
@@ -2643,7 +3947,7 @@ const OptionsInner: React.FC = () => {
                                 
                                 {/* Scrollable List */}
                                 <div className="flex-1 overflow-y-auto p-4 bg-slate-50/30">
-                                    {items.length === 0 ? (
+                                    {mergedItems.length === 0 ? (
                                         <div className="h-full flex flex-col items-center justify-center text-slate-400">
                                             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
                                                 <Folder size={32} className="opacity-50" />

@@ -69,7 +69,7 @@ This file defines the operational rules, development workflows, and coding stand
     ```
 
   * **Test Stack:** Vitest 3 + Testing Library (React 16) + jsdom. Standalone `vitest.config.ts` (does NOT extend `vite.config.ts` — CRXJS plugin breaks jsdom).
-  * **Chrome API Mock:** `src/test/chromeMock.ts` provides `installChromeMock()`, `resetChromeMock()`, `deferNextResponse(action)`, `seedStorage()`, and `chromeMockSpies` (sendMessage / storageGet / storageSet / storageRemove). Supports both callback and Promise-style chrome APIs. **`resetChromeMock()` clears spy call counts** — without this, spy counts leak across tests in the same file.
+  * **Chrome API Mock:** `src/test/chromeMock.ts` provides `installChromeMock()`, `resetChromeMock()`, `deferNextResponse(action)`, deferred storage get/set/remove helpers, `seedStorage()`, `emitStorageChanges()`, and `chromeMockSpies` (runtime/storage operations plus storage-listener registration). Supports both callback and Promise-style chrome APIs. Rejected deferred set/remove calls expose `chrome.runtime.lastError` only for the matching callback, like Chrome. Storage writes retain their historical non-emitting default; tests call `emitStorageChanges()` only when they need a deterministic `storage.onChanged` event. **`resetChromeMock()` clears listeners, scoped errors, and spy call counts** — without this, state leaks across tests in the same file.
   * **Current Test Files:**
     * `src/utils/pageReader.test.ts` — `ID_REGEX` accept/reject behavior (case ID extraction).
     * `src/components/Options.test.tsx` — 6 hydration-window invariants (T-Inv1…T-Inv6) per `docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md` § 4 + § 5.
@@ -94,8 +94,13 @@ This file defines the operational rules, development workflows, and coding stand
 * **Build Executable (PyInstaller):**
 
     ```bash
-    pyinstaller --onedir --clean -y --name dh_native_host host/dh_native_host.py
+    host/venv/Scripts/python.exe -c "import release_helper; release_helper.build_host()"
     ```
+
+  * The release helper requires exact PyInstaller `6.18.0` and invokes it only
+    as `host/venv/Scripts/python.exe -m PyInstaller` with the reviewed hidden
+    imports. It never provisions pip/PyInstaller. Installing or upgrading the
+    toolchain requires separate user approval.
 
 * **Run Tests:**
   * **Run All Tests:**
@@ -138,17 +143,19 @@ This file defines the operational rules, development workflows, and coding stand
   * The flag should reset only on: (a) identity change (new case number/ticket), (b) explicit user-triggered refresh.
   * See `FAB.tsx` for the canonical implementation of this pattern.
   * **Beta channel preference** (`prefs.betaChannelEnabled`): plain user preference, no `isUserEdited` guard needed — there is no background refresh path that overwrites it. Mirrored to host `config.json` as `extension_preferences.beta_channel_enabled`.
-  * **Team catalog preferences** (`prefs.teamCatalogEnabled`, `prefs.teamManifestUrl`, `prefs.team`, `prefs.teamLabel`): plain user preferences, no `isUserEdited` guard needed. Mirrored to host `config.json` as `extension_preferences.team_catalog_enabled` / `team_manifest_url` / `team` / `team_label`. Host treats these as passive holders (does not read them) — purpose is backup/restore parity. See `docs/superpowers/specs/2026-05-21-team-prefs-config-mirror-design.md`.
+* **Team catalog preferences** (`prefs.teamCatalogEnabled`, `prefs.teamManifestUrl`, `prefs.team`, `prefs.teamLabel`): plain user preferences, no `isUserEdited` guard needed. Mirrored to host `config.json` as `extension_preferences.team_catalog_enabled` / `team_manifest_url` / `team` / `team_label`. Host treats these as passive holders (does not read them) — purpose is backup/restore parity. See `docs/superpowers/specs/2026-05-21-team-prefs-config-mirror-design.md`.
+* **Team Catalog storage ownership:** The Service Worker is the single mutation owner for manifest, selected-team items, ETags, URL identity stamp, sync timestamp, selection clears, and Reset clears. Every Options `SYNC_TEAM_CATALOG` message carries an immutable `{enabled, manifestUrl, teamId}` identity plus request generation; Options normalizes every optional team comparison as `(team || '')`. Reset also carries a reset token and dispatches only after the latest default-derived `dh_prefs` snapshot commits and the matching tokenized Host `update_config` reports durable acknowledgment. The Service Worker allocates its storage generation synchronously on acceptance, validates captured identity before any clear/fetch and after every awaited pref read, and serializes validation plus awaited storage mutation through `teamCatalog.ts`. Callback-style set/remove wrappers reject on callback-scoped `chrome.runtime.lastError`; mutation failure returns `failed`, never `committed`, while the queue remains usable for later work. Options never calls `syncTeamBookmarks` or cache-clear helpers directly. Consumers render cached team state only when `dh_team_manifest_url`, `dh_team`, and current `dh_prefs` match.
 * **Options config persistence principle:**
   * `%LOCALAPPDATA%\DynamicsHelper\config.json` is the canonical backing store for Options page configuration. It is the file users back up, copy across machines, or restore after clearing browser cache.
   * **Persistence timing — Plan A (instant persistence, v2.0.70+):** There is **no Save button**. All Options fields persist immediately:
     * **Selects / checkboxes / toggles** (language, autoAnalyzeMode, enableStatusBubble, betaChannelEnabled, logLevel, teamCatalogEnabled, useWorkspaceOnly, team dropdown): persist on `onChange` via `updatePref({ ... })`.
     * **Text / number / color inputs** (buttonText, primaryColor, offsetBottom, offsetRight, rootPath, skillDirectories, mcpConfigPath, userInstructions, userPrompt): persist on `onBlur` via `handlePrefBlur()`. onChange only mutates React state (avoids storage / host RPC storms during typing or color-picker drag).
     * **Team manifest URL**: also onBlur, with `new URL(...)` format validation before triggering a fetch (avoids burning a 404 on half-typed input).
-    * **Bookmark editor items (`dh_items`)**: every `setItems` call triggers a `useEffect` write to `chrome.storage.local`. Guarded by `itemsLoadedRef` so the initial mount doesn't overwrite real data with the empty default.
-    * **Reset button**: still exists. Clears `dh_*` storage keys and calls `persistPrefs(DEFAULT_PREFS)` to sync host config.json to defaults.
-    * The single entry point for all prefs writes is `persistPrefs(nextPrefs, opts?)` in `Options.tsx`. It writes `dh_prefs` + fires `update_config` to host (fire-and-forget; host re-reads `config.json` on startup so transient host-down failure is recoverable). With `opts.fetchManifest=true` it also triggers a manifest fetch when `teamManifestUrl` differs from `lastFetchedManifestUrlRef`.
-    * **Hydration guard (v2.0.70-beta.4+):** `persistPrefs` no-ops if `prefsHydratedRef.current === false`. The ref flips to `true` after the host's `get_config` response is merged into state (or on host-unreachable / non-success fallback branches, so the user isn't deadlocked). Without this guard, a user click in the ~mount-to-host-response window (a few hundred ms typical, multi-second if host is cold-starting) would send DEFAULT_PREFS-empty values for `rootPath`/`teamManifestUrl`/`team`/`userPrompt` and wipe out `config.json` + truncate `user_prompt.md`. **Do not bypass.** If a new code path needs to write prefs before hydration completes, either wait or accept that the write is silently dropped — UI local state is unaffected, only the disk write is suppressed. See `DEVELOPER_GUIDE.md` § "Hydration guard (v2.0.70-beta.4+)" for the failure-mode analysis.
+    * **Bookmark editor items (`dh_items`)**: every personal add/edit/delete/move/import/collapse and Reset intent increments one bookmark generation through `mutatePersonalItems`. Writes and Reset removal share one serialized storage queue; do not add raw personal `setItems` or direct `dh_items` mutation sites. A failed set/remove retains the newest complete intent for a later mutation retry, keeps a localized persistence warning visible, and clears that warning only after a later successful mutation.
+    * **Reset button**: still exists. A normal click intentionally creates a fresh `ResetTransaction`, applies `DEFAULT_PREFS`, and starts a new Host phase. The transaction stores one token, default Team identity, request/bookmark generations, retry action, and phase (`host-pending|host-committed|sw-pending|local-cleanup-pending|complete`) independently of preference-mirror actions. The matching Host `update_config` must durably acknowledge before `RESET_EXTENSION_STATE`; `config_saved: true` with refresh failure counts as Host commit while retaining its current warning. Once committed, that token never resends Host or rewrites defaults. The incomplete warning's **Retry cleanup** control resumes only the stored SW/local phase; the normal Reset button does not. SW clears shared state only while default identity is safe, and local team/bookmark cleanup is generation-scoped so newer preference/bookmark edits survive.
+    * The single entry point for all prefs writes is `persistPrefs(nextPrefs, opts?)` in `Options.tsx`. It writes the ordered `dh_prefs` mirror, then sends an immutable `update_config` intent after Host hydration and **inspects the structured result**. `update_config` is not universally fire-and-forget: `config_saved: true` acknowledges the values sent even when active-session refresh failed, while unsaved/transport failures remain pending for retry and surface a warning. With `opts.fetchManifest=true`, the latest matching intent triggers a manifest fetch unless that URL is already in flight or is the last `committed`/`unchanged` URL. Failed/stale/skipped/transport outcomes remain retryable.
+    * **Sparse prompt-file writes:** Explicit empty `user_instructions` or top-level `user_prompt` truncates its canonical markdown file; omitted means no write. Unrelated preference updates omit both fields. Options attaches immutable revision/value tokens to explicit edit, clear, and Reset intents; acknowledgements and retries advance only the matching saved revision.
+    * **Hydration guard (v2.0.70-beta.4+):** Before Host hydration completes, `persistPrefs` still updates the local `dh_prefs` mirror, but it does not send DEFAULT_PREFS-derived values to the Host or fetch a manifest. User-touched fields are caught up through one immutable intent routed through the same single-flight `writePrefsMirror` queue; its inspected Host send runs only from the successful latest-commit callback (including host-down/non-success fallback handling). **Do not bypass the Host-RPC gate or write from a React state-updater closure.** See `DEVELOPER_GUIDE.md` § "Hydration guard (v2.0.70-beta.4+)" for the failure mode and ordering contract.
   * **Default rule:** New Options fields are mirrored to `extension_preferences` in `config.json` unless explicitly excluded.
   * **Model & Performance (v2.0.73+):** `extension_preferences.model` / `reasoning_effort` / `context_tier` decouple DH's analyze sessions from the Copilot CLI's global `~/.copilot/settings.json`. Empty (the default) means "inherit the CLI default" — the host only adds them to `create_session`'s `sdk_kwargs` when non-empty (`_refresh_session`). The host validates `reasoning_effort` ∈ `{low,medium,high,xhigh}` and `context_tier` ∈ `{default,long_context}` in `_get_session_config`, dropping illegal hand-edited values. The Options model dropdown is populated dynamically by the **`list_models` host RPC** (`handle_list_models` → `client.list_models()`), cached in `chrome.storage.local` (`dh_model_list` + `dh_model_list_fetched_at`, 24 h staleness, manual Refresh). **Critical:** the effort dropdown must only offer the SELECTED model's `supported_reasoning_efforts` — some models (e.g. Claude Sonnet 4.5) support NONE, and passing an effort they reject makes `session.create` fail (`Model X does not support reasoning effort configuration`), which then surfaces as the generic "session/client not initialized" on every analyze until the config is corrected. `list_models` failures are classified (`auth`/`unavailable`/`unknown`) and surfaced in Options, never a silent empty dropdown. Spec: `docs/superpowers/specs/2026-07-03-configurable-model-performance-design.md`.
   * **Current exclusions (3):**
@@ -193,8 +200,11 @@ This file defines the operational rules, development workflows, and coding stand
   * Catch exceptions in the main loop to prevent the process from crashing.
   * Return error responses to the extension: `{"status": "error", "message": "..."}`.
 * **CLI Flags:**
-  * `--register`: Registers the Native Host manifest and registry keys. Used by the installer.
-  * CLI flags are checked via raw `sys.argv` membership (no `argparse`).
+  * `update_entrypoint.py` owns exact source/frozen main, registration,
+    install-package, probe, detached completion/recovery, and status-host
+    invocation grammars. Do not add raw `sys.argv` membership checks after the
+    early dispatcher.
+  * `--register` remains available in canonical source and frozen main modes.
 
 ## 4. Critical Rules & Safety
 
@@ -240,8 +250,43 @@ This file defines the operational rules, development workflows, and coding stand
 * **Client & Session Working Directory:** Load config before constructing `CopilotClient`, pass `working_directory=root` at both client and session levels, and restart the client when root changes. The client process otherwise inherits Chrome Native Messaging's Host install cwd, which can be persisted into a session and later restored by CLI `/resume`. An explicit empty root in `update_config` clears the configured root. A missing or empty Analyze `rootPath` falls back to host `config.json` (the extension may send its empty default before prefs hydrate); it MUST NOT clear the host root.
 * **Lazy Session Creation:** `initialize_sdk()` starts only the client. It MUST NOT create a generic session before Analyze provides a case identity. Options updates preserve the current deterministic case session; with no active case they clear/defer the session rather than creating a UUIDv4 generic session.
 * **Smart Refresh:** Sessions are recreated when `current_case_id`, active-session root, or session/client availability changes — not on every analyze request. A failed refresh must invalidate the old session and return an error; never analyze a new case through stale state.
-* **Report:** `dh_case_report.md` includes the session name and a root-bound PowerShell command: `copilot -C '<root>' --resume=<uuid>` (plain `copilot --resume=<uuid>` only when no root is configured). `-C` applies the root before CLI discovers workspace skills/MCP/instructions and safely overrides stale cwd metadata from old sessions.
+* **Report:** `dh_case_report.md` includes the session name and a root-bound PowerShell command: `copilot -C '<root>' --resume=<uuid>` (plain `copilot --resume=<uuid>` only when no root is configured). `-C` applies the root before an interactive CLI continuation resolves workspace capabilities and safely overrides stale cwd metadata from old sessions. DH's SDK create/resume path separately disables CLI automatic custom-instruction discovery and injects its selected instruction source explicitly.
 * **System Message Injection:** The session name is appended to the `system_message` content as a `## Session Info` section before session creation (labelled `Session Name: <uuid>`), so the AI can reference it during the conversation (e.g., for `context.md` frontmatter — MyCasesKit `session_name:` field, now treated as an opaque UUID; case identity lives in the separate `case_number` field).
+
+#### Prompt Source Isolation
+
+* **Disable implicit discovery:** Never remove `skip_custom_instructions=True` from any DH SDK `create_session()` or `resume_session()` path, including create fallback and transport retry. CLI-global instructions, `AGENTS.md`, path-specific instruction files, and other CLI auto-discovered instruction files must not enter DH sessions.
+* **Exactly one editable system source:** DH always injects the product-managed Core plus exactly one editable source: DH-specific Instructions, or `<Root>/.github/copilot-instructions.md` when a non-empty Root and Repository ONLY are both effective. Never inject DH-specific and Repository Instructions together. No other repository instruction path is supported.
+* **Immutable snapshot:** Resolve Core and the selected editable source once as exact bytes, decode with strict UTF-8, and build both system text and the versioned, length-framed SHA-256 fingerprint from that frozen snapshot. Do not normalize BOMs, newlines, or whitespace, and do not reopen files during one refresh attempt.
+* **Fail closed:** Missing/unreadable Core, unreadable selected DH-specific Instructions, and missing/unreadable selected Repository Instructions block Analyze without fallback or a model turn. Existing empty Repository Instructions are valid.
+* **Refresh identity:** A mode or selected-byte change refreshes/resumes the same deterministic UUIDv5 session. Every active-session invalidation must clear `current_prompt_fingerprint`; commit a candidate fingerprint only after SDK create/resume succeeds.
+* **Logging boundary:** Never log instruction contents, Custom User Prompt contents, or prompt-source paths. Safe source mode, classified error code, and a short fingerprint prefix are sufficient diagnostics.
+* **SDK response diagnostics:** Never log a full SDK response event, event data object, content, or object representation. Log only event type, data type, content presence, and content length. If an event has no usable content, the generated diagnostic report must contain the same safe metadata summary, never the raw event.
+* **Team catalog credential logging:** Manifest and bookmark URLs may contain SAS credentials. Console diagnostics must never include a complete URL, query text, `sig`, response status text, or thrown object/message that could echo the URL. Log only a classified failure kind, numeric HTTP status, and fixed safe parse/network diagnostics.
+* **Config health:** `get_config` prompt health is soft and must keep Options usable; strict immutable resolution belongs to Analyze/session refresh. Options must inspect every `update_config` response because saved values and refresh success are separate outcomes.
+* **Post-save health:** The latest acknowledged Options update performs one generation-gated, health-only `get_config` check. It updates only `promptHealthIssue`; it must not re-run preference hydration, write config, or create an update/get-config loop.
+* **Persistence boundary:** Service Worker persistence preserves optional prompt `error_code` as `LastAnalysis.errorCode` through storage and hydration while retaining the raw safe Host fallback. Known codes are localized only when immediate or rehydrated UI is rendered.
+* **Custom User Prompt at send time:** `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md` is the canonical Analyze-time source. FAB still removes/replaces the first authoritative line-level `## User Prompt` section as a UX preview, but the Host rereads the file for every Analyze, removes payload content from the first marker, appends current non-empty file content exactly once, and only then applies PII scrubbing. Empty content removes stale sections; unreadable/invalid UTF-8 fails closed with `user_prompt_unreadable`. Never log its content or path.
+* **Prompt/config error table:**
+
+| Code | Condition | Required handling |
+|---|---|---|
+| `dh_core_prompt_missing` | DH Core is missing | Block Analyze; repair/reinstall |
+| `dh_core_prompt_unreadable` | DH Core cannot be read/decoded | Block Analyze; repair install/permissions |
+| `dh_specific_instructions_unreadable` | Selected DH-specific Instructions cannot be read/decoded | Block Analyze; preserve omitted editor value in Options |
+| `repository_instructions_missing` | Selected Root instructions are missing | Block Analyze; add file or disable Repository ONLY |
+| `repository_instructions_unreadable` | Selected Root instructions cannot be read/decoded | Block Analyze; repair file or disable Repository ONLY |
+| `user_prompt_unreadable` | Custom User Prompt cannot be read/decoded | Block Analyze; `get_config` omits `user_prompt`; explicit edit/clear repairs |
+* **Preference mirror actions:** Team sync, cache clear, and manifest fetch are user-intent actions, not storage-callback closures. Carry an unsettled action into compatible newer `dh_prefs` snapshots, settle it before dispatch so repair recursion cannot duplicate it, and cancel team actions when enabled/URL/team identity changes. Reset uses a mirror action only for its initial default-mirror/Host dispatch; its phased transaction and cleanup retry ownership are stored separately and must never be carried or canceled as an ordinary preference action.
+* **Preference mirror durability:** `dh_prefs` writes, including hydration catch-up, are single-flight and coalescing. Inspect `chrome.runtime.lastError`; no Host update or carried action may run until the latest intended snapshot commits. Failed writes remain visibly pending with unsettled actions for later user-driven retry.
+* **Reset truth:** Reset requests carry immutable default identity, request/bookmark generations, one token, phase, and retry action. Persist durable Host acknowledgment into the transaction before checking whether a newer preference callback superseded UI/local continuation. Never dispatch SW cleanup before Host acknowledgment (`success: true` or `config_saved: true`), and never resend Host/default preferences after it. Matching SW `committed` truth advances to scoped local cleanup; stale/failed/transport callbacks retain same-token SW retry. Superseded local continuation retains local-only retry. Retry may skip unsafe newer-owned state but must never clear or revert newer preferences/bookmarks.
+* **String-only error fallback:** `safeErrorText(candidates, fallback)` is the single extension selector for reviewed Host/SW error display and persistence paths. It accepts only non-empty strings and never invokes `String`, `toString`, interpolation, or serialization on candidate objects, arrays, functions, symbols, or null. Analyze inner/outer/rejection persistence, Native response normalization, config-update inner/outer results, Options health/immediate warnings, FAB nested/outer/catch display, and Service Worker immediate normalization use it. Preserve normalized `error_code`, string `errorKind`, finite numeric `httpStatus`, and unchanged success `data`; unknown/malformed values use fixed/localized safe fallbacks.
+* **Manifest retry truth:** Options keeps last successful manifest URL separate from tokenized in-flight URL and normalizes optional team identity as `(team || '')` in current checks and response matching. Only current identity-matching `committed`/`unchanged` callbacks mark success, including no-team requests; every failure/stale/skipped/transport callback releases its own in-flight token, and an old URL callback cannot release or complete a newer URL.
+* **Async team UI reads:** Options and `useMenuLogic()` must generation-gate initial and storage-change cache reads. Capture enabled/manifest URL/team identity before each read and revalidate it before applying manifest list, items, timestamp, or navigation state.
+* **FAB Analyze ownership:** Create `requestId` before local ownership and the safety timer. Derive analyzing state from the current local request ID or hydrated pending identity. Timers, responses, catches, and `finally` blocks may clear/show state only for their matching request; a new single-active request cancels the old timer.
+* **FAB response processing:** Retain ownership through every await after the Host response, including `hashCaseId`, and recheck afterward. A stale request cannot render, close menus, update duration, or emit outcome telemetry.
+* **Prompt file reads and presence:** `_get_session_config` reads/migrates/hydrates `user_prompt.md` only with `include_prompt_status=True` (`get_config`). Analyze performs one separate canonical read; session refresh config performs none. Absent editable prompt fields mean no write; present null/non-string fields fail before every persistent write.
+* **Scope:** Repository ONLY extends instruction selection alongside existing Skills/MCP behavior. It does not implement MyCases integration, workspace detection, Stage 0 coordination, or Stage 1 persistence.
 
 ### 7. Self-Update Mechanism
 
@@ -249,6 +294,91 @@ This file defines the operational rules, development workflows, and coding stand
 * **--onedir Layout:** The release zip contains a `host/` folder with the exe, `_internal/` directory (Python runtime, DLLs), and config files. The updater copies all files to the install directory, protecting user files (`config.json`, `copilot-instructions.md`, log files) via `_USER_FILES` set.
 * **Locked File Handling:** When replacing `dh_native_host.exe`, the old file may be locked by the OS or antivirus. The updater renames it to `.exe.old` (or `.exe.old2`, `.exe.old3` as fallback). Other files (`_internal/`, `system_prompt.md`) are overwritten directly.
 * **Do Not Break:** The `--register` CLI flag and the self-update flow are critical for production users. Test changes carefully.
+* **Plan A package boundary:** Every packaged regular file is represented once
+  in `update-manifest.json` with one ownership class and a lowercase SHA-256;
+  `host/release-integrity.json` inventories product bytes and
+  `host/installed-product.json` links that inventory. Hashes detect incomplete
+  or mixed packages; they are not signatures.
+* **Archive safety:** New package code must use `stage_and_validate_archive`.
+  Never use `ZipFile.extract()` or `extractall()`. Reject traversal, duplicate
+  and case-colliding paths, directory entries, links/reparse points, encrypted
+  entries, unsupported types, and missing/extra/hash-mismatched files before
+  accepting a stage.
+* **Capability timing:** Plan A advertises only `prompt-scope-v1`. Do not add
+  `transactional-update-v1` until the complete Plan D cutover and frozen gates
+  pass. `get_capabilities`/`verify_installation` are diagnostics in Plan A, not
+  protected-action enforcement.
+* **Dormant transactional routing:** `host/update_journal.py`,
+  `host/update_ownership.py`, `host/update_mutex.py`, and
+  `host/update_engine.py` implement the transaction engine, while Plan C's early
+  special modes expose detached recovery primitives. Ordinary update clicks,
+  `updater.py`, the Extension, and the installer do not route through them yet.
+  The legacy updater above remains the active production path until Plan D
+  completes the runtime cutover.
+* **Transaction authority:** IDs are lowercase 32-hex from exactly 16 random
+  bytes. Stable authority is `updates/active.json` plus
+  `updates/transactions/<id>/journal.json`; `TransactionPaths` intentionally
+  has no `recovery_root`. `UpdateEngine` exclusively owns journal transitions,
+  active/workspace mutation, nonterminal resume, rollback, and terminal evidence
+  cleanup under the installation mutex.
+* **Preparation and ownership:** N may validate an internally consistent N+1
+  package using the caller's trusted `expected_version`; never compare it with
+  the importing Host's `VERSION`. Filter `UpdateManifest.entries`, require
+  manifest/integrity Chrome identity and metadata links, stage only in
+  `<id>.preparing`, and atomically promote it. Preserve `config.json`,
+  `copilot-instructions.md`, `user_prompt.md`, logs, generated `manifest.json`,
+  unknown top-level paths, and unrelated `updates/**`.
+* **Activation and failure lineage:** Browser activation requires immutable
+  `{pid, creation_token}`; installer activation requires `None` and never waits
+  on itself. `reason_code` is current status, while `original_failure_code` and
+  `rollback_from` remain immutable. Retry recovery with the original forward
+  code. Fresh seed ownership is recorded durably and user-created/edited config
+  always wins. `finalize_terminal_evidence` runs only after Plan C receipt
+  durability/status unregister and removes active before the matching terminal
+  workspace.
+* **Host test isolation:** Every Host subprocess receives fresh existing
+  `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP`
+  directories before process start. Automated tests never use the real install,
+  registry, browser registration, updater network, or release publication.
+* **Dormant Plan C recovery:** `native_messaging.py`, `native_registration.py`,
+  `update_platform.py`, `update_recovery.py`, `update_status_host.py`, and
+  `update_entrypoint.py` provide preflighted detached recovery primitives. They
+  do not route update clicks or advertise `transactional-update-v1`; the legacy
+  updater remains active until Plan D is complete.
+* **Validate before construction:** A special invocation must validate its exact
+  executable role, source/frozen bit, arity, full argv, identity text, fixed
+  executable chain, and path authority before constructing any dependency,
+  registry, controller, process adapter, default root, installer, or status
+  server. Non-probe mismatches are exit `2`, empty stdout, and exact stderr
+  `invalid_early_invocation\n`. Probe mismatches delegate only Plan A's fixed
+  malformed tuple; never add a second probe serializer.
+* **Process identity and launch:** Public Plan C APIs use complete
+  `InitiatingProcessIdentity(pid, creation_token)`, never a bare PID. The
+  injected low-level Win32 `open_process(pid)` seam is the only PID-only layer.
+  Wait on the retained handle; never reopen the PID, use `Popen.close`, or use
+  `subprocess.Popen` for detached recovery. Detached runners use canonical
+  transaction-root `cwd`, `CreateProcessW`, an explicit `NUL` handle allowlist,
+  and close parent thread/process handles exactly once.
+* **Plan B owns transaction state:** Plan C must not write transitions,
+  journals, `updates/active.json`, probe manifests, or transaction workspaces,
+  and must not directly remove active/workspace evidence. Use Plan B readers,
+  `TransactionPaths`, engine methods, and `finalize_terminal_evidence` only.
+* **Preflight and recovery topology:** Before recovery-tree/status/RunOnce/live
+  mutation, materialize and probe the exact combined staged Host, Extension, and
+  metadata view; repeat immediately before activation. Never bypass
+  `prepare_recovery_runtime`, activation-time preflight, or Plan D's required
+  `require_no_pending_finalization` start barrier. `updates/recovery` replacement
+  must preserve sibling `updates/active.json` byte-for-byte.
+* **Bounded finalization:** Reserve the one `finalization-cursor.json`, write at
+  most one matching receipt, advance the cursor to `receipt-ready`, then let Plan
+  B clean terminal evidence. Acknowledgment moves the receipt with one
+  same-volume `os.replace` to fixed `finalization-ack.json` and only then removes
+  the cursor. Never scan receipts, use random scratch names, write a separate ack
+  object, overwrite a pending cursor, or unlink/copy-delete a receipt.
+* **Recovery test safety:** Automated Plan C tests use injected process,
+  registry, probe, clock, filesystem, and mutex adapters only. Do not run a real
+  update/install, registry/AppData mutation, browser registration, PID wait,
+  RunOnce action, publish, tag, or release outside the disposable-VM gate.
 
 ### 8. Secret Field Persistence
 
@@ -264,12 +394,13 @@ This file defines the operational rules, development workflows, and coding stand
 
 ### 9. Analysis Result Persistence (C2a+)
 
-* **Pattern:** Analyze results survive page reload via `chrome.storage.local` (`dh_pending_analysis` + `dh_last_analysis`). The Service Worker owns ALL writes; FAB only reads via the `useAnalysisHydration` hook and calls `dismissPopover()` on user dismissal.
+* **Pattern:** Analyze results survive page reload via `chrome.storage.local` (`dh_pending_analysis:<encoded-requestId>` + `dh_last_analysis`), with one-shot acknowledgments under deterministic `dh_seen_analysis:*` per-identity keys. The legacy singleton pending/seen keys remain read-only compatibility and are removed by Reset. The Service Worker owns result/pending/reset writes; FAB reads through `useAnalysisHydration` and writes the separate seen identity via `dismissPopover()`.
 * **Wire contract:** FAB attaches `_persist: {caseNumber, successTitle, errorTitle}` to outgoing `analyze_error` NATIVE_MSG payloads. The SW strips this field before forwarding to the host. **DO NOT** forward `_persist` to the host — it will be treated as an unknown key.
-* **Title translation:** Titles are pre-translated in FAB and passed through `_persist`. The SW has no `useTranslation()` and MUST NOT attempt to translate; if you need a new analyze-flow title, add it to FAB and pass through `_persist`.
-* **One-shot semantics:** Once the user dismisses an analyze-flow popover, `seen=true` is written to `dh_last_analysis`. Re-hydration on next mount checks this flag and does NOT re-open seen results. **DO NOT** bypass `popoverIsAnalyze.current` discrimination in the `ResultPopover` `onClose` handler — bookmark popovers share the same component and dismissing a bookmark must NOT mark an analysis result as seen.
+* **Error persistence:** Error records keep the raw safe Host fallback in `content` and may keep a non-empty machine-readable code in `errorCode`. The Service Worker must preserve an inner Analyze `error_code` in preference to an outer code and must not fabricate one for transport failures. Legacy records without a code remain valid.
+* **Display localization:** Titles are pre-translated in FAB and passed through `_persist`; the SW has no `useTranslation()`. Prompt-source error bodies are different: store the raw fallback plus code, then localize known codes in `ResultPopover` at immediate or rehydrated render time so the current language wins. Unknown codes display the stored fallback.
+* **One-shot and request scope:** New results persist `requestId`; legacy records use exact `caseNumber + timestamp`. Pending and seen keys are request/identity scoped, so A/B never compete even across Service Worker restarts. Hydration uses one `chrome.storage.local.get(null)` snapshot, selects the newest fresh pending for the current case, and mirrors storage removal/expiry. A result removes only its own pending key. **DO NOT** bypass `popoverIsAnalyze.current` discrimination in the shared `ResultPopover` close handler.
 * **Two ages:** `MAX_PENDING_DISPLAY_AGE_MS = 15min` (UI re-hydration cutoff) vs `MAX_PENDING_AGE_MS = 2h` (GC cutoff). Do not collapse these — they encode different user-intent assumptions.
-* **Pure-helper boundary:** New analyze-persistence behaviour goes into `analyzeBridge.ts` (SW side) or `useAnalysisHydration.ts` (FAB side), NOT directly into `serviceWorker.ts`/`FAB.tsx`. The boundary is what makes the 16 spec invariants testable without a real Chrome port. See `docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md` for invariant numbering (P-I1..P-I4, R-I1..R-I5).
+* **Pure-helper boundary:** New analyze-persistence behaviour goes into `analyzeBridge.ts` (SW side) or `useAnalysisHydration.ts` (FAB side), NOT directly into `serviceWorker.ts`/`FAB.tsx`. The boundary makes the persistence invariants testable without a real Chrome port. See `docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md` for invariant numbering (P-I1..P-I4, R-I1..R-I6).
 
 ## 5. Debugging Workflow
 
@@ -279,14 +410,11 @@ Since you cannot see the browser or console:
 2. **Check Telemetry:** Look for `trackEvent` calls in `FAB.tsx` to verify frontend flow.
 3. **Mocking:** When adding new "Skills" or SDK features, verify they work in `dh_native_host.py` using `logging` before hooking them up to the UI.
 
-## 6. Copilot SDK Instructions
+`host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` are retained historical probes and are not supported SDK 1.0.5 diagnostics: they still use removed constructor/import/message shapes. Their session calls keep `skip_custom_instructions=True`, but do not rely on these scripts until they are separately migrated. Use the SDK 1.0.5 probe in the wire-drift playbook below instead.
 
-(From `copilot-instructions.md` in user's `%LOCALAPPDATA%\DynamicsHelper\`)
+## 6. DH-Specific Instruction Source
 
-* **Context:** The AI is analyzing support cases.
-* **Tools:** It has access to `kusto_mcp`, `filesystem`, `workiq`.
-* **Format:** Responses should be in Markdown.
-* **Safety:** Do not output real customer PII in the final report.
+`%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md` is user-managed, so its contents and referenced tools vary by installation. It is selected only when Repository ONLY is not effective; otherwise it is retained but inactive. Do not copy assumptions from one user's file into product code, DH Core, or repository workflow. Product safety requirements remain in DH Core and code, not solely in this editable file.
 
 ## 7. Definition of Done (DoD)
 
@@ -335,7 +463,7 @@ This script automates version bumping, git operations, building, and publishing.
 
 **What it does:**
 
-1. Updates version in `package.json`, `manifest.json`, and `dh_native_host.py`.
+1. Updates version in `package.json`, `manifest.json`, and `host/product_info.py`.
 2. **Commits & Tags:** Creates a `chore: release vX.X.X` commit and a `vX.X.X` git tag.
 3. **Builds:** Runs `npm build` and `pyinstaller --onedir`.
 4. **Packages:** Creates `DynamicsHelper_vX.X.X.zip` in `releases/` (contains `extension/`, `host/` with exe + `_internal/`, installer scripts).

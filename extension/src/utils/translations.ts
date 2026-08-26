@@ -14,7 +14,7 @@ export const translations: TranslationDictionary = {
     reset: { en: "Reset", zh: "重置" },
     cancel: { en: "Cancel", zh: "取消" },
     savedSuccess: { en: "Settings saved successfully!", zh: "设置已保存！" },
-    resetConfirm: { en: "Reset everything to default?\n\nThis will permanently clear:\n  • All custom bookmarks (returns to default menu)\n  • Team Catalog config (URL, selected team, cached items)\n  • All preferences (colors, button position, language, log level, paths)\n  • User Instructions (copilot-instructions.md will be wiped)\n  • User Prompt (user_prompt.md will be wiped)\n\nThis action cannot be undone.", zh: "重置所有设置为默认值？\n\n以下内容将被永久清除：\n  • 全部自定义书签（恢复为默认菜单）\n  • 团队目录配置（URL、所选团队、缓存）\n  • 所有偏好设置（颜色、按钮位置、语言、日志级别、路径）\n  • 用户指令（copilot-instructions.md 将被清空）\n  • 用户提示词（user_prompt.md 将被清空）\n\n此操作不可撤销。" },
+    resetConfirm: { en: "Reset everything to default?\n\nThis will permanently clear:\n  • All custom bookmarks (returns to default menu)\n  • Team Catalog config (URL, selected team, cached items)\n  • All preferences (colors, button position, language, log level, paths)\n  • DH-specific Instructions (copilot-instructions.md will be wiped)\n  • Custom User Prompt (user_prompt.md will be wiped)\n\nThis action cannot be undone.", zh: "重置所有设置为默认值？\n\n以下内容将被永久清除：\n  • 全部自定义书签（恢复为默认菜单）\n  • 团队目录配置（URL、所选团队、缓存）\n  • 所有偏好设置（颜色、按钮位置、语言、日志级别、路径）\n  • DH 专用指令（copilot-instructions.md 将被清空）\n  • 自定义用户提示词（user_prompt.md 将被清空）\n\n此操作不可撤销。" },
     
     // --- Options Page ---
     appearance: { en: "Appearance", zh: "外观设置" },
@@ -93,10 +93,10 @@ export const translations: TranslationDictionary = {
         zh: "此文本会自动附加到页面扫描的“案例上下文”描述中。用于为每次分析添加标准问题或指令（例如，“请提供根本原因分析和缓解措施”）。" 
     },
     userPromptPlaceholder: { en: "Add extra context for the AI...", zh: "为 AI 添加额外的上下文..." },
-    userInstructions: { en: "Custom User Instructions", zh: "自定义用户指令" },
+    userInstructions: { en: "DH-specific Instructions", zh: "DH 专用指令" },
     userInstructionsDesc: { 
-        en: "These instructions are appended to the core System Prompt. Use this to add your own rules (e.g., \"Always use bullet points\", \"Focus on technical details\").", 
-        zh: "这些指令会附加到核心系统提示词中。用于添加您自己的规则（例如，“总是使用项目符号”，“关注技术细节”）。" 
+        en: "These DH-wide system instructions are appended to the DH Core System Prompt when Repository ONLY is not active.",
+        zh: "未启用仅仓库模式时，这些 DH 范围的系统指令会附加到 DH 核心系统提示词中。"
     },
     rootPath: { en: "Root Path (Local Repository)", zh: "根路径 (本地仓库)" },
     rootPathDesc: { 
@@ -108,7 +108,15 @@ export const translations: TranslationDictionary = {
         en: "Comma-separated list of directories containing custom skills (e.g., ~/.copilot/skills).", 
         zh: "包含自定义技能的目录列表，以逗号分隔 (例如 ~/.copilot/skills)。" 
     },
-    useWorkspaceOnly: { en: "Use repository SKILLS and MCP ONLY", zh: "仅使用仓库的 SKILLS 和 MCP" },
+    useWorkspaceOnly: { en: "Use repository SKILLS, MCP, and instructions ONLY", zh: "仅使用仓库的 SKILLS、MCP 和指令" },
+    useWorkspaceOnlyDesc: {
+        en: "Uses repository SKILLS and MCP, with <Root>/.github/copilot-instructions.md as the only editable system instructions. DH Core System Prompt and Custom User Prompt remain active.",
+        zh: "使用仓库的 SKILLS 和 MCP，并将 <Root>/.github/copilot-instructions.md 作为唯一的可编辑系统指令。DH 核心系统提示词和自定义用户提示词仍然生效。"
+    },
+    dhSpecificInstructionsInactive: {
+        en: "This content is retained but inactive while Repository ONLY uses <Root>/.github/copilot-instructions.md.",
+        zh: "此内容会保留，但仅仓库模式使用 <Root>/.github/copilot-instructions.md 时不会生效。"
+    },
     mcpConfigPath: { en: "MCP Configuration", zh: "MCP 配置" },
     mcpConfigPathDesc: {
         en: "Path to the global MCP configuration JSON file (Default: ~/.copilot/mcp-config.json).",
@@ -172,7 +180,7 @@ export const translations: TranslationDictionary = {
     addChild: { en: "Add Child", zh: "添加子项" },
     deleteTooltip: { en: "Delete", zh: "删除" },
     teamManagedTooltip: { en: "Team managed", zh: "团队管理" },
-    userInstructionsPlaceholder: { en: "Enter your custom instructions here...", zh: "在此输入你的自定义指令…" },
+    userInstructionsPlaceholder: { en: "Enter DH-specific instructions here...", zh: "在此输入 DH 专用指令…" },
     // FAB (i18n audit)
     settings: { en: "Settings", zh: "设置" },
     refreshContext: { en: "Refresh Context (Re-scan page)", zh: "刷新上下文（重新扫描页面）" },
@@ -185,6 +193,58 @@ export const translations: TranslationDictionary = {
     unknownError: { en: "Unknown error", zh: "未知错误" },
     unknownAnalysisError: { en: "Unknown analysis error", zh: "未知分析错误" },
     unknownNativeHostError: { en: "Unknown native host error", zh: "未知的本机宿主错误" },
+    analysisMalformedResponse: {
+        en: "The Native Host returned a malformed Analyze response.",
+        zh: "本机宿主返回了格式错误的分析响应。",
+    },
+    analysisPersistenceContextInvalid: {
+        en: "Analyze could not start because its persistence context was invalid.",
+        zh: "由于分析持久化上下文无效，无法开始分析。",
+    },
+    analysisPersistenceStartFailed: {
+        en: "Analyze could not start because local recovery state could not be saved.",
+        zh: "由于无法保存本地恢复状态，无法开始分析。",
+    },
+    analysisDurabilityWarning: {
+        en: "Analysis completed, but the result could not be saved for navigation recovery.",
+        zh: "分析已完成，但结果无法保存以供页面导航后恢复。",
+    },
+    analysisDurabilityAndCleanupWarning: {
+        en: "Analysis completed, but result recovery and analyzing-state cleanup may be unavailable until retry or expiry.",
+        zh: "分析已完成，但在重试或状态过期前，结果恢复和分析状态清理可能不可用。",
+    },
+    promptErrorDhCoreMissing: {
+        en: "DH Core System Prompt is missing. Repair or reinstall Dynamics Helper.",
+        zh: "DH 核心系统提示词缺失。请修复或重新安装 Dynamics Helper。",
+    },
+    promptErrorDhCoreUnreadable: {
+        en: "DH Core System Prompt cannot be read. Repair the installation or file permissions.",
+        zh: "无法读取 DH 核心系统提示词。请修复安装或文件权限。",
+    },
+    promptErrorDhSpecificUnreadable: {
+        en: "DH-specific Instructions cannot be read. Repair or replace them in Options.",
+        zh: "无法读取 DH 专用指令。请在选项中修复或替换该文件。",
+    },
+    promptErrorRepositoryMissing: {
+        en: "Repository Instructions are missing. Add .github/copilot-instructions.md under Root Path or disable Repository ONLY.",
+        zh: "仓库指令缺失。请在根路径下添加 .github/copilot-instructions.md，或禁用仅仓库模式。",
+    },
+    promptErrorRepositoryUnreadable: {
+        en: "Repository Instructions cannot be read. Repair the file or disable Repository ONLY.",
+        zh: "无法读取仓库指令。请修复该文件，或禁用仅仓库模式。",
+    },
+    promptErrorUserPromptUnreadable: {
+        en: "Custom User Prompt cannot be read. Repair or replace it in Options.",
+        zh: "无法读取自定义用户提示词。请在选项中修复或替换该文件。",
+    },
+    configSavedRefreshFailed: {
+        en: "Settings were saved, but the active prompt could not be refreshed.",
+        zh: "设置已保存，但无法刷新当前提示源。",
+    },
+    configNotSaved: {
+        en: "Settings were not saved.",
+        zh: "设置未保存。",
+    },
     newItemLabel: { en: "New Item", zh: "新建项目" },
     newLinkLabel: { en: "New Link", zh: "新建链接" },
     // Native confirm()/alert() dialog strings (must go through t() per i18n rule)
@@ -248,9 +308,35 @@ export const translations: TranslationDictionary = {
     updateInstalled: { en: "Update installed! Reloading extension...", zh: "更新已安装！正在重新加载扩展..." },
     updateFailed: { en: "Update failed", zh: "更新失败" },
     resetComplete: { en: "Reset complete.", zh: "重置完成。" },
+    resetIncomplete: {
+        en: "Reset did not complete. Some state may already be cleared; current values were kept.",
+        zh: "重置未完成。部分状态可能已清除；当前值已保留。",
+    },
+    retryResetCleanup: { en: "Retry cleanup", zh: "重试清理" },
+    resetCleanupComplete: {
+        en: "Reset cleanup complete. Current preferences were kept.",
+        zh: "重置清理已完成。当前偏好设置已保留。",
+    },
+    bookmarkPersistenceWarning: {
+        en: "Bookmark changes are not saved. Make another bookmark change to retry.",
+        zh: "书签更改尚未保存。请再次更改书签以重试。",
+    },
+    bookmarkStorageReadFailed: {
+        en: "Bookmarks could not be read. Your saved data was not changed; retry.",
+        zh: "无法读取书签。已保存的数据未被更改；请重试。",
+    },
+    bookmarkStorageInvalid: {
+        en: "Saved bookmarks are invalid. Import a valid backup or Reset to repair them.",
+        zh: "已保存的书签无效。请导入有效备份或重置以修复。",
+    },
+    bookmarkDefaultsUnreadable: {
+        en: "Default bookmarks could not be loaded. Repair or reinstall the extension, then retry.",
+        zh: "无法加载默认书签。请修复或重新安装扩展，然后重试。",
+    },
     importSuccess: { en: "Imported successfully!", zh: "导入成功！" },
     availableForUpdate: { en: "available for update", zh: "可更新" },
     checkFailed: { en: "Check failed", zh: "检查失败" },
+    updateCheckFailed: { en: "Update check failed.", zh: "更新检查失败。" },
     edit: { en: "Edit", zh: "编辑" },
     preview: { en: "Preview", zh: "预览" },
     

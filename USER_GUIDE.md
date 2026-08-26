@@ -87,7 +87,8 @@ The extension uses configuration files stored in your User directory. This ensur
 **Location:** `%LOCALAPPDATA%\DynamicsHelper` (Paste this into Windows File Explorer address bar).
 
 * **`config.json`**: Controls MCP servers, skills, and model settings.
-* **`copilot-instructions.md`**: The "Persona" of the AI. You can edit this file to change how the AI responds (e.g., change the tone, add new rules).
+* **`copilot-instructions.md`**: Your **DH-specific Instructions**. They apply only to DH sessions when Repository ONLY is not effective.
+* **`user_prompt.md`**: The canonical Host source for the **Custom User Prompt**. The Host rereads it for every Analyze.
 * **`native_host.log`**: The log file for troubleshooting. Log files rotate automatically at 5 MB (up to 3 backups: `.log.1`, `.log.2`, `.log.3`), keeping total disk usage under ~20 MB.
 
 ### The Options Page
@@ -96,7 +97,7 @@ Open the Options page from the extension icon or the FAB menu. Settings are orga
 
 * **General** — language, auto-analyze mode, status bubble, analyze timeout, log level, and beta channel.
 * **Appearance** — floating-button text, colour, and screen-edge offsets.
-* **Copilot Configuration** — workbench root path, skills, MCP config, custom instructions, and user prompt.
+* **Copilot Configuration** — workbench Root Path, Skills, MCP config, DH-specific Instructions, Repository ONLY, and Custom User Prompt.
 * **Model & Performance** — model, reasoning effort, and context tier for analyze sessions.
 * **Team Catalog** — shared team bookmark subscription.
 * **Bookmark Manager** — your personal bookmark menu editor.
@@ -138,31 +139,74 @@ Under **Settings → Model & Performance**, you can choose the model, reasoning 
 
 If the model list can't be fetched (e.g. your GitHub login expired), DH shows an error under the dropdown and keeps the last-known model list — it never silently shows an empty list. For an expired login, run `copilot` in a terminal to re-authenticate, then click Refresh.
 
-### Custom Instructions & Prompts
+### DH-Specific Instructions & Custom User Prompt
 
-In the **Settings → Copilot Configuration** section, you can customize two Markdown text fields:
+In **Settings → Copilot Configuration**, you can customize two Markdown text fields with different scopes:
 
-* **User Instructions**: Appended to the core system prompt. Use this for personal rules (e.g., "Always respond in bullet points", "Focus on technical details"). These instructions shape the AI's behavior across all analyses.
-* **User Prompt**: Appended to the case context description when scanning a page. Use this for standard questions or instructions that should accompany every analysis (e.g., "Please provide a root cause analysis and mitigation steps").
+* **DH-specific Instructions**: System-role rules used across DH analyses when Repository ONLY is not effective. Use this for DH-only preferences such as response style or analysis emphasis. The canonical file is `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`.
+* **Custom User Prompt**: User-role content appended once and PII-scrubbed with the case payload. Use it for recurring questions such as "Provide a root cause analysis and mitigation steps." Options previews the text, while `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md` is authoritative: the Host rereads it on every Analyze and replaces any stale prompt section in the browser payload.
 
-Both fields support Markdown formatting. Click the **Preview** toggle above each textarea to see the rendered output; click **Edit** to return to the raw text editor. Both the Edit and Preview panes can be resized by dragging their bottom-right corner.
+Both fields support Markdown formatting. Click **Preview** above either textarea to see rendered output and **Edit** to return to raw text. Both panes can be resized. Clearing either field is a real saved operation: an explicit empty value truncates its file. Unrelated setting changes omit both prompt-file fields and leave their files unchanged. If Custom User Prompt is unreadable or invalid UTF-8, Options keeps the last browser-mirrored text instead of displaying a false empty value; explicitly edit/clear the field to repair the Host file.
+
+If Chrome cannot save the local preference mirror, Options shows a persistent
+**Settings were not saved** warning and does not apply the Host/team side
+effects yet. Change a setting again to retry. A failed personal bookmark write
+or removal keeps the current menu visible and shows **Bookmark changes are not
+saved**; make another bookmark change to retry the newest menu snapshot. Reset
+reports success only after both the Native Host defaults and matching browser
+cleanup commit. Host save failure performs no browser cleanup; if only session
+refresh fails, Reset can finish while that separate warning remains. A stale,
+interrupted, or superseded Reset keeps newer values visible and asks you to
+retry; after the Host phase has committed, retry repeats only browser cleanup.
+
+Prompt/configuration errors are actionable and do not mean authentication failed:
+
+| Code | Meaning | Action |
+|---|---|---|
+| `dh_core_prompt_missing` | DH Core is missing | Repair or reinstall Dynamics Helper |
+| `dh_core_prompt_unreadable` | DH Core cannot be read | Repair the installation or permissions |
+| `dh_specific_instructions_unreadable` | DH-specific Instructions cannot be read | Replace or clear them in Options |
+| `repository_instructions_missing` | Root instructions are missing | Add `.github/copilot-instructions.md` or disable Repository ONLY |
+| `repository_instructions_unreadable` | Root instructions cannot be read | Repair the file or disable Repository ONLY |
+| `user_prompt_unreadable` | Custom User Prompt cannot be read | Replace or clear it in Options |
 
 ### Workspace Configuration (Advanced)
 
-You can configure Dynamics Helper to use specific skills and tools for a particular project or repository.
+You can configure Dynamics Helper to use specific Skills, MCP servers, and instructions for a project or repository.
 
 1.  **Create a `.github` folder** in the root of your project/repository.
 2.  **Add Configuration Files:**
     *   **`.github/skills/`**: A folder containing your custom skill definitions.
     *   **`.github/mcp-config.json`**: A JSON file defining MCP servers for this project.
-    *   **`.github/copilot-instructions.md`**: Project-specific instructions for the AI.
+    *   **`.github/copilot-instructions.md`**: The only Repository Instructions file DH supports. It must be directly under the configured Root Path.
 
 ### Repository ONLY Mode
 
-In the extension settings, you can enable **"Repository ONLY Mode"**.
+In the extension settings, **Use repository SKILLS, MCP, and instructions ONLY** extends the existing Repository ONLY behavior to instruction selection. DH Core is always active, and Custom User Prompt is always included with Analyze.
 
-*   **Enabled:** The AI will *only* use the configuration found in your current workspace (`.github` folder). It ignores your global User settings and the built-in defaults. This is useful for strict project isolation.
-*   **Disabled (Default):** The AI combines your Global User settings with the Workspace settings. Workspace settings are added to your global capabilities.
+The exact instruction-source matrix is:
+
+```text
+Root empty, Repository ONLY ignored:
+  DH Core + DH-specific Instructions + Custom User Prompt
+
+Root non-empty, Repository ONLY off:
+  DH Core + DH-specific Instructions + Custom User Prompt
+
+Root non-empty, Repository ONLY on:
+  DH Core + <Root>/.github/copilot-instructions.md + Custom User Prompt
+```
+
+Important behavior:
+
+* With an empty Root Path, the checkbox is disabled and its stored value is retained but ignored.
+* With a non-empty Root Path and Repository ONLY on, repository Skills and MCP replace their global counterparts, and `<Root>/.github/copilot-instructions.md` replaces DH-specific Instructions. The disabled DH-specific editor retains its content.
+* DH explicitly disables Copilot CLI automatic custom-instruction discovery for every DH session. CLI-global `~/.copilot/copilot-instructions.md`, `AGENTS.md`, `.github/instructions/**/*.instructions.md`, and other automatically discovered files do not enter DH analyses.
+* Only the Root-level `.github/copilot-instructions.md` is supported. DH does not walk parent directories or reproduce the CLI's broader discovery rules.
+* An existing empty or whitespace-only Repository Instructions file is valid and produces a Core-only system layer. A missing DH-specific Instructions file is also valid empty content. An existing unreadable/invalid-UTF-8 selected DH-specific file, a missing or unreadable/invalid-UTF-8 selected Repository file, or missing/unreadable DH Core blocks Analyze; DH does not fall back to another instruction source.
+* Existing saved Repository ONLY values of `true` immediately gain this instruction-selection meaning when Root Path is non-empty. If that Root lacks `.github/copilot-instructions.md`, add the file or turn Repository ONLY off before Analyze.
+* No instruction text is moved automatically. Keep DH-only preferences in DH-specific Instructions, repository workflow in the Root file, and CLI-wide preferences in the CLI global file, understanding that DH intentionally excludes the latter.
+* This setting is generic to any repository. It does not detect or integrate with MyCases, initialize MyCases files, or implement Stage 0/1 orchestration.
 
 ---
 
@@ -198,8 +242,8 @@ In the extension settings, you can enable automatic analysis:
 Each analysis creates a persistent Copilot session tied to your case number. After the analysis completes:
 
 * The report includes a **Session Name** (a deterministic UUID that identifies the case session).
-* Copy the complete resume command from the report. With Root Path configured it has the form `copilot -C '<root>' --resume=<uuid>`; `-C` applies the workspace before Copilot discovers skills, MCP, and instructions.
-* This restores the conversation history, tool state, planning context, and the configured workspace root. Prefer the report command over entering `/resume` inside a CLI started elsewhere, especially for sessions created by older DH versions whose saved cwd may be stale.
+* Copy the complete resume command from the report. With Root Path configured it has the form `copilot -C '<root>' --resume=<uuid>`; `-C` applies the workspace before the interactive CLI continuation resolves workspace capabilities.
+* This restores conversation history, tool state, planning context, and the configured workspace root. It does not change the explicit instruction source DH used when creating or refreshing the session. Prefer the report command over entering `/resume` inside a CLI started elsewhere, especially for sessions created by older DH versions whose saved cwd may be stale.
 
 ### Team Bookmark Catalog
 
@@ -242,7 +286,7 @@ Each team's bookmark file at its `url`:
 
 **Personal bookmarks** (drag-and-drop in the **Bookmark Manager** tab) work independently of the team catalog and are not affected by the toggle.
 
-**Built-in defaults:** New browser profiles start with public Dynamics Helper documentation, release, and issue-reporting links. An upgrade does not replace a non-empty personal bookmark menu. Missing, non-array, or empty personal bookmark storage falls back to the shipped defaults. Clearing browser storage or clicking **Reset** loads the currently shipped public defaults again.
+**Built-in defaults:** New browser profiles start with public Dynamics Helper documentation, release, and issue-reporting links. An upgrade does not replace saved personal bookmark state, including an intentionally empty menu. Only missing personal bookmark storage loads the shipped defaults; malformed storage is reported without overwriting it. Clearing browser storage or clicking **Reset** loads the currently shipped public defaults again.
 
 ---
 
@@ -305,9 +349,9 @@ The tool includes a built-in "PII Scrubber" that attempts to remove the followin
 
 ### Auditing
 
-* All data sent to the AI and all responses are logged locally.
+* Local logs contain operational diagnostics and may include non-prompt paths or SDK response diagnostics at verbose levels. DH does not log instruction contents, Custom User Prompt contents, or prompt-source paths; safe source mode, error classification, and a short fingerprint prefix may be logged.
 * **Log Location**: `%LOCALAPPDATA%\DynamicsHelper\native_host.log`
-* You can inspect this file at any time to verify what data is being processed.
+* The generated report contains the analysis response. Review it separately from the operational log.
 
 ---
 
@@ -318,6 +362,7 @@ If the tool isn't working, follow these steps to collect information for the dev
 ### Common Issues
 
 * **"Analysis Timed Out"**: The Agent is taking too long. This usually means it's doing a lot of work (good!) but hit the analyze-timeout budget (default 20 minutes; configurable under **Options → General → Analyze Timeout**). Raise the timeout or narrow your request, and check the logs.
+* **"Repository Instructions are missing/cannot be read"**: Repository ONLY selected `<Root>/.github/copilot-instructions.md`, but DH could not obtain strict UTF-8 content. Add/repair the file, or disable Repository ONLY. An empty existing file is valid.
 * **"Host error" / "Native host disconnected"**: The browser cannot find the Python script.
   * Verify you ran `install.bat` as Administrator.
   * Verify your Extension ID is correct in the host manifest.

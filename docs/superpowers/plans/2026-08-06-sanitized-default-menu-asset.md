@@ -622,7 +622,7 @@ with:
 Immediately after the **Personal bookmarks** paragraph in `USER_GUIDE.md`, add:
 
 ```markdown
-**Built-in defaults:** New browser profiles start with public Dynamics Helper documentation, release, and issue-reporting links. An upgrade does not replace a non-empty personal bookmark menu. Missing, invalid, or empty personal bookmark storage falls back to the shipped defaults. Clearing browser storage or clicking **Reset** loads the currently shipped public defaults again.
+**Built-in defaults:** New browser profiles start with public Dynamics Helper documentation, release, and issue-reporting links. An upgrade does not replace saved personal bookmark state, including an intentionally empty menu. Only missing personal bookmark storage loads the shipped defaults; malformed storage is reported without overwriting it. Clearing browser storage or clicking **Reset** loads the currently shipped public defaults again.
 ```
 
 - [ ] **Step 4: Document the required packaged-asset rule for developers**

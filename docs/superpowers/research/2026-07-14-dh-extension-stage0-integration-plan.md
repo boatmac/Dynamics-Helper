@@ -1,9 +1,23 @@
 # Dynamics Helper Extension — Conditional Stage 0/1 Integration Plan
 
 - **Date:** 2026-07-14
-- **Status:** Planning input, conditional on MyCasesKit contracts; not an implementation plan
+- **Status:** Historical planning input; prompt proposal superseded 2026-07-15; Stage 0/1 research retained
 - **Related research:** `2026-07-14-dh-mycaseskit-stage0-instructions-brief.md`
-- **MyCasesKit proposal:** `stage0-coordinator-design.md` (Form ③ recommended, not yet formally approved)
+- **MyCasesKit proposal at 2026-07-14:** `stage0-coordinator-design.md` (Form ③ was recommended; accepted later in response `675006a`)
+
+> **Superseded prompt-scope recommendation (2026-07-15):** The accepted
+> `docs/superpowers/specs/2026-07-15-dh-prompt-scope-cleanup-design.md`
+> supersedes this research document wherever it recommends relying on Copilot
+> CLI automatic workspace instruction discovery. Implemented DH sessions set
+> `skip_custom_instructions=True` and explicitly inject DH Core plus exactly one
+> editable source: DH-specific Instructions, or only
+> `<Root>/.github/copilot-instructions.md` when Repository ONLY is effective.
+> CLI-global, `AGENTS.md`, path-specific, and other automatically discovered
+> instructions are excluded. This note does not change the Stage 0/1 contract
+> research below; no MyCases integration described here has been implemented.
+> Prompt mechanics, Workstream A, and `session_name` ownership statements below
+> remain a historical 2026-07-14 baseline/proposal. See
+> `docs/session-handoff-2026-07-15.md` for the latest MyCasesKit response state.
 
 ## 1. Objective
 
@@ -54,22 +68,28 @@ DH Extract
 - persistence request/response + idempotency identity
 - error taxonomy and version compatibility
 
-## 3. Workstream A — DH fixes that do not depend on MyCasesKit API
+## 3. Historical 2026-07-14 Workstream A Proposal — Superseded 2026-07-15
 
-These can be designed/implemented independently after explicit approval.
+> This entire Workstream A section records the 2026-07-14 baseline and proposed
+> prompt fix. It is not current implementation guidance. The accepted
+> 2026-07-15 prompt-scope spec replaced the CLI-discovery approach, and
+> Workstream A was subsequently implemented under that accepted design.
+
+At the 2026-07-14 baseline, these items were candidates for independent design
+and implementation after explicit approval.
 
 ### A1. Remove duplicate workspace-instruction injection
 
-Current DH manually reads `<root>/.github/copilot-instructions.md` and appends it to SDK `system_message`, while Copilot CLI auto-discovers the same file from `working_directory`.
+At the 2026-07-14 baseline, DH manually read `<root>/.github/copilot-instructions.md` and appended it to SDK `system_message`, while Copilot CLI auto-discovered the same file from `working_directory`.
 
-Change:
+Historical proposed change (superseded 2026-07-15):
 
 - remove the manual workspace-instruction append;
 - retain root-bound client/session working directory;
 - rely on Copilot CLI official discovery for repository instructions and agent files;
 - keep DH's own internal system prompt separate.
 
-Required tests:
+Historical proposed tests:
 
 - `_get_session_config()` no longer embeds workspace instruction text;
 - SDK integration smoke proves workspace instructions still load from working directory;
@@ -77,9 +97,9 @@ Required tests:
 
 ### A2. Fix Custom User Instructions empty-string clearing
 
-Current host uses truthiness (`a or b`) and can ignore an explicit empty value.
+At the 2026-07-14 baseline, the Host used truthiness (`a or b`) and could ignore an explicit empty value.
 
-Change:
+Historical proposed change:
 
 - distinguish missing field from empty string;
 - empty string truncates `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`;
@@ -100,11 +120,11 @@ Document that:
 - repository workflow belongs in workspace instruction files;
 - Custom User Prompt is repeated on each Analyze turn.
 
-Do not silently migrate existing text. Show migration guidance because current content may mix all three scopes.
+The proposal did not silently migrate existing text; it called for guidance because the 2026-07-14 content could mix all three scopes.
 
 ### A4. Correct Repository ONLY documentation
 
-The preference currently isolates skills and MCP, not instructions. Update documentation/UI help text only if needed; do not broaden behavior without a separate design.
+At the 2026-07-14 baseline, the preference isolated Skills and MCP, not instructions. The proposal limited this item to documentation/UI help and required a separate design before broadening behavior.
 
 ## 4. Workstream B — contracts MyCasesKit must define first
 
@@ -308,7 +328,7 @@ Integrated:
 
 ## 6. Workstream D — migration
 
-### D1. Current DH instructions
+### D1. Historical 2026-07-14 DH Instructions Migration Proposal
 
 Provide a guided/manual migration checklist:
 
@@ -366,7 +386,7 @@ MyCasesKit owns migration from legacy `session_id` templates/agents and any cont
 ## 8. Suggested sequencing
 
 1. MyCasesKit formally decides Form ③.
-2. DH may implement Workstream A independent cleanup while MyCasesKit design continues.
+2. DH may implement the historical Workstream A independent cleanup while MyCasesKit design continues.
 3. MyCasesKit fixes independent `session_name` prose conflict and exports integration canaries.
 4. Both repos approve `Stage0Envelope` + coordinator contract.
 5. MyCasesKit builds/tests `New-Case`.
@@ -378,9 +398,11 @@ MyCasesKit owns migration from legacy `session_id` templates/agents and any cont
 
 Parallelization note: Workstream A can proceed while MyCasesKit designs/builds B, but DH integrated orchestration must not guess B interfaces.
 
-## 9. MyCasesKit discussion checklist
+## 9. Historical 2026-07-14 MyCasesKit Discussion Checklist
 
-Please return the following artifacts/decisions to DH:
+This is the request checklist sent from the 2026-07-14 research session. It is
+not a current response-status tracker; see the handoff for decisions returned in
+MyCasesKit commit `675006a` and the remaining Contract Primitives gaps.
 
 - [ ] Form ③ accepted/rejected
 - [ ] Workspace marker/manifest/canary schema

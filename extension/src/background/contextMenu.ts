@@ -1,5 +1,71 @@
-import { PageReader } from '../utils/pageReader';
 import { getTranslation, resolveLanguage, LanguageCode } from '../utils/translations';
+import {
+    buildContextMenuAnalyzePayload,
+    type ContextMenuAnalyzePayload,
+} from '../utils/analyzeRequest';
+import { ownDataProperty } from '../utils/ownData';
+
+export interface ContextMenuClickDeps {
+    readPreferences: () => Promise<unknown>
+    executeInTab: (tabId: number) => Promise<void>
+    sendToTab: (
+        tabId: number,
+        message: { type: 'TRIGGER_ANALYZE'; payload: ContextMenuAnalyzePayload },
+    ) => Promise<void>
+}
+
+export async function handleContextMenuAnalyzeClick(
+    info: { selectionText?: unknown },
+    tabId: number | undefined,
+    deps: ContextMenuClickDeps,
+): Promise<'sent' | 'ignored' | 'failed'> {
+    if (!Number.isInteger(tabId) || (tabId as number) <= 0) return 'ignored'
+    try {
+        const storedPreferences = await deps.readPreferences()
+        await deps.executeInTab(tabId as number)
+        const selection = ownDataProperty(info, 'selectionText')
+        const payload = buildContextMenuAnalyzePayload(
+            selection.kind === 'value' ? selection.value : undefined,
+            storedPreferences,
+        )
+        await deps.sendToTab(tabId as number, {
+            type: 'TRIGGER_ANALYZE',
+            payload,
+        })
+        return 'sent'
+    } catch {
+        console.error('[DH-BG] Context menu Analyze failed')
+        return 'failed'
+    }
+}
+
+const productionContextMenuDeps: ContextMenuClickDeps = {
+    readPreferences: () => new Promise((resolve, reject) => {
+        chrome.storage.local.get('dh_prefs', result => {
+            if (chrome.runtime.lastError) {
+                reject(new Error('Context menu preferences read failed'))
+                return
+            }
+            const prefs = ownDataProperty(result, 'dh_prefs')
+            resolve(prefs.kind === 'value' ? prefs.value : undefined)
+        })
+    }),
+    executeInTab: async tabId => {
+        await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => true,
+        })
+    },
+    sendToTab: (tabId, message) => new Promise((resolve, reject) => {
+        chrome.tabs.sendMessage(tabId, message, () => {
+            if (chrome.runtime.lastError) {
+                reject(new Error('Context menu Analyze delivery failed'))
+                return
+            }
+            resolve()
+        })
+    }),
+}
 
 async function getMenuTitle(): Promise<string> {
     const result = await chrome.storage.local.get("dh_prefs");
@@ -34,50 +100,12 @@ export function setupContextMenu() {
     });
 
     chrome.contextMenus.onClicked.addListener((info, tab) => {
-        if (info.menuItemId === "dh-analyze-selection" && tab?.id) {
-            handleContextMenuClick(info, tab);
+        if (info.menuItemId === "dh-analyze-selection") {
+            void handleContextMenuAnalyzeClick(
+                info,
+                tab?.id,
+                productionContextMenuDeps,
+            );
         }
     });
-}
-
-/**
- * Handles the context menu click event.
- * Injects a script to scrape the page (or use selection) and then sends the analyze message.
- */
-async function handleContextMenuClick(info: chrome.contextMenus.OnClickData, tab: chrome.tabs.Tab) {
-
-    if (!tab.id) return;
-
-    // We need to get the full context, not just the selection text.
-    // So we inject a content script function to run PageReader.
-    try {
-        // 1. Get Preferences (Root Path)
-        const prefs = await chrome.storage.local.get("dh_prefs");
-        const rootPath = (prefs.dh_prefs as any)?.rootPath || "";
-
-        // 2. Execute Script in Tab to get data
-        const results = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: () => {
-                // We need to access PageReader logic. 
-                // Since PageReader is a module, we can't easily inject it via 'func'.
-                // Instead, we should send a message to the EXISTING Content Script (FAB.tsx / index.tsx).
-                return true; 
-            }
-        });
-
-        // 3. Send message to Content Script to trigger analysis
-        // The Content Script (FAB) is already running and has the "handleAnalyze" logic.
-        // We just need to tell it to start.
-        chrome.tabs.sendMessage(tab.id, {
-            type: "TRIGGER_ANALYZE",
-            payload: {
-                selectionText: info.selectionText,
-                rootPath: rootPath
-            }
-        });
-
-    } catch (e) {
-        console.error("[DH-BG] Context Menu Error:", e);
-    }
 }

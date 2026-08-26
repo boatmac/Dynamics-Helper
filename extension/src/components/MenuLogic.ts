@@ -1,19 +1,34 @@
 // Ported logic from legacy contentScript.js
 // Handles menu state, recursive rendering, and actions
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import {
+    collapseBookmarkFolders,
+    loadBookmarkItems,
+    parseOwnBookmarkItems,
+    writeStoredItems,
+    type MenuItem,
+} from '../utils/bookmarkItems';
+export type { MenuItem } from '../utils/bookmarkItems';
 
-export interface MenuItem {
-    type: 'folder' | 'link' | 'markdown' | 'back' | 'unknown';
-    label: string;
-    url?: string;
-    content?: string;
-    children?: MenuItem[];
-    target?: string;
-    icon?: string;
-    collapsed?: boolean;
-    tags?: string[];
-    source?: 'team' | 'personal';
+export type BookmarkLoadIssue =
+    | 'bookmark_storage_invalid'
+    | 'bookmark_storage_read_failed'
+    | 'bookmark_defaults_unreadable'
+    | null;
+
+type LoadedMenuSnapshot = {
+    items: MenuItem[] | null;
+    source: 'saved' | 'defaults' | null;
+    issue: BookmarkLoadIssue;
+};
+
+async function readMenuSnapshot(): Promise<LoadedMenuSnapshot> {
+    const loaded = await loadBookmarkItems();
+    if (loaded.kind !== 'loaded') {
+        return { items: null, source: null, issue: loaded.code };
+    }
+    return { items: loaded.items, source: loaded.source, issue: null };
 }
 
 /**
@@ -38,33 +53,100 @@ export function mergeMenus(personal: MenuItem[], team: MenuItem[]): MenuItem[] {
     return [...personal, ...teamFiltered];
 }
 
+export function teamCacheIsCurrent(data: {
+    dh_team_manifest_url?: string;
+    dh_team?: string;
+    dh_prefs?: {
+        teamCatalogEnabled?: boolean;
+        teamManifestUrl?: string;
+        team?: string;
+    };
+}): boolean {
+    return data.dh_prefs?.teamCatalogEnabled === true
+        && data.dh_team_manifest_url === data.dh_prefs.teamManifestUrl
+        && data.dh_team === data.dh_prefs.team;
+}
+
 export function useMenuLogic() {
     const [items, setItems] = useState<MenuItem[]>([]);
     const [navStack, setNavStack] = useState<MenuItem[][]>([]);
     const [currentItems, setCurrentItems] = useState<MenuItem[]>([]);
+    const [bookmarkLoadIssue, setBookmarkLoadIssue] = useState<BookmarkLoadIssue>(null);
+    const loadGenerationRef = useRef(0);
 
     // Load Items
     useEffect(() => {
-        loadItems().then(data => {
+        let cancelled = false;
+        const loadLatest = async () => {
+            const generation = ++loadGenerationRef.current;
+            const isCurrent = () => !cancelled
+                && generation === loadGenerationRef.current;
+            const loaded = await readMenuSnapshot();
+            if (!isCurrent()) return;
+            if (!loaded.items) {
+                setBookmarkLoadIssue(loaded.issue);
+                return;
+            }
+            const personalItems = collapseBookmarkFolders(
+                loaded.items,
+                isCurrent,
+            );
+            if (!personalItems || !isCurrent()) return;
+            if (loaded.source === 'defaults') {
+                try {
+                    const writeResult = await writeStoredItems(
+                        personalItems,
+                        isCurrent,
+                    );
+                    if (writeResult !== 'committed' || !isCurrent()) return;
+                } catch {
+                    if (isCurrent()) {
+                        setBookmarkLoadIssue('bookmark_storage_read_failed');
+                    }
+                    return;
+                }
+            }
+            setItems(personalItems);
+            setNavStack([]);
+            setCurrentItems(personalItems);
+            setBookmarkLoadIssue(null);
+            const teamItems = await loadTeamItems();
+            if (!isCurrent()) return;
+            const data = mergeMenus(personalItems, teamItems);
             setItems(data);
+            setNavStack([]);
             setCurrentItems(data);
-        });
+        };
+        void loadLatest();
         
         // Listen for changes
         if (chrome?.storage?.onChanged) {
             const listener = (changes: any, area: string) => {
-                if (area === "local" && (changes.dh_items || changes.dh_team_items)) {
+                if (
+                    area === "local"
+                    && (
+                        changes.dh_items
+                        || changes.dh_team_items
+                        || changes.dh_team_manifest_url
+                        || changes.dh_team
+                        || changes.dh_prefs
+                    )
+                ) {
                     // Reload everything when either personal or team items change
-                    loadItems().then(data => {
-                        setItems(data);
-                        setNavStack([]);
-                        setCurrentItems(data);
-                    });
+                    void loadLatest();
                 }
             };
             chrome.storage.onChanged.addListener(listener);
-            return () => chrome.storage.onChanged.removeListener(listener);
+            return () => {
+                cancelled = true;
+                loadGenerationRef.current += 1;
+                chrome.storage.onChanged.removeListener(listener);
+            };
         }
+        return () => {
+            cancelled = true;
+            loadGenerationRef.current += 1;
+        };
     }, []);
 
     const navigateTo = (folder: MenuItem) => {
@@ -86,73 +168,41 @@ export function useMenuLogic() {
         currentItems,
         canGoBack: navStack.length > 0,
         navigateTo,
-        navigateBack
+        navigateBack,
+        bookmarkLoadIssue,
     };
 }
 
-async function loadItems(): Promise<MenuItem[]> {
-    // 1. Load personal items
-    let personalItems: MenuItem[] = [];
+async function loadTeamItems(): Promise<MenuItem[]> {
     try {
         if (chrome?.storage?.local) {
-            const obj = await new Promise<{ dh_items?: MenuItem[] }>((resolve) => {
-                chrome.storage.local.get("dh_items", (items) => resolve(items as { dh_items?: MenuItem[] }));
+            const wrappedTeamData = await new Promise<{ value: unknown }>((resolve) => {
+                chrome.storage.local.get([
+                    'dh_team_items',
+                    'dh_team_manifest_url',
+                    'dh_team',
+                    'dh_prefs',
+                ], value => resolve({ value }));
             });
-            if (Array.isArray(obj.dh_items) && obj.dh_items.length > 0) {
-                personalItems = obj.dh_items;
-            }
-        }
-    } catch (_) { }
-
-    // Fallback to items.json if no personal items saved
-    if (personalItems.length === 0) {
-        try {
-            const url = chrome.runtime.getURL("items.json");
-            const res = await fetch(url);
-            if (res.ok) {
-                const text = await res.text();
-                if (text.trim().startsWith("<")) {
-                    throw new Error("Received HTML instead of JSON");
-                }
-                const data = JSON.parse(text);
-                personalItems = Array.isArray(data) ? data : (data.items || []);
-            }
-        } catch (e) {
-            console.warn("[DH] Failed to load items.json", e);
-        }
-    }
-
-    // Ultimate fallback
-    if (personalItems.length === 0) {
-        personalItems = [
-            { type: "folder", label: "Favorites", children: [
-                { type: "link", label: "Dynamics Admin Center", url: "https://admin.powerplatform.microsoft.com/" },
-            ]},
-            { type: "markdown", label: "About", content: "# Dynamics Helper\nLoaded defaults." }
-        ] as MenuItem[];
-    }
-
-    // 2. Load team items from cache
-    let teamItems: MenuItem[] = [];
-    try {
-        if (chrome?.storage?.local) {
-            const teamData = await new Promise<any>((resolve) => {
-                chrome.storage.local.get(['dh_team_items', 'dh_prefs'], resolve);
-            });
+            const teamData = wrappedTeamData.value;
+            const parsedItems = parseOwnBookmarkItems(
+                teamData,
+                'dh_team_items',
+            );
             // Respect the team-catalog toggle: when disabled, do not surface
             // cached team data in the FAB even if dh_team_items still exists.
             // Spec 2026-05-20-team-catalog-user-config-design.md § 3.7.
-            const enabled = teamData.dh_prefs?.teamCatalogEnabled === true;
-            if (enabled && Array.isArray(teamData.dh_team_items)) {
-                teamItems = teamData.dh_team_items;
+            if (
+                parsedItems
+                && teamCacheIsCurrent(
+                    teamData as Parameters<typeof teamCacheIsCurrent>[0],
+                )
+            ) {
+                return parsedItems;
             }
         }
     } catch (_) { }
-
-    // 3. Flat-merge: personal first, team appended, label collisions
-    // resolved by personal-wins (team's same-label item dropped entirely).
-    // See mergeMenus() docstring + spec § 3.1.
-    return mergeMenus(personalItems, teamItems);
+    return [];
 }
 
 export async function resolveDynamicUrl(rawUrl: string): Promise<string | null> {

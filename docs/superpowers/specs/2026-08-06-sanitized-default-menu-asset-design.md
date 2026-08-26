@@ -34,9 +34,10 @@ would retain unreviewed organizational content and would not restore provenance.
    installed copy is read, copied, transformed, or used as a template.
 4. Labels and markdown are English. This change does not add menu-data
    internationalization.
-5. Existing non-empty `dh_items` remain untouched on upgrade.
-6. The new default applies only when personal storage is missing, invalid, or
-   empty, or when the user explicitly invokes Reset.
+5. Existing `dh_items`, including an explicitly stored empty array, remain
+   untouched on upgrade. Invalid stored data is reported without replacement.
+6. The new default applies only when personal storage is missing or when the
+   user explicitly invokes Reset.
 7. Team Catalog and personal/team merge behavior remain unchanged.
 
 ## 3. Asset Contract
@@ -107,8 +108,9 @@ and remain under `/boatmac/Dynamics-Helper/`.
 
 The existing precedence rule remains:
 
-1. A valid non-empty personal `dh_items` array wins.
-2. Missing, invalid, or empty personal storage falls back to packaged defaults.
+1. Any valid personal `dh_items` array, including an empty array, wins.
+2. Missing personal storage falls back to packaged defaults; invalid storage is
+   reported without fetching or persisting defaults.
 3. Team items merge through the existing label-collision policy.
 
 There is no migration that identifies or rewrites old seeded defaults. Such

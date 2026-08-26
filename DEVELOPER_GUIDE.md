@@ -16,11 +16,13 @@ The project consists of three main components:
 
 ### `extension/` (Frontend)
 
-* **`src/components/FAB.tsx`**: The main UI component. It contains the "Analyze" logic, the safety timeout configuration (currently 600s), and the `isUserEdited` ref pattern for protecting user edits from background scans. All user-facing strings use `t()` from `useTranslation()` for i18n support.
-* **`src/components/Options.tsx`**: The extension settings page. Handles preferences, Root Path, MCP/Skill directory config, team catalog sync, and update checking. User Instructions and User Prompt textareas include an Edit/Preview toggle for rendered Markdown preview.
+* **`src/components/FAB.tsx`**: The main UI component. It contains the Analyze logic, derives its safety timeout from the Host preference with a 10-second grace period, localizes prompt-source errors at render time, and uses the `isUserEdited` ref pattern to protect user edits from background scans. All user-facing strings use `t()` from `useTranslation()` for i18n support.
+* **`src/components/Options.tsx`**: The extension settings page. Handles preferences, Root Path, MCP/Skill directory config, team catalog sync, and update checking. DH-specific Instructions and Custom User Prompt textareas include an Edit/Preview toggle for rendered Markdown preview.
 * **`src/components/MarkdownPreview.tsx`**: Shared Markdown renderer using `react-markdown` + `remark-gfm`. Provides styled GFM rendering (headings, code blocks, tables, links, lists, blockquotes). Used by Options.tsx for preview toggles.
 * **`src/utils/pageReader.ts`**: Logic for scraping Dynamics/Azure Portal pages to extract case numbers, error text, and context. Uses a 4-strategy cascade (header controls, label search, header container regex, ticket title fallback).
-* **`src/background/serviceWorker.ts`**: Service worker handling telemetry (with stable anonymous UUID via `chrome.storage.local`), native messaging relay, and extension version injection.
+* **`src/background/serviceWorker.ts`**: Service worker handling telemetry (with stable anonymous UUID via `chrome.storage.local`), native messaging relay, analysis-result persistence, and extension version injection. Native-message logging is metadata-only; it must not log prompt-bearing payloads.
+* **`src/background/teamManifestSync.ts`**: Team sync response boundary. Manifest-only fetches re-read `dh_prefs` after every fetch result, including failure/null/304. Selected-team responses preserve `committed|unchanged|failed|skipped|stale` plus captured identity.
+* **`src/utils/analysisPrompt.ts`**: Idempotent send-time Custom User Prompt assembly for both constructed and preformatted FAB context.
 * **`src/utils/telemetry.ts`**: Azure Application Insights integration for anonymous telemetry.
 * **`manifest.json`**: Defines permissions (`nativeMessaging`) and background scripts.
 * **`dist/`**: The build output directory. Load the extension from here (`extension/dist`).
@@ -46,10 +48,11 @@ The project consists of three main components:
 
 ### `%LOCALAPPDATA%\DynamicsHelper\` (User Configuration)
 
-* **`config.json`**: Defines the MCP servers and Skill directories the Agent can use. Ships with a minimal default (`fetch` server); additional servers (Kusto, WorkIQ, etc.) are user-configured.
+* **`config.json`**: Defines Root Path, Repository ONLY, MCP, Skills, model/performance settings, and mirrored extension preferences. Ships with a minimal default; additional capabilities are user-configured.
   * *Note:* In Production mode, this file is shared between the installed app and the user's overrides.
 * **`native_host.log`**: The primary debug log.
-* **`copilot-instructions.md`**: The active system prompt (User overrides).
+* **`copilot-instructions.md`**: DH-specific Instructions. This is one editable system source, selected only when Repository ONLY is not effective.
+* **`user_prompt.md`**: Custom User Prompt backup/source, inserted into every PII-scrubbed Analyze user turn.
 
 ---
 
@@ -68,8 +71,10 @@ Understanding how a user request becomes an AI response.
 4. **Session Management:**
     * The backend validates the case number via `_extract_case_id()` (accepts 16 or 19 digits).
     * A stable deterministic UUIDv5 is derived via `_case_to_session_id()` from the bare case number and the shared MyCasesKit namespace. The same UUID is the SDK `session_id` argument and the shell-CLI resume handle.
+    * Before every Analyze, the Host validates the effective Root and resolves an immutable prompt snapshot containing exact DH Core bytes plus exactly one selected editable source. Strict UTF-8 decode or source-availability failures stop before any model turn.
     * Smart refresh compares `current_case_id` plus `current_session_root_path` (the root actually applied to the active session), not just the desired `self.root_path` config value.
-    * On session creation, `resume_session(uuid, working_directory=root)` is tried first (restores conversation history/tool state and self-heals old cwd metadata). It falls back to `create_session(session_id=uuid, working_directory=root)`.
+    * Smart refresh also compares `current_prompt_fingerprint` with the snapshot's versioned fingerprint. A changed source mode, Core bytes, or selected-source bytes resumes/creates the same UUIDv5 session before sending the turn.
+    * On session creation or refresh, `resume_session(uuid, ...)` is tried first and falls back to `create_session(session_id=uuid, ...)`. Resume, create fallback, and transport retry receive equivalent Root, prompt, isolation, Skills, MCP, hook, permission, and model/performance kwargs.
     * The session UUID is injected into the `system_message` content as `## Session Info` / `Session Name: <uuid>`, making it available for `context.md` frontmatter `session_name:`.
 5. **SDK Execution (`send_and_wait`):**
     * The backend sends the prompt as a plain string (SDK 0.2.0+, still applies in 1.0.5) with a **user-configurable timeout** (default 1200s, range 60–3600s, set via Options → Analyze Timeout). The FAB safety timeout is derived as `(value + 10) * 1000` ms so the host's truthful "Copilot did not finish within Ns" error always fires first.
@@ -81,37 +86,144 @@ The host maintains persistent sessions so users can continue analysis in the Cop
 * **Session ID:** A deterministic UUID v5 derived from the case ID via `_case_to_session_id()`. The same case always produces the same UUID, enabling resume across restarts. The Copilot CLI requires session IDs to be valid UUIDs (not arbitrary strings like `dh-{caseId}`).
 * **Server Verification:** After `create_session()`, the session ID is read from `session.session_id` and stored in `self.current_session_id`.
 * **Case Tracking:** `self.current_case_id` tracks which case the current session belongs to, used for smart-refresh comparison (not the session ID itself).
-* **SDK Mechanism:** `client.resume_session(session_id, working_directory=root)` restores state from `~/.copilot/session-state/{session_id}/` and explicitly applies the configured root. `CopilotClient` also receives the same root so its CLI subprocess never falls back to the Native Host install cwd.
+* **SDK Mechanism:** `client.resume_session(session_id, working_directory=root, skip_custom_instructions=True, ...)` restores state from `~/.copilot/session-state/{session_id}/` and explicitly applies the configured Root. `CopilotClient` also receives the same Root so its CLI subprocess never falls back to the Native Host install cwd. Every create/resume/retry path keeps `skip_custom_instructions=True`.
 * **Graceful Fallback:** If the SDK version doesn't support `resume_session()`, an `AttributeError` is caught and a new session is created instead.
-* **Report Integration:** `dh_case_report.md` includes the UUID and `copilot -C '<root>' --resume=<uuid>`. `-C` runs before CLI workspace discovery, ensuring root-level skills/MCP/instructions load even if an old session persisted the wrong cwd.
+* **Report Integration:** `dh_case_report.md` includes the UUID and `copilot -C '<root>' --resume=<uuid>`. `-C` applies the correct Root before the interactive CLI continuation resolves workspace capabilities even if an old session persisted the wrong cwd. DH's SDK session does not rely on CLI automatic instruction discovery.
 * **Response Payload:** The session name is returned to the extension as `session_name` in the analysis response for frontend visibility (renamed from `session_id` in B82 to match the B81 cross-CLI naming RFC).
 * **System Message Injection:** The UUID is appended to the `system_message` content as a `## Session Info` section (labelled `Session Name: <uuid>`) before session creation. This ensures the AI can reference it (e.g., for `context.md` frontmatter `session_name:` field) without relying on a fallback value.
 * **Lifecycle:** Startup initializes only the SDK client; session creation is lazy until Analyze supplies a case. Config updates preserve an active deterministic case session and never replace it with a generic UUIDv4 session. Root changes restart the client and refresh the session. `update_config` is authoritative for clearing root; a missing/empty Analyze `rootPath` reloads host config so a pre-hydration extension default cannot overwrite the canonical disk value.
 
-### 3. Instruction Hierarchy (The Context)
+### 3. Deterministic Prompt Sources
 
-The "System Prompt" is built from three layers, merged at runtime in `_get_session_config`. The resulting dict is unpacked into keyword-only arguments for `create_session()` (SDK 0.2.0 no longer accepts a single config dict; 0.3.0 also requires keyword-only — see `docs/sdk-upgrade-2026-05-0.3.0.md`). After the three layers are merged, the session ID is appended as a `## Session Info` section (runtime augmentation in `_refresh_session`):
+DH owns instruction selection. Every SDK `create_session()` and `resume_session()` call, including fallback/retry paths, sets `skip_custom_instructions=True`. The spawned Copilot CLI therefore does not automatically add CLI-global instructions, Root/ancestor `AGENTS.md`, path-specific `.instructions.md` files, agent instruction files, or automatically discovered `.github/copilot-instructions.md` to a DH session.
 
-1. **Layer 1: System Instructions (Immutable)**
-    * Source: `host/system_prompt.md` (or beside exe).
-    * Content: Base persona, core capabilities, safety rules.
+The Host explicitly injects DH Core plus exactly one editable system source. Custom User Prompt remains separate PII-scrubbed user-role content on every Analyze:
 
-2. **Layer 2: User Instructions (Customizable)**
-    * Source: `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md`.
-    * Content: User-specific preferences managed via the Extension Options Page.
+| Root Path | Persisted Repository ONLY | Effective system sources | Analyze user content |
+|---|---:|---|---|
+| Empty | false or true | DH Core + DH-specific Instructions | Case payload + Custom User Prompt |
+| Non-empty | false | DH Core + DH-specific Instructions | Case payload + Custom User Prompt |
+| Non-empty | true | DH Core + `<Root>/.github/copilot-instructions.md` | Case payload + Custom User Prompt |
 
-3. **Layer 3: Workspace Instructions (Project-Specific)**
-    * Source: `[Root Path]/.github/copilot-instructions.md`.
-    * Content: Project-specific rules (if a Root Path is configured in the extension).
+`effective_repository_only = bool(effective_root) and use_workspace_only`. A non-empty Root does not select Repository Instructions by itself. DH-specific and Repository Instructions are mutually exclusive, and only the Root-level `.github/copilot-instructions.md` is supported. Repository ONLY still controls Skills and MCP according to their existing rules; DH Core, SDK built-ins, Session Info, hooks, tool definitions, and Custom User Prompt remain active.
 
-**Repository ONLY Logic:** If "Repo Only" is enabled (`useWorkspaceOnly = true`) and a Root Path is configured, only Workspace Instructions (Layer 3) are used. Layer 2 (User) and Layer 1 (System) instructions are still loaded, but Workspace Skills and MCP servers completely replace their global counterparts.
+#### Immutable Snapshot and Fingerprint
+
+`_resolve_prompt_snapshot()` reads DH Core and the selected editable source exactly once in binary mode. It stores the exact bytes and strict UTF-8 decoded strings in frozen `PromptSnapshot`; it performs no BOM, newline, or whitespace normalization. `_build_system_message()` uses only that snapshot, in this order:
+
+1. DH Core System Prompt.
+2. The selected editable source, omitted from assembly only when its decoded content is empty/whitespace.
+3. Deterministic Session Info.
+
+The snapshot fingerprint is `v1:` plus SHA-256 over length-framed version marker, source mode, exact Core bytes, and exact selected bytes. Root identity remains a separate refresh condition. Before each Analyze, an unchanged case/Root/fingerprint reuses the active session; any change refreshes the same UUIDv5 session. The candidate fingerprint is committed only after awaited SDK resume/create succeeds. `_invalidate_active_session()` always clears `current_prompt_fingerprint`, so resolution, refresh, timeout, transport, and uncertain durable-write failures cannot reuse stale prompt state.
+
+#### Source Errors and Config Health
+
+Strict Analyze/session resolution fails closed:
+
+* Missing or unreadable/invalid-UTF-8 DH Core blocks Analyze.
+* A missing DH-specific file is valid empty content; an existing unreadable/invalid-UTF-8 file blocks Analyze when selected.
+* An existing empty Repository Instructions file is valid; a missing or unreadable/invalid-UTF-8 selected Repository file blocks Analyze.
+* The Host never falls back to the unselected DH-specific, Repository, or CLI-global source, and no user turn is sent on failure.
+
+`get_config` is intentionally softer. `_get_session_config(include_prompt_status=True)` returns normal configuration plus `prompt_source_status` without creating or committing a session snapshot. It returns readable `_user_instructions_raw` and `extension_preferences.user_prompt`, including explicit empty content. If either file exists but cannot be read as strict UTF-8, its content property is omitted so Options retains its Chrome mirror and shows the safe health warning; unreadable Custom User Prompt reports `user_prompt_unreadable`. Legacy hydration is used only when `prompt_source_status` is absent. Calls without `include_prompt_status=True` never read, migrate, or hydrate `user_prompt.md`; Analyze owns one separate canonical read per request.
+
+After the latest `update_config` intent is durably acknowledged, Options sends one additional health-only `get_config`. This callback changes only `promptHealthIssue`; it never re-enters the full hydration merge. Both config and health generations must still match before applying a response, so an older health result cannot replace newer state. Transport/non-success responses leave the existing health issue unchanged.
+
+Prompt-source errors carry a stable `error_code` and safe English fallback. Options/FAB preserve unknown non-empty codes, localize known codes only at render time, and never tell users to re-authenticate for a source/configuration error. Logs may include safe source mode, classified code, or a short fingerprint prefix, but never instruction contents, Custom User Prompt contents, or prompt-source paths. SDK response-event diagnostics are likewise metadata-only: event type, data type, content presence, and content length. No-content fallback reports use that safe summary and never serialize the event, its data, or model content.
+
+FAB applies Custom User Prompt immediately before every send for an accurate editor/template preview. The Host remains authoritative: it rereads `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md` on each Analyze, truncates payload text from the first authoritative line-level marker, appends current non-empty file content exactly once, and then PII-scrubs the canonicalized text. Empty file content removes stale payload sections; an unreadable or invalid UTF-8 file blocks Analyze as `user_prompt_unreadable` without logging content or path.
+
+| Prompt/config error code | Host condition | Extension behavior |
+|---|---|---|
+| `dh_core_prompt_missing` | Core absent | Localized install repair warning |
+| `dh_core_prompt_unreadable` | Core read/decode failure | Localized install/permission warning |
+| `dh_specific_instructions_unreadable` | DH-specific file read/decode failure | Omit raw field; preserve Chrome mirror |
+| `repository_instructions_missing` | Selected Root file absent | Localized add-file/disable-mode warning |
+| `repository_instructions_unreadable` | Selected Root file read/decode failure | Localized repair/disable-mode warning |
+| `user_prompt_unreadable` | Custom User Prompt read/decode failure | Omit `user_prompt`; preserve mirror until explicit repair |
+
+Options treats `user_instructions` and top-level `user_prompt` as sparse
+revisioned writes. Their edit/clear/Reset handlers capture immutable
+`{revision, value}` tokens; unrelated updates omit both fields and
+`config.extension_preferences` never carries `user_prompt`. A saved response
+acknowledges only its captured revision, while transport/unsaved failures leave
+that revision pending for a later intent.
+
+The ordered `dh_prefs` mirror is a single-flight coalescing queue and owns typed post-commit actions. Normal saves and hydration catch-up both enter it as immutable snapshots. Each action has a
+stable ID and captured Team Catalog identity. Compatible newer snapshots carry
+unsettled actions forward; incompatible enabled/URL/team snapshots cancel team
+actions. The latest successful durable callback, with no queued newer intent,
+settles before dispatch and runs the matching Host update from
+`onLatestCommit`. Storage
+`chrome.runtime.lastError` runs neither, leaves actions unsettled, and exposes a
+persistent retryable issue. Reset is separate after its initial mirror action:
+`resetTransactionRef` captures immutable default identity, request/bookmark
+generations, token, retry action, and phase (`host-pending`, `host-committed`,
+`sw-pending`, `local-cleanup-pending`, `complete`). The matching mirror must
+commit and tokenized Host `update_config` must return `success: true` or
+`config_saved: true` before Options dispatches `RESET_EXTENSION_STATE`. Options
+records `host-committed` before generation/supersession checks. From then on,
+Retry cleanup never enters `persistPrefs`, never sends Host/defaults, and reuses
+the token for only the pending SW/local phase. A normal Reset click always starts
+a new transaction. SW default-identity validation and separate team/bookmark
+generation checks prevent retry from clearing newer-owned state.
+
+Personal bookmarks have a separate generation boundary. Every add/edit/delete/
+move/import/collapse and Reset intent calls `mutatePersonalItems`; all `dh_items`
+writes/removes use one Promise queue. Reset captures that generation and checks
+it before remove, after remove, after default loading, and after the default
+write. A newer mutation cancels only personal cleanup, is written after any
+already-started remove, stays visible, and reports that shared state may already
+have been cleared rather than claiming complete success. Callback-scoped set or
+remove failure retains the newest complete snapshot/removal intent, displays a
+persistent localized bookmark warning, and leaves the queue usable. The next
+bookmark mutation coalesces to the newest UI snapshot; only its successful
+storage callback clears the warning.
+
+Options team cache hydration and storage follow-up reads use one UI generation
+plus captured enabled/URL/team identity before applying list/items/synced state.
+`useMenuLogic()` similarly accepts only its latest mount/storage load and ignores
+all results after unmount. FAB Analyze state is the union of a local request ID
+and the current hydrated pending identity. The one active safety timer is tagged
+with its request ID; a new request cancels it, and stale response/finally/timeout
+paths cannot clear or report against the replacement request.
+Ownership remains live through all response-processing awaits, including case
+hashing; every post-await continuation rechecks request ID before UI, duration,
+menu, or outcome-telemetry changes.
+
+Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe diagnostics and logs only failure kind plus numeric status. Every Options request captures enabled/URL/team plus a request generation. The Service Worker synchronously allocates a storage generation before any asynchronous pref/cache read, rejects stale identity before clear/fetch, rechecks generation after awaited reads, and queues identity validation together with awaited mutation. `setStorage` and `removeStorage` inspect `chrome.runtime.lastError` inside their callbacks and reject with fixed safe errors. Manifest/bookmark/304 writes and clear/Reset removes therefore cannot report committed after a rejected mutation; selected failed responses omit items and timestamps. The queue's rejection continuation keeps later operations usable. Options sends messages only and clears rendered team items/timestamp immediately on identity change.
+
+Manifest URL blur deduplication uses two refs, not one optimistic marker.
+`lastSuccessfulManifestUrlRef` changes only for a current identity-matching
+`committed` or `unchanged` response. `manifestFetchInFlightRef` stores a token
+and URL, suppresses only a duplicate concurrent URL, and is cleared only by its
+own callback. Auth/network/transport/failed/stale/skipped outcomes can retry on
+the next same-URL blur; URL A cannot clear or complete URL B. Every Options
+current/response team check normalizes an omitted team to `''`, so no-team
+committed/unchanged results deduplicate while failed/stale/skipped results retry.
+
+`safeErrorText(candidates, fallback)` is the shared string-selection boundary
+for extension error persistence and display. It returns the first non-empty
+string unchanged; it never calls `String`/`toString` or serializes candidate
+objects, arrays, functions, symbols, or null. `analyzeBridge`,
+`normalizeNativeHostResponse`, `configUpdateResult`, Options prompt health and
+immediate warnings, FAB nested/outer/catch paths, and Service Worker immediate
+normalization all use it. `normalizeNativeHostResponse` still leaves success
+`data` unchanged and allowlists normalized `error_code`, string `errorKind`, and
+finite numeric `httpStatus`, so model-list classification remains available
+without exposing arbitrary Host fields.
+
+Analysis pending and dismissal state is request scoped. Starts write `dh_pending_analysis:<encoded-requestId>`; completion removes only that key. The legacy singleton pending key remains readable. `seenAnalysisKey()` produces collision-safe request or exact legacy case/timestamp keys, so A/B acknowledgments coexist. Hydration performs one `get(null)`, selects the newest fresh pending matching the current case, observes pending storage changes/expiry, and derives matching seen state from the same snapshot. Reset removes both prefixes and legacy singletons.
+
+The standalone `host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` files are historical pre-1.0.5 probes. They retain `skip_custom_instructions=True` on session creation, but other imports, constructor arguments, and message shapes are obsolete; they are explicitly outside supported diagnostics until separately migrated. Use `host/venv` tests or the SDK 1.0.5 wire-drift probe documented in `AGENTS.md` instead.
 
 ### 4. Skills Configuration
 
 Capabilities (Skills) are loaded based on the following precedence:
 
 1. **Base Skills:**
-    * **User Skills:** Defined in `%LOCALAPPDATA%\config.json`.
+    * **User Skills:** Defined in `%LOCALAPPDATA%\DynamicsHelper\config.json`.
     * **Default Skills:** The `host/skills/` directory is reserved for bundled skills but currently ships empty. Skills are user-configured.
     * *Rule:* User Settings **override** Default Settings. If `skill_directories` exists in User Config, Default is ignored.
 
@@ -127,7 +239,7 @@ Capabilities (Skills) are loaded based on the following precedence:
 Model Context Protocol (MCP) servers follow similar logic:
 
 1. **Base MCP:**
-    * **User Config:** Defined in `%LOCALAPPDATA%\config.json` (legacy) or `~/.copilot/mcp-config.json` (standard).
+    * **User Config:** Defined in `%LOCALAPPDATA%\DynamicsHelper\config.json` (legacy) or `~/.copilot/mcp-config.json` (standard).
     * **Default Config:** Bundled `mcp-config.json` (if any).
     * *Rule:* User Settings **override** Default Settings.
 
@@ -176,35 +288,39 @@ Analyze runs are long (often 60-300 s). The user can navigate away from the case
 
 **Storage schema** (`extension/src/utils/analysisStore.ts`):
 
-* `dh_pending_analysis` — `{caseNumber, requestId, startTime}` written by SW before forwarding the host RPC, cleared on success/error/timeout/edge-6.3.
-* `dh_last_analysis` — `{status: 'success'|'error', caseNumber, title, content, path?, durationSec?, completedAt, seen}` written by SW on host response, marked `seen=true` when the user dismisses the popover.
+* `dh_pending_analysis:<encoded-requestId>` — one `{caseNumber, requestId, startTime}` per in-flight request, written before Host RPC and removed only by that request's completion. `dh_pending_analysis` is legacy read compatibility.
+* `dh_last_analysis` — `{status: 'success'|'error', caseNumber, requestId?, title, content, timestamp, seen, durationSec?, savedTo?, errorCode?}` written by SW on Host response. New records use `requestId` as result identity; legacy records use exact `caseNumber + timestamp`. The legacy `seen` field remains readable for compatibility but is no longer rewritten for acknowledgment. `errorCode` is an optional raw machine-readable Host code; legacy records may omit optional fields.
+* `dh_seen_analysis:request:<case>:<requestId>` / `dh_seen_analysis:legacy:<case>:<timestamp>` — one identity-only acknowledgment per consumed result. The old singleton `dh_seen_analysis` is accepted only for backward compatibility.
 
 **Two ages, do not confuse them:**
 
 * `MAX_PENDING_AGE_MS = 2h` — GC threshold; pending markers older than this are treated as orphans (likely SW crash mid-flight).
 * `MAX_PENDING_DISPLAY_AGE_MS = 15min` — UI threshold for `useAnalysisHydration`; older pending markers are not surfaced as "Analyzing…" because the user has likely abandoned the run.
-* `MAX_RESULT_AGE_MS = 1h` — re-hydration window for `dh_last_analysis`; older results are not popped open on mount.
+* `STALE_WINDOW_MS = 1h` — rehydration window for `dh_last_analysis`; older results are not popped open on mount.
 
 **Wire protocol — `_persist` field on outgoing NATIVE_MSG:**
 
-FAB attaches a `_persist: {caseNumber, successTitle, errorTitle}` to the analyze payload. The SW reads this, calls `recordAnalyzeStart` before forwarding, calls `recordAnalyzeSuccess`/`recordAnalyzeError` on response, and **strips `_persist` before sending to the host** (the host has never seen this field and will reject unknown keys). Titles are pre-translated by FAB because the SW has no `t()` access.
+FAB attaches a `_persist: {caseNumber, successTitle, errorTitle}` to the analyze payload. The SW reads this, calls `recordAnalyzeStart` before forwarding, calls `recordAnalyzeSuccess`/`recordAnalyzeError` on response, and **strips `_persist` before sending to the Host** (the Host has never seen this field and will reject unknown keys). Titles are pre-translated by FAB because the SW has no `t()` access.
+
+For errors, persistence stores the raw safe Host fallback in `content` and preserves a non-empty `error_code` as optional `errorCode`; an inner Analyze code takes precedence over an outer wrapper code, and transport rejection does not fabricate one. Both immediate and rehydrated popovers localize known codes in `ResultPopover` at render time. The immediate path may prefix its safe fallback before opening the popover (for example, `Analysis failed:` or the Host-error label); rehydration supplies the raw stored fallback. Unknown or absent codes therefore display the fallback from their own path rather than a shared prelocalized string.
 
 **Pure-helper boundary:**
 
-* `extension/src/background/analyzeBridge.ts` exposes `handleAnalyzeForward(payload, ctx, deps)` with DI'd `send`. The 6 tests in `analyzeBridge.test.ts` cover P-I1..P-I4 + edge 6.3 without spinning up a real Chrome port.
-* `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, isAnalyzing, dismissPopover}`. The 10 tests in `useAnalysisHydration.test.ts` cover R-I1..R-I5 + variants by mocking `chrome.storage.local` only.
-* FAB calls `useAnalysisHydration(scrapedData?.caseNumber || '')` once at the top of the component, then mirrors `popover`/`isAnalyzing` into local state in two `useEffect` hooks. The mirror is one-way (storage → local); user dismissal goes through `hydration.dismissPopover()` which writes `seen=true`.
+* `extension/src/background/analyzeBridge.ts` exposes `handleAnalyzeForward(payload, ctx, deps)` with DI'd `send`. Its focused suite covers P-I1..P-I4, error-code transport, and edge 6.3 without spinning up a real Chrome port; the test count is not a contract.
+* `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, pending, isAnalyzing, dismissPopover(identity)}`. It uses a batched snapshot, newest matching pending selection, storage-change refresh, and expiry timer.
+* FAB keeps local Analyze in-flight state separate from the hydrated mirror. Hydration true/false is mirrored when no local request owns the spinner; hydration false cannot stop an active local request. Completion clears local ownership and retains only a different hydrated request if present.
 
 **popoverIsAnalyze ref discriminator:**
 
-`ResultPopover` is shared between analyze flow and bookmark markdown previews. `popoverIsAnalyze.current` is set `true` whenever an analyze success/error opens the popover, and the close handler only calls `hydration.dismissPopover()` when this flag is set — otherwise dismissing a bookmark popover would spuriously mark a stale analysis result as seen.
+`ResultPopover` is shared between analyze flow and bookmark markdown previews. `popoverIsAnalyze.current` is set `true` whenever an analyze success/error opens the popover, and the close handler only calls `hydration.dismissPopover(resultPopover.identity)` when this flag and an analysis identity are present — otherwise dismissing a bookmark popover would spuriously acknowledge analysis state.
 
 **Edge cases handled:**
 
-* **Race in handleAnalyzeForward (edge 6.3):** if `recordAnalyzeStart` resolves *after* the host response, the post-response success/error write is a no-op for the marker because `clearPendingIfMatches(requestId)` only deletes if the requestId matches what is on disk. The pending row is written, then immediately cleared on the next event loop tick, so the user sees a brief "Analyzing…" flicker instead of a stuck pending marker.
+* **Start-before-send ordering:** `handleAnalyzeForward` awaits `recordAnalyzeStart(ctx)` before calling `deps.send(payload)`. The Host request is not dispatched until the pending marker write completes.
+* **A/B isolation:** Analyses A and B have distinct pending keys. Starting B never overwrites A, and either completion removes only its own key, including after a Service Worker restart.
 * **Stale pending on mount:** `useAnalysisHydration` checks `Date.now() - startTime > MAX_PENDING_DISPLAY_AGE_MS` and ignores pending markers older than 15 min. The marker stays on disk until GC; this is intentional (the user might still want to know if the run eventually completes).
 * **Case mismatch on pending:** if the on-disk pending marker is for case A but the FAB is mounted on case B, the hook ignores the pending row entirely (no false "Analyzing…").
-* **Options Reset:** the Reset button now also removes `dh_last_analysis` and `dh_pending_analysis` so a user-initiated reset wipes persisted analysis state. See `Options.tsx:1159`.
+* **Options Reset:** dispatches `RESET_EXTENSION_STATE` only after the default `dh_prefs` mirror callback, with captured identity/generation. Reset removes result, both legacy singletons, and every pending/seen prefixed key together with queued Team Catalog cache state.
 
 ---
 
@@ -231,14 +347,16 @@ Standalone config — **does NOT extend `vite.config.ts`**. The CRXJS plugin use
 Provides a complete mock of the chrome.runtime + chrome.storage surfaces used by the extension. Public API:
 
 * `installChromeMock()` — call in `beforeEach`. Wires `globalThis.chrome` to the mock.
-* `resetChromeMock()` — clears storage, pending responses, message log, **and spy call counts**.
+* `resetChromeMock()` — clears storage, pending responses, scoped `lastError`, message log, **and spy call counts**.
 * `seedStorage({ ... })` — pre-populate `chrome.storage.local` before render.
 * `deferNextResponse(action)` — pause the next outgoing message with the given `action`. Returns a controller with `.resolve(response)` / `.reject(error)`. Used to hold `get_config` open while the test simulates user edits inside the hydration window.
-* `chromeMockSpies` — `{ sendMessage, storageGet, storageSet, storageRemove }`, each a `vi.fn()`. Used for call-count assertions and inspecting outgoing payloads.
+* `deferNextStorageSet(key?)` / `deferNextStorageRemove(key?)` — pause a matching mutation. Rejection invokes its callback while `chrome.runtime.lastError` is scoped, then clears the error immediately afterward.
+* `emitStorageChanges(changes, areaName?)` — explicitly updates mock storage and invokes registered `chrome.storage.onChanged` listeners. Normal mock `set`/`remove` calls remain non-emitting for backward-compatible deterministic tests.
+* `chromeMockSpies` — runtime/storage operation spies plus storage-listener registration spies, each a `vi.fn()`. Used for ordering, call-count, and payload assertions.
 
 The mock supports **both callback-style** (`chrome.runtime.sendMessage(msg, cb)`) and **Promise-style** (`await chrome.runtime.sendMessage(msg)`) APIs. Pick the matching style for the code under test — the production code uses callback style for `sendMessage` and Promise style for `chrome.storage.local`.
 
-**Spy reset is mandatory.** `resetChromeMock()` calls `.mockClear()` on all four spies. Without this, spy counts accumulate across tests in the same file because the spy objects themselves are module-level singletons. The 6-invariant `Options.test.tsx` suite depends on per-test call counting and will silently report false positives if spies leak.
+**Mock reset is mandatory.** `resetChromeMock()` clears registered listeners and calls `.mockClear()` on all spies. Without this, listeners/state/counts accumulate across tests because the mock objects are module-level singletons. Ordering and Options invariant suites can silently report false positives if mock state leaks.
 
 ### The 6-Invariant Pattern for `Options.test.tsx`
 
@@ -249,7 +367,7 @@ The Options page hydration window has 6 distinct invariants documented in `docs/
 | Inv1 | storage.set succeeds during hydration window (segment 1 ungated) | Adding a hydration gate to segment 1 breaks fast local persistence |
 | Inv2 | host RPC is gated during hydration window (segment 2 gated) | Removing the gate clobbers `config.json` with DEFAULT_PREFS values |
 | Inv3 | hydration merge skips user-touched fields | Removing `!touched.has('X')` overwrites user edits |
-| Inv4 | catch-up RPC at hydration COMPLETE sends user value | Reading stale outer-closure `prefs` instead of `merged` (the React 19 race fixed in `0265a74`) |
+| Inv4 | catch-up at hydration COMPLETE mirrors and then sends the user value | Reading stale outer-closure `prefs`, bypassing mirror durability, or sending before latest commit |
 | Inv5 | no catch-up RPC fires when nothing touched during window | Catch-up running unconditionally spams the host every Options open |
 | Inv6 | Reset during window survives the late hydration merge | `handleReset` not marking DEFAULT_PREFS keys as touched lets late host response un-reset the user |
 
@@ -261,9 +379,7 @@ The Options page hydration window has 6 distinct invariants documented in `docs/
 
 Inv4 specifically guards commit `0265a74`. The pre-fix bug: the post-hydration catch-up RPC was reading `mergedPrefs` from an outer-scope variable assigned **inside** a `setPrefs(prev => ...)` updater. React 19 sometimes schedules the updater on a later microtask tick, so the catch-up RPC ran before the assignment and silently sent stale state. Production "worked" because chrome IPC latency masked the race in the common case.
 
-The fix relocates the catch-up RPC + `prefsHydratedRef.current = true` flip **inside** the success-branch `setPrefs` updater closure, reading `merged = changed ? newPrefs : prev` directly. Inv4 verifies this by deferring `get_config`, simulating a `language` edit during the window, then asserting the catch-up payload carries the user's new value.
-
-If a future refactor moves the catch-up RPC back outside the updater closure (because "it looks cleaner") Inv4 will fail and tell you not to.
+The current fix computes the merged snapshot, updates refs/state, and schedules a generation-tagged hydration mirror plus catch-up intent. A post-render effect creates an immutable catch-up mirror and enters the shared `writePrefsMirror` queue. Only its successful `onLatestCommit` sends the captured Host update; storage failure sends nothing and a newer queued edit supersedes it. No Host or storage side effect runs inside a React state-updater closure; StrictMode replay therefore cannot duplicate an RPC. Inv4 defers `get_config`, edits `language`, and verifies the post-render intent carries the committed user value.
 
 ### Test File Conventions
 
@@ -305,15 +421,36 @@ Do **not** call `chrome.storage.local.get('dh_prefs')` directly inside a React c
 
 ### Writing prefs
 
-Only `Options.tsx::persistPrefs(nextPrefs, opts?)` writes. It (a) calls `chrome.storage.local.set({ dh_prefs })`, (b) fires `update_config` RPC to the host so `config.json` is mirrored (see AGENTS.md § 3 "Options config persistence principle"), (c) optionally re-fetches the team manifest if `opts.fetchManifest` is set. Other components do **not** write to `dh_prefs`.
+Only `Options.tsx::persistPrefs(nextPrefs, opts?)` writes user preference changes. It creates an immutable `ConfigUpdateIntent` containing a generation, a frozen preference snapshot, and, only when needed, a frozen `{revision, value}` DH-instruction token. Other React components do **not** write `dh_prefs`.
+
+The persistence path is ordered and inspected:
+
+1. Write the captured preference snapshot to the `dh_prefs` Chrome mirror. Generation checks converge delayed/out-of-order callbacks back to the newest snapshot.
+2. After Host hydration, send one `update_config` payload built only from that captured intent in the successful latest mirror callback. Hydration catch-up follows the same rule; stale or failed storage callbacks dispatch no Host update.
+3. Inspect the outer Native Messaging envelope and the inner Host result with `classifyConfigUpdateResponse()`; this RPC is not universally fire-and-forget.
+4. Flush a requested team-manifest fetch only after the latest matching mirror commits and only for the still-active URL.
+
+`user_instructions` is sparse. It is included only while an instruction edit revision remains unacknowledged. An explicit empty string from editor clear or Reset is a real write and truncates `copilot-instructions.md`; omission means no instruction-file write. The Host retains `system_instructions` only as a legacy fallback when the primary field is absent, never when `user_instructions` is present and empty.
+
+The Host uses a sentinel for both editable file fields. Present null or any
+non-string value returns `config_saved: false` before config or file writes;
+absence performs no file write.
+
+Host update outcomes separate persistence from active-session refresh:
+
+* `success: true` acknowledges the captured instruction revision and clears the newest update warning.
+* `success: false, config_saved: true` means all requested persistent writes completed but session refresh failed. Options acknowledges exactly the revision that was sent, keeps the saved UI values, and shows a persistent localized warning.
+* `config_saved: false`, malformed responses, and transport failures do not acknowledge the instruction revision, so it remains pending for a later intent. The Host conservatively invalidates active session/fingerprint state after any attempted durable write that raises because truncation or partial output may already have occurred; it does not claim rollback.
+
+Get-config health and update warnings are separate state. The newest update warning takes precedence; after a later successful update, any still-current prompt health warning becomes visible again. Known prompt codes are localized at render time, while unknown codes use the safe Host fallback.
 
 #### Hydration guard (v2.0.70-beta.4+)
 
-`persistPrefs` checks `prefsHydratedRef.current` at entry and **no-ops if false**. The ref starts `false` at mount and flips to `true` only after the host's `get_config` response is merged into state (success branch). It also flips to `true` on the `chrome.runtime.lastError` branch and the non-success-response branch — those are "host down / broken" fallbacks so the user can still operate Options without deadlocking, accepting that `dh_prefs` is the only source of truth in that session.
+`prefsHydratedRef` starts `false` and flips to `true` after the Host's `get_config` response is merged, or on host-unreachable/non-success fallback so the user is not deadlocked. While it is false, `persistPrefs` still records the captured user state in the ordered `dh_prefs` mirror, but it gates the Host RPC and manifest fetch. Once hydration settles, an epoch-driven post-render catch-up captures user-touched values, writes that immutable snapshot through the same queue, and performs its inspected Host send only from `onLatestCommit`. It does not perform Host side effects inside the React state-updater closure, which is important under React StrictMode replay.
 
 Why: between OptionsInner mount and the host's `get_config` response (≈100ms typical, multi-second if host is cold-starting or crashed), `prefs` holds `DEFAULT_PREFS` merged with `chrome.storage.local.dh_prefs`. If both are empty (fresh install, Remove+Load Unpacked, or any cache clear), fields like `rootPath` / `teamManifestUrl` / `team` / `userPrompt` are empty strings. A fast user click on a Language dropdown / toggle in that window would call `persistPrefs(DEFAULT_PREFS-merged)` and shallow-merge those empty values into `config.json` + truncate `user_prompt.md` (because the host's `handle_update_config` does `current_data.update(payload["config"])` and writes `user_prompt.md` whenever `user_prompt is not None` — empty string is not None).
 
-If you add a new code path that writes prefs before hydration finishes — e.g. an effect that calls `updatePref` based on URL params — you must either wait for hydration or accept that the write will be silently dropped. The guard does not retry queued writes; the next user-triggered `persistPrefs` after hydration is what will sync state. UI local state is unaffected by the guard, so the user still sees their click take effect — only the disk write is suppressed.
+If you add a new path that writes before hydration finishes, route it through `updatePref`/`persistPrefs` and mark its keys touched. Do not call the Host directly, bypass immutable intent creation or `writePrefsMirror`, or move catch-up into a React updater. Passive Host-hydration mirrors capture their own snapshot and user-generation value; they must skip when newer user persistence has started so they cannot suppress the user's Host update.
 
 ### Documented exception — runtime overrides
 
@@ -433,6 +570,207 @@ When replacing `dh_native_host.exe`, the file may be locked by the OS or antivir
 ---
 
 ## Release Process & Testing
+
+### Package Integrity Boundary
+
+`host/package_manifest.py` owns canonical package schemas, ownership classes,
+path rules, and hashes. `host/package_archive.py` validates staged trees and
+performs manual two-pass ZIP extraction; never use `ZipFile.extract()` or
+`extractall()`. `host/install_integrity.py` verifies a frozen live product and
+implements the early probe consumed by `host/early_cli.py`.
+
+Key interfaces:
+
+```text
+generate_release_documents(stage_root, package_version) -> ReleaseDocuments
+write_release_documents(stage_root, documents) -> None
+validate_staged_package(stage_root, expected_version=None) -> ValidatedPackage
+stage_and_validate_archive(archive_path, stage_root, expected_version=None)
+write_deterministic_archive(stage_root, archive_path) -> None
+InstallationVerifier(install_root, frozen=None).verify()
+```
+
+Canonical DH JSON is strict UTF-8, sorted compact ASCII, no BOM, and one final
+newline. Package paths are relative POSIX paths; traversal, backslashes,
+absolute/drive/UNC paths, alternate data streams, trailing dot/space, reserved
+Windows names, exact/casefold duplicates, symlinks, and reparse points fail
+closed. Test Host subprocesses with fresh `LOCALAPPDATA`, `APPDATA`,
+`USERPROFILE`, `HOME`, `TEMP`, and `TMP` values before process start.
+
+For safe tests, call pure helpers against temporary synthetic source/stage
+trees. Do not invoke the release CLI: it also edits versions and can perform Git
+or publishing operations. Plan A keeps the legacy updater active and does not
+advertise `transactional-update-v1`.
+
+### Dormant Plan B Transaction API
+
+Plan B is implemented and consumed by Plan C special modes, but ordinary update
+clicks remain on the historical Python updater and installation remains on the
+PowerShell installer path until Plan D completes its gates. Plan C/D consume
+these exact interfaces rather than writing journal, active, or workspace paths
+directly:
+
+```text
+parse_transaction_id(value: object) -> str
+generate_transaction_id(random_bytes: Callable[[int], bytes] = secrets.token_bytes) -> str
+read_journal(path: Path) -> UpdateJournal
+read_active_transaction(path: Path) -> ActiveTransaction
+resolve_active_journal(updates_root: Path, active: ActiveTransaction) -> Path
+TransactionPaths.for_install(install_root: Path, transaction_id: object) -> TransactionPaths
+UpdateEngine.create_prepared(package: ValidatedPackage, transaction_id: str, *, expected_version: str | None, prior_version: str | None, initiator: UpdateInitiator) -> UpdateJournal
+UpdateEngine.activate_prepared(transaction_id: str, process_identity: InitiatingProcessIdentity | None) -> UpdateJournal
+UpdateEngine.resume(transaction_id: str) -> UpdateJournal
+UpdateEngine.rollback(transaction_id: str, failure_code: JournalReason) -> UpdateJournal
+UpdateEngine.finalize_terminal_evidence(transaction_id: str) -> bool
+terminal_version(journal: UpdateJournal) -> TerminalVersion
+parse_terminal_version(value: object) -> TerminalVersion
+terminal_version_to_value(value: TerminalVersion) -> dict[str, object]
+```
+
+`generate_transaction_id` consumes exactly 16 random bytes and returns lowercase
+32-hex. Browser TypeScript uses its reviewed `crypto.getRandomValues` adapter;
+no other Python generator is allowed. Browser preparation passes a selected
+non-null target and browser activation passes `InitiatingProcessIdentity(pid,
+creation_token)`. Installer preparation may pass a trusted target or `None`,
+then activates with `None`; it must not open/wait on its own process.
+
+Stable authority is `updates/active.json`, pointing to the exact journal beneath
+`updates/transactions/<id>`. Preparation alone uses `<id>.preparing` and atomic
+promotion. Plan C consumes `TransactionPaths.probe_manifest`, lets the engine
+own probing/commit/rollback, and calls `finalize_terminal_evidence` only after a
+durable finalization receipt and status unregister. Recovery retry passes
+`original_failure_code`, never current `rollback_failed`. Receipt serialization
+uses `terminal_version`, including the fresh rollback JSON
+`{"fresh_install":true,"version":null}`.
+
+The five literal ownership modes are installed, legacy, fresh-seeded,
+fresh-preexisting, and fresh-post-plan-user-creation. The matrix freezes 216
+operation-label cases across before-operation fault, after-operation crash, and
+synthesized post-operation state (648 cases), plus 67 journal-transition crash
+cases. Run all Plan B focused tests with `PYTHONPATH=host` and isolated values
+for `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP`.
+
+### Dormant Plan C Detached Recovery API
+
+Plan C exposes recovery/finalization primitives but does not replace the active
+legacy updater. Source and frozen entrypoint identity is exact:
+
+* Source development registers `host/host_manifest.json`; its `path` field is
+  the absolute `host/launch_host.bat` path, and the batch wrapper forwards Chrome
+  argv.
+* Frozen production registers sibling `manifest.json` with relative
+  `dh_native_host.exe`.
+* Source early dispatch receives resolved `Path(__file__)`; frozen dispatch
+  receives resolved `Path(sys.executable)`. Never pass the source interpreter as
+  the entrypoint.
+
+The accepted early invocations are:
+
+```text
+dh_native_host.py [<allowlisted-origin> [--parent-window=<nonnegative-decimal>]]
+dh_native_host.py --register
+dh_native_host.exe [<allowlisted-origin> [--parent-window=<nonnegative-decimal>]]
+dh_native_host.exe --register
+dh_native_host.exe --install-package <absolute-canonical-package-root>
+dh_native_host.exe --update-probe <absolute-canonical-probe-manifest>
+dh_update_runner.exe --complete-update <32-lower-hex-id> <positive-decimal-pid> <win-create-time-ticks>
+dh_update_runner.exe --recover-active
+dh_update_runner.exe --recover-update <absolute-canonical-journal>
+dh_update_status_host.exe <allowlisted-origin> [--parent-window=<nonnegative-decimal>]
+```
+
+Decimal parent window `0` is Chrome's valid sentinel. Every special command
+validates role, runtime bit, arity, identity text, executable chain, and path
+authority before `EarlyModeDependencies`, registry/controller/process adapters,
+default install root, installer callback, or status server is constructed.
+Non-probe mismatch is exit `2`, empty stdout, and exact stderr
+`b"invalid_early_invocation\n"`. Malformed or wrong-role probe also exits `2`,
+but delegates Plan A's fixed malformed tuple and emits exact stdout
+`b'{"error_code":"package_probe_failed","status":"error"}\n'` with empty
+stderr; `run_update_probe` remains uncalled.
+
+`prepare_recovery_runtime(transaction_id, source, registry)` is the only
+Plan-D-facing recovery setup boundary. It preflights the complete staged target,
+rereads the same `PREPARED` authority, installs the exact onedir recovery tree,
+and registers status only for browser mode. Both browser and installer
+activation repeat preflight before RunOnce or `activate_prepared`. Browser mode
+uses a complete `InitiatingProcessIdentity`; installer mode uses `None`.
+
+Finalization crash/replay behavior is bounded:
+
+| Durable/interrupted state | Same-ID recovery | New update start |
+|---|---|---|
+| Reserved stable cursor, no receipt | Recreate/verify one receipt, advance cursor | Blocked |
+| Reserved cursor plus receipt target/scratch | Verify/normalize receipt, advance cursor without a second receipt | Blocked |
+| Receipt-ready cursor plus receipt | Resume cleanup or acknowledgment | Blocked |
+| Crash before receipt-to-ack replace | Replay from source receipt | Blocked while cursor remains |
+| Crash after replace, before cursor removal | Re-fsync/replay from matching fixed ack slot | Blocked |
+| Ack slot plus cursor scratch after lost unlink response | Normalize/remove cursor from matching slot | Blocked until replay completes |
+| Ack slot only | Same ID succeeds read-only until later slot replacement | Allowed |
+| Newer cursor plus older matching ack slot | Older ID replay is read-only and cannot mutate newer state | Newer start already owns cursor |
+| Newer acknowledgment replaces fixed slot | Delayed older ID becomes `finalization_not_current` | Allowed after cursor cleanup |
+| Nonterminal requested journal | Finalize fails `transaction_not_terminal` | Existing authority remains |
+| Requested ID mismatches active/journal/root authority | Finalize fails `active_transaction_mismatch` | No record mutation |
+| Malformed/noncanonical receipt or receipt scratch | `invalid_finalization_receipt` | Cursor/receipt evidence retained |
+| Malformed/noncanonical stable cursor | `invalid_finalization_cursor` | Start remains blocked while cursor evidence exists |
+| Valid cursor scratch matching active terminal authority | Normalize a reserved cursor, create/verify one receipt, then advance | Blocked until replay completes |
+| Cursor scratch with unreadable active authority | `invalid_finalization_cursor` | Scratch retained; start blocked |
+| Cursor scratch whose active ID differs from requested ID | `finalization_ack_pending` | Scratch retained; start blocked |
+| Forbidden ack scratch | `invalid_finalization_acknowledgment` | No cursor/receipt mutation |
+| Malformed old ack plus valid newer terminal authority | Newer finalize may reserve cursor/receipt; acknowledgment later atomically replaces the slot | Blocked only by the newer cursor |
+| Malformed ack without valid requested terminal authority | Preserve and return `invalid_finalization_acknowledgment` | No record mutation |
+| Receipt-ready cursor with absent receipt and mismatched ack | `invalid_finalization_acknowledgment` | Cursor and slot retained |
+| Receipt-ready cursor while Plan B cleanup is incomplete | Acknowledge fails `finalization_cleanup_incomplete` | Receipt and cursor retained |
+| Different requested ID while another cursor/scratch is pending | `finalization_ack_pending` before registry/engine/receipt work | Blocked |
+| Ack ID matches neither current cursor nor fixed slot | `finalization_not_current` | Current records unchanged |
+| Filesystem/registry/engine/durability operation fails | `finalization_cleanup_failed`; retry same ID | Blocked while cursor remains |
+| Cursor/receipt write cannot canonical round-trip | `finalization_record_round_trip_failed` | Preserve bounded evidence for retry |
+
+`require_no_pending_finalization(install_root)` is the Plan D start barrier. It
+must run before ID allocation, runtime marker persistence, package open, or Plan
+B transaction creation at both coordinator `DH_UPDATE_START` and Host
+`UpdateService.prepare` boundaries. The service queue and installation mutex
+must close the check-to-create race; two unrelated sequential checks are not
+atomic. Ordinary Analyze/config/health actions remain available.
+
+Use fresh existing directories for all six profile/temp variables before every
+Python or Node verification process. Focused Host imports set `PYTHONPATH=host`;
+discovery removes it. The plan's `Invoke-IsolatedPython` and
+`Invoke-IsolatedCommand` helpers are the canonical harness.
+
+Frozen build and probe commands are side-effect-free with respect to product
+installation, but they must still use the fresh six-variable helper:
+
+```powershell
+Invoke-IsolatedPython -PythonArgs @("-m", "PyInstaller", "--version")
+Invoke-IsolatedPython -PythonArgs @(
+  "-c", "import release_helper; release_helper.build_host()"
+)
+$env:DH_PLAN_C_FROZEN_ONEDIR = (Resolve-Path "dist/dh_native_host").Path
+try {
+  Invoke-IsolatedPython -PythonArgs @(
+    "-m", "unittest",
+    "host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation",
+    "-v"
+  )
+} finally {
+  Remove-Item Env:DH_PLAN_C_FROZEN_ONEDIR -ErrorAction SilentlyContinue
+}
+```
+
+The version command must report exactly `6.18.0`. Build/spec/dist outputs remain
+ignored and untracked. Do not provision PyInstaller automatically.
+
+Manual recovery commands are exactly:
+
+```text
+%LOCALAPPDATA%\DynamicsHelper\updates\recovery\dh_update_runner.exe --recover-active
+%LOCALAPPDATA%\DynamicsHelper\updates\recovery\dh_update_runner.exe --recover-update <absolute-canonical-journal>
+```
+
+For `recovery-required`, preserve backups and evidence; never advise deleting
+them. Real handle inheritance, RunOnce, registration, forced rollback, browser
+status argv, and interrupted installer resume require a disposable VM.
 
 ### 1. Release Automation
 

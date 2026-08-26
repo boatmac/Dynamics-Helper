@@ -1,65 +1,25 @@
-# --- SELF-REGISTRATION MODE ---
-# Must run before stdout redirection to allow printing status to console.
 import sys
+from pathlib import Path
 
-if "--register" in sys.argv:
-    import os
-    import json
-    import winreg
+from update_entrypoint import dispatch_early_mode  # noqa: E402
 
-    try:
-        HOST_NAME = "com.dynamics.helper.native"
-        ALLOWED_ORIGINS = [
-            "chrome-extension://aiimcjfjmibedicmckpphgbddankgdln/",
-            "chrome-extension://fkemelmlolmdnldpofiahmnhngmhonno/",
-        ]
-
-        # Determine paths (Self-contained exe)
-        # When running as exe, sys.executable is the path to the exe.
-        # When running as script, it's python.exe.
-        # But --register is mainly for the compiled exe scenario in Prod.
-        exe_path = sys.executable
-        install_dir = os.path.dirname(exe_path)
-
-        # Manifest is strictly "manifest.json" in Prod
-        manifest_path = os.path.join(install_dir, "manifest.json")
-
-        # 1. Write Manifest (UTF-8 No BOM)
-        # Relative path "dh_native_host.exe" ensures portability and avoids encoding issues.
-        manifest_content = {
-            "name": HOST_NAME,
-            "description": "Dynamics Helper Native Host",
-            "path": "dh_native_host.exe",
-            "type": "stdio",
-            "allowed_origins": ALLOWED_ORIGINS,
-        }
-
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(manifest_content, f, indent=2)
-        print(f"Created manifest at: {manifest_path}")
-
-        # 2. Register Keys (Windows Registry)
-        registry_locations = [
-            (winreg.HKEY_CURRENT_USER, r"Software\Google\Chrome\NativeMessagingHosts"),
-            (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Edge\NativeMessagingHosts"),
-        ]
-
-        for hkey, subkey in registry_locations:
-            try:
-                host_key_path = f"{subkey}\\{HOST_NAME}"
-                key = winreg.CreateKey(hkey, host_key_path)
-                winreg.SetValueEx(key, "", 0, winreg.REG_SZ, manifest_path)
-                winreg.CloseKey(key)
-                print(f"Registered {HOST_NAME} at {host_key_path}")
-            except Exception as e:
-                print(f"Failed to register at {subkey}: {e}")
-
-        print("Registration completed successfully.")
-        sys.exit(0)
-
-    except Exception as e:
-        print(f"Registration failed: {e}")
-        sys.exit(1)
+_source_runtime = not bool(getattr(sys, "frozen", False))
+_early_entrypoint = (
+    Path(sys.executable).resolve(strict=True)
+    if not _source_runtime
+    else Path(__file__).resolve(strict=True)
+)
+_early_exit = (
+    dispatch_early_mode(
+        str(_early_entrypoint),
+        sys.argv[1:],
+        source_runtime=_source_runtime,
+    )
+    if __name__ == "__main__"
+    else None
+)
+if _early_exit is not None:
+    raise SystemExit(_early_exit)
 
 # --- STDOUT PROTECTION ---
 # Native Messaging requires STDOUT to be exclusively used for length-prefixed JSON.
@@ -111,8 +71,9 @@ except Exception as e:
     NATIVE_STDOUT = sys.stdout.buffer
 
 import asyncio
+import copy
 import threading
-import struct
+from native_messaging import read_native_message, write_message
 import json
 import logging
 import logging.handlers
@@ -124,8 +85,12 @@ import re
 import uuid
 import traceback
 import urllib.request
+from dataclasses import dataclass
+import hashlib
+from pathlib import Path
 
-VERSION = "2.0.74-beta.4"
+from install_integrity import InstallationVerification, InstallationVerifier
+from product_info import VERSION, get_host_capabilities
 
 # --- Cross-repo session-id coordination anchor (2026-07-03) ---
 # DH derives each Copilot session id as a deterministic UUIDv5 from the bare
@@ -137,6 +102,58 @@ VERSION = "2.0.74-beta.4"
 # repos. Authoritative spec: MyCasesKit docs/dh-uuid5-change-spec.md.
 _NAMESPACE_MYCASE = uuid.UUID("816bee4e-8eee-4c0b-ae69-70879d032f4d")
 _WORKING_DIRECTORY_UNSET = object()
+_PAYLOAD_FIELD_UNSET = object()
+
+_PROMPT_ERROR_MESSAGES = {
+    "dh_core_prompt_missing": (
+        "DH Core System Prompt is missing. Repair or reinstall Dynamics Helper."
+    ),
+    "dh_core_prompt_unreadable": (
+        "DH Core System Prompt cannot be read as UTF-8. "
+        "Repair the installation or file permissions."
+    ),
+    "dh_specific_instructions_unreadable": (
+        "DH-specific Instructions cannot be read as UTF-8. "
+        "Repair or replace them in Options."
+    ),
+    "repository_instructions_missing": (
+        "Repository Instructions are missing. Add "
+        ".github/copilot-instructions.md under Root Path or disable Repository ONLY."
+    ),
+    "repository_instructions_unreadable": (
+        "Repository Instructions cannot be read as UTF-8. "
+        "Repair the file or disable Repository ONLY."
+    ),
+    "user_prompt_unreadable": (
+        "Custom User Prompt cannot be read as UTF-8. Repair or replace it in Options."
+    ),
+}
+
+_USER_PROMPT_HEADING = re.compile(r"^## User Prompt[\t ]*\r?$", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class PromptSnapshot:
+    mode: str
+    effective_root: str | None
+    core_bytes: bytes
+    core_text: str
+    selected_bytes: bytes
+    selected_text: str
+    fingerprint: str
+
+
+class PromptSourceError(RuntimeError):
+    def __init__(self, error_code: str) -> None:
+        self.error_code = error_code
+        super().__init__(_PROMPT_ERROR_MESSAGES[error_code])
+
+    def to_result(self) -> dict[str, str]:
+        return {
+            "status": "error",
+            "error_code": self.error_code,
+            "error": str(self),
+        }
 
 # Setup User Data Directory (Cross-platform)
 
@@ -246,9 +263,7 @@ def handle_exception(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
-    logger.critical(
-        "Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback)
-    )
+    logger.critical("Uncaught host exception (%s).", exc_type.__name__)
 
 
 sys.excepthook = handle_exception
@@ -271,6 +286,7 @@ try:
     # WARNING: `copilot.generated.rpc.PermissionRequestResult` is a different
     # internal RPC type (success: bool); always import from `copilot.session`.
     from copilot import CopilotClient, RuntimeConnection
+    from copilot._jsonrpc import ProcessExitedError
     from copilot.session import (
         PermissionRequestResult,
         PreToolUseHookOutput,
@@ -289,13 +305,13 @@ try:
     logger.info("Successfully imported copilot SDK.")
     log_emergency("Successfully imported copilot SDK.")
 except ImportError as e:
-    msg = f"Failed to import copilot SDK: {e}\n{traceback.format_exc()}"
+    msg = f"Failed to import Copilot SDK ({type(e).__name__})."
     logger.critical(msg)
     log_emergency(msg)
     # We exit here because the app cannot function without it
     sys.exit(1)
 except Exception as e:
-    msg = f"Unexpected error importing copilot SDK: {e}\n{traceback.format_exc()}"
+    msg = f"Unexpected Copilot SDK import failure ({type(e).__name__})."
     logger.critical(msg)
     log_emergency(msg)
     sys.exit(1)
@@ -318,7 +334,7 @@ try:
     logger.info("Successfully imported PiiScrubber and Updater.")
     log_emergency("Successfully imported PiiScrubber and Updater.")
 except ImportError as e:
-    msg = f"Failed to import PiiScrubber or Updater: {e}\n{traceback.format_exc()}"
+    msg = f"Failed to import Host dependency ({type(e).__name__})."
     logger.critical(msg)
     log_emergency(msg)
     sys.exit(1)
@@ -425,6 +441,12 @@ class NativeHost:
         self.current_case_id = None  # Track which case the current session belongs to
         self.client_working_directory = None
         self.current_session_root_path = None
+        self.current_prompt_fingerprint: str | None = None
+        self.last_session_error: str | None = None
+        self.last_prompt_source_error: PromptSourceError | None = None
+        self._installation_verifier = InstallationVerifier(
+            Path(self._get_install_dir())
+        )
 
         # Log startup location
         logger.info(
@@ -552,6 +574,237 @@ class NativeHost:
         if not os.path.isabs(expanded):
             raise ValueError("Root path must be an absolute path.")
         return os.path.normpath(expanded)
+
+    @staticmethod
+    def _get_install_dir() -> str:
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(sys.executable)
+        return os.path.dirname(os.path.abspath(__file__))
+
+    @staticmethod
+    def _serialize_installation_verification(
+        verification: InstallationVerification,
+    ) -> dict[str, str]:
+        if verification.mode == "development":
+            if verification.integrity != "development" or not verification.host_version:
+                return {
+                    "mode": "packaged",
+                    "integrity": "failed",
+                    "error_code": "installation_integrity_failed",
+                }
+            return {
+                "mode": "development",
+                "integrity": "development",
+                "host_version": verification.host_version,
+            }
+        if verification.integrity == "verified":
+            if not verification.host_version or not verification.extension_version:
+                return {
+                    "mode": "packaged",
+                    "integrity": "failed",
+                    "error_code": "installation_integrity_failed",
+                }
+            return {
+                "mode": "packaged",
+                "integrity": "verified",
+                "host_version": verification.host_version,
+                "extension_version": verification.extension_version,
+            }
+        return {
+            "mode": "packaged",
+            "integrity": "failed",
+            "error_code": "installation_integrity_failed",
+        }
+
+    @staticmethod
+    def _prompt_source_mode(
+        effective_root: str | None,
+        use_workspace_only: bool,
+    ) -> str:
+        return (
+            "repository-only"
+            if effective_root and use_workspace_only
+            else "dh-specific"
+        )
+
+    @staticmethod
+    def _validate_effective_root(effective_root: str | None) -> None:
+        if effective_root and not os.path.isdir(effective_root):
+            raise ValueError(
+                "Configured Root Path does not exist or is not a directory."
+            )
+
+    @staticmethod
+    def _read_prompt_source(
+        path: str,
+        *,
+        missing_error_code: str | None,
+        unreadable_error_code: str,
+    ) -> tuple[bytes, str]:
+        try:
+            with open(path, "rb") as stream:
+                raw = stream.read()
+        except FileNotFoundError as error:
+            if missing_error_code is None:
+                return b"", ""
+            raise PromptSourceError(missing_error_code) from error
+        except OSError as error:
+            raise PromptSourceError(unreadable_error_code) from error
+        try:
+            return raw, raw.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise PromptSourceError(unreadable_error_code) from error
+
+    def _canonicalize_user_prompt(self, context: str) -> str:
+        try:
+            _, current_prompt = self._read_prompt_source(
+                os.path.join(USER_DATA_DIR, "user_prompt.md"),
+                missing_error_code=None,
+                unreadable_error_code="user_prompt_unreadable",
+            )
+        except PromptSourceError:
+            raise
+
+        marker = _USER_PROMPT_HEADING.search(context)
+        without_prior = (context[: marker.start()] if marker else context).rstrip()
+        if not current_prompt.strip():
+            return without_prior
+        prefix = f"{without_prior}\n\n" if without_prior else ""
+        return f"{prefix}## User Prompt\n\n{current_prompt}"
+
+    @staticmethod
+    def _compute_prompt_fingerprint(
+        mode: str,
+        core_bytes: bytes,
+        selected_bytes: bytes,
+    ) -> str:
+        digest = hashlib.sha256()
+        for part in (
+            b"dh-prompt-fingerprint-v1",
+            mode.encode("utf-8"),
+            core_bytes,
+            selected_bytes,
+        ):
+            digest.update(len(part).to_bytes(8, "big"))
+            digest.update(part)
+        return f"v1:{digest.hexdigest()}"
+
+    def _resolve_prompt_snapshot(
+        self,
+        effective_root: str | None,
+        use_workspace_only: bool,
+    ) -> PromptSnapshot:
+        mode = self._prompt_source_mode(effective_root, use_workspace_only)
+        core_bytes, core_text = self._read_prompt_source(
+            os.path.join(self._get_install_dir(), "system_prompt.md"),
+            missing_error_code="dh_core_prompt_missing",
+            unreadable_error_code="dh_core_prompt_unreadable",
+        )
+        if mode == "repository-only":
+            selected_path = os.path.join(
+                effective_root or "", ".github", "copilot-instructions.md"
+            )
+            missing_code = "repository_instructions_missing"
+            unreadable_code = "repository_instructions_unreadable"
+        else:
+            selected_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
+            missing_code = None
+            unreadable_code = "dh_specific_instructions_unreadable"
+        selected_bytes, selected_text = self._read_prompt_source(
+            selected_path,
+            missing_error_code=missing_code,
+            unreadable_error_code=unreadable_code,
+        )
+        return PromptSnapshot(
+            mode=mode,
+            effective_root=effective_root,
+            core_bytes=core_bytes,
+            core_text=core_text,
+            selected_bytes=selected_bytes,
+            selected_text=selected_text,
+            fingerprint=self._compute_prompt_fingerprint(
+                mode, core_bytes, selected_bytes
+            ),
+        )
+
+    def _get_prompt_source_config_fields(
+        self,
+        effective_root: str | None,
+        use_workspace_only: bool,
+    ) -> dict:
+        status: dict[str, str] = {"status": "ok"}
+        dh_raw: str | None = None
+        dh_error: PromptSourceError | None = None
+        user_prompt_raw: str | None = None
+        user_prompt_error: PromptSourceError | None = None
+
+        try:
+            self._read_prompt_source(
+                os.path.join(self._get_install_dir(), "system_prompt.md"),
+                missing_error_code="dh_core_prompt_missing",
+                unreadable_error_code="dh_core_prompt_unreadable",
+            )
+        except PromptSourceError as error:
+            status = error.to_result()
+
+        try:
+            _, dh_raw = self._read_prompt_source(
+                os.path.join(USER_DATA_DIR, "copilot-instructions.md"),
+                missing_error_code=None,
+                unreadable_error_code="dh_specific_instructions_unreadable",
+            )
+        except PromptSourceError as error:
+            dh_error = error
+
+        try:
+            _, user_prompt_raw = self._read_prompt_source(
+                os.path.join(USER_DATA_DIR, "user_prompt.md"),
+                missing_error_code=None,
+                unreadable_error_code="user_prompt_unreadable",
+            )
+        except PromptSourceError as error:
+            user_prompt_error = error
+
+        selected_error: PromptSourceError | None = None
+        if effective_root and use_workspace_only:
+            try:
+                self._read_prompt_source(
+                    os.path.join(
+                        effective_root,
+                        ".github",
+                        "copilot-instructions.md",
+                    ),
+                    missing_error_code="repository_instructions_missing",
+                    unreadable_error_code="repository_instructions_unreadable",
+                )
+            except PromptSourceError as error:
+                selected_error = error
+
+        if status["status"] == "ok" and selected_error is not None:
+            status = selected_error.to_result()
+        if status["status"] == "ok" and dh_error is not None:
+            status = dh_error.to_result()
+        if status["status"] == "ok" and user_prompt_error is not None:
+            status = user_prompt_error.to_result()
+
+        fields: dict = {"prompt_source_status": status}
+        if dh_raw is not None:
+            fields["_user_instructions_raw"] = dh_raw
+        if user_prompt_raw is not None:
+            fields["_user_prompt_raw"] = user_prompt_raw
+        return fields
+
+    @staticmethod
+    def _build_system_message(
+        snapshot: PromptSnapshot,
+        session_id: str | None,
+    ) -> dict[str, str]:
+        sections = [snapshot.core_text]
+        if snapshot.selected_text.strip():
+            sections.append(snapshot.selected_text)
+        if session_id:
+            sections.append(f"## Session Info\n\nSession Name: {session_id}")
+        return {"mode": "append", "content": "\n\n".join(sections)}
 
     def _read_beta_channel_pref(self) -> bool:
         """Best-effort read of the beta-channel preference from config.json.
@@ -719,6 +972,16 @@ class NativeHost:
 
         return None
 
+    def _invalidate_active_session(self, *, clear_client: bool = False) -> None:
+        self.session = None
+        self.current_session_id = None
+        self.current_case_id = None
+        self.current_session_root_path = None
+        self.current_prompt_fingerprint = None
+        if clear_client:
+            self.client = None
+            self.client_working_directory = None
+
     async def _discard_client_if_workspace_changed(
         self, desired_working_directory: str | None
     ) -> None:
@@ -736,13 +999,9 @@ class NativeHost:
         )
         try:
             await self.client.stop()
-        except Exception as e:
-            logger.warning(f"Failed to stop old Copilot client cleanly: {e}")
-        self.client = None
-        self.client_working_directory = None
-        self.session = None
-        self.current_session_id = None
-        self.current_session_root_path = None
+        except Exception as error:
+            self._safe_sdk_error("stop old Copilot client", error)
+        self._invalidate_active_session(clear_client=True)
 
     async def initialize_sdk(self):
         """Initializes the Copilot Client without creating a generic session."""
@@ -773,12 +1032,9 @@ class NativeHost:
             await self.client.start()
             logger.info("Copilot Client started.")
 
-        except Exception as e:
-            logger.error(f"Failed to initialize SDK: {e}")
-            self.client = None  # Ensure client is None so null checks catch it
-            self.client_working_directory = None
-            self.session = None  # Ensure it's None on failure
-            self.current_session_root_path = None
+        except Exception as error:
+            self._safe_sdk_error("initialize Copilot client", error)
+            self._invalidate_active_session(clear_client=True)
 
     # ------------------------------------------------------------------
     # Secret field encryption boundary
@@ -888,7 +1144,12 @@ class NativeHost:
         ext["team_manifest_url_encrypted"] = blob
         del ext["team_manifest_url"]
 
-    def _get_session_config(self, root_path_override=_WORKING_DIRECTORY_UNSET) -> dict:
+    def _get_session_config(
+        self,
+        root_path_override=_WORKING_DIRECTORY_UNSET,
+        *,
+        include_prompt_status: bool = False,
+    ) -> dict:
         """Constructs the session configuration from disk."""
         session_config: dict = {}
 
@@ -992,10 +1253,10 @@ class NativeHost:
         # Extract root path
         if root_path_override is _WORKING_DIRECTORY_UNSET:
             current_root = self._normalize_root_path(final_data.get("root_path"))
+            self.root_path = current_root
         else:
             current_root = self._normalize_root_path(root_path_override)
         has_root_path = bool(current_root)
-        self.root_path = current_root
 
         # --- SKILL DIRECTORIES ---
         # Strategy:
@@ -1074,6 +1335,8 @@ class NativeHost:
         # --- Apply to Instance and Session ---
 
         session_config.update(final_data)  # type: ignore
+        session_config["_effective_root"] = current_root
+        session_config["_use_workspace_only"] = bool(use_workspace_only)
 
         # Model / performance selection (spec 2026-07-03-configurable-model-
         # performance). Surface as TOP-LEVEL session_config keys (like
@@ -1108,8 +1371,8 @@ class NativeHost:
 
         # B. Load Workspace MCP Config (.github/mcp-config.json)
         # This overrides Global tools with the same name
-        if self.root_path and os.path.exists(self.root_path):
-            ws_mcp_path = os.path.join(self.root_path, ".github", "mcp-config.json")
+        if current_root and os.path.exists(current_root):
+            ws_mcp_path = os.path.join(current_root, ".github", "mcp-config.json")
             if os.path.exists(ws_mcp_path):
                 try:
                     with open(ws_mcp_path, "r") as f:
@@ -1156,122 +1419,43 @@ class NativeHost:
         # wire; omission would let resume restore stale metadata (often the
         # Native Host install directory). A configured root wins; otherwise
         # use the process cwd as an explicit compatibility fallback.
-        working_directory = self.root_path or os.getcwd()
+        working_directory = current_root or os.getcwd()
         session_config["working_directory"] = working_directory
         logger.info(f"Set working_directory to: {working_directory}")
 
-        # --- System Instructions (Split Prompt Architecture) ---
-
-        system_instr_path = os.path.join(install_dir, "system_prompt.md")
-        user_instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
-
-        # 2. Load System Instructions (Managed by Installer)
-        sys_content = ""
-        if os.path.exists(system_instr_path):
-            try:
-                with open(system_instr_path, "r", encoding="utf-8") as f:
-                    sys_content = f.read()
-            except Exception as e:
-                logger.error(f"Failed to read system instructions: {e}")
-
-        # 3. Load User Instructions (Managed by User)
-        user_content = ""
-        if os.path.exists(user_instr_path):
-            try:
-                with open(user_instr_path, "r", encoding="utf-8") as f:
-                    user_content = f.read()
-            except Exception as e:
-                logger.error(f"Failed to read user instructions: {e}")
-        else:
-            logger.info(f"User instructions file not found at: {user_instr_path}")
-
-        # 4. Combine
-        final_content = sys_content
-        if user_content.strip():
-            final_content += "\n\n" + user_content
-
-        # Apply
-        if final_content.strip():
-            session_config["system_message"] = {
-                "mode": "append",
-                "content": final_content,
-            }
-            logger.info("Loaded system instructions (System + User).")
-
-        # Store raw user content in config for the UI to retrieve
-        session_config["_user_instructions_raw"] = user_content
-
-        # 5. Append Workspace Instructions (.github/copilot-instructions.md)
-        if self.root_path and os.path.exists(self.root_path):
-            ws_instr_path = os.path.join(
-                self.root_path, ".github", "copilot-instructions.md"
-            )
-            if os.path.exists(ws_instr_path):
-                try:
-                    with open(ws_instr_path, "r", encoding="utf-8") as f:
-                        ws_instr_content = f.read()
-
-                    if ws_instr_content.strip():
-                        # If system_message already exists, append to it
-                        current_msg = session_config.get("system_message", {})
-
-                        previous_content = ""
-                        if isinstance(current_msg, dict):
-                            previous_content = current_msg.get("content", "")
-                        elif isinstance(current_msg, str):
-                            previous_content = current_msg
-
-                        new_content = (
-                            previous_content + "\n\n" + ws_instr_content
-                            if previous_content
-                            else ws_instr_content
-                        )
-
-                        session_config["system_message"] = {
-                            "mode": "append",
-                            "content": new_content,
-                        }
-                        logger.info(
-                            f"Loaded workspace instructions from {ws_instr_path}"
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to load workspace instructions from {ws_instr_path}: {e}"
-                    )
-
-        # --- User Prompt (New Architecture: user_prompt.md) ---
-        # 1. Path
-        user_prompt_path = os.path.join(USER_DATA_DIR, "user_prompt.md")
-
-        # 2. Migration: Check if config has it but file doesn't
-        # Access raw extension_preferences from final_data (merged config)
+        # Custom User Prompt is an Options/get_config projection only. Session
+        # refreshes read the canonical file once later in handle_analyze_error.
         ext_prefs = final_data.get("extension_preferences", {})
-        legacy_prompt = ext_prefs.get("user_prompt")
-
-        if legacy_prompt and not os.path.exists(user_prompt_path):
-            try:
-                logger.info(f"Migrating legacy user_prompt to {user_prompt_path}")
-                with open(user_prompt_path, "w", encoding="utf-8") as f:
-                    f.write(legacy_prompt)
-            except Exception as e:
-                logger.error(f"Failed to migrate user_prompt: {e}")
-
-        # 3. Read from File (Source of Truth)
-        current_prompt_content = ""
-        if os.path.exists(user_prompt_path):
-            try:
-                with open(user_prompt_path, "r", encoding="utf-8") as f:
-                    current_prompt_content = f.read()
-            except Exception as e:
-                logger.error(f"Failed to read user_prompt.md: {e}")
-
-        # 4. Inject into extension_preferences for Frontend Sync
         if "extension_preferences" not in session_config:
             session_config["extension_preferences"] = {}
+        session_config["extension_preferences"].pop("user_prompt", None)
+        if include_prompt_status:
+            user_prompt_path = os.path.join(USER_DATA_DIR, "user_prompt.md")
+            legacy_prompt = ext_prefs.get("user_prompt")
+            if legacy_prompt and not os.path.exists(user_prompt_path):
+                try:
+                    logger.info("Migrating legacy Custom User Prompt.")
+                    with open(user_prompt_path, "w", encoding="utf-8") as f:
+                        f.write(legacy_prompt)
+                except Exception as e:
+                    logger.error(
+                        "Failed to migrate Custom User Prompt (%s).",
+                        type(e).__name__,
+                    )
 
-        # We force the file content into the config object sent to frontend
-        # This overrides whatever might be lingering in config.json
-        session_config["extension_preferences"]["user_prompt"] = current_prompt_content
+            prompt_health_fields = self._get_prompt_source_config_fields(
+                current_root,
+                bool(use_workspace_only),
+            )
+            current_prompt_content = prompt_health_fields.pop(
+                "_user_prompt_raw",
+                None,
+            )
+            if current_prompt_content is not None:
+                session_config["extension_preferences"][
+                    "user_prompt"
+                ] = current_prompt_content
+            session_config.update(prompt_health_fields)
 
         return session_config
 
@@ -1280,8 +1464,7 @@ class NativeHost:
         Auto-approves permissions to prevent headless hangs.
         Fallback safety net — if pre_tool_use hook doesn't catch it.
         """
-        logger.info(f"Permission requested (fallback handler): {request}")
-        logger.info("Auto-approving permission request to prevent headless hang.")
+        logger.info("Permission requested (fallback handler); auto-approving.")
         # SDK 1.0.5: PermissionRequestResult is a Union (annotation-only);
         # the concrete approval variant is PermissionDecisionApproveOnce().
         # (0.3.0 used PermissionRequestResult(kind="approve-once"), removed
@@ -1295,8 +1478,7 @@ class NativeHost:
         This eliminates the permission request overhead entirely, improving speed.
         The _permission_handler above serves as a fallback safety net.
         """
-        tool_name = hook_input.get("toolName", "unknown")
-        logger.info(f"Pre-tool-use hook: auto-allowing '{tool_name}'")
+        logger.info("Pre-tool-use hook: auto-allowing tool request.")
         return PreToolUseHookOutput(permissionDecision="allow")
 
     @staticmethod
@@ -1326,8 +1508,11 @@ class NativeHost:
                     f"[infinite-sessions] {origin} session has no workspace_path "
                     "attribute (infinite sessions may be disabled or unsupported)."
                 )
-        except Exception as e:
-            logger.debug(f"[infinite-sessions] observability log failed: {e}")
+        except Exception as error:
+            logger.debug(
+                "[infinite-sessions] observability log failed (%s).",
+                type(error).__name__,
+            )
 
     @staticmethod
     def _extract_case_id(case_number: str) -> str | None:
@@ -1411,12 +1596,21 @@ class NativeHost:
         fence = "`" * (longest_run + 1)
         return f"{fence}{value}{fence}"
 
+    @staticmethod
+    def _safe_sdk_error(operation: str, error: BaseException) -> str:
+        """Log and return one SDK error summary without serializing its text."""
+        summary = f"{operation} failed ({type(error).__name__})."
+        logger.error(summary)
+        return summary
+
     async def _refresh_session(
         self,
         session_id: str | None = None,
         case_id: str | None = None,
         working_directory_override=_WORKING_DIRECTORY_UNSET,
-    ):
+        session_config: dict | None = None,
+        prompt_snapshot: PromptSnapshot | None = None,
+    ) -> bool:
         """Re-creates or resumes a Copilot session.
 
         Args:
@@ -1432,16 +1626,31 @@ class NativeHost:
         # (e.g. an unsupported model/reasoning-effort combo) instead of the
         # generic "session/client not initialized".
         self.last_session_error = None
+        self.last_prompt_source_error = None
 
-        # Build session config before any client (re)initialization so the CLI
-        # process and the session are anchored to the same workspace root.
         try:
-            full_config = self._get_session_config(
+            full_config = session_config or self._get_session_config(
                 root_path_override=working_directory_override
             )
-        except Exception as e:
-            logger.error(f"Failed to build session config: {e}")
-            self.last_session_error = str(e)
+            self._validate_effective_root(full_config.get("_effective_root"))
+            snapshot = prompt_snapshot or self._resolve_prompt_snapshot(
+                full_config.get("_effective_root"),
+                bool(full_config.get("_use_workspace_only")),
+            )
+        except PromptSourceError as error:
+            logger.error(
+                "Failed to resolve prompt sources (%s).",
+                error.error_code,
+            )
+            self.last_prompt_source_error = error
+            self.last_session_error = str(error)
+            self._invalidate_active_session()
+            return False
+        except Exception as error:
+            self.last_session_error = self._safe_sdk_error(
+                "build session config", error
+            )
+            self._invalidate_active_session()
             return False
 
         await self._discard_client_if_workspace_changed(
@@ -1468,37 +1677,24 @@ class NativeHost:
                 )
                 await self.client.start()
                 logger.info("Client re-initialized successfully.")
-            except Exception as e:
-                logger.error(f"Client re-initialization failed: {e}")
-                self.client = None
-                return False
-
-        # Inject session name into system message so the AI can reference it
-        # (e.g. when creating context.md frontmatter — MyCasesKit
-        # `session_name:` field, now an opaque uuid5 shared byte-for-byte
-        # with MyCasesKit; case identity lives in the `case_number` field).
-        if session_id and "system_message" in full_config:
-            sys_msg = full_config["system_message"]
-            if isinstance(sys_msg, dict):
-                prev = sys_msg.get("content", "")
-                sys_msg["content"] = (
-                    prev + f"\n\n## Session Info\n\nSession Name: {session_id}"
+            except Exception as error:
+                self.last_session_error = self._safe_sdk_error(
+                    "start Copilot client", error
                 )
-            logger.debug(f"Injected session name into system message: {session_id}")
+                self._invalidate_active_session(clear_client=True)
+                return False
 
         # Extract only SDK-compatible keyword arguments from the config dict.
         # This prevents passing unknown keys (root_path, extension_preferences, etc.)
         # to the SDK, which now uses strict keyword-only arguments.
         sdk_kwargs = {
             "on_permission_request": self._permission_handler,
-            "hooks": {
-                "on_pre_tool_use": self._pre_tool_use_hook,
-            },
+            "hooks": {"on_pre_tool_use": self._pre_tool_use_hook},
+            "skip_custom_instructions": True,
+            "system_message": self._build_system_message(snapshot, session_id),
         }
 
         # Map config dict keys to SDK keyword arguments
-        if "system_message" in full_config:
-            sdk_kwargs["system_message"] = full_config["system_message"]
         if "mcp_servers" in full_config:
             sdk_kwargs["mcp_servers"] = full_config["mcp_servers"]
         if "working_directory" in full_config:
@@ -1517,6 +1713,8 @@ class NativeHost:
         if full_config.get("context_tier"):
             sdk_kwargs["context_tier"] = full_config["context_tier"]
 
+        transport_error = None
+
         # If a session_id is provided, try to resume an existing session first
         if session_id:
             try:
@@ -1532,6 +1730,7 @@ class NativeHost:
                 self.current_session_root_path = full_config.get(
                     "working_directory"
                 )
+                self.current_prompt_fingerprint = snapshot.fingerprint
                 logger.info(
                     f"Resumed existing session: {session_id} (Server ID: {self.current_session_id})"
                 )
@@ -1541,19 +1740,21 @@ class NativeHost:
                 logger.info(
                     "SDK does not support resume_session. Will create new session."
                 )
-            except Exception as e:
-                logger.info(
-                    f"No existing session to resume ({session_id}): {e}. Creating new session."
-                )
-                logger.debug(f"Resume traceback: {traceback.format_exc()}")
+            except (OSError, ProcessExitedError) as error:
+                transport_error = error
+                self._safe_sdk_error("resume Copilot session transport", error)
+            except Exception as error:
+                self._safe_sdk_error("resume Copilot session", error)
 
         try:
+            if session_id:
+                sdk_kwargs["session_id"] = session_id
+            if transport_error is not None:
+                raise transport_error
+
             # Inject the session-name (uuid5 of case) so the server uses it as
             # the session_id; this is what `copilot --resume <name>` later
             # looks up (B82 — see _case_to_session_id docstring).
-            if session_id:
-                sdk_kwargs["session_id"] = session_id
-
             # Debug: Log the config keys being sent to create_session
             safe_keys = {k: type(v).__name__ for k, v in sdk_kwargs.items()}
             logger.info(f"create_session config keys: {safe_keys}")
@@ -1575,20 +1776,22 @@ class NativeHost:
             # case ID from the deterministic session it replaced.
             self.current_case_id = case_id
             self.current_session_root_path = full_config.get("working_directory")
+            self.current_prompt_fingerprint = snapshot.fingerprint
             logger.info(
                 f"Copilot Session created successfully. "
                     f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
             )
             self._log_session_observability(self.session, "created")
             return True
-        except OSError as e:
-            # OSError (e.g., [Errno 22] Invalid argument) typically means the CLI
-            # subprocess pipe is broken/closed (process exited during idle period).
-            # Re-initialize the client and retry once.
-            logger.warning(
-                f"create_session failed with OSError: {e}. "
-                f"CLI process likely exited. Re-initializing client and retrying..."
-            )
+        except (OSError, ProcessExitedError) as error:
+            self._safe_sdk_error("create Copilot session transport", error)
+            broken_client = self.client
+            if broken_client:
+                try:
+                    await broken_client.stop()
+                except Exception as stop_error:
+                    self._safe_sdk_error("stop broken Copilot client", stop_error)
+            self._invalidate_active_session(clear_client=True)
             try:
                 cli_path = self.find_copilot_cli()
                 reinit_connection = (
@@ -1606,8 +1809,15 @@ class NativeHost:
                     "working_directory"
                 )
                 await self.client.start()
-                logger.info("Client re-initialized after OSError.")
+                logger.info("Client re-initialized after transport failure.")
+            except Exception as retry_err:
+                self.last_session_error = self._safe_sdk_error(
+                    "restart Copilot client", retry_err
+                )
+                self._invalidate_active_session(clear_client=True)
+                return False
 
+            try:
                 self.session = await self.client.create_session(**sdk_kwargs)
                 server_session_id = getattr(self.session, "session_id", None)
                 self.current_session_id = server_session_id
@@ -1615,31 +1825,36 @@ class NativeHost:
                 self.current_session_root_path = full_config.get(
                     "working_directory"
                 )
+                self.current_prompt_fingerprint = snapshot.fingerprint
                 logger.info(
                     f"Copilot Session created successfully (after retry). "
                 f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
                 )
                 self._log_session_observability(self.session, "created-after-retry")
                 return True
-            except Exception as retry_err:
-                logger.error(f"Retry after re-init also failed: {retry_err}")
-                logger.error(f"Full traceback: {traceback.format_exc()}")
-                self.last_session_error = str(retry_err)
-                self.client = None
-                self.client_working_directory = None
-                self.session = None
-                self.current_session_id = None
-                self.current_case_id = None
-                self.current_session_root_path = None
+            except (OSError, ProcessExitedError) as retry_err:
+                self.last_session_error = self._safe_sdk_error(
+                    "retry Copilot session", retry_err
+                )
+                retry_client = self.client
+                if retry_client:
+                    try:
+                        await retry_client.stop()
+                    except Exception as stop_error:
+                        self._safe_sdk_error("stop retry Copilot client", stop_error)
+                self._invalidate_active_session(clear_client=True)
                 return False
-        except Exception as e:
-            logger.error(f"Failed to create/refresh session: {e}")
-            logger.error(f"Full traceback: {traceback.format_exc()}")
-            self.last_session_error = str(e)
-            self.session = None
-            self.current_session_id = None
-            self.current_case_id = None
-            self.current_session_root_path = None
+            except Exception as retry_err:
+                self.last_session_error = self._safe_sdk_error(
+                    "retry Copilot session", retry_err
+                )
+                self._invalidate_active_session()
+                return False
+        except Exception as error:
+            self.last_session_error = self._safe_sdk_error(
+                "create Copilot session", error
+            )
+            self._invalidate_active_session()
             return False
 
     def _resolve_skills(self, directories, base_path):
@@ -1656,158 +1871,193 @@ class NativeHost:
                 resolved.append(os.path.normpath(expanded))
         return resolved
 
+    @staticmethod
+    def _write_utf8_text(path: str, value: str) -> None:
+        with open(path, "w", encoding="utf-8", newline="") as stream:
+            stream.write(value)
+
+    @staticmethod
+    def _validate_user_config(incoming_config: dict) -> None:
+        if (
+            "extension_preferences" in incoming_config
+            and not isinstance(incoming_config["extension_preferences"], dict)
+        ):
+            raise TypeError("extension_preferences must be an object")
+        if "skill_directories" in incoming_config:
+            incoming_skills = incoming_config["skill_directories"]
+            if not isinstance(incoming_skills, list) or any(
+                not isinstance(skill, str) for skill in incoming_skills
+            ):
+                raise TypeError("skill_directories must be a list of strings")
+
+    def _write_user_config(self, incoming_config: dict) -> dict:
+        self._validate_user_config(incoming_config)
+        user_config_path = os.path.join(USER_DATA_DIR, "config.json")
+        current_data: dict = {}
+        if os.path.exists(user_config_path):
+            try:
+                with open(user_config_path, "r", encoding="utf-8") as stream:
+                    current_data = json.load(stream)
+            except (OSError, json.JSONDecodeError):
+                current_data = {}
+
+        config_to_write = copy.deepcopy(incoming_config)
+        ext_prefs = config_to_write.get("extension_preferences")
+        if "extension_preferences" in config_to_write:
+            ext_prefs.pop("user_prompt", None)
+
+        if "skill_directories" in config_to_write:
+            incoming_skills = config_to_write["skill_directories"]
+
+        current_ext = current_data.get("extension_preferences")
+        if isinstance(current_ext, dict):
+            current_ext.pop("user_prompt", None)
+
+        if "skill_directories" in config_to_write:
+            workspace_skill = (
+                os.path.normpath(
+                    os.path.join(self.root_path, ".github", "skills")
+                )
+                if self.root_path
+                else None
+            )
+            config_to_write["skill_directories"] = [
+                skill
+                for skill in incoming_skills
+                if workspace_skill is None
+                or os.path.normpath(skill) != workspace_skill
+            ]
+
+        self._encrypt_secrets_before_write(config_to_write)
+        current_data.update(config_to_write)
+        with open(user_config_path, "w", encoding="utf-8") as stream:
+            json.dump(current_data, stream, indent=2)
+        return current_data
+
     async def handle_update_config(self, payload):
         """Updates configuration files and refreshes the session."""
-        try:
-            # 1. Update User Instructions
-            # Support both 'user_instructions' (new) and 'system_instructions' (legacy/mapped)
-            new_instr = payload.get("user_instructions") or payload.get(
-                "system_instructions"
-            )
+        new_instr = _PAYLOAD_FIELD_UNSET
+        if "user_instructions" in payload:
+            new_instr = payload["user_instructions"]
+        elif "system_instructions" in payload:
+            new_instr = payload["system_instructions"]
 
-            if new_instr is not None:
-                # FIX: Write to 'copilot-instructions.md'
-                instr_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
-                with open(instr_path, "w", encoding="utf-8") as f:
-                    f.write(new_instr)
-                logger.info("Updated copilot-instructions.md")
+        new_prompt = _PAYLOAD_FIELD_UNSET
+        if "user_prompt" in payload:
+            new_prompt = payload["user_prompt"]
+        else:
+            incoming_config = payload.get("config", {})
+            if isinstance(incoming_config, dict):
+                ext = incoming_config.get("extension_preferences", {})
+                if isinstance(ext, dict) and "user_prompt" in ext:
+                    new_prompt = ext["user_prompt"]
 
-            # 1.5 Update User Prompt (New Architecture: user_prompt.md)
-            # Check top-level payload first, then try to fish it out of extension_preferences if missing
-            new_prompt = payload.get("user_prompt")
-
-            # If not in top-level, check if it's inside config (legacy/transition)
+        for field_name, value in (
+            ("user_instructions", new_instr),
+            ("user_prompt", new_prompt),
+        ):
             if (
-                new_prompt is None
-                and "config" in payload
-                and "extension_preferences" in payload["config"]
+                value is not _PAYLOAD_FIELD_UNSET
+                and not isinstance(value, str)
             ):
-                new_prompt = payload["config"]["extension_preferences"].get(
-                    "user_prompt"
-                )
-
-            if new_prompt is not None:
-                prompt_path = os.path.join(USER_DATA_DIR, "user_prompt.md")
-                with open(prompt_path, "w", encoding="utf-8") as f:
-                    f.write(new_prompt)
-                logger.info("Updated user_prompt.md")
-
-            # 2. Update Config (Model, etc)
-            if "config" in payload:
-                user_config_path = os.path.join(USER_DATA_DIR, "config.json")
-                # Read existing or empty
-                current_data = {}
-                if os.path.exists(user_config_path):
-                    try:
-                        with open(user_config_path, "r") as f:
-                            current_data = json.load(f)
-                    except:
-                        pass  # Start fresh if corrupt
-
-                # --- SANITIZE USER PROMPT ---
-                # Remove user_prompt from config to avoid duplication in config.json
-                # It is now stored in user_prompt.md
-                if "extension_preferences" in payload["config"]:
-                    ext_prefs = payload["config"]["extension_preferences"]
-                    if "user_prompt" in ext_prefs:
-                        # Remove it from the dict we are about to save
-                        # But we must create a copy if we want to be safe, though here we are just processing incoming payload
-                        # Actually, we can just delete it from payload["config"] before merging
-                        del ext_prefs["user_prompt"]
-                        # Also remove from current_data if it exists there (cleanup legacy)
-                        if "extension_preferences" in current_data:
-                            if "user_prompt" in current_data["extension_preferences"]:
-                                del current_data["extension_preferences"]["user_prompt"]
-
-                # --- SANITIZE SKILLS ---
-                # The payload contains "effective" skills (User + Default + Workspace).
-                # We must NOT save Workspace skills into the User Config (config.json).
-                # Default skills ARE saved if the user has them, because User Settings > Default.
-                if "skill_directories" in payload["config"]:
-                    incoming_skills = payload["config"]["skill_directories"]
-                    system_skills = set()
-
-                    # Identify Workspace Skills to Remove
-                    # The workspace skills path is <root>/.github/skills
-                    if self.root_path:
-                        ws_skills_path = os.path.join(
-                            self.root_path, ".github", "skills"
-                        )
-                        # Normalize for comparison
-                        system_skills.add(os.path.normpath(ws_skills_path))
-
-                    # Filter Incoming
-                    filtered_skills = []
-                    for s in incoming_skills:
-                        if os.path.normpath(s) not in system_skills:
-                            filtered_skills.append(s)
-
-                    logger.info(
-                        f"Sanitized skills: {len(incoming_skills)} -> {len(filtered_skills)} (Removed {len(incoming_skills) - len(filtered_skills)} workspace skills)"
-                    )
-                    payload["config"]["skill_directories"] = filtered_skills
-
-                # Encrypt secret fields (team_manifest_url -> _encrypted)
-                # before merging. EncryptError aborts the entire write per
-                # spec § "EncryptError handling".
-                try:
-                    self._encrypt_secrets_before_write(payload["config"])
-                except secret_store.EncryptError as e:
-                    logger.error(
-                        "Failed to encrypt secret field; aborting config write. "
-                        "Error: %s", e
-                    )
-                    return {
-                        "error": "Failed to encrypt secret field; configuration not saved."
-                    }
-
-                # Merge new config
-                current_data.update(payload["config"])
-
-                with open(user_config_path, "w") as f:
-                    json.dump(current_data, f, indent=2)
-                logger.info("Updated config.json")
-
-                # Apply log level immediately (before session refresh)
-                ext_prefs = current_data.get("extension_preferences", {})
-                _apply_log_level(ext_prefs.get("log_level", "INFO"))
-
-                # Apply analyze timeout immediately (C2b-lite). Mirror the
-                # clamp + coercion in _load_config so an Options edit takes
-                # effect on the very next analyze without host restart.
-                try:
-                    _raw_timeout = int(ext_prefs.get("analyze_timeout_seconds", 1200))
-                except (TypeError, ValueError):
-                    _raw_timeout = 1200
-                self.analyze_timeout_seconds = max(60, min(3600, _raw_timeout))
-
-            # 3. Refresh the current deterministic case session. Config edits
-            # must not replace it with a generic UUID while leaving a stale
-            # current_case_id behind. With no active case, defer session
-            # creation until the next Analyze request supplies an identity.
-            if self.current_case_id:
-                session_id = self._case_to_session_id(self.current_case_id)
-                success = await self._refresh_session(
-                    session_id=session_id,
-                    case_id=self.current_case_id,
-                )
-            else:
-                self.session = None
-                self.current_session_id = None
-                self.current_session_root_path = None
-                success = True
-
-            if success:
                 return {
-                    "success": True,
-                    "message": "Configuration updated and session refreshed.",
+                    "success": False,
+                    "config_saved": False,
+                    "error": f"{field_name} must be a string.",
                 }
-            else:
-                return {"error": "Configuration saved but session refresh failed."}
 
-        except Exception as e:
-            logger.error(f"Error updating config: {e}")
-            return {"error": str(e)}
+        config_saved = False
+        durable_write_attempted = False
+        try:
+            if "config" in payload:
+                incoming_config = payload["config"]
+                if not isinstance(incoming_config, dict):
+                    raise TypeError("config must be an object")
+                self._validate_user_config(incoming_config)
+                durable_write_attempted = True
+                saved_config = self._write_user_config(incoming_config)
+                saved_ext = saved_config.get("extension_preferences", {})
+                _apply_log_level(saved_ext.get("log_level", "INFO"))
+                try:
+                    raw_timeout = int(
+                        saved_ext.get("analyze_timeout_seconds", 1200)
+                    )
+                except (TypeError, ValueError):
+                    raw_timeout = 1200
+                self.analyze_timeout_seconds = max(
+                    60,
+                    min(3600, raw_timeout),
+                )
+            if new_instr is not _PAYLOAD_FIELD_UNSET:
+                durable_write_attempted = True
+                self._write_utf8_text(
+                    os.path.join(USER_DATA_DIR, "copilot-instructions.md"),
+                    new_instr,
+                )
+            if new_prompt is not _PAYLOAD_FIELD_UNSET:
+                durable_write_attempted = True
+                self._write_utf8_text(
+                    os.path.join(USER_DATA_DIR, "user_prompt.md"),
+                    new_prompt,
+                )
+            config_saved = True
+        except secret_store.EncryptError as error:
+            logger.error(
+                "Secret encryption failed; configuration was not saved: %s",
+                type(error).__name__,
+            )
+            if durable_write_attempted:
+                self._invalidate_active_session()
+            return {
+                "success": False,
+                "config_saved": False,
+                "error": "Configuration was not saved.",
+            }
+        except Exception as error:
+            logger.error("Configuration write failed: %s", type(error).__name__)
+            # Writer attempts may have truncated or partially changed a file.
+            # No rollback is attempted, so stale active state cannot be reused.
+            if durable_write_attempted:
+                self._invalidate_active_session()
+            return {
+                "success": False,
+                "config_saved": False,
+                "error": "Configuration was not saved.",
+            }
+
+        # Preserve the current deterministic case. With no active case, defer
+        # session creation until the next Analyze supplies an identity.
+        if self.current_case_id:
+            session_id = self._case_to_session_id(self.current_case_id)
+            success = await self._refresh_session(
+                session_id=session_id,
+                case_id=self.current_case_id,
+            )
+        else:
+            self._invalidate_active_session()
+            success = True
+
+        if success:
+            return {
+                "success": True,
+                "config_saved": config_saved,
+                "message": "Configuration updated and session refreshed.",
+            }
+
+        prompt_error = getattr(self, "last_prompt_source_error", None)
+        self._invalidate_active_session()
+        if prompt_error:
+            return {
+                "success": False,
+                "config_saved": config_saved,
+                "error_code": prompt_error.error_code,
+                "error": str(prompt_error),
+            }
+        return {
+            "success": False,
+            "config_saved": config_saved,
+            "error": "Configuration saved but session refresh failed.",
+        }
 
     def start_input_thread(self):
         """Starts a daemon thread to read stdin without blocking the async loop."""
@@ -1817,45 +2067,44 @@ class NativeHost:
 
     def _read_stdin_loop(self):
         """Blocking loop that reads Native Messaging format from stdin."""
-        while self.running and self.loop:
+        while self.running:
             try:
-                # Read 4 bytes length
-                # sys.stdin.buffer.read is blocking
-                raw_length = sys.stdin.buffer.read(4)
-                if len(raw_length) == 0:
+                input_stream = getattr(
+                    self, "_native_input_stream", sys.stdin.buffer
+                )
+                message = read_native_message(
+                    input_stream, max_payload_bytes=None
+                )
+                if message is None:
                     logger.info("Stdin closed. Stopping.")
                     self.running = False
-                    # Signal the main loop to exit
                     self.loop.call_soon_threadsafe(self.input_queue.put_nowait, None)
                     break
-
-                message_length = struct.unpack("@I", raw_length)[0]
-                message_data = sys.stdin.buffer.read(message_length).decode("utf-8")
-
-                if not message_data:
-                    continue
-
-                message = json.loads(message_data)
-                # Thread-safe put into async queue
                 self.loop.call_soon_threadsafe(self.input_queue.put_nowait, message)
 
             except Exception as e:
-                logger.error(f"Error in input thread: {e}")
+                logger.error("Error in input thread (%s).", type(e).__name__)
                 self.running = False
                 break
 
     def send_message(self, message_content):
         """Writes a message to stdout in Native Messaging format."""
         try:
-            logger.debug(f"Sending message: {json.dumps(message_content)}")
-            encoded_content = json.dumps(message_content).encode("utf-8")
-            encoded_length = struct.pack("@I", len(encoded_content))
-
-            NATIVE_STDOUT.write(encoded_length)
-            NATIVE_STDOUT.write(encoded_content)
-            NATIVE_STDOUT.flush()
+            logger.debug(
+                "Sending message: requestId=%r status=%r action=%r error=%r error_code=%r data_type=%s",
+                message_content.get("requestId"),
+                message_content.get("status"),
+                message_content.get("action"),
+                message_content.get("error"),
+                message_content.get("error_code"),
+                type(message_content.get("data")).__name__,
+            )
+            output_stream = getattr(
+                self, "_native_output_stream", NATIVE_STDOUT
+            )
+            write_message(output_stream, message_content)
         except Exception as e:
-            logger.error(f"Error sending message: {e}")
+            logger.error("Error sending Native Messaging response (%s).", type(e).__name__)
 
     def send_progress(self, message):
         """Sends a progress update to the client."""
@@ -1926,8 +2175,12 @@ class NativeHost:
             return {"status": "success", "data": {"models": out}}
         except Exception as e:
             kind = self._classify_list_models_error(e)
-            logger.warning(f"list_models failed ({kind}): {e}")
-            return {"status": "error", "error": str(e), "errorKind": kind}
+            safe_error = self._safe_sdk_error("list Copilot models", e)
+            return {
+                "status": "error",
+                "error": safe_error,
+                "errorKind": kind,
+            }
 
     async def handle_analyze_error(self, payload):
         """Uses the Copilot SDK to analyze the error."""
@@ -1936,23 +2189,54 @@ class NativeHost:
         product = payload.get("product", "General")
         case_number = payload.get("caseNumber", "Unspecified")
         payload_root_value = payload.get("rootPath")
-        if isinstance(payload_root_value, str) and payload_root_value.strip():
-            payload_root_path = self._normalize_root_path(payload_root_value)
-        else:
-            # Missing/empty analyze values can be the extension's
-            # pre-hydration default. Config updates are the authoritative way
-            # to clear root_path; analyze falls back to host config here.
-            self._get_session_config()
-            payload_root_path = self.root_path
+        try:
+            text = self._canonicalize_user_prompt(
+                text if isinstance(text, str) else ""
+            )
+            payload_root_explicit = (
+                payload.get("rootPathOverrideProvided") is True
+                and isinstance(payload_root_value, str)
+            )
+            if payload_root_explicit:
+                payload_root_path = self._normalize_root_path(payload_root_value)
+                full_config = self._get_session_config(
+                    root_path_override=payload_root_path
+                )
+            elif isinstance(payload_root_value, str) and payload_root_value.strip():
+                payload_root_path = self._normalize_root_path(payload_root_value)
+                full_config = self._get_session_config(
+                    root_path_override=payload_root_path
+                )
+            else:
+                # Missing/empty analyze values can be the extension's
+                # pre-hydration default. Config updates are the authoritative
+                # way to clear root_path; analyze falls back to host config.
+                full_config = self._get_session_config()
+                payload_root_path = full_config.get("_effective_root")
+            self._validate_effective_root(full_config.get("_effective_root"))
+            snapshot = self._resolve_prompt_snapshot(
+                full_config.get("_effective_root"),
+                bool(full_config.get("_use_workspace_only")),
+            )
+        except PromptSourceError as error:
+            logger.error(
+                "Failed to prepare Analyze prompt (%s).",
+                error.error_code,
+            )
+            self._invalidate_active_session()
+            return error.to_result()
+        except ValueError as error:
+            self._invalidate_active_session()
+            return {"status": "error", "error": str(error)}
 
         # Diagnostic: log the identifying payload fields so we can correlate
         # cross-tab issues (e.g. Tab B sending stale caseNumber from Tab A).
-        # text/error body is intentionally excluded to keep PII out of the log.
+        # Text and context bodies are intentionally excluded to keep PII out.
         logger.info(
-            "analyze payload: caseNumber=%r product=%r context=%r rootPath=%r textLen=%d",
+            "analyze payload: caseNumber=%r product=%r contextLen=%d rootPath=%r textLen=%d",
             case_number,
             product,
-            context,
+            len(context) if isinstance(context, str) else -1,
             payload_root_path,
             len(text) if isinstance(text, str) else -1,
         )
@@ -1968,13 +2252,7 @@ class NativeHost:
         # 2. Session name changed (different case)
         needs_refresh = self.session is None or self.client is None
 
-        if self.root_path != payload_root_path:
-            logger.info(
-                f"Configured root path changed: {self.root_path} -> {payload_root_path}."
-            )
-            self.root_path = payload_root_path
-
-        desired_session_root = payload_root_path or os.getcwd()
+        desired_session_root = full_config.get("working_directory")
         if getattr(self, "current_session_root_path", None) != desired_session_root:
             logger.info(
                 "Session root path changed: %r -> %r.",
@@ -1983,8 +2261,20 @@ class NativeHost:
             )
             needs_refresh = True
 
-        if valid_case_id and valid_case_id != self.current_case_id:
+        if valid_case_id != self.current_case_id:
             logger.info(f"Case changed: {self.current_case_id} -> {valid_case_id}.")
+            needs_refresh = True
+
+        if self.current_prompt_fingerprint != snapshot.fingerprint:
+            logger.info(
+                "Prompt fingerprint changed: %r -> %r.",
+                (
+                    self.current_prompt_fingerprint[:11]
+                    if self.current_prompt_fingerprint
+                    else None
+                ),
+                snapshot.fingerprint[:11],
+            )
             needs_refresh = True
 
         if needs_refresh:
@@ -1994,37 +2284,30 @@ class NativeHost:
             refreshed = await self._refresh_session(
                 session_id=session_id,
                 case_id=valid_case_id,
-                working_directory_override=payload_root_path,
+                session_config=full_config,
+                prompt_snapshot=snapshot,
             )
             if not refreshed:
-                detail = getattr(self, "last_session_error", None) or "unknown error"
-                self.session = None
-                self.current_session_id = None
-                self.current_case_id = None
-                self.current_session_root_path = None
+                detail = getattr(self, "last_session_error", None)
+                prompt_error = getattr(self, "last_prompt_source_error", None)
+                self._invalidate_active_session()
+                if prompt_error:
+                    return prompt_error.to_result()
                 return {
                     "status": "error",
-                    "error": f"Copilot session refresh failed: {detail}",
+                    "error": detail or "Copilot session refresh failed.",
                 }
 
         if not text:
             return {"status": "error", "error": "No text provided for analysis."}
 
         if not self.session or not self.client:
-            detail = getattr(self, "last_session_error", None) or ""
-            hint = ""
-            low = detail.lower()
-            if "does not support reasoning effort" in low:
-                hint = (
-                    " The selected model does not support a reasoning effort. "
-                    "Set Reasoning effort back to 'Use CLI default' in Options → "
-                    "Model & Performance, or choose a model that supports it."
-                )
-            elif "does not support" in low:
-                hint = " Check your Model / Reasoning effort / Context tier in Options → Model & Performance."
             return {
                 "status": "error",
-                "error": (f"Copilot session/client not initialized. {detail}{hint}").strip(),
+                "error": (
+                    getattr(self, "last_session_error", None)
+                    or "Copilot session/client not initialized."
+                ),
             }
 
         self.send_progress("Checking authentication...")
@@ -2048,8 +2331,11 @@ class NativeHost:
         except asyncio.TimeoutError:
             logger.warning("Auth status check timed out after 15s, continuing...")
             self.send_progress("Auth check timed out, continuing...")
-        except Exception as e:
-            logger.error(f"Failed to check auth status: {e}")
+        except Exception as error:
+            logger.error(
+                "Failed to check auth status (%s).",
+                type(error).__name__,
+            )
             self.send_progress("Auth check skipped, continuing...")
 
         try:
@@ -2065,7 +2351,6 @@ class NativeHost:
                 else scrubbed_text
             )
 
-            logger.debug(f"Scrubbed Prompt content: {prompt}")
             logger.info(f"Sending prompt to Copilot (length: {len(prompt)})")
 
             self.send_progress("Waiting for Copilot agent...")
@@ -2108,26 +2393,56 @@ class NativeHost:
                         break  # Success, exit loop
                     except Exception as e:
                         # Check for Session Not Found (JSON-RPC -32603)
+                        session_failure_text = str(e)
                         if (
-                            "Session not found" in str(e) or "-32603" in str(e)
+                            "Session not found" in session_failure_text
+                            or "-32603" in session_failure_text
                         ) and attempt == 0:
                             logger.warning(
-                                f"Session error encountered: {e}. Refreshing session..."
+                                "Session-not-found response encountered (%s). "
+                                "Refreshing session...",
+                                type(e).__name__,
                             )
                             refreshed = await self._refresh_session(
                                 session_id=session_id,
                                 case_id=valid_case_id,
-                                working_directory_override=payload_root_path,
+                                session_config=full_config,
+                                prompt_snapshot=snapshot,
                             )
                             if not refreshed:
-                                detail = self.last_session_error or "unknown error"
+                                prompt_error = getattr(
+                                    self, "last_prompt_source_error", None
+                                )
+                                detail = self.last_session_error
+                                self._invalidate_active_session()
+                                if prompt_error:
+                                    return prompt_error.to_result()
                                 raise RuntimeError(
-                                    f"Copilot session reconnect failed: {detail}"
+                                    detail or "Copilot session reconnect failed."
                                 )
                             continue
                         # Re-raise other errors (including TimeoutError) to be handled by outer blocks
                         raise e
-                logger.debug(f"Returned from send_and_wait. Event: {response_event}")
+                raw_event_type = (
+                    getattr(response_event, "type", "none")
+                    if response_event is not None
+                    else "none"
+                )
+                event_type = (
+                    raw_event_type
+                    if isinstance(raw_event_type, str)
+                    else type(raw_event_type).__name__
+                )
+                event_data = getattr(response_event, "data", None)
+                data_type = type(event_data).__name__ if event_data is not None else "none"
+                event_content = getattr(event_data, "content", None)
+                has_content = isinstance(event_content, str) and bool(event_content)
+                content_length = len(event_content) if isinstance(event_content, str) else 0
+                event_summary = (
+                    f"event_type={event_type}, data_type={data_type}, "
+                    f"content_present={has_content}, content_length={content_length}"
+                )
+                logger.debug(f"Returned from send_and_wait: {event_summary}")
 
                 self.send_progress("Processing response...")
 
@@ -2150,26 +2465,15 @@ class NativeHost:
 
                 if response_event and response_event.data:
                     # Check for content, but also handle cases where it might be in a different field or the event type is weird
-                    if (
-                        hasattr(response_event.data, "content")
-                        and response_event.data.content
-                    ):
-                        full_response = response_event.data.content
+                    if has_content:
+                        full_response = event_content
                     else:
-                        # DEBUG: Dump the full event to understand why content is missing
-                        # This will help diagnose if it's a refusal, a filter, or a different event type
-                        import pprint
-
-                        debug_dump = pprint.pformat(response_event, indent=2)
                         full_response = (
                             f"### Debug: No content received\n\n"
                             f"The Copilot SDK returned an event without standard content. "
-                            f"Here is the raw event data for debugging:\n\n"
-                            f"```text\n{debug_dump}\n```"
+                            f"Safe diagnostic summary: `{event_summary}`."
                         )
-                        logger.warning(
-                            f"Response event data missing content: {response_event}"
-                        )
+                        logger.warning(f"Response event data missing content: {event_summary}")
                 else:
                     full_response = "No response event received (None)."
 
@@ -2179,12 +2483,7 @@ class NativeHost:
                 )
                 # Invalidate the session — the subprocess pipe is likely dead
                 logger.info("Invalidating session after timeout.")
-                self.session = None
-                self.client = None
-                self.client_working_directory = None
-                self.current_session_id = None
-                self.current_case_id = None
-                self.current_session_root_path = None
+                self._invalidate_active_session(clear_client=True)
                 # Truthful error message (C2b-lite). The previous "waiting
                 # for authentication" line was a guess and misled users into
                 # re-auth loops; in practice timeouts almost always mean
@@ -2208,7 +2507,8 @@ class NativeHost:
             logger.info("Received full response from Copilot.")
 
             # Determine Save Location
-            if self.root_path and os.path.exists(self.root_path):
+            effective_root = full_config.get("_effective_root")
+            if effective_root and os.path.exists(effective_root):
                 safe_case = "".join(
                     c for c in case_number if c.isalnum() or c in ("-", "_")
                 ).strip()
@@ -2219,8 +2519,8 @@ class NativeHost:
                 # to guarantee dh_case_report.md lands in the same directory.
                 save_dir = None
                 try:
-                    for entry in os.listdir(self.root_path):
-                        candidate = os.path.join(self.root_path, entry, safe_case)
+                    for entry in os.listdir(effective_root):
+                        candidate = os.path.join(effective_root, entry, safe_case)
                         if os.path.isdir(candidate):
                             save_dir = candidate
                             logger.info(f"Found Copilot-created folder: {save_dir}")
@@ -2254,7 +2554,7 @@ class NativeHost:
                     if not safe_product:
                         safe_product = "General"
 
-                    save_dir = os.path.join(self.root_path, safe_product, safe_case)
+                    save_dir = os.path.join(effective_root, safe_product, safe_case)
 
                 os.makedirs(save_dir, exist_ok=True)
                 output_file = os.path.join(save_dir, "dh_case_report.md")
@@ -2281,7 +2581,7 @@ class NativeHost:
                 if self.current_session_id:
                     resume_command = self._build_resume_command(
                         self.current_session_id,
-                        self.root_path,
+                        effective_root,
                     )
                     f.write(
                         "> Resume in Copilot CLI: "
@@ -2301,19 +2601,27 @@ class NativeHost:
                 },
             }
 
-        except Exception as e:
-            logger.error(f"SDK Error: {e}")
+        except Exception as error:
+            safe_error = self._safe_sdk_error("Copilot request", error)
             # Invalidate session on pipe/subprocess errors so next request reconnects
-            error_text = str(e).lower()
-            if "invalid argument" in error_text or "broken pipe" in error_text:
+            error_text = str(error).lower()
+            if (
+                isinstance(error, ProcessExitedError)
+                or "invalid argument" in error_text
+                or "broken pipe" in error_text
+            ):
                 logger.info("Invalidating session due to broken pipe/subprocess.")
-                self.session = None
-                self.client = None
-                self.client_working_directory = None
-                self.current_session_id = None
-                self.current_case_id = None
-                self.current_session_root_path = None
-            return {"status": "error", "error": f"SDK Error: {str(e)}"}
+                dead_client = self.client
+                if dead_client:
+                    try:
+                        await dead_client.stop()
+                    except Exception as stop_error:
+                        self._safe_sdk_error("stop dead Copilot client", stop_error)
+                self._invalidate_active_session(clear_client=True)
+            return {
+                "status": "error",
+                "error": safe_error,
+            }
 
     async def process_message(self, message):
         """Dispatches messages to handlers."""
@@ -2344,13 +2652,39 @@ class NativeHost:
                         "status": "healthy",
                         "message": "Copilot SDK Active",
                         "host_version": VERSION,
+                        "capabilities": list(
+                            get_host_capabilities().provided
+                        ),
                     }
                 else:
                     response["data"] = {
                         "status": "error",
                         "message": "SDK not initialized",
                         "host_version": VERSION,
+                        "capabilities": list(
+                            get_host_capabilities().provided
+                        ),
                     }
+
+            elif action == "get_capabilities":
+                capabilities = get_host_capabilities()
+                response["data"] = {
+                    "host_version": capabilities.host_version,
+                    "capabilities": list(capabilities.provided),
+                }
+
+            elif action == "verify_installation":
+                try:
+                    verification = self._installation_verifier.verify()
+                except Exception:
+                    verification = InstallationVerification(
+                        mode="packaged",
+                        integrity="failed",
+                        error_code="installation_integrity_failed",
+                    )
+                response["data"] = self._serialize_installation_verification(
+                    verification
+                )
 
             elif action == "check_updates":
                 if self.loop:
@@ -2397,16 +2731,21 @@ class NativeHost:
                             response["status"] = "error"
                             response["error"] = "Event loop not available"
                     except Exception as e:
-                        logger.error(f"Update failed: {e}")
+                        logger.error("Update failed (%s).", type(e).__name__)
                         response["status"] = "error"
-                        response["error"] = str(e)
+                        response["error"] = "Update failed."
 
             elif action == "get_config":
                 # Return the effective configuration (merging defaults + user + workspace)
-                session_config = self._get_session_config()
+                session_config = self._get_session_config(
+                    include_prompt_status=True
+                )
                 # Cast to dict for JSON serialization
                 data = dict(session_config)
                 data["host_version"] = VERSION
+                data["capabilities"] = list(
+                    get_host_capabilities().provided
+                )
                 response["data"] = data
 
             elif action == "list_models":
@@ -2426,9 +2765,12 @@ class NativeHost:
                 response["message"] = f"Unknown action: {action}"
 
         except Exception as e:
+            self._safe_sdk_error("process Host action", e)
             response["status"] = "error"
             response["error"] = "internal_error"
-            response["message"] = str(e)
+            response["message"] = (
+                f"Host action failed ({type(e).__name__})."
+            )
 
         # Clear current request ID after processing
         self.current_request_id = None
@@ -2473,7 +2815,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        msg = f"Fatal error in main loop: {e}\n{traceback.format_exc()}"
+        msg = f"Fatal error in main loop ({type(e).__name__})."
         logger.critical(msg)
         log_emergency(msg)
         sys.exit(1)

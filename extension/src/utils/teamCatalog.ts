@@ -10,6 +10,13 @@
 
 // --- Types ---
 
+import {
+    parseBookmarkDocument,
+    parseBookmarkItems,
+    parseOwnBookmarkItems,
+    type MenuItem,
+} from './bookmarkItems';
+
 export interface TeamManifestEntry {
     id: string;
     label: string;
@@ -24,21 +31,22 @@ export interface TeamManifest {
 export interface TeamCatalogFile {
     version: number;
     team: string;
-    items: any[]; // MenuItem[] — kept as `any` to avoid circular dependency
+    items: MenuItem[];
 }
 
 /**
  * Classified failure reason from a manifest / bookmark fetch. Callers use
- * `kind` to pick localised UX copy; `httpStatus` / `message` provide detail
- * for developer console + advanced diagnostics.
+ * `kind` to pick localised UX copy; `httpStatus` / `message` provide fixed,
+ * credential-safe diagnostics. They must never echo a URL or thrown value.
  *
  *   - `auth`     — HTTP 401/403; SAS token expired, private URL, wrong scope
  *   - `notFound` — HTTP 404/410; URL typo, blob deleted, container renamed
  *   - `http`     — Any other non-ok HTTP status (5xx server, 4xx other)
  *   - `network`  — fetch() threw (DNS failure, CORS, offline, TLS)
  *   - `parse`    — Response body was not valid JSON
+ *   - `storage`  — Chrome rejected a local cache mutation
  */
-export type FetchFailureKind = 'auth' | 'notFound' | 'http' | 'network' | 'parse';
+export type FetchFailureKind = 'auth' | 'notFound' | 'http' | 'network' | 'parse' | 'storage';
 
 export interface FetchFailure {
     kind: FetchFailureKind;
@@ -48,14 +56,21 @@ export interface FetchFailure {
     message: string;
 }
 
-function classifyHttpStatus(status: number, statusText: string): FetchFailure {
+function classifyHttpStatus(status: number): FetchFailure {
     if (status === 401 || status === 403) {
-        return { kind: 'auth', httpStatus: status, message: `HTTP ${status} ${statusText} — auth (SAS/token expired or insufficient permissions)` };
+        return { kind: 'auth', httpStatus: status, message: `HTTP ${status} authentication or authorization failure` };
     }
     if (status === 404 || status === 410) {
-        return { kind: 'notFound', httpStatus: status, message: `HTTP ${status} ${statusText} — URL not found` };
+        return { kind: 'notFound', httpStatus: status, message: `HTTP ${status} resource not found` };
     }
-    return { kind: 'http', httpStatus: status, message: `HTTP ${status} ${statusText}` };
+    return { kind: 'http', httpStatus: status, message: `HTTP ${status} request failure` };
+}
+
+function warnFetchFailure(stage: 'manifest' | 'bookmarks', failure: FetchFailure): void {
+    console.warn(`[DH] Team ${stage} fetch failed`, {
+        kind: failure.kind,
+        ...(failure.httpStatus === undefined ? {} : { httpStatus: failure.httpStatus }),
+    });
 }
 
 // --- Internal Helpers ---
@@ -63,11 +78,13 @@ function classifyHttpStatus(status: number, statusText: string): FetchFailure {
 /**
  * Recursively stamp all items with `source: 'team'`.
  */
-function stampTeamSource(items: any[]): any[] {
+function stampTeamSource(items: MenuItem[]): MenuItem[] {
     return items.map(item => ({
         ...item,
         source: 'team' as const,
-        children: item.children ? stampTeamSource(item.children) : undefined,
+        ...(item.children === undefined
+            ? {}
+            : { children: stampTeamSource(item.children) }),
     }));
 }
 
@@ -111,25 +128,25 @@ export async function fetchManifest(
             return { ok: true, changed: false, etag: currentEtag || '' };
         }
         if (!res.ok) {
-            const failure = classifyHttpStatus(res.status, res.statusText);
-            console.warn(`[DH] Failed to fetch team manifest from ${url}: ${failure.message}`);
+            const failure = classifyHttpStatus(res.status);
+            warnFetchFailure('manifest', failure);
             return { ok: false, failure };
         }
 
         let raw: TeamManifest;
         try {
             raw = await res.json() as TeamManifest;
-        } catch (parseErr) {
-            const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-            console.warn(`[DH] Manifest JSON parse failed for ${url}:`, parseErr);
-            return { ok: false, failure: { kind: 'parse', message: `JSON parse failed: ${msg}` } };
+        } catch {
+            const failure: FetchFailure = { kind: 'parse', message: 'JSON parse failed' };
+            warnFetchFailure('manifest', failure);
+            return { ok: false, failure };
         }
         const etag = res.headers.get('ETag') || res.headers.get('etag') || '';
 
         // Drop entries missing url (migration guard for old `file`-shaped manifests)
         const validTeams = (raw.teams || []).filter(t => {
             if (!t.url) {
-                console.warn(`[DH] Manifest entry '${t.id || '(no id)'}' missing 'url' field; skipping.`);
+                console.warn('[DH] Manifest entry missing url; skipping.');
                 return false;
             }
             return true;
@@ -137,10 +154,10 @@ export async function fetchManifest(
         const manifest: TeamManifest = { version: raw.version, teams: validTeams };
 
         return { ok: true, changed: true, manifest, etag };
-    } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`[DH] Network error fetching team manifest from ${url}:`, e);
-        return { ok: false, failure: { kind: 'network', message: msg } };
+    } catch {
+        const failure: FetchFailure = { kind: 'network', message: 'Network request failed' };
+        warnFetchFailure('manifest', failure);
+        return { ok: false, failure };
     }
 }
 
@@ -155,7 +172,7 @@ export async function fetchManifest(
  *   - `null`                                       — url was empty
  */
 export type TeamBookmarksFetchResult =
-    | { ok: true; changed: true; items: any[]; etag: string }
+    | { ok: true; changed: true; items: MenuItem[]; etag: string }
     | { ok: true; changed: false; etag: string }
     | { ok: false; failure: FetchFailure };
 
@@ -175,46 +192,43 @@ export async function fetchTeamBookmarks(
             return { ok: true, changed: false, etag: currentEtag || '' };
         }
         if (!res.ok) {
-            const failure = classifyHttpStatus(res.status, res.statusText);
-            console.warn(`[DH] Failed to fetch team bookmarks from ${url}: ${failure.message}`);
+            const failure = classifyHttpStatus(res.status);
+            warnFetchFailure('bookmarks', failure);
             return { ok: false, failure };
         }
 
-        let data: any;
+        let data: unknown;
         try {
             data = await res.json();
-        } catch (parseErr) {
-            const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-            console.warn(`[DH] Team bookmarks JSON parse failed for ${url}:`, parseErr);
-            return { ok: false, failure: { kind: 'parse', message: `JSON parse failed: ${msg}` } };
+        } catch {
+            const failure: FetchFailure = { kind: 'parse', message: 'JSON parse failed' };
+            warnFetchFailure('bookmarks', failure);
+            return { ok: false, failure };
         }
         const etag = res.headers.get('ETag') || res.headers.get('etag') || '';
-        // Accept two shapes:
-        //   - Wrapped: { version, team, items: [...] }  (spec-canonical)
-        //   - Raw array: [...]                         (matches DH's own export
-        //     format - see handleExport in Options.tsx which writes plain
-        //     JSON.stringify(items))
-        // The wrapped form is preferred for new manifests because it carries
-        // a version field for forward compatibility, but team admins frequently
-        // host a DH-exported backup directly. Accept either to keep the user
-        // experience friction-free.
-        const rawItems = Array.isArray(data)
-            ? data
-            : (Array.isArray(data?.items) ? data.items : []);
-        const items = stampTeamSource(rawItems);
+        const parsed = parseBookmarkDocument(data);
+        if (!parsed) {
+            const failure: FetchFailure = {
+                kind: 'parse',
+                message: 'Bookmark schema validation failed',
+            };
+            warnFetchFailure('bookmarks', failure);
+            return { ok: false, failure };
+        }
+        const items = stampTeamSource(parsed);
 
         return { ok: true, changed: true, items, etag };
-    } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`[DH] Network error fetching team bookmarks from ${url}:`, e);
-        return { ok: false, failure: { kind: 'network', message: msg } };
+    } catch {
+        const failure: FetchFailure = { kind: 'network', message: 'Network request failed' };
+        warnFetchFailure('bookmarks', failure);
+        return { ok: false, failure };
     }
 }
 
 /**
- * Result of a `syncTeamBookmarks` pass. `items` is always populated (from
- * cache when a fetch failed) so callers rendering the bookmark list have
- * something to show. `failure` is present when either the manifest fetch
+ * Result of a `syncTeamBookmarks` pass. `items` uses the selected team's
+ * cache on ordinary failures. A stale pass returns an empty current-safe list
+ * that consumers must ignore. `failure` is present when either manifest fetch
  * OR the bookmark fetch failed — callers that care about the distinction
  * (Options refresh button showing an error banner) should check
  * `failure` before treating the pass as a successful sync.
@@ -224,10 +238,210 @@ export async function fetchTeamBookmarks(
  * user's URL is wrong; a `notFound` on the bookmarks means the manifest
  * entry's URL is wrong — different user actions).
  */
+export type SyncStatus = 'committed' | 'unchanged' | 'failed' | 'skipped' | 'stale';
+
+export interface TeamSyncIdentity {
+    enabled: boolean;
+    manifestUrl: string;
+    teamId: string;
+}
+
 export interface SyncResult {
-    items: any[];
+    status: SyncStatus;
+    identity: TeamSyncIdentity;
+    items: MenuItem[];
+    syncedAt?: string;
     failure?: FetchFailure;
     failureStage?: 'manifest' | 'bookmarks';
+}
+
+type CachedTeamItemsResult =
+    | { kind: 'loaded'; items: MenuItem[] }
+    | { kind: 'absent' }
+    | { kind: 'invalid' };
+
+function parseCachedTeamItems(
+    cache: unknown,
+    teamId: string,
+): CachedTeamItemsResult {
+    try {
+        if (
+            typeof cache !== 'object'
+            || cache === null
+            || Array.isArray(cache)
+        ) return { kind: 'invalid' };
+        const team = Object.getOwnPropertyDescriptor(cache, 'dh_team');
+        if (!team || !Object.hasOwn(team, 'value') || team.value !== teamId) {
+            return { kind: 'absent' };
+        }
+        const itemsDescriptor = Object.getOwnPropertyDescriptor(
+            cache,
+            'dh_team_items',
+        );
+        if (!itemsDescriptor) return { kind: 'absent' };
+        if (!Object.hasOwn(itemsDescriptor, 'value')) return { kind: 'invalid' };
+        const items = parseBookmarkItems(itemsDescriptor.value);
+        return items ? { kind: 'loaded', items } : { kind: 'invalid' };
+    } catch {
+        return { kind: 'invalid' };
+    }
+}
+
+export const TEAM_CACHE_KEYS = [
+    'dh_team',
+    'dh_team_items',
+    'dh_team_etag',
+    'dh_team_manifest',
+    'dh_team_manifest_etag',
+    'dh_team_manifest_url',
+    'dh_team_synced',
+] as const;
+
+let teamMutationQueue: Promise<void> = Promise.resolve();
+let teamSyncGeneration = 0;
+
+export function beginTeamSyncGeneration(): number {
+    teamSyncGeneration += 1;
+    return teamSyncGeneration;
+}
+
+export function teamSyncGenerationIsCurrent(expectedGeneration: number): boolean {
+    return expectedGeneration === teamSyncGeneration;
+}
+
+function queueTeamMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const run = teamMutationQueue.then(mutation, mutation);
+    teamMutationQueue = run.then(() => undefined, () => undefined);
+    return run;
+}
+
+function readStorage(keys: string | string[]): Promise<any> {
+    return new Promise(resolve => chrome.storage.local.get(keys, resolve));
+}
+
+function setStorage(values: Record<string, unknown>): Promise<void> {
+    return new Promise((resolve, reject) => chrome.storage.local.set(values, () => {
+        if (chrome.runtime.lastError) {
+            reject(new Error('Team catalog storage mutation failed'));
+            return;
+        }
+        resolve();
+    }));
+}
+
+function removeStorage(keys: readonly string[]): Promise<void> {
+    return new Promise((resolve, reject) => chrome.storage.local.remove([...keys], () => {
+        if (chrome.runtime.lastError) {
+            reject(new Error('Team catalog storage removal failed'));
+            return;
+        }
+        resolve();
+    }));
+}
+
+function storageFailureResult(
+    identity: TeamSyncIdentity,
+    failureStage: 'manifest' | 'bookmarks',
+): SyncResult {
+    return {
+        status: 'failed',
+        identity,
+        items: [],
+        failure: {
+            kind: 'storage',
+            message: 'Team catalog storage mutation failed',
+        },
+        failureStage,
+    };
+}
+
+function bookmarkParseFailureResult(identity: TeamSyncIdentity): SyncResult {
+    return {
+        status: 'failed',
+        identity,
+        items: [],
+        failure: {
+            kind: 'parse',
+            message: 'Cached bookmark schema validation failed',
+        },
+        failureStage: 'bookmarks',
+    };
+}
+
+function storedIdentityMatches(
+    prefs: {
+        teamCatalogEnabled?: boolean;
+        teamManifestUrl?: string;
+        team?: string;
+    } | undefined,
+    identity: TeamSyncIdentity,
+): boolean {
+    return prefs?.teamCatalogEnabled === identity.enabled
+        && (prefs.teamManifestUrl || '') === identity.manifestUrl
+        && (prefs.team || '') === identity.teamId;
+}
+
+export async function currentTeamIdentityMatches(
+    identity: TeamSyncIdentity,
+    expectedGeneration: number,
+): Promise<boolean> {
+    const current = await readStorage('dh_prefs');
+    if (!teamSyncGenerationIsCurrent(expectedGeneration)) return false;
+    const prefs = current.dh_prefs as {
+        teamCatalogEnabled?: boolean;
+        teamManifestUrl?: string;
+        team?: string;
+    } | undefined;
+    return storedIdentityMatches(prefs, identity);
+}
+
+async function commitForIdentity(
+    identity: TeamSyncIdentity,
+    expectedGeneration: number,
+    values: Record<string, unknown>,
+): Promise<boolean> {
+    return queueTeamMutation(async () => {
+        if (!teamSyncGenerationIsCurrent(expectedGeneration)) return false;
+        if (!await currentTeamIdentityMatches(identity, expectedGeneration)) return false;
+        if (!teamSyncGenerationIsCurrent(expectedGeneration)) return false;
+        await setStorage(values);
+        return true;
+    });
+}
+
+export async function writeTeamManifestForUrl(
+    identity: TeamSyncIdentity,
+    manifest: TeamManifest,
+    etag: string,
+    expectedGeneration: number,
+): Promise<boolean> {
+    return commitForIdentity(identity, expectedGeneration, {
+        dh_team_manifest: manifest,
+        dh_team_manifest_etag: etag,
+        dh_team_manifest_url: identity.manifestUrl,
+    });
+}
+
+export async function readTeamManifestState(
+    identity: TeamSyncIdentity,
+    expectedGeneration: number,
+): Promise<{
+    etag?: string;
+    current: boolean;
+}> {
+    const data = await readStorage([
+        'dh_team_manifest_etag',
+        'dh_team_manifest_url',
+    ]);
+    const current = teamSyncGenerationIsCurrent(expectedGeneration);
+    if (!current) return { current: false };
+    const identityCurrent = await currentTeamIdentityMatches(identity, expectedGeneration);
+    return {
+        etag: identityCurrent && data.dh_team_manifest_url === identity.manifestUrl
+            ? data.dh_team_manifest_etag as string | undefined
+            : undefined,
+        current: identityCurrent,
+    };
 }
 
 /**
@@ -238,7 +452,7 @@ export interface SyncResult {
  *   4. Fetch that team's bookmark JSON (with ETag)
  *   5. Persist whatever changed
  *
- * Returns `{ items, failure?, failureStage? }`. On failure `items` is the
+ * Returns a status-discriminated result. On failure `items` is the
  * cached array (possibly empty) so the UI keeps rendering; callers should
  * check `failure` to decide whether to show a banner and/or refresh the
  * synced-at timestamp. Prior to 2026-07-03 this function returned a bare
@@ -247,35 +461,87 @@ export interface SyncResult {
  * SAS token without warning the user.
  */
 export async function syncTeamBookmarks(
-    manifestUrl: string,
-    teamId: string,
+    identityOrUrl: TeamSyncIdentity | string,
+    teamIdOrGeneration?: string | number,
+    capturedGeneration?: number,
+    fetchBookmarks: typeof fetchTeamBookmarks = fetchTeamBookmarks,
 ): Promise<SyncResult> {
-    if (!manifestUrl) return { items: [] };
+    const identity: TeamSyncIdentity = typeof identityOrUrl === 'string'
+        ? {
+            enabled: true,
+            manifestUrl: identityOrUrl,
+            teamId: typeof teamIdOrGeneration === 'string' ? teamIdOrGeneration : '',
+        }
+        : identityOrUrl;
+    const generation = capturedGeneration
+        ?? (typeof teamIdOrGeneration === 'number' ? teamIdOrGeneration : beginTeamSyncGeneration());
+    const { manifestUrl, teamId } = identity;
+    if (!manifestUrl || !teamId) return { status: 'skipped', identity, items: [] };
 
-    const cache = await new Promise<any>((resolve) => {
+    const cacheRead = await new Promise<{ value: unknown }>((resolve) => {
         chrome.storage.local.get(
-            ['dh_team_items', 'dh_team_etag', 'dh_team_manifest_etag', 'dh_team'],
-            resolve,
+            [
+                'dh_team_items',
+                'dh_team_etag',
+                'dh_team_manifest_etag',
+                'dh_team_manifest_url',
+                'dh_team',
+            ],
+            value => resolve({ value }),
         );
     });
-
-    const cachedItemsForTeam = (): any[] =>
-        cache.dh_team === teamId && Array.isArray(cache.dh_team_items)
-            ? cache.dh_team_items
-            : [];
+    const cache = cacheRead.value;
+    const cachedItems = parseCachedTeamItems(cache, teamId);
+    const safeCachedItems = cachedItems.kind === 'loaded' ? cachedItems.items : [];
+    if (!teamSyncGenerationIsCurrent(generation)) {
+        return { status: 'stale', identity, items: [] };
+    }
+    if (!await currentTeamIdentityMatches(identity, generation)) {
+        return { status: 'stale', identity, items: [] };
+    }
+    let cacheMatchesUrl: boolean;
+    let cachedManifestEtag: string | undefined;
+    let cachedTeam: unknown;
+    let cachedTeamEtag: string | undefined;
+    try {
+        const data = cache as {
+            dh_team_manifest_url?: unknown;
+            dh_team_manifest_etag?: string;
+            dh_team?: unknown;
+            dh_team_etag?: string;
+        };
+        cacheMatchesUrl = data.dh_team_manifest_url === manifestUrl;
+        cachedManifestEtag = data.dh_team_manifest_etag;
+        cachedTeam = data.dh_team;
+        cachedTeamEtag = data.dh_team_etag;
+    } catch {
+        return bookmarkParseFailureResult(identity);
+    }
+    const staleResult = (): SyncResult => ({ status: 'stale', identity, items: [] });
+    const preferencesStillMatch = () => currentTeamIdentityMatches(identity, generation);
 
     // Step 1: refresh the manifest
-    const manifestResult = await fetchManifest(manifestUrl, cache.dh_team_manifest_etag);
+    const manifestResult = await fetchManifest(
+        manifestUrl,
+        cacheMatchesUrl ? cachedManifestEtag : undefined,
+    );
     let manifest: TeamManifest | null = null;
 
     if (manifestResult === null) {
         // Empty URL (defensive; guarded above). Return quietly.
-        return { items: cachedItemsForTeam() };
-    }
-    if (!manifestResult.ok) {
-        console.warn(`[DH] Manifest fetch failure (${manifestResult.failure.kind}): ${manifestResult.failure.message}`);
         return {
-            items: cachedItemsForTeam(),
+            status: 'skipped',
+            identity,
+            items: cacheMatchesUrl ? safeCachedItems : [],
+        };
+    }
+    if (!await preferencesStillMatch()) return staleResult();
+    if (!manifestResult.ok) {
+        warnFetchFailure('manifest', manifestResult.failure);
+        return {
+            status: 'failed',
+            identity,
+            items: cacheMatchesUrl ? safeCachedItems : [],
             failure: manifestResult.failure,
             failureStage: 'manifest',
         };
@@ -284,68 +550,117 @@ export async function syncTeamBookmarks(
     if (manifestResult.changed) {
         manifest = manifestResult.manifest;
         // Persist the new manifest + its ETag
-        await new Promise<void>((resolve) => {
-            chrome.storage.local.set({
+        try {
+            if (!await commitForIdentity(identity, generation, {
                 dh_team_manifest: manifest,
                 dh_team_manifest_etag: manifestResult.etag,
-            }, resolve);
-        });
+                dh_team_manifest_url: manifestUrl,
+            })) return staleResult();
+        } catch {
+            return storageFailureResult(identity, 'manifest');
+        }
     } else {
         // 304 — reuse cached manifest
         const cached = await new Promise<any>((resolve) => {
-            chrome.storage.local.get(['dh_team_manifest'], resolve);
+            chrome.storage.local.get(
+                ['dh_team_manifest', 'dh_team_manifest_url'],
+                resolve,
+            );
         });
-        manifest = cached.dh_team_manifest || null;
+        manifest = cached.dh_team_manifest_url === manifestUrl
+            ? cached.dh_team_manifest || null
+            : null;
     }
+    if (!await preferencesStillMatch()) return staleResult();
 
     if (!manifest) {
-        return { items: cachedItemsForTeam() };
+        return {
+            status: 'skipped',
+            identity,
+            items: cacheMatchesUrl ? safeCachedItems : [],
+        };
     }
 
     // Step 2: find the entry for the currently-selected team
-    if (!teamId) return { items: [] };
     const entry = manifest.teams.find(t => t.id === teamId);
     if (!entry) {
-        console.warn(`[DH] Selected team '${teamId}' not found in manifest; using cached items if any.`);
-        return { items: cachedItemsForTeam() };
+        console.warn('[DH] Selected team not found in manifest; using cached items if any.');
+        return {
+            status: 'skipped',
+            identity,
+            items: cacheMatchesUrl ? safeCachedItems : [],
+        };
     }
 
     // Step 3: fetch the team's bookmark JSON
     // If we switched team since last sync, ignore old ETag
-    const currentEtag = cache.dh_team === teamId ? cache.dh_team_etag : undefined;
-    const bookmarksResult = await fetchTeamBookmarks(entry.url, currentEtag);
+    const currentEtag = cacheMatchesUrl
+        && cachedTeam === teamId
+        ? cachedTeamEtag
+        : undefined;
+    const bookmarksResult = await fetchBookmarks(entry.url, currentEtag);
+    if (!await preferencesStillMatch()) return staleResult();
 
     if (bookmarksResult === null) {
-        return { items: cachedItemsForTeam() };
+        return {
+            status: 'skipped',
+            identity,
+            items: cacheMatchesUrl ? safeCachedItems : [],
+        };
     }
     if (!bookmarksResult.ok) {
-        console.warn(`[DH] Bookmark fetch for team '${teamId}' failed (${bookmarksResult.failure.kind}): ${bookmarksResult.failure.message}`);
+        warnFetchFailure('bookmarks', bookmarksResult.failure);
         return {
-            items: cachedItemsForTeam(),
+            status: 'failed',
+            identity,
+            items: cacheMatchesUrl ? safeCachedItems : [],
             failure: bookmarksResult.failure,
             failureStage: 'bookmarks',
         };
     }
 
     if (!bookmarksResult.changed) {
+        if (cachedItems.kind !== 'loaded' || !cacheMatchesUrl) {
+            return bookmarkParseFailureResult(identity);
+        }
         // 304 — refresh sync timestamp only
-        await new Promise<void>((resolve) => {
-            chrome.storage.local.set({ dh_team_synced: new Date().toISOString() }, resolve);
-        });
-        return { items: Array.isArray(cache.dh_team_items) ? cache.dh_team_items : [] };
+        const syncedAt = new Date().toISOString();
+        try {
+            if (!await commitForIdentity(identity, generation, { dh_team_synced: syncedAt })) {
+                return staleResult();
+            }
+        } catch {
+            return storageFailureResult(identity, 'bookmarks');
+        }
+        return {
+            status: 'unchanged',
+            identity,
+            items: safeCachedItems,
+            syncedAt,
+        };
     }
 
     // New bookmarks — persist
-    await new Promise<void>((resolve) => {
-        chrome.storage.local.set({
+    const parsedItems = parseOwnBookmarkItems(bookmarksResult, 'items');
+    if (!parsedItems) return bookmarkParseFailureResult(identity);
+    const syncedAt = new Date().toISOString();
+    try {
+        if (!await commitForIdentity(identity, generation, {
             dh_team: teamId,
-            dh_team_items: bookmarksResult.items,
+            dh_team_items: parsedItems,
             dh_team_etag: bookmarksResult.etag,
-            dh_team_synced: new Date().toISOString(),
-        }, resolve);
-    });
+            dh_team_synced: syncedAt,
+        })) return staleResult();
+    } catch {
+        return storageFailureResult(identity, 'bookmarks');
+    }
 
-    return { items: bookmarksResult.items };
+    return {
+        status: 'committed',
+        identity,
+        items: parsedItems,
+        syncedAt,
+    };
 }
 
 /**
@@ -357,11 +672,20 @@ export async function syncTeamBookmarks(
  * Use this when the user picks "No team" from the dropdown.
  */
 export async function clearTeamSelection(): Promise<void> {
-    await new Promise<void>((resolve) => {
-        chrome.storage.local.remove(
-            ['dh_team', 'dh_team_items', 'dh_team_etag', 'dh_team_synced'],
-            resolve,
-        );
+    const generation = beginTeamSyncGeneration();
+    await clearTeamSelectionAtGeneration(generation);
+}
+
+export async function clearTeamSelectionAtGeneration(
+    generation: number,
+    identity?: TeamSyncIdentity,
+): Promise<boolean> {
+    return queueTeamMutation(async () => {
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
+        if (identity && !await currentTeamIdentityMatches(identity, generation)) return false;
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
+        await removeStorage(['dh_team', 'dh_team_items', 'dh_team_etag', 'dh_team_synced']);
+        return true;
     });
 }
 
@@ -372,10 +696,36 @@ export async function clearTeamSelection(): Promise<void> {
  * - the manifest survives and the dropdown remains populated.
  */
 export async function clearTeamBookmarks(): Promise<void> {
-    await new Promise<void>((resolve) => {
-        chrome.storage.local.remove(
-            ['dh_team', 'dh_team_items', 'dh_team_etag', 'dh_team_manifest', 'dh_team_manifest_etag', 'dh_team_synced'],
-            resolve,
-        );
+    const generation = beginTeamSyncGeneration();
+    await clearTeamBookmarksAtGeneration(generation);
+}
+
+export async function clearTeamBookmarksAtGeneration(
+    generation: number,
+    identity?: TeamSyncIdentity,
+): Promise<boolean> {
+    return queueTeamMutation(async () => {
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
+        if (identity && !await currentTeamIdentityMatches(identity, generation)) return false;
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
+        await removeStorage(TEAM_CACHE_KEYS);
+        return true;
+    });
+}
+
+export async function clearTeamSelectionIfChanged(
+    identity: TeamSyncIdentity,
+    generation: number,
+): Promise<boolean> {
+    return queueTeamMutation(async () => {
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
+        if (!await currentTeamIdentityMatches(identity, generation)) return false;
+        const cached = await readStorage('dh_team');
+        if (!teamSyncGenerationIsCurrent(generation)) return false;
+        if (cached.dh_team && cached.dh_team !== identity.teamId) {
+            if (!await currentTeamIdentityMatches(identity, generation)) return false;
+            await removeStorage(['dh_team', 'dh_team_items', 'dh_team_etag', 'dh_team_synced']);
+        }
+        return true;
     });
 }

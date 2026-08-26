@@ -1,13 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 import { useTranslation } from '../utils/i18n';
-import { usePrefs, mergeRootPathOverride } from '../utils/prefs';
+import { usePrefs } from '../utils/prefs';
 import { trackEvent, trackException, hashCaseId } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { useAnalysisHydration } from '../hooks/useAnalysisHydration';
+import type {
+    AnalysisPersistenceWarning,
+    LastAnalysisIdentity,
+} from '../utils/analysisStore';
+import { applyCurrentUserPrompt } from '../utils/analysisPrompt';
+import { safeErrorText } from '../utils/safeErrorText';
+import { ownDataProperty } from '../utils/ownData';
+import { parseAnalyzeForwardResult } from '../background/analyzeBridge';
+import {
+    parsePageIdentitySnapshot,
+    parseScrapedDataSnapshot,
+    type PageIdentity,
+} from '../utils/pageIdentity';
+import {
+    readAnalyzeInvocation,
+    requestMatchesPage,
+    snapshotAnalyzeRequest,
+    type AnalyzeInvocation,
+    type AnalyzeRequestSnapshot,
+} from '../utils/analyzeRequest';
+import { ResultPopover } from './ResultPopover';
+export { ResultPopover } from './ResultPopover';
 import { 
     X, 
     Settings, 
@@ -30,201 +50,52 @@ function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
 }
 
-// Non-blocking Result Popover Component
-const ResultPopover: React.FC<{ 
-    isOpen: boolean; 
-    onClose: () => void; 
-    title?: string;
-    content: string; 
-    filePath?: string;
-    duration?: string;
-}> = ({ isOpen, onClose, title, content, filePath, duration }) => {
-    const { t } = useTranslation();
-    // State for position and dragging
-    const [position, setPosition] = useState({ x: Math.max(0, window.innerWidth - 550), y: 100 });
-    const [isDragging, setIsDragging] = useState(false);
-    const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-
-    // Handle Dragging
-    useEffect(() => {
-        const handleMouseMove = (e: MouseEvent) => {
-            if (isDragging) {
-                setPosition({
-                    x: e.clientX - dragOffset.x,
-                    y: e.clientY - dragOffset.y
-                });
-            }
-        };
-        const handleMouseUp = () => {
-            setIsDragging(false);
-        };
-
-        if (isDragging) {
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('mouseup', handleMouseUp);
-        }
-        return () => {
-            window.removeEventListener('mousemove', handleMouseMove);
-            window.removeEventListener('mouseup', handleMouseUp);
-        };
-    }, [isDragging, dragOffset]);
-
-    const handleMouseDown = (e: React.MouseEvent) => {
-        // Only trigger drag if clicking the header background, not buttons
-        if ((e.target as HTMLElement).tagName === 'BUTTON' || (e.target as HTMLElement).closest('button')) return;
-        
-        setIsDragging(true);
-        setDragOffset({
-            x: e.clientX - position.x,
-            y: e.clientY - position.y
-        });
-    };
-
-    if (!isOpen) return null;
-
-    return (
-        <div style={{
-            position: 'fixed',
-            left: `${position.x}px`,
-            top: `${position.y}px`,
-            width: '450px',
-            height: '600px', // Fixed initial height to support resize
-            minWidth: '320px',
-            minHeight: '200px',
-            maxWidth: '90vw',
-            maxHeight: '90vh',
-            backgroundColor: 'white',
-            borderRadius: '16px',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0,0,0,0.05)',
-            display: 'flex',
-            flexDirection: 'column',
-            zIndex: 2147483647,
-            pointerEvents: 'auto',
-            fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-            resize: 'both',
-            overflow: 'hidden' // Required for resize handle
-        }}>
-            {/* Header - Draggable Area */}
-            <div 
-                onMouseDown={handleMouseDown}
-                style={{ 
-                    padding: '16px 20px', 
-                    borderBottom: '1px solid #F1F5F9', 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
-                    alignItems: 'center',
-                    background: '#F8FAFC',
-                    cursor: isDragging ? 'grabbing' : 'grab',
-                    userSelect: 'none'
-                }}
-            >
-                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: '#0F172A', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {title || `🤖 Copilot ${t('analyze')}`}
-                </h3>
-                <button 
-                    onClick={onClose}
-                    style={{ 
-                        border: 'none', 
-                        background: 'transparent', 
-                        cursor: 'pointer', 
-                        color: '#64748B',
-                        padding: '4px',
-                        borderRadius: '6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                    }}
-                    title={t('close')}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#E2E8F0')}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                >
-                    <X size={18} />
-                </button>
-            </div>
-
-            {/* Content Area */}
-            <div style={{ 
-                padding: '20px', 
-                overflowY: 'auto', 
-                flex: 1, 
-                fontSize: '14px', 
-                lineHeight: '1.6', 
-                color: '#334155',
-            }}>
-                {content ? (
-                    <ReactMarkdown 
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                            h1: ({node, ...props}) => <h1 style={{ fontSize: '1.5em', fontWeight: '700', margin: '0.67em 0', color: '#0F172A' }} {...props} />,
-                            h2: ({node, ...props}) => <h2 style={{ fontSize: '1.25em', fontWeight: '600', margin: '0.5em 0', color: '#1E293B' }} {...props} />,
-                            h3: ({node, ...props}) => <h3 style={{ fontSize: '1.1em', fontWeight: '600', margin: '0.5em 0', color: '#334155' }} {...props} />,
-                            code: ({node, inline, className, children, ...props}: any) => {
-                                const match = /language-(\w+)/.exec(className || '')
-                                return !inline ? (
-                                    <div style={{ background: '#F1F5F9', padding: '12px', borderRadius: '8px', overflowX: 'auto', margin: '12px 0' }}>
-                                        <code style={{ fontFamily: 'monospace', fontSize: '13px' }} {...props}>
-                                            {children}
-                                        </code>
-                                    </div>
-                                ) : (
-                                    <code style={{ background: '#F1F5F9', padding: '2px 4px', borderRadius: '4px', fontFamily: 'monospace', fontSize: '13px' }} {...props}>
-                                        {children}
-                                    </code>
-                                )
-                            },
-                            a: ({node, ...props}) => <a style={{ color: '#0D9488', textDecoration: 'underline' }} {...props} />,
-                            ul: ({node, ...props}) => <ul style={{ paddingLeft: '1.5em', margin: '1em 0' }} {...props} />,
-                            li: ({node, ...props}) => <li style={{ marginBottom: '0.5em' }} {...props} />,
-                            blockquote: ({node, ...props}) => <blockquote style={{ borderLeft: '4px solid #E2E8F0', paddingLeft: '1em', margin: '1em 0', color: '#64748B' }} {...props} />
-                        }}
-                    >
-                        {content}
-                    </ReactMarkdown>
-                ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94A3B8' }}>
-                         <Activity size={48} style={{ opacity: 0.2, marginBottom: '16px' }} />
-                         <p>{t('noContent')}</p>
-                    </div>
-                )}
-            </div>
-
-            {/* Footer with Path */}
-            {(filePath || duration) && (
-                <div style={{ 
-                    padding: '12px 20px', 
-                    background: '#F8FAFC', 
-                    borderTop: '1px solid #F1F5F9', 
-                    fontSize: '12px', 
-                    color: '#64748B',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px'
-                }}>
-                    {duration && (
-                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <Activity size={12} />
-                            <span>{t('analysisTook')}: <b>{duration}</b></span>
-                        </div>
-                    )}
-                    
-                    {filePath && (
-                        <div>
-                            <div style={{ fontWeight: '600', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <Folder size={12} /> {t('savedReport')}:
-                            </div>
-                            <div style={{ wordBreak: 'break-all', fontFamily: 'monospace', background: '#FFFFFF', padding: '6px 8px', borderRadius: '4px', border: '1px solid #E2E8F0' }}>
-                                {filePath}
-                            </div>
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
-    );
+type AcceptedContextSnapshot = {
+    generation: number;
+    identity: PageIdentity | null;
+    data: ScrapedData;
 };
+
+type TerminalRevalidationResult = {
+    generation: number;
+    accepted: AcceptedContextSnapshot | null;
+};
+
+type TerminalRevalidationCoordinator = {
+    requestId: string;
+    origin: PageIdentity | null;
+    latestGeneration: number;
+    latestCompletion: Promise<TerminalRevalidationResult> | null;
+    version: number;
+    changeSignal: TerminalRevalidationChangeSignal;
+    closed: boolean;
+};
+
+type TerminalRevalidationChangeSignal = {
+    promise: Promise<void>;
+    resolve: () => void;
+};
+
+function createTerminalRevalidationChangeSignal(): TerminalRevalidationChangeSignal {
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    return { promise, resolve };
+}
+
+function safeAnalyzeRejectionText(value: unknown, fallback: string): string {
+    const direct = typeof value === 'string' ? value : undefined;
+    const messageProperty = ownDataProperty(value, 'message');
+    const message = messageProperty.kind === 'value'
+        && typeof messageProperty.value === 'string'
+        ? messageProperty.value
+        : undefined;
+    return safeErrorText([message, direct], fallback);
+}
 
 const FAB: React.FC = () => {
     const { t } = useTranslation();
+    const latestTranslationRef = React.useRef(t);
+    latestTranslationRef.current = t;
     const [isOpen, setIsOpen] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
@@ -232,8 +103,11 @@ const FAB: React.FC = () => {
         isOpen: boolean;
         title: string;
         content: string; 
+        errorCode?: string;
         path?: string;
         duration?: string;
+        durabilityWarning?: string;
+        identity?: LastAnalysisIdentity;
     }>({ isOpen: false, title: '', content: '' });
     // NOTE: legacy `errorMsg` state was removed in v2.0.71 (C2a+). It had
     // 9 setters and 0 readers — confirmed dead in
@@ -247,14 +121,20 @@ const FAB: React.FC = () => {
     // call markSeen() on close — bookmark popovers have no persisted state.
     const popoverIsAnalyze = React.useRef(false);
 
-    // C2a+: ref-mirror of scrapedData.caseNumber for use inside async closures
-    // (handleAnalyze await + setTimeout callbacks). Plain state would be the
-    // stale snapshot captured when handleAnalyze was invoked. We need the
-    // LATEST case to detect "user navigated to a different case while analyze
-    // was in flight" — D365 internal tab switches don't change URL or
-    // re-mount FAB, so the only signal is scrapedData updating via the
-    // MutationObserver-driven re-scrape.
-    const currentCaseRef = React.useRef<string>('');
+    const currentPageIdentityRef = React.useRef<PageIdentity | null>(null);
+    const currentPageIdentityInitializedRef = React.useRef(false);
+    const currentCaseNumberRef = React.useRef('');
+    const editableContextIdentityRef = React.useRef<PageIdentity | null>(null);
+    const pageScanGenerationRef = React.useRef(0);
+    const pendingPageScanGenerationsRef = React.useRef<Set<number>>(new Set());
+    const [pendingPageScanCount, setPendingPageScanCount] = useState(0);
+    const acceptedContextSnapshotRef = React.useRef<AcceptedContextSnapshot | null>(null);
+    const editableAnalyzeContextRef = React.useRef<{
+        accepted: NonNullable<typeof acceptedContextSnapshotRef.current>;
+        data: ScrapedData;
+    } | null>(null);
+    const [hydrationCaseNumber, setHydrationCaseNumber] = useState('');
+    const hydrationCaseNumberRef = React.useRef('');
     
     // Status Bubble State
     const [statusBubble, setStatusBubble] = useState<{ 
@@ -276,6 +156,28 @@ const FAB: React.FC = () => {
     // scrollIntoView in legacyFeatures.ts::highlight) is unaffected — only
     // the redundant bubble notification is suppressed.
     const isAnalyzingRef = React.useRef(false);
+    const localAnalyzeRequestIdRef = React.useRef<string | null>(null);
+    const localAnalyzePageRef = React.useRef<{
+        request: AnalyzeRequestSnapshot;
+        acceptedGeneration: number;
+    } | null>(null);
+    const postRunScanOwnerRef = React.useRef<string | null>(null);
+    const terminalRevalidationRef = React.useRef<TerminalRevalidationCoordinator | null>(null);
+    const deferredLocalHydrationRef = React.useRef<{
+        requestId: string;
+        caseNumber: string;
+    } | null>(null);
+    const analyzeOriginRef = React.useRef<AnalyzeRequestSnapshot | null>(null);
+    const identityChangedDuringAnalyzeRef = React.useRef(false);
+    const initialScanStartedRef = React.useRef(false);
+    const scheduledAutoAnalyzeRef = React.useRef<{
+        context: NonNullable<typeof editableAnalyzeContextRef.current>;
+        timeoutId: ReturnType<typeof setTimeout>;
+    } | null>(null);
+    const analyzeSafetyTimerRef = React.useRef<{
+        requestId: string;
+        timeoutId: ReturnType<typeof setTimeout>;
+    } | null>(null);
     const analyzeFlowEndedAtRef = React.useRef(0);
     const ANALYZE_BUBBLE_PROTECTION_MS = 6000;
     
@@ -292,45 +194,124 @@ const FAB: React.FC = () => {
 
     // C2a+: re-hydrate persisted analysis result on mount and on case change.
     // See docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md
-    // The hook reads dh_last_analysis / dh_pending_analysis from
+    // The hook reads dh_last_analysis / dh_pending_analysis /
+    // dh_seen_analysis from
     // chrome.storage.local and tells us whether to auto-open the popover
     // (matching unseen result inside STALE_WINDOW_MS) or show the spinner
     // (matching pending marker inside MAX_PENDING_DISPLAY_AGE_MS).
-    const hydration = useAnalysisHydration(scrapedData?.caseNumber || '');
+    const hydration = useAnalysisHydration(hydrationCaseNumber);
+    const hydratedPendingRef = React.useRef(hydration.pending);
 
-    // C2a+: keep currentCaseRef in sync with the latest scrapedData.caseNumber
-    // so async closures inside handleAnalyze (await response, setTimeout) can
-    // detect mid-flight case switches. See ref declaration above.
-    useEffect(() => {
-        currentCaseRef.current = scrapedData?.caseNumber || '';
-    }, [scrapedData?.caseNumber]);
+    const reconcileVisibleAnalyzingState = () => {
+        const activeRequestId = localAnalyzeRequestIdRef.current;
+        const localPage = localAnalyzePageRef.current;
+        const currentIdentity = currentPageIdentityRef.current;
+        const localVisible = Boolean(
+            activeRequestId
+            && localPage?.request.requestId === activeRequestId
+            && currentIdentity !== null
+            && requestMatchesPage(localPage.request, currentIdentity)
+            && !hasPendingPageScanNewerThan(localPage.acceptedGeneration),
+        );
+        const hydratedPending = hydratedPendingRef.current;
+        const acceptedGeneration = acceptedContextSnapshotRef.current?.generation ?? -1;
+        const hydratedVisible = Boolean(
+            hydratedPending
+            && hydratedPending.caseNumber === hydrationCaseNumberRef.current
+            && !hasPendingPageScanNewerThan(acceptedGeneration),
+        );
+        setIsAnalyzing(localVisible || hydratedVisible);
+        isAnalyzingRef.current = Boolean(activeRequestId);
+    };
 
     // When the hook surfaces a persisted result and no popover is open, mirror
-    // it into the local resultPopover state. Then immediately mark it seen so
-    // a future remount doesn't re-open the same result (one-shot semantics).
+    // it into local resultPopover state. Then acknowledge its identity so a
+    // future remount doesn't re-open the same result (one-shot semantics).
     useEffect(() => {
         if (!hydration.popover) return;
+        const hydrationIdentity = hydration.popover.identity;
+        const hydrationRequestId = hydrationIdentity.requestId;
+        const localPage = localAnalyzePageRef.current;
+        const localCaseNumber = hydrationRequestId !== undefined
+            && localPage !== null
+            && localPage.request.requestId === hydrationRequestId
+            ? localPage.request.caseNumber
+            : '';
+        // The SW persists before replying, so local hydration must wait for
+        // this request's terminal page revalidation path.
+        const matchesActiveLocalAnalyze = hydrationRequestId !== undefined
+            && (
+                hydrationRequestId === localAnalyzeRequestIdRef.current
+                || hydrationRequestId === postRunScanOwnerRef.current
+                || hydrationRequestId === analyzeOriginRef.current?.requestId
+            )
+            && (
+                !localCaseNumber
+                || localCaseNumber === hydrationIdentity.caseNumber
+            );
+        if (matchesActiveLocalAnalyze) {
+            deferredLocalHydrationRef.current = {
+                requestId: hydrationRequestId,
+                caseNumber: hydrationIdentity.caseNumber,
+            };
+            return;
+        }
+        if (
+            hydrationRequestId !== undefined
+            && deferredLocalHydrationRef.current?.requestId === hydrationRequestId
+            && deferredLocalHydrationRef.current.caseNumber === hydrationIdentity.caseNumber
+        ) return;
+        const acceptedGeneration = acceptedContextSnapshotRef.current?.generation ?? -1;
+        if (hasPendingPageScanNewerThan(acceptedGeneration)) return;
+        if (hydration.popover.identity.caseNumber !== currentCaseNumberRef.current) return;
         if (resultPopover.isOpen) return;
+        popoverIsAnalyze.current = true;
         setResultPopover({
             isOpen: true,
             title: hydration.popover.title,
             content: hydration.popover.content,
+            errorCode: hydration.popover.errorCode,
             path: hydration.popover.savedTo,
+            duration: hydration.popover.durationSec === undefined
+                ? undefined
+                : hydration.popover.durationSec.toFixed(1) + 's',
+            identity: hydration.popover.identity,
         });
-        popoverIsAnalyze.current = true;
-        // Fire-and-forget; dismissPopover only marks storage seen=true and
-        // closes the hook's internal popover state — both safe to ignore.
-        void hydration.dismissPopover();
-    }, [hydration.popover, resultPopover.isOpen, hydration]);
+        // Fire-and-forget; dismissPopover only writes the separate seen
+        // identity and closes the hook's internal state - both safe to ignore.
+        void hydration.dismissPopover(hydration.popover.identity);
+    }, [
+        hydration.popover,
+        resultPopover.isOpen,
+        hydration,
+        hydrationCaseNumber,
+        pendingPageScanCount,
+    ]);
 
-    // Mirror hook's isAnalyzing into local state so the FAB shows the
-    // spinner when a pending marker exists from a previous session.
+    // Hydrated pending is a mirror, while a locally-started request owns its
+    // own in-flight flag. A disappearing/expired pending marker can clear the
+    // hydrated spinner but must never clear an active local Analyze.
     useEffect(() => {
-        if (hydration.isAnalyzing) {
-            setIsAnalyzing(true);
-        isAnalyzingRef.current = true;
+        hydratedPendingRef.current = hydration.pending;
+        reconcileVisibleAnalyzingState();
+    }, [
+        hydration.pending?.requestId,
+        hydration.pending?.caseNumber,
+        hydration.pending?.startTime,
+        pendingPageScanCount,
+    ]);
+
+    useEffect(() => () => {
+        if (analyzeSafetyTimerRef.current) {
+            clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
         }
-    }, [hydration.isAnalyzing]);
+        const coordinator = terminalRevalidationRef.current;
+        if (coordinator) {
+            coordinator.closed = true;
+            coordinator.changeSignal.resolve();
+            terminalRevalidationRef.current = null;
+        }
+    }, []);
 
     // Initial Health Check to wake up Host and check for updates
     useEffect(() => {
@@ -370,9 +351,19 @@ const FAB: React.FC = () => {
     useEffect(() => {
         const handleProgress = (e: any) => {
             const { requestId, payload } = e.detail;
+            const localPage = localAnalyzePageRef.current;
+            const requestOwnsVisiblePage = Boolean(
+                localPage !== null
+                && localPage.request.requestId === requestId
+                && requestMatchesPage(
+                    localPage.request,
+                    currentPageIdentityRef.current,
+                )
+                && !hasPendingPageScanNewerThan(localPage.acceptedGeneration),
+            );
             
             // Only show progress if it matches our current request
-            if (latestRequestId.current === requestId) {
+            if (latestRequestId.current === requestId && requestOwnsVisiblePage) {
                  // Update the status bubble with the progress message
                  // Use 'default' type (blue/pulse) but with the new text
                  // Auto-hide is 0 to keep it visible
@@ -395,6 +386,18 @@ const FAB: React.FC = () => {
 
             setUpdateAvailable(e.detail);
             showStatusBubble(`${t('updateAvailable')}: ${e.detail.version}`, 'success', 10000); 
+        };
+
+        const handleUpdateError = (event: Event) => {
+            const candidate = ownDataProperty(
+                (event as CustomEvent<unknown>).detail,
+                'error',
+            );
+            const error = safeErrorText([
+                candidate.kind === 'value' ? candidate.value : undefined,
+            ], latestTranslationRef.current('updateCheckFailed'));
+            if (!latestPrefsRef.current.enableStatusBubble) return;
+            showStatusBubble(error, 'error', 5000);
         };
 
         const handleNotification = (e: any) => {
@@ -420,12 +423,14 @@ const FAB: React.FC = () => {
 
         window.addEventListener('dh-native-progress', handleProgress);
         window.addEventListener('dh-update-available', handleUpdate);
+        window.addEventListener('dh-update-error', handleUpdateError);
         window.addEventListener('DH_NOTIFICATION', handleNotification);
         window.addEventListener('DH_TOAST', handleToast);
         
         return () => {
             window.removeEventListener('dh-native-progress', handleProgress);
             window.removeEventListener('dh-update-available', handleUpdate);
+            window.removeEventListener('dh-update-error', handleUpdateError);
             window.removeEventListener('DH_NOTIFICATION', handleNotification);
             window.removeEventListener('DH_TOAST', handleToast);
         };
@@ -433,7 +438,7 @@ const FAB: React.FC = () => {
 
 
     const showStatusBubble = (text: string, type: 'default' | 'success' | 'error' = 'default', autoHideDuration = 3000) => {
-        if (!prefs.enableStatusBubble) return;
+        if (!latestPrefsRef.current.enableStatusBubble) return;
 
         if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
         
@@ -452,48 +457,316 @@ const FAB: React.FC = () => {
     // record). The bubble is kept as a brief visual flash; the popover
     // carries the full message and stays until dismissed.
     //
-    // caseNumberOfRun (optional): the case the analyze run was launched on.
-    // When the user has switched to a different D365 tab while the analyze
-    // was in flight, we suppress the popover (it would be visually wrong on
-    // the unrelated case) and instead surface a bubble that names the
-    // originating case. The error is still persisted to dh_last_analysis by
-    // the SW, so navigating back to caseNumberOfRun re-hydrates the popover.
-    const showAnalysisError = (msg: string, caseNumberOfRun?: string) => {
-        const isStillOnRunCase =
-            !caseNumberOfRun ||
-            !currentCaseRef.current ||
-            currentCaseRef.current === caseNumberOfRun;
-        if (isStillOnRunCase) {
-            setResultPopover({
-                isOpen: true,
-                title: `❌ ${t('analysisFailed')}`,
-                content: msg,
-            });
-            popoverIsAnalyze.current = true;
-            showStatusBubble(t('analysisFailed'), 'error', 4000);
-        } else {
-            showStatusBubble(
-                `${t('analysisFailed')} — Case ${caseNumberOfRun}`,
-                'error',
-                5000,
-            );
-        }
+    const showAnalysisError = (
+        fallback: string,
+        errorCode?: string,
+        identity?: LastAnalysisIdentity,
+        durabilityWarning?: string,
+    ) => {
+        popoverIsAnalyze.current = true;
+        setResultPopover({
+            isOpen: true,
+            title: `❌ ${t('analysisFailed')}`,
+            content: fallback,
+            errorCode,
+            identity,
+            durabilityWarning,
+        });
+        showStatusBubble(t('analysisFailed'), 'error', 4000);
     };
     
     const { prefs } = usePrefs();
-    const [rootPathOverride, setRootPathOverride] = useState<string | null>(null);
-    const effectivePrefs = mergeRootPathOverride(prefs, rootPathOverride);
+    const latestPrefsRef = React.useRef(prefs);
+    latestPrefsRef.current = prefs;
     
     // UI States
     const [isContextExpanded, setIsContextExpanded] = useState(false);
     // Track if auto-analysis has been attempted for the current data to prevent loops/timing issues
     const [hasAutoAnalyzed, setHasAutoAnalyzed] = useState(false);
 
+    function hasPendingPageScanNewerThan(generation: number): boolean {
+        for (const pendingGeneration of pendingPageScanGenerationsRef.current) {
+            if (pendingGeneration > generation) return true;
+        }
+        return false;
+    }
+
+    function runPageScan<T>(
+        failureMessage: string,
+        consume: (scan: { generation: number; fresh: unknown }) => T | Promise<T>,
+        onStarted?: (generation: number, completion: Promise<T>) => void,
+    ): Promise<T> {
+        const generation = ++pageScanGenerationRef.current;
+        pendingPageScanGenerationsRef.current.add(generation);
+        setPendingPageScanCount(pendingPageScanGenerationsRef.current.size);
+        const localPage = localAnalyzePageRef.current;
+        const scheduledAuto = scheduledAutoAnalyzeRef.current;
+        if (
+            (localPage && generation > localPage.acceptedGeneration)
+            || (
+                scheduledAuto
+                && generation > scheduledAuto.context.accepted.generation
+            )
+        ) {
+            setStatusBubble(previous => ({ ...previous, visible: false }));
+        }
+        reconcileVisibleAnalyzingState();
+        const completion = (async () => {
+            try {
+                let fresh: unknown = null;
+                try {
+                    fresh = await PageReader.scanForErrors();
+                } catch {
+                    console.warn(failureMessage);
+                }
+                return await consume({ generation, fresh });
+            } finally {
+                pendingPageScanGenerationsRef.current.delete(generation);
+                setPendingPageScanCount(pendingPageScanGenerationsRef.current.size);
+                reconcileVisibleAnalyzingState();
+            }
+        })();
+        onStarted?.(generation, completion);
+        return completion;
+    }
+
+    function applyIdentityScan(fresh: unknown): void {
+        const parsed = parsePageIdentitySnapshot(fresh);
+        if (!parsed) return;
+        const { identity, caseNumber } = parsed;
+        const wasInitialized = currentPageIdentityInitializedRef.current;
+        const identityChanged = identity !== currentPageIdentityRef.current;
+        const caseChanged = caseNumber !== currentCaseNumberRef.current;
+        if (
+            deferredLocalHydrationRef.current
+            && caseNumber !== deferredLocalHydrationRef.current.caseNumber
+        ) {
+            deferredLocalHydrationRef.current = null;
+        }
+        currentPageIdentityInitializedRef.current = true;
+        if (identityChanged || caseChanged) {
+            if (
+                localAnalyzeRequestIdRef.current
+                && analyzeOriginRef.current?.requestId
+                    === localAnalyzeRequestIdRef.current
+                && identity !== analyzeOriginRef.current.pageIdentity
+            ) {
+                identityChangedDuringAnalyzeRef.current = true;
+            }
+            currentPageIdentityRef.current = identity;
+            currentCaseNumberRef.current = caseNumber;
+            hydrationCaseNumberRef.current = caseNumber;
+            setHydrationCaseNumber(caseNumber);
+            if (identityChanged && wasInitialized) {
+                setResultPopover(previous => ({ ...previous, isOpen: false }));
+                setStatusBubble(previous => ({ ...previous, visible: false }));
+                setIsOpen(false);
+            }
+            reconcileVisibleAnalyzingState();
+        }
+    }
+
+    function applyFullScan(
+        fresh: unknown,
+        completedOrigin: PageIdentity | null = null,
+        isPostRunScan = false,
+        generation = pageScanGenerationRef.current,
+        forceReplace = false,
+    ): typeof acceptedContextSnapshotRef.current {
+        if (hasPendingPageScanNewerThan(generation)) return null;
+        const plain = parseScrapedDataSnapshot(fresh);
+        if (!plain) return null;
+        const parsed = parsePageIdentitySnapshot(plain);
+        if (!parsed) return null;
+        const nextIdentity = parsed.identity;
+        const previousContextIdentity = editableContextIdentityRef.current;
+        const accepted = { generation, identity: nextIdentity, data: plain };
+        acceptedContextSnapshotRef.current = accepted;
+        applyIdentityScan(plain);
+        const replaceAfterAnalyze = isPostRunScan && (
+            identityChangedDuringAnalyzeRef.current
+            || nextIdentity !== completedOrigin
+        );
+        if (
+            forceReplace
+            || replaceAfterAnalyze
+            || nextIdentity !== previousContextIdentity
+            || !editableAnalyzeContextRef.current
+        ) {
+            isUserEdited.current = false;
+            setHasAutoAnalyzed(false);
+            editableContextIdentityRef.current = nextIdentity;
+            editableAnalyzeContextRef.current = { accepted, data: plain };
+            setScrapedData(plain);
+            return accepted;
+        }
+        const editableContext = editableAnalyzeContextRef.current;
+        editableContext.accepted = accepted;
+        if (isUserEdited.current) {
+            return accepted;
+        }
+        editableContextIdentityRef.current = nextIdentity;
+        editableContext.data = plain;
+        setScrapedData(plain);
+        return accepted;
+    }
+
+    function acceptedSnapshotIsCurrent(
+        snapshot: NonNullable<typeof acceptedContextSnapshotRef.current>,
+    ): boolean {
+        return acceptedContextSnapshotRef.current === snapshot
+            && snapshot.identity === currentPageIdentityRef.current
+            && !hasPendingPageScanNewerThan(snapshot.generation);
+    }
+
+    function editableAnalyzeContextIsCurrent(
+        context: NonNullable<typeof editableAnalyzeContextRef.current>,
+    ): boolean {
+        return editableAnalyzeContextRef.current === context
+            && acceptedSnapshotIsCurrent(context.accepted);
+    }
+
+    function requestOwnsVisiblePage(
+        request: AnalyzeRequestSnapshot,
+        acceptedGeneration: number,
+    ): boolean {
+        return requestMatchesPage(request, currentPageIdentityRef.current)
+            && !hasPendingPageScanNewerThan(acceptedGeneration);
+    }
+
+    function runTerminalRevalidationParticipant(
+        requestId: string,
+        failureMessage: string,
+        forceReplace = false,
+    ): Promise<TerminalRevalidationResult> {
+        let containedCompletion: Promise<TerminalRevalidationResult> | null = null;
+        const rawCompletion = runPageScan(
+            failureMessage,
+            scan => {
+                const coordinator = terminalRevalidationRef.current;
+                if (
+                    !coordinator
+                    || coordinator.requestId !== requestId
+                    || analyzeOriginRef.current?.requestId !== requestId
+                    || scan.generation !== pageScanGenerationRef.current
+                    || !scan.fresh
+                ) {
+                    return { generation: scan.generation, accepted: null };
+                }
+                return {
+                    generation: scan.generation,
+                    accepted: applyFullScan(
+                        scan.fresh,
+                        coordinator.origin,
+                        true,
+                        scan.generation,
+                        forceReplace,
+                    ),
+                };
+            },
+            (generation, completion) => {
+                const coordinator = terminalRevalidationRef.current;
+                const contained = completion.catch(() => ({
+                    generation,
+                    accepted: null,
+                }));
+                containedCompletion = contained;
+                if (
+                    !coordinator
+                    || coordinator.requestId !== requestId
+                    || coordinator.closed
+                ) return;
+                const previousSignal = coordinator.changeSignal;
+                if (coordinator.latestGeneration >= 0) {
+                    pendingPageScanGenerationsRef.current.delete(
+                        coordinator.latestGeneration,
+                    );
+                    setPendingPageScanCount(
+                        pendingPageScanGenerationsRef.current.size,
+                    );
+                }
+                coordinator.latestGeneration = generation;
+                coordinator.latestCompletion = contained;
+                coordinator.version += 1;
+                coordinator.changeSignal = createTerminalRevalidationChangeSignal();
+                previousSignal.resolve();
+            },
+        );
+        return containedCompletion ?? rawCompletion.catch(() => ({
+            generation: pageScanGenerationRef.current,
+            accepted: null,
+        }));
+    }
+
+    async function awaitLatestTerminalRevalidation(
+        requestId: string,
+    ): Promise<AcceptedContextSnapshot | null> {
+        while (true) {
+            const coordinator = terminalRevalidationRef.current;
+            if (!coordinator || coordinator.requestId !== requestId) return null;
+            const generation = coordinator.latestGeneration;
+            const completion = coordinator.latestCompletion;
+            if (!completion) return null;
+            const version = coordinator.version;
+            const changeSignal = coordinator.changeSignal.promise;
+            const settled = await Promise.race([
+                completion.then(result => ({ kind: 'completed' as const, result })),
+                changeSignal.then(() => ({ kind: 'changed' as const })),
+            ]);
+            if (settled.kind === 'changed') continue;
+
+            const latest = terminalRevalidationRef.current;
+            if (
+                !latest
+                || latest.requestId !== requestId
+                || latest.closed
+            ) return null;
+            if (
+                latest.version !== version
+                || latest.latestGeneration !== generation
+                || latest.latestCompletion !== completion
+            ) continue;
+            return settled.result.generation === generation
+                ? settled.result.accepted
+                : null;
+        }
+    }
+
+    function activeTerminalRevalidationRequestId(): string | null {
+        const coordinator = terminalRevalidationRef.current;
+        return coordinator
+            && !coordinator.closed
+            && localAnalyzeRequestIdRef.current === coordinator.requestId
+            ? coordinator.requestId
+            : null;
+    }
+
+    function closeTerminalRevalidation(requestId: string): void {
+        const coordinator = terminalRevalidationRef.current;
+        if (!coordinator || coordinator.requestId !== requestId) return;
+        coordinator.closed = true;
+        coordinator.changeSignal.resolve();
+        terminalRevalidationRef.current = null;
+    }
+
     // Duration Logic
     const [lastDuration, setLastDuration] = useState<string | null>(null);
 
     // Menu Logic
-    const { currentItems, canGoBack, navigateTo, navigateBack } = useMenuLogic();
+    const {
+        currentItems,
+        canGoBack,
+        navigateTo,
+        navigateBack,
+        bookmarkLoadIssue,
+    } = useMenuLogic();
+    const bookmarkLoadWarning = bookmarkLoadIssue === 'bookmark_storage_read_failed'
+        ? t('bookmarkStorageReadFailed')
+        : bookmarkLoadIssue === 'bookmark_storage_invalid'
+            ? t('bookmarkStorageInvalid')
+            : bookmarkLoadIssue === 'bookmark_defaults_unreadable'
+                ? t('bookmarkDefaultsUnreadable')
+                : '';
 
     // Helper to check if text is already a formatted template
     const isFormattedTemplate = (text: string) => {
@@ -501,7 +774,7 @@ const FAB: React.FC = () => {
     };
 
     // Helper to construct the standardized context template
-    const constructTemplate = (data: ScrapedData, userPrompt: string = "") => {
+    const constructTemplate = (data: ScrapedData) => {
         // If the errorText is ALREADY a template (and we are forced to reconstruct for some reason),
         // we should try to preserve it? 
         // Actually, this function is usually called when we *don't* have a template yet,
@@ -517,41 +790,64 @@ const FAB: React.FC = () => {
             `## Description\n\n${data.description || ((data.errorText && !isFormattedTemplate(data.errorText)) ? data.errorText : '')}`
         ];
 
-        if (userPrompt) {
-            parts.push(`## User Prompt\n\n${userPrompt}`);
-        }
-
         return parts.join('\n\n');
+    };
+
+    const scheduleAutoAnalyze = (
+        context: NonNullable<typeof editableAnalyzeContextRef.current>,
+    ) => {
+        const timeoutId = setTimeout(() => {
+            if (scheduledAutoAnalyzeRef.current?.timeoutId === timeoutId) {
+                scheduledAutoAnalyzeRef.current = null;
+            }
+            if (!editableAnalyzeContextIsCurrent(context)) {
+                if (editableAnalyzeContextRef.current === context) {
+                    setHasAutoAnalyzed(false);
+                    setStatusBubble(previous => previous.type === 'default'
+                        ? { ...previous, visible: false }
+                        : previous);
+                }
+                return;
+            }
+            void handleAnalyze(context);
+        }, 100);
+        scheduledAutoAnalyzeRef.current = { context, timeoutId };
     };
 
     // Auto-scan when opening
     useEffect(() => {
         // Wrapper for async scan
         const doScan = async () => {
-             // Initial scan on mount (even if closed) to support auto-analyze without opening
-             const initialData = await PageReader.scanForErrors();
-             if (initialData && !isUserEdited.current) {
-                  setScrapedData(initialData);
+             if (!initialScanStartedRef.current) {
+                 initialScanStartedRef.current = true;
+                 // Initial scan on mount (even if closed) to support auto-analyze without opening
+                 await runPageScan('[DH] Page scan failed', initialScan => {
+                     if (
+                         initialScan.generation !== pageScanGenerationRef.current
+                         || !initialScan.fresh
+                     ) return;
+                     if (localAnalyzeRequestIdRef.current) applyIdentityScan(initialScan.fresh);
+                     else applyFullScan(initialScan.fresh, null, false, initialScan.generation);
+                 });
              }
 
              if (isOpen) {
-                 const freshData = await PageReader.scanForErrors();
-                 
-                 if (freshData) {
-                     // Determine if this is "new" data worth replacing the current state for
-                     // We check if we have no data, or if key identifiers (Case Number/Title) changed
-                     // This handles SPA navigation where the user moves to a new ticket without refreshing the page
-                     // We compare against the current scrapedData state
-                     const isNewContext = !scrapedData || 
-                                          (freshData.caseNumber && freshData.caseNumber !== scrapedData.caseNumber) ||
-                                          (freshData.ticketTitle && freshData.ticketTitle !== scrapedData.ticketTitle);
-
-                     if (isNewContext) {
-                         isUserEdited.current = false; // New case context — reset edit flag
-                         setScrapedData(freshData);
-                         setHasAutoAnalyzed(false); // Reset to allow auto-analysis for the new context
-                     }
+                 const terminalRequestId = activeTerminalRevalidationRequestId();
+                 if (terminalRequestId) {
+                     await runTerminalRevalidationParticipant(
+                         terminalRequestId,
+                         '[DH] Page scan failed',
+                     );
+                     return;
                  }
+                 await runPageScan('[DH] Page scan failed', openScan => {
+                     if (
+                         openScan.generation !== pageScanGenerationRef.current
+                         || !openScan.fresh
+                     ) return;
+                     if (localAnalyzeRequestIdRef.current) applyIdentityScan(openScan.fresh);
+                     else applyFullScan(openScan.fresh, null, false, openScan.generation);
+                 });
              }
         };
         
@@ -561,27 +857,51 @@ const FAB: React.FC = () => {
     // Listen for Context Menu triggers (Right-click -> Analyze Error)
     useEffect(() => {
         const handleTriggerAnalyze = async (e: any) => {
-            const { selectionText, rootPath } = e.detail;
-            console.log("[DH] Context Menu Triggered:", { selectionText, rootPath });
-
-            // If rootPath is provided, ensure our prefs are consistent
-            if (rootPath && rootPath !== effectivePrefs.rootPath) {
-                setRootPathOverride(rootPath);
-            }
+            const selection = ownDataProperty(e.detail, 'selectionText');
+            const selectionText = selection.kind === 'value'
+                && typeof selection.value === 'string'
+                ? selection.value
+                : undefined;
+            const analyzeInvocation = readAnalyzeInvocation(e.detail);
+            console.log("[DH] Context Menu Triggered");
+            let pageSnapshot = acceptedContextSnapshotRef.current;
 
             if (selectionText) {
+                if (pageSnapshot && !acceptedSnapshotIsCurrent(pageSnapshot)) return;
                 // We need to merge the selection with the current page context (Case Number, Product, etc.)
                 // so the analysis file is saved in the correct folder.
-                let baseData = scrapedData;
-                
-                // If we don't have cached data (e.g. menu never opened), scan now
-                if (!baseData) {
-                    baseData = await PageReader.scanForErrors();
+                if (!pageSnapshot) {
+                    const terminalRequestId = activeTerminalRevalidationRequestId();
+                    if (terminalRequestId) {
+                        pageSnapshot = (
+                            await runTerminalRevalidationParticipant(
+                                terminalRequestId,
+                                '[DH] Page scan failed',
+                            )
+                        ).accepted;
+                    } else {
+                        pageSnapshot = await runPageScan(
+                            '[DH] Page scan failed',
+                            scan => {
+                                if (
+                                    scan.generation !== pageScanGenerationRef.current
+                                    || !scan.fresh
+                                ) return null;
+                                return applyFullScan(
+                                    scan.fresh,
+                                    null,
+                                    false,
+                                    scan.generation,
+                                );
+                            },
+                        );
+                    }
                 }
+                if (!pageSnapshot || !acceptedSnapshotIsCurrent(pageSnapshot)) return;
 
                 // Construct the data object for analysis
                 const dataToAnalyze: ScrapedData = {
-                    ...(baseData || {}),
+                    ...pageSnapshot.data,
                     errorText: selectionText, // The selection becomes the primary text to analyze
                     source: "Context Menu Selection"
                 };
@@ -598,11 +918,12 @@ const FAB: React.FC = () => {
                 }
                 
                 // Update state so the UI reflects what we are analyzing
+                const analyzeContext = { accepted: pageSnapshot, data: dataToAnalyze };
+                editableAnalyzeContextRef.current = analyzeContext;
                 setScrapedData(dataToAnalyze);
                 
                 // Trigger analysis immediately
-                // Note: We use the functional form or pass data directly to avoid stale state issues
-                handleAnalyze(dataToAnalyze);
+                void handleAnalyze(analyzeContext, analyzeInvocation);
             }
         };
 
@@ -610,7 +931,7 @@ const FAB: React.FC = () => {
         return () => {
             window.removeEventListener('dh-trigger-analyze', handleTriggerAnalyze);
         };
-    }, [effectivePrefs.rootPath, scrapedData]); // Dependencies for the listener
+    }, [prefs.rootPath, scrapedData]); // Dependencies keep the invocation on current prefs.
 
     // Optimized: Use MutationObserver + Debounce instead of fixed interval polling
     useEffect(() => {
@@ -619,51 +940,30 @@ const FAB: React.FC = () => {
         const runScan = async () => {
             // 1. Performance Check: Don't scan if tab is hidden/inactive
             if (document.hidden) return;
-            
-            // 2. State Check: Don't scan if busy or menu open
-            if (isAnalyzing || isOpen) return;
 
             // console.log("[DH] Running Lazy Scan..."); 
-            const freshData = await PageReader.scanForErrors();
-            
-            if (freshData) {
-                 setScrapedData(prev => {
-                     // Check for significant change
-                     const isDataDifferent = !prev || 
-                                     freshData.caseNumber !== prev.caseNumber ||
-                                     freshData.ticketTitle !== prev.ticketTitle ||
-                                     freshData.description !== prev.description ||
-                                     freshData.errorText !== prev.errorText;
-                     
-                     if (isDataDifferent) {
-                         console.log("[DH] Background Scan: Data changed/enriched", freshData);
-                         
-                         // Determine if this is a WHOLE NEW ticket context
-                         const isIdentityChange = !prev || 
-                                                  (freshData.caseNumber && freshData.caseNumber !== prev.caseNumber) ||
-                                                  (freshData.ticketTitle && freshData.ticketTitle !== prev.ticketTitle);
-
-                         if (isIdentityChange) {
-                             console.log("[DH] New Context Detected (Identity Change)");
-                             isUserEdited.current = false; // New case — reset edit flag
-                             setHasAutoAnalyzed(false); // Reset to allow auto-analysis for the new context
-                             latestRequestId.current = null;
-                             setStatusBubble(prev => ({ ...prev, visible: false }));
-                             return freshData;
-                         }
-                         
-                         // Same identity, but data enriched — only update if user hasn't edited
-                         if (!isUserEdited.current) {
-                             console.log("[DH] Context Enriched (Same Identity)");
-                             return freshData;
-                         }
-
-                         console.log("[DH] Context Enriched but user has edited — skipping overwrite");
-                         return prev;
-                     }
-                     return prev;
-                 });
+            const terminalRequestId = activeTerminalRevalidationRequestId();
+            if (terminalRequestId) {
+                await runTerminalRevalidationParticipant(
+                    terminalRequestId,
+                    '[DH] Page scan failed',
+                );
+                return;
             }
+
+            await runPageScan('[DH] Page scan failed', scan => {
+                if (
+                    scan.generation !== pageScanGenerationRef.current
+                    || !scan.fresh
+                ) return;
+                if (localAnalyzeRequestIdRef.current || isOpen) {
+                    if (localAnalyzeRequestIdRef.current) {
+                        applyIdentityScan(scan.fresh);
+                    }
+                    return;
+                }
+                applyFullScan(scan.fresh, null, false, scan.generation);
+            });
         };
 
         // MutationObserver to detect DOM changes
@@ -697,26 +997,32 @@ const FAB: React.FC = () => {
             clearTimeout(debounceTimer);
             document.removeEventListener("visibilitychange", handleVisibilityChange);
         };
-    }, [isAnalyzing, isOpen]);
+    }, [isOpen]);
 
     // Separate effect for Auto Analyze to ensure state (prefs, scrapedData) is current
     useEffect(() => {
-        if (!scrapedData || hasAutoAnalyzed) return;
+        if (hasAutoAnalyzed) return;
+        const analyzeContext = editableAnalyzeContextRef.current;
+        if (!analyzeContext || !editableAnalyzeContextIsCurrent(analyzeContext)) return;
+        const analyzeData = analyzeContext.data;
 
         // --- Auto Analyze Logic ---
         if (prefs.autoAnalyzeMode === 'always') {
             // Check if we have valid data to analyze
             // For auto-analyze, we construct the template if needed to ensure length check passes
             // We use the helper to get the "full" text that would be analyzed
-            const fullText = constructTemplate(scrapedData, prefs.userPrompt);
+            const fullText = applyCurrentUserPrompt(
+                constructTemplate(analyzeData),
+                prefs.userPrompt,
+            );
             // Simple check: do we have enough *real* content (description/title)? 
             // The template adds headers, so length > 50 is a safe bet for "non-empty".
             // A safer check might be to look at the raw fields again.
-            const rawContent = scrapedData.errorText || scrapedData.description || scrapedData.ticketTitle || "";
+            const rawContent = analyzeData.errorText || analyzeData.description || analyzeData.ticketTitle || "";
             
             // Check if we have at least a Ticket ID to consider it valid context for AUTO analysis.
             // We strictly require a Ticket ID here to avoid triggering on List Views (e.g. "My Open Cases").
-            const hasValidIdentifier = scrapedData.caseNumber && scrapedData.caseNumber.length > 3; // Relaxed length check for "WO-1" etc
+            const hasValidIdentifier = analyzeData.caseNumber && analyzeData.caseNumber.length > 3; // Relaxed length check for "WO-1" etc
             
             // AND ensure the raw content isn't just whitespace.
             // If we have a valid Ticket ID, we can be more lenient with content length (e.g. short errors like "Access Denied").
@@ -727,63 +1033,71 @@ const FAB: React.FC = () => {
             console.log("[DH] Auto-Analyze Check:", { 
                 hasValidIdentifier, 
                 hasEnoughContent, 
-                caseNumber: scrapedData.caseNumber, 
+                caseNumber: analyzeData.caseNumber,
                 contentLength: rawContent.trim().length 
             });
 
             if (hasValidIdentifier && hasEnoughContent) { 
                     setHasAutoAnalyzed(true); // Mark as handled immediately to prevent double-fire
-                    // Immediate feedback: Set analyzing state so UI reflects it instantly
-                    setIsAnalyzing(true);
-        isAnalyzingRef.current = true;
                     showStatusBubble(t('analyzing'), 'default', 0); // Show analyzing status persistently until done
-                    setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
+                    scheduleAutoAnalyze(analyzeContext);
             }
         } else if (prefs.autoAnalyzeMode === 'critical') {
             // Critical criteria: Sev 1 OR A, AND Status Reason "Initial contact pending"
-            const isSevCritical = scrapedData.severity?.includes('1') || scrapedData.severity?.toUpperCase().includes('A');
-            const isInitialPending = scrapedData.statusReason?.toLowerCase().includes('initial contact pending');
+            const isSevCritical = analyzeData.severity?.includes('1') || analyzeData.severity?.toUpperCase().includes('A');
+            const isInitialPending = analyzeData.statusReason?.toLowerCase().includes('initial contact pending');
             
-            const rawContent = scrapedData.errorText || scrapedData.description || scrapedData.ticketTitle || "";
+            const rawContent = analyzeData.errorText || analyzeData.description || analyzeData.ticketTitle || "";
             
             // Critical Mode: Same strict check (Case Number required)
-            const hasValidIdentifier = scrapedData.caseNumber && scrapedData.caseNumber.length > 5;
+            const hasValidIdentifier = analyzeData.caseNumber && analyzeData.caseNumber.length > 5;
 
             if (isSevCritical && isInitialPending && hasValidIdentifier && rawContent.length > 20) {
                 setHasAutoAnalyzed(true);
-                // Immediate feedback: Set analyzing state so UI reflects it instantly
-                setIsAnalyzing(true);
-        isAnalyzingRef.current = true;
                 showStatusBubble(t('analyzing'), 'default', 0);
-                setTimeout(() => handleAnalyze(scrapedData), 100); // Reduced delay
+                scheduleAutoAnalyze(analyzeContext);
             }
         } else if (prefs.autoAnalyzeMode === 'new_cases') {
              // New Cases criteria: Status Reason "Initial contact pending" (regardless of severity)
-             const isInitialPending = scrapedData.statusReason?.toLowerCase().includes('initial contact pending');
+             const isInitialPending = analyzeData.statusReason?.toLowerCase().includes('initial contact pending');
              
-             const rawContent = scrapedData.errorText || scrapedData.description || scrapedData.ticketTitle || "";
-             const hasValidIdentifier = scrapedData.caseNumber && scrapedData.caseNumber.length > 5;
+             const rawContent = analyzeData.errorText || analyzeData.description || analyzeData.ticketTitle || "";
+             const hasValidIdentifier = analyzeData.caseNumber && analyzeData.caseNumber.length > 5;
 
              if (isInitialPending && hasValidIdentifier && rawContent.length > 20) {
                  setHasAutoAnalyzed(true);
-                 setIsAnalyzing(true);
-        isAnalyzingRef.current = true;
                  showStatusBubble(t('analyzing'), 'default', 0);
-                 setTimeout(() => handleAnalyze(scrapedData), 100);
+                 scheduleAutoAnalyze(analyzeContext);
              }
         }
-    }, [isOpen, scrapedData, prefs.autoAnalyzeMode, prefs.userPrompt, hasAutoAnalyzed]);
+    }, [
+        isOpen,
+        scrapedData,
+        prefs.autoAnalyzeMode,
+        prefs.userPrompt,
+        hasAutoAnalyzed,
+        pendingPageScanCount,
+    ]);
 
     const handleRefreshContext = async () => {
-        const data = await PageReader.scanForErrors();
-        
-        // Ensure data is not null before processing
-        if (data) {
-             // Explicit refresh — user wants fresh data, so reset the edit flag
-            isUserEdited.current = false;
-            setScrapedData(data);
-            setHasAutoAnalyzed(false); // Reset so auto-analyze can run again if enabled
+        const terminalRequestId = activeTerminalRevalidationRequestId();
+        if (terminalRequestId) {
+            await runTerminalRevalidationParticipant(
+                terminalRequestId,
+                '[DH] Page scan failed',
+                true,
+            );
+            return;
         }
+        await runPageScan('[DH] Page scan failed', scan => {
+            if (scan.generation !== pageScanGenerationRef.current || !scan.fresh) return;
+            if (localAnalyzeRequestIdRef.current) {
+                applyIdentityScan(scan.fresh);
+            } else {
+                // Explicit refresh replaces edits only after the scrape validates.
+                applyFullScan(scan.fresh, null, false, scan.generation, true);
+            }
+        });
     };
 
     const handlePing = async () => {
@@ -794,6 +1108,7 @@ const FAB: React.FC = () => {
                 payload: { action: "ping", requestId: crypto.randomUUID() }
             });
             // Show result in popover instead of alert
+            popoverIsAnalyze.current = false;
             setResultPopover({
                 isOpen: true,
                 title: `⚡ ${t('pingResult')}`,
@@ -802,6 +1117,7 @@ const FAB: React.FC = () => {
             // Also close menu to show result clearly? Optional.
             // setIsOpen(false); 
         } catch (e: any) {
+            popoverIsAnalyze.current = false;
             setResultPopover({
                 isOpen: true,
                 title: `❌ ${t('pingError')}`,
@@ -810,28 +1126,222 @@ const FAB: React.FC = () => {
         }
     };
 
-    const handleAnalyze = async (dataToAnalyze: ScrapedData | null = null) => {
-        // Use provided data or fall back to state
-        const targetData = dataToAnalyze || scrapedData;
+    const localizeAnalysisWarnings = (
+        warnings: readonly AnalysisPersistenceWarning[] | undefined,
+    ): string | undefined => {
+        if (!warnings?.length) return undefined;
+        return warnings.includes('analysis_pending_cleanup_failed')
+            ? t('analysisDurabilityAndCleanupWarning')
+            : t('analysisDurabilityWarning');
+    };
 
-        if (!targetData) return;
+    type AnalyzeTerminalOutcome =
+        | {
+            kind: 'success';
+            markdown: string;
+            savedTo?: string;
+            duration: number;
+            caseHash: string;
+            sap: string;
+            severity: string;
+            durabilityWarning?: string;
+        }
+        | {
+            kind: 'host-error';
+            error: string;
+            errorCode?: string;
+            durabilityWarning?: string;
+        }
+        | { kind: 'exception'; error: string }
+        | { kind: 'timeout' };
+
+    const publishAnalyzeTerminalOutcome = (
+        requestId: string,
+        caseNumber: string,
+        outcome: AnalyzeTerminalOutcome,
+    ) => {
+        if (outcome.kind === 'success') {
+            trackEvent('Analyze Success', {
+                durationSeconds: outcome.duration,
+                caseIdHash: outcome.caseHash,
+                sap: outcome.sap,
+                severity: outcome.severity,
+            });
+            if (outcome.caseHash && !reportedCases.current.has(outcome.caseHash)) {
+                reportedCases.current.add(outcome.caseHash);
+                trackEvent('Case Analyzed', {
+                    caseIdHash: outcome.caseHash,
+                    sap: outcome.sap,
+                    severity: outcome.severity,
+                });
+            }
+            setLastDuration(`${outcome.duration.toFixed(1)}s`);
+            showStatusBubble(
+                `${t('analysisComplete')} (${outcome.duration.toFixed(1)}s)`,
+                'success',
+                3000,
+            );
+            popoverIsAnalyze.current = true;
+            setResultPopover({
+                isOpen: true,
+                title: `🤖 Copilot ${t('analyze')}`,
+                content: outcome.markdown,
+                durabilityWarning: outcome.durabilityWarning,
+                path: outcome.savedTo,
+                duration: `${outcome.duration.toFixed(1)}s`,
+                identity: { requestId, caseNumber },
+            });
+            setIsOpen(false);
+            return;
+        }
+        if (outcome.kind === 'host-error') {
+            showAnalysisError(
+                outcome.error,
+                outcome.errorCode,
+                { requestId, caseNumber },
+                outcome.durabilityWarning,
+            );
+            trackEvent('Analyze Host Error', {
+                errorCode: outcome.errorCode ?? 'unclassified',
+            });
+            return;
+        }
+        if (outcome.kind === 'exception') {
+            showAnalysisError(
+                outcome.error,
+                undefined,
+                { requestId, caseNumber },
+            );
+            trackEvent('Analyze Exception', { errorCode: 'unclassified' });
+            return;
+        }
+        showAnalysisError(
+            t('analysisFailed'),
+            undefined,
+            { requestId, caseNumber },
+        );
+        trackEvent('Analyze Timeout');
+    };
+
+    const finishAnalyzeTerminal = async (
+        request: AnalyzeRequestSnapshot,
+        invocation: NonNullable<typeof editableAnalyzeContextRef.current>,
+        acceptedGeneration: number,
+        outcome: AnalyzeTerminalOutcome,
+    ): Promise<void> => {
+        const { requestId, caseNumber } = request;
+        if (postRunScanOwnerRef.current !== requestId) return;
+        const originRecord = analyzeOriginRef.current;
+        if (!originRecord || originRecord.requestId !== requestId) return;
+        const origin = originRecord.pageIdentity;
+        postRunScanOwnerRef.current = null;
+        terminalRevalidationRef.current = {
+            requestId,
+            origin,
+            latestGeneration: -1,
+            latestCompletion: null,
+            version: 0,
+            changeSignal: createTerminalRevalidationChangeSignal(),
+            closed: false,
+        };
+        if (analyzeSafetyTimerRef.current?.requestId === requestId) {
+            clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
+            analyzeSafetyTimerRef.current = null;
+        }
+
+        void runTerminalRevalidationParticipant(
+            requestId,
+            '[DH] Post-analysis page scan failed',
+        );
+        const terminalSnapshot = await awaitLatestTerminalRevalidation(requestId);
+
+        const ownsTerminalPublication =
+            localAnalyzeRequestIdRef.current === requestId
+            && latestRequestId.current === requestId
+            && analyzeOriginRef.current?.requestId === requestId;
+        const canPublishTerminalOutcome = Boolean(
+            ownsTerminalPublication
+            && terminalSnapshot !== null
+            && acceptedSnapshotIsCurrent(terminalSnapshot)
+            && editableAnalyzeContextIsCurrent(invocation)
+            && requestOwnsVisiblePage(request, acceptedGeneration)
+        );
+        if (canPublishTerminalOutcome) {
+            publishAnalyzeTerminalOutcome(requestId, caseNumber, outcome);
+        } else if (currentCaseNumberRef.current === caseNumber) {
+            deferredLocalHydrationRef.current = { requestId, caseNumber };
+        }
+        closeTerminalRevalidation(requestId);
+        if (!ownsTerminalPublication) return;
+
+        localAnalyzeRequestIdRef.current = null;
+        latestRequestId.current = null;
+        if (hydratedPendingRef.current?.requestId === requestId) {
+            hydratedPendingRef.current = null;
+        }
+        analyzeOriginRef.current = null;
+        identityChangedDuringAnalyzeRef.current = false;
+        if (localAnalyzePageRef.current?.request.requestId === requestId) {
+            localAnalyzePageRef.current = null;
+        }
+        analyzeFlowEndedAtRef.current = Date.now();
+        reconcileVisibleAnalyzingState();
+    };
+
+    const handleAnalyze = async (
+        context: NonNullable<typeof editableAnalyzeContextRef.current> | null = null,
+        analyzeInvocation?: AnalyzeInvocation,
+    ) => {
+        const invocation = context || editableAnalyzeContextRef.current;
+        if (!invocation || !editableAnalyzeContextIsCurrent(invocation)) return;
+        const targetData = invocation.data;
+        const page = parseScrapedDataSnapshot(targetData);
+        if (!page) return;
         // Check if we have enough info to analyze (either error text OR title)
-        const hasContent = targetData.errorText || targetData.description || targetData.ticketTitle;
+        const hasContent = page.errorText || page.description || page.ticketTitle;
         if (!hasContent) return;
 
+        const dataRequest = snapshotAnalyzeRequest(
+            crypto.randomUUID(),
+            page,
+            latestPrefsRef.current.rootPath,
+            analyzeInvocation,
+        );
+        const request = dataRequest.pageIdentity === invocation.accepted.identity
+            ? dataRequest
+            : Object.freeze({
+                ...dataRequest,
+                pageIdentity: invocation.accepted.identity,
+            });
+        const {
+            requestId,
+            pageIdentity,
+            caseNumber,
+            rootPath,
+            rootPathOverrideProvided,
+        } = request;
+        const acceptedGenerationOfRun = invocation.accepted.generation;
+        if (analyzeSafetyTimerRef.current) {
+            clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
+            analyzeSafetyTimerRef.current = null;
+        }
+        latestRequestId.current = requestId;
+        localAnalyzeRequestIdRef.current = requestId;
+        localAnalyzePageRef.current = {
+            request,
+            acceptedGeneration: acceptedGenerationOfRun,
+        };
+        analyzeOriginRef.current = request;
+        identityChangedDuringAnalyzeRef.current = false;
+        postRunScanOwnerRef.current = requestId;
+        reconcileVisibleAnalyzingState();
+
         trackEvent('Analyze Clicked', { 
-            hasContext: !!targetData.source,
-            sap: targetData.productCategory || 'Unknown'
+            hasContext: !!page.source,
+            sap: page.productCategory || 'Unknown'
         });
 
-        setIsAnalyzing(true);
-        isAnalyzingRef.current = true;
         const startTime = Date.now();
-        // Snapshot the case this run was launched on. Used to detect mid-flight
-        // D365 tab switches: if the user moves to a different case, popovers
-        // and bubbles should reference the originating case rather than
-        // visually attach to the unrelated case currently on screen.
-        const caseNumberOfRun = targetData.caseNumber || '';
         
         // Safety timeout to prevent infinite "Analyzing..." state.
         // Derived from prefs.analyzeTimeoutSeconds (C2b-lite, user-
@@ -841,54 +1351,63 @@ const FAB: React.FC = () => {
         const _analyzeTimeoutSec = Math.max(60, Math.min(3600, prefs.analyzeTimeoutSeconds ?? 1200));
         const _safetyTimeoutMs = (_analyzeTimeoutSec + 10) * 1000;
         const timeoutId = setTimeout(() => {
-            setIsAnalyzing(prev => {
-                if (prev) {
-                    showAnalysisError(t('analysisFailed'), caseNumberOfRun);
-                    trackEvent('Analyze Timeout');
-                    return false;
-                }
-                return prev;
-            });
+            if (localAnalyzeRequestIdRef.current !== requestId) return;
+            void finishAnalyzeTerminal(
+                request,
+                invocation,
+                acceptedGenerationOfRun,
+                { kind: 'timeout' },
+            );
         }, _safetyTimeoutMs);
+        analyzeSafetyTimerRef.current = { requestId, timeoutId };
 
         try {
             // Construct payload
             // If the errorText ALREADY looks like our full markdown template (starts with ## Ticket ID or ## Case Number), use it as is.
             // Otherwise (Auto-Analyze or fresh scan), construct the template.
             let fullContext = "";
-            if (targetData.errorText && (targetData.errorText.startsWith('## Ticket ID') || targetData.errorText.startsWith('## Case Number'))) {
-                fullContext = targetData.errorText;
+            if (page.errorText && (page.errorText.startsWith('## Ticket ID') || page.errorText.startsWith('## Case Number'))) {
+                fullContext = page.errorText;
             } else {
-                fullContext = constructTemplate(targetData, prefs.userPrompt);
+                fullContext = constructTemplate(page);
             }
+            fullContext = applyCurrentUserPrompt(fullContext, prefs.userPrompt);
 
             // Only show bubble if we initiated manually and it wasn't already shown by auto-analyze logic
-            if (!statusBubble.visible) {
+            if (
+                !statusBubble.visible
+                && requestOwnsVisiblePage(request, acceptedGenerationOfRun)
+            ) {
                  showStatusBubble(t('analyzing'), 'default', 0);
             }
 
-            const requestId = crypto.randomUUID();
-            latestRequestId.current = requestId;
-
-            const response = await chrome.runtime.sendMessage({
+            const hostPayload = {
+                text: fullContext,
+                context: page.source || 'Unknown Context',
+                timestamp: new Date().toLocaleString(),
+                rootPath,
+                ...(rootPathOverrideProvided
+                    ? { rootPathOverrideProvided: true as const }
+                    : {}),
+                ...(typeof page.productCategory === 'string'
+                    ? { product: page.productCategory }
+                    : {}),
+                ...(typeof caseNumber === 'string'
+                    ? { caseNumber }
+                    : {}),
+            };
+            const response: unknown = await chrome.runtime.sendMessage({
                 type: "NATIVE_MSG",
                 payload: { 
                     action: "analyze_error", 
-                    payload: {
-                        text: fullContext,
-                        context: targetData.source || "Unknown Context",
-                        timestamp: new Date().toLocaleString(),
-                        rootPath: effectivePrefs.rootPath,
-                        product: targetData.productCategory,
-                        caseNumber: targetData.caseNumber
-                    },
+                    payload: hostPayload,
                     requestId: requestId,
                     // C2a+: tell the SW to persist pending/result for re-hydration
                     // after the user navigates away from the case page. SW strips
                     // this before forwarding to the host. Titles are pre-translated
                     // here because the SW has no `t()` (spec §3 ctx contract).
                     _persist: {
-                        caseNumber: targetData.caseNumber || '',
+                        caseNumber,
                         successTitle: `🤖 Copilot ${t('analyze')}`,
                         errorTitle: `❌ ${t('analysisFailed')}`,
                     }
@@ -901,99 +1420,63 @@ const FAB: React.FC = () => {
                 return;
             }
 
-            // Stop listening to progress updates for this request to prevent race conditions
-            // where a lagging "Processing..." message overwrites the success message.
-            latestRequestId.current = null;
-
-            clearTimeout(timeoutId); // Clear timeout on response
-            
-            // Format response to be user friendly
-            if (response.status === 'success') {
-                const nativeResp = response.data;
-                
-                // Check Native Host wrapper status
-                if (nativeResp && nativeResp.status === 'success') {
-                    const analysisData = nativeResp.data;
-                    
-                    // Check Analysis function result
-                    if (analysisData && !analysisData.error) {
-                        const duration = (Date.now() - startTime) / 1000;
-                        const caseNum = targetData.caseNumber || '';
-                        const caseHash = await hashCaseId(caseNum);
-                        const sap = targetData.productCategory || 'Unknown';
-                        const severity = targetData.severity || 'Unknown';
-
-                        trackEvent('Analyze Success', {
-                            durationSeconds: duration,
-                            caseIdHash: caseHash,
-                            sap,
-                            severity,
-                        });
-
-                        // Fire "Case Analyzed" only once per unique case per session.
-                        // This lets us count unique incidents without inflating numbers
-                        // when the same case is re-analyzed multiple times.
-                        if (caseHash && !reportedCases.current.has(caseHash)) {
-                            reportedCases.current.add(caseHash);
-                            trackEvent('Case Analyzed', {
-                                caseIdHash: caseHash,
-                                sap,
-                                severity,
-                            });
-                        }
-                        setLastDuration(`${duration.toFixed(1)}s`);
-
-                        // C2a+: cross-case detection — if the user navigated to
-                        // a different D365 tab while this run was in flight,
-                        // suppress the popover (visually misleading on the
-                        // unrelated case) and surface a bubble that names the
-                        // originating case. SW already persisted the result to
-                        // dh_last_analysis; navigating back to caseNumberOfRun
-                        // re-hydrates the popover via useAnalysisHydration.
-                        const isStillOnRunCase =
-                            !caseNumberOfRun ||
-                            !currentCaseRef.current ||
-                            currentCaseRef.current === caseNumberOfRun;
-                        if (isStillOnRunCase) {
-                            showStatusBubble(`${t('analysisComplete')} (${duration.toFixed(1)}s)`, 'success', 3000);
-                            setResultPopover({
-                                isOpen: true,
-                                title: `🤖 Copilot ${t('analyze')}`,
-                                content: analysisData.markdown || JSON.stringify(analysisData, null, 2),
-                                path: analysisData.saved_to,
-                                duration: `${duration.toFixed(1)}s`
-                            });
-                            popoverIsAnalyze.current = true;
-                            setIsOpen(false); // Close menu to show result
-                        } else {
-                            showStatusBubble(
-                                `${t('analysisComplete')} — Case ${caseNumberOfRun} (${duration.toFixed(1)}s)`,
-                                'success',
-                                5000,
-                            );
-                        }
-                    } else {
-                        const errMsg = analysisData?.error || t('unknownAnalysisError');
-                        showAnalysisError(`${t('analysisFailed')}: ${errMsg}`, caseNumberOfRun);
-                        trackEvent('Analyze Failed', { error: errMsg });
-                    }
-                } else {
-                    const hostError = nativeResp?.message || nativeResp?.error || t('unknownNativeHostError');
-                    showAnalysisError(`${t('hostErrorLabel')}: ${hostError}`, caseNumberOfRun);
-                    trackEvent('Analyze Host Error', { error: hostError });
-                }
+            const parsedResponse = parseAnalyzeForwardResult(response);
+            const durabilityWarning = localizeAnalysisWarnings(
+                parsedResponse.extension_warnings,
+            );
+            if (parsedResponse.status === 'success') {
+                const analysisData = parsedResponse.data;
+                const duration = (Date.now() - startTime) / 1000;
+                const caseHash = await hashCaseId(caseNumber);
+                if (latestRequestId.current !== requestId) return;
+                await finishAnalyzeTerminal(
+                    request,
+                    invocation,
+                    acceptedGenerationOfRun,
+                    {
+                        kind: 'success',
+                        markdown: analysisData.markdown,
+                        savedTo: analysisData.saved_to,
+                        duration,
+                        caseHash,
+                        sap: page.productCategory || 'Unknown',
+                        severity: page.severity || 'Unknown',
+                        durabilityWarning,
+                    },
+                );
             } else {
-                showAnalysisError(`${t('errorLabel')}: ${response.error || response.message || t('unknownError')}`, caseNumberOfRun);
+                await finishAnalyzeTerminal(
+                    request,
+                    invocation,
+                    acceptedGenerationOfRun,
+                    {
+                        kind: 'host-error',
+                        error: parsedResponse.error,
+                        errorCode: parsedResponse.error_code,
+                        durabilityWarning,
+                    },
+                );
             }
-        } catch (e: any) {
-            showAnalysisError(`${t('errorLabel')}: ${e.message}`, caseNumberOfRun);
-            trackEvent('Analyze Exception', { error: e.message });
+        } catch (e: unknown) {
+            if (latestRequestId.current === requestId) {
+                await finishAnalyzeTerminal(
+                    request,
+                    invocation,
+                    acceptedGenerationOfRun,
+                    {
+                        kind: 'exception',
+                        error: `${t('errorLabel')}: ${safeAnalyzeRejectionText(
+                            e,
+                            t('unknownError'),
+                        )}`,
+                    },
+                );
+            }
         } finally {
-            setIsAnalyzing(false);
-            isAnalyzingRef.current = false;
-            analyzeFlowEndedAtRef.current = Date.now();
-            // Don't clear bubble here immediately if success/error, let the timeout handle it. 
-            // If manual cancel or something else, we might need to check.
+            if (analyzeSafetyTimerRef.current?.requestId === requestId) {
+                clearTimeout(analyzeSafetyTimerRef.current.timeoutId);
+                analyzeSafetyTimerRef.current = null;
+            }
         }
     };
 
@@ -1030,7 +1513,10 @@ const FAB: React.FC = () => {
                     chrome.runtime.reload();
                 }, 1500);
             } else {
-                const errMsg = response?.error || t('unknownError');
+                const errMsg = safeErrorText(
+                    [response?.error, response?.message],
+                    t('unknownError'),
+                );
                 showStatusBubble(`${t('updateFailed')}: ` + errMsg, 'error');
                 trackEvent('FAB Update Failed', { version: updateAvailable.version, error: errMsg });
             }
@@ -1041,7 +1527,11 @@ const FAB: React.FC = () => {
         if (item.type === 'folder') {
             navigateTo(item);
         } else if (item.type === 'link' && item.url) {
-            trackEvent('Bookmark Link Clicked', { label: item.label, url: item.url });
+            trackEvent('Bookmark Link Clicked', {
+                label: item.label,
+                source: item.source || 'personal',
+                type: item.type,
+            });
             try {
                 // We must use chrome.runtime.sendMessage to ask background script to open tab
                 // because sometimes window.open is blocked or behaves poorly in content scripts
@@ -1053,12 +1543,13 @@ const FAB: React.FC = () => {
                 if (url) {
                     window.open(url, '_blank');
                 }
-            } catch (e) {
-                console.error("Failed to open link:", e);
+            } catch {
+                console.error("Failed to open bookmark link.");
             }
             setIsOpen(false);
         } else if (item.type === 'markdown') {
             trackEvent('Bookmark Note Clicked', { label: item.label });
+            popoverIsAnalyze.current = false;
             // Show markdown content in the result popover
             setResultPopover({
                 isOpen: true,
@@ -1077,19 +1568,24 @@ const FAB: React.FC = () => {
             isOpen={resultPopover.isOpen} 
             onClose={() => {
                 // C2a+: if the popover came from an analyze flow (success or
-                // error), mark the persisted result as seen so it does not
-                // re-hydrate on the next page load. Bookmark popovers leave
-                // the flag untouched.
+                // error), acknowledge its identity so it does not re-hydrate
+                // on the next page load. Bookmark popovers leave analysis
+                // acknowledgment state untouched.
                 if (popoverIsAnalyze.current) {
                     popoverIsAnalyze.current = false;
-                    hydration.dismissPopover();
+                    if (resultPopover.identity) {
+                        void hydration.dismissPopover(resultPopover.identity);
+                    }
                 }
                 setResultPopover(prev => ({ ...prev, isOpen: false }));
             }} 
             title={resultPopover.title}
             content={resultPopover.content}
+            errorCode={resultPopover.errorCode}
             filePath={resultPopover.path}
             duration={resultPopover.duration}
+            isAnalyze={popoverIsAnalyze.current}
+            durabilityWarning={resultPopover.durabilityWarning}
         />
 
         <div className="dh-container">
@@ -1131,6 +1627,20 @@ const FAB: React.FC = () => {
 
                     {/* Menu Items */}
                     <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                        {bookmarkLoadWarning && (
+                            <div
+                                role="alert"
+                                style={{
+                                    padding: '10px 12px',
+                                    color: '#92400E',
+                                    backgroundColor: '#FFFBEB',
+                                    borderBottom: '1px solid #FDE68A',
+                                    fontSize: '12px',
+                                }}
+                            >
+                                {bookmarkLoadWarning}
+                            </div>
+                        )}
                         {/* Update Banner */}
                         {updateAvailable && (
                             <button
@@ -1216,13 +1726,23 @@ const FAB: React.FC = () => {
                                                         return scrapedData.errorText;
                                                     }
                                                     // Use the shared helper to construct the template from raw fields
-                                                    return constructTemplate(scrapedData, prefs.userPrompt);
+                                                    return applyCurrentUserPrompt(
+                                                        constructTemplate(scrapedData),
+                                                        prefs.userPrompt,
+                                                    );
                                                 })()
                                                 : ''
                                         }
                                         onChange={(e) => {
                                             const newVal = e.target.value;
                                             isUserEdited.current = true;
+                                            const editableContext = editableAnalyzeContextRef.current;
+                                            if (editableContext) {
+                                                editableContext.data = {
+                                                    ...editableContext.data,
+                                                    errorText: newVal,
+                                                };
+                                            }
                                             setScrapedData(prev => {
                                                 if (!prev) return { errorText: newVal }; // Should not happen given render condition
                                                 return { 
@@ -1251,7 +1771,12 @@ const FAB: React.FC = () => {
                             {/* Analyze Button */}
                             <button 
                                 onClick={() => handleAnalyze()}
-                                disabled={!scrapedData?.errorText || isAnalyzing}
+                                disabled={
+                                    !scrapedData?.errorText
+                                    || isAnalyzing
+                                    || editableContextIdentityRef.current
+                                        !== currentPageIdentityRef.current
+                                }
                                 className="dh-action-btn dh-btn-primary"
                             >
                                 <Zap size={14} fill={isAnalyzing ? "none" : "currentColor"} />

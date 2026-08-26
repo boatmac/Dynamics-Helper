@@ -1,4 +1,5 @@
 import { vi } from 'vitest'
+import { ownDataProperty } from '../utils/ownData'
 
 // Hand-rolled chrome.* stub for unit tests.
 //
@@ -8,20 +9,47 @@ import { vi } from 'vitest'
 //   accidentally use undefined response data.
 // - deferNextResponse(action) lets the test caller decide WHEN to resolve
 //   the response (timing-sensitive tests like hydration window need this).
+// - deferNextStorageGet/Set/Remove optionally delay matching storage work and
+//   callbacks; when unused, storage retains its original immediate behavior.
 // - resolveNext / rejectNext fire pending deferrals in FIFO order per action.
 // - storage uses an in-memory Map; reset via resetChromeMock() in beforeEach.
 
-type DeferredResponse = {
+export type DeferredResponse = {
   resolve: (value: unknown) => void
   reject: (reason?: unknown) => void
   promise: Promise<unknown>
 }
 
 type PendingMap = Map<string, DeferredResponse[]>
+type DeferredStorageSet = DeferredResponse & {
+  matches: (items: Record<string, unknown>) => boolean
+}
+type DeferredStorageRemove = DeferredResponse & {
+  matches: (keys: string[]) => boolean
+}
+type DeferredStorageGet = DeferredResponse & {
+  matches: (keys: unknown) => boolean
+}
+type StorageChangeListener = (
+  changes: { [key: string]: chrome.storage.StorageChange },
+  areaName: string,
+) => void
+type RuntimeMessageListener = (
+  message: unknown,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: ReturnType<typeof vi.fn>,
+) => unknown
 
 let pendingByAction: PendingMap = new Map()
+let pendingStorageGets: DeferredStorageGet[] = []
+let pendingStorageSets: DeferredStorageSet[] = []
+let pendingStorageRemoves: DeferredStorageRemove[] = []
 let storageData: Record<string, unknown> = {}
 let messageLog: Array<{ action: string; payload: unknown }> = []
+let storageChangeListeners = new Set<StorageChangeListener>()
+let runtimeMessageListeners = new Set<RuntimeMessageListener>()
+let activeTabs: Array<{ id?: number }> = []
+let tabMessageLog: Array<{ tabId: number; message: unknown }> = []
 
 function makeDeferred(): DeferredResponse {
   let resolve!: (v: unknown) => void
@@ -35,12 +63,30 @@ function makeDeferred(): DeferredResponse {
 
 export function resetChromeMock(): void {
   pendingByAction = new Map()
+  pendingStorageGets = []
+  pendingStorageSets = []
+  pendingStorageRemoves = []
   storageData = {}
   messageLog = []
+  storageChangeListeners = new Set()
+  runtimeMessageListeners = new Set()
+  activeTabs = []
+  tabMessageLog = []
   sendMessage.mockClear()
+  tabsQuery.mockClear()
+  tabsSendMessage.mockClear()
+  runtimeOnMessageAddListener.mockClear()
+  runtimeOnMessageRemoveListener.mockClear()
   storageGet.mockClear()
   storageSet.mockClear()
   storageRemove.mockClear()
+  storageOnChangedAddListener.mockClear()
+  storageOnChangedRemoveListener.mockClear()
+  if (typeof chrome !== 'undefined' && chrome.runtime) {
+    ;(chrome.runtime as typeof chrome.runtime & {
+      lastError?: { message: string }
+    }).lastError = undefined
+  }
 }
 
 /**
@@ -61,20 +107,56 @@ export function deferNextResponse(action: string): DeferredResponse {
   return deferred
 }
 
+export function deferNextStorageSet(key?: string): DeferredResponse {
+  const deferred: DeferredStorageSet = {
+    ...makeDeferred(),
+    matches: items => key === undefined || Object.hasOwn(items, key),
+  }
+  pendingStorageSets.push(deferred)
+  return deferred
+}
+
+export function deferNextStorageGet(key?: string): DeferredResponse {
+  const deferred: DeferredStorageGet = {
+    ...makeDeferred(),
+    matches: keys => {
+      if (key === undefined || keys == null) return true
+      if (typeof keys === 'string') return keys === key
+      if (Array.isArray(keys)) return keys.includes(key)
+      return Object.hasOwn(keys as object, key)
+    },
+  }
+  pendingStorageGets.push(deferred)
+  return deferred
+}
+
+export function deferNextStorageRemove(key?: string): DeferredResponse {
+  const deferred: DeferredStorageRemove = {
+    ...makeDeferred(),
+    matches: keys => key === undefined || keys.includes(key),
+  }
+  pendingStorageRemoves.push(deferred)
+  return deferred
+}
+
 export function getMessageLog(): ReadonlyArray<{ action: string; payload: unknown }> {
   return messageLog
 }
 
+function ownString(value: unknown, key: PropertyKey): string | undefined {
+  const property = ownDataProperty(value, key)
+  return property.kind === 'value' && typeof property.value === 'string'
+    ? property.value
+    : undefined
+}
+
 const sendMessage = vi.fn((payload: unknown, maybeCallback?: unknown) => {
-  const action =
-    payload && typeof payload === 'object' && 'action' in payload
-      ? String((payload as { action: unknown }).action)
-      : payload && typeof payload === 'object' && 'payload' in payload &&
-          (payload as { payload?: unknown }).payload &&
-          typeof (payload as { payload: { action?: unknown } }).payload === 'object' &&
-          'action' in (payload as { payload: { action?: unknown } }).payload
-        ? String((payload as { payload: { action: unknown } }).payload.action)
-        : '<unknown>'
+  const directAction = ownString(payload, 'action')
+  const nestedPayload = ownDataProperty(payload, 'payload')
+  const nestedAction = nestedPayload.kind === 'value'
+    ? ownString(nestedPayload.value, 'action')
+    : undefined
+  const action = directAction ?? nestedAction ?? ownString(payload, 'type') ?? '<unknown>'
   messageLog.push({ action, payload })
 
   const queue = pendingByAction.get(action)
@@ -87,11 +169,18 @@ const sendMessage = vi.fn((payload: unknown, maybeCallback?: unknown) => {
       // Real chrome.runtime.sendMessage delivers via callback async.
       void next.promise.then(
         (value) => callback(value),
-        () => {
-          // Simulate lastError path: callback fires with undefined response.
-          // Tests can pre-set chrome.runtime.lastError before rejecting if
-          // they want to exercise the error branch.
-          callback(undefined)
+        (reason) => {
+          const runtime = chrome.runtime as typeof chrome.runtime & {
+            lastError?: { message: string }
+          }
+          runtime.lastError = {
+            message: reason instanceof Error ? reason.message : String(reason),
+          }
+          try {
+            callback(undefined)
+          } finally {
+            runtime.lastError = undefined
+          }
         },
       )
       return undefined
@@ -103,6 +192,18 @@ const sendMessage = vi.fn((payload: unknown, maybeCallback?: unknown) => {
   // No deferred response queued — never resolve so forgotten mocks surface
   // as timeouts, not silent passes.
   if (callback) {
+    const resetToken = payload && typeof payload === 'object'
+      && 'payload' in payload
+      && (payload as { payload?: unknown }).payload
+      && typeof (payload as { payload: { payload?: unknown } }).payload.payload === 'object'
+      && (payload as { payload: { payload: { reset_token?: unknown } } }).payload.payload.reset_token
+    if (action === 'update_config' && Number.isInteger(resetToken)) {
+      queueMicrotask(() => callback({
+        status: 'success',
+        data: { success: true, config_saved: true },
+      }))
+      return undefined
+    }
     // Callback simply never fires.
     return undefined
   }
@@ -131,6 +232,34 @@ const storageGet = vi.fn((keys?: unknown, maybeCallback?: unknown) => {
     return out
   }
   const result = compute()
+  const deferredIndex = pendingStorageGets.findIndex(entry => entry.matches(keys))
+  const deferred = deferredIndex >= 0
+    ? pendingStorageGets.splice(deferredIndex, 1)[0]
+    : undefined
+  if (deferred) {
+    const fail = (reason: unknown) => {
+      if (!cb) throw reason
+      const runtime = chrome.runtime as typeof chrome.runtime & {
+        lastError?: { message: string }
+      }
+      runtime.lastError = {
+        message: reason instanceof Error ? reason.message : String(reason),
+      }
+      try {
+        cb(undefined)
+      } finally {
+        runtime.lastError = undefined
+      }
+    }
+    const completion = deferred.promise.then(() => result, fail)
+    if (cb) {
+      void completion.then(value => {
+        if (value !== undefined) cb(value)
+      })
+      return undefined
+    }
+    return completion
+  }
   if (cb) {
     // Fire callback async to match real chrome behavior.
     queueMicrotask(() => cb(result))
@@ -140,8 +269,34 @@ const storageGet = vi.fn((keys?: unknown, maybeCallback?: unknown) => {
 })
 
 const storageSet = vi.fn((items: Record<string, unknown>, maybeCallback?: unknown) => {
-  Object.assign(storageData, items)
   const cb = typeof maybeCallback === 'function' ? (maybeCallback as () => void) : undefined
+  const deferredIndex = pendingStorageSets.findIndex(entry => entry.matches(items))
+  const deferred = deferredIndex >= 0
+    ? pendingStorageSets.splice(deferredIndex, 1)[0]
+    : undefined
+  const commit = () => {
+    Object.assign(storageData, items)
+    cb?.()
+  }
+  const fail = (reason: unknown) => {
+    if (!cb) throw reason
+    const runtime = chrome.runtime as typeof chrome.runtime & {
+      lastError?: { message: string }
+    }
+    runtime.lastError = {
+      message: reason instanceof Error ? reason.message : String(reason),
+    }
+    try {
+      cb()
+    } finally {
+      runtime.lastError = undefined
+    }
+  }
+  if (deferred) {
+    const completion = deferred.promise.then(commit, fail)
+    return cb ? undefined : completion
+  }
+  Object.assign(storageData, items)
   if (cb) {
     queueMicrotask(() => cb())
     return undefined
@@ -151,8 +306,34 @@ const storageSet = vi.fn((items: Record<string, unknown>, maybeCallback?: unknow
 
 const storageRemove = vi.fn((keys: string | string[], maybeCallback?: unknown) => {
   const arr = Array.isArray(keys) ? keys : [keys]
-  for (const k of arr) delete storageData[k]
   const cb = typeof maybeCallback === 'function' ? (maybeCallback as () => void) : undefined
+  const deferredIndex = pendingStorageRemoves.findIndex(entry => entry.matches(arr))
+  const deferred = deferredIndex >= 0
+    ? pendingStorageRemoves.splice(deferredIndex, 1)[0]
+    : undefined
+  const commit = () => {
+    for (const k of arr) delete storageData[k]
+    cb?.()
+  }
+  const fail = (reason: unknown) => {
+    if (!cb) throw reason
+    const runtime = chrome.runtime as typeof chrome.runtime & {
+      lastError?: { message: string }
+    }
+    runtime.lastError = {
+      message: reason instanceof Error ? reason.message : String(reason),
+    }
+    try {
+      cb()
+    } finally {
+      runtime.lastError = undefined
+    }
+  }
+  if (deferred) {
+    const completion = deferred.promise.then(commit, fail)
+    return cb ? undefined : completion
+  }
+  for (const k of arr) delete storageData[k]
   if (cb) {
     queueMicrotask(() => cb())
     return undefined
@@ -164,6 +345,98 @@ export function seedStorage(data: Record<string, unknown>): void {
   Object.assign(storageData, data)
 }
 
+export function getStorageSnapshot(): Readonly<Record<string, unknown>> {
+  return structuredClone(storageData)
+}
+
+/**
+ * Emit an explicit chrome.storage.onChanged notification. Storage mocks keep
+ * their historical non-emitting set/remove behavior unless a test calls this
+ * helper, so existing tests remain deterministic.
+ */
+export function emitStorageChanges(
+  changes: { [key: string]: chrome.storage.StorageChange },
+  areaName = 'local',
+): void {
+  if (areaName === 'local') {
+    for (const [key, change] of Object.entries(changes)) {
+      if (change.newValue === undefined) delete storageData[key]
+      else storageData[key] = change.newValue
+    }
+  }
+  for (const listener of [...storageChangeListeners]) {
+    listener(changes, areaName)
+  }
+}
+
+const storageOnChangedAddListener = vi.fn((listener: StorageChangeListener) => {
+  storageChangeListeners.add(listener)
+})
+
+const storageOnChangedRemoveListener = vi.fn((listener: StorageChangeListener) => {
+  storageChangeListeners.delete(listener)
+})
+
+const runtimeOnMessageAddListener = vi.fn((listener: RuntimeMessageListener) => {
+  runtimeMessageListeners.add(listener)
+})
+
+const runtimeOnMessageRemoveListener = vi.fn((listener: RuntimeMessageListener) => {
+  runtimeMessageListeners.delete(listener)
+})
+
+const tabsQuery = vi.fn((
+  _queryInfo: chrome.tabs.QueryInfo,
+  maybeCallback?: (tabs: chrome.tabs.Tab[]) => void,
+) => {
+  const result = activeTabs.map(tab => ({ ...tab })) as chrome.tabs.Tab[]
+  if (maybeCallback) {
+    queueMicrotask(() => maybeCallback(result))
+    return undefined
+  }
+  return Promise.resolve(result)
+})
+
+const tabsSendMessage = vi.fn((
+  tabId: number,
+  message: unknown,
+  optionsOrCallback?: unknown,
+  maybeCallback?: unknown,
+) => {
+  tabMessageLog.push({ tabId, message })
+  const callback = typeof optionsOrCallback === 'function'
+    ? optionsOrCallback as (response?: unknown) => void
+    : typeof maybeCallback === 'function'
+      ? maybeCallback as (response?: unknown) => void
+      : undefined
+  if (callback) {
+    queueMicrotask(() => callback())
+    return undefined
+  }
+  return Promise.resolve(undefined)
+})
+
+export function setActiveTabs(tabs: Array<{ id?: number }>): void {
+  activeTabs = tabs.map(tab => ({ ...tab }))
+}
+
+export function emitRuntimeMessage(message: unknown): void {
+  const sender = { id: 'test-extension' } as chrome.runtime.MessageSender
+  for (const listener of [...runtimeMessageListeners]) {
+    listener(message, sender, vi.fn())
+  }
+}
+
+export function emitTabMessage(tabId: number, message: unknown): void {
+  const sender = {
+    id: 'test-extension',
+    tab: { id: tabId } as chrome.tabs.Tab,
+  } as chrome.runtime.MessageSender
+  for (const listener of [...runtimeMessageListeners]) {
+    listener(message, sender, vi.fn())
+  }
+}
+
 export function installChromeMock(): void {
   ;(globalThis as unknown as { chrome: unknown }).chrome = {
     runtime: {
@@ -172,8 +445,8 @@ export function installChromeMock(): void {
       getURL: (path: string) => `chrome-extension://test/${path}`,
       lastError: undefined,
       onMessage: {
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
+        addListener: runtimeOnMessageAddListener,
+        removeListener: runtimeOnMessageRemoveListener,
       },
     },
     storage: {
@@ -183,16 +456,25 @@ export function installChromeMock(): void {
         remove: storageRemove,
       },
       onChanged: {
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
+        addListener: storageOnChangedAddListener,
+        removeListener: storageOnChangedRemoveListener,
       },
+    },
+    tabs: {
+      query: tabsQuery,
+      sendMessage: tabsSendMessage,
     },
   }
 }
 
 export const chromeMockSpies = {
   sendMessage,
+  runtimeSendMessage: sendMessage,
+  tabsQuery,
+  tabsSendMessage,
   storageGet,
   storageSet,
   storageRemove,
+  storageOnChangedAddListener,
+  storageOnChangedRemoveListener,
 }

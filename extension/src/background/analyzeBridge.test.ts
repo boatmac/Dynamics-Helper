@@ -1,251 +1,1206 @@
-// Tests for the Service Worker analyze persistence bridge.
-//
-// Maps to spec invariants P-I1..P-I4 in
-// docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md § 5.
-//
-// Strategy: handleAnalyzeForward is a pure async function with injected
-// `send`. We can assert (a) what lands in chrome.storage.local at each
-// stage and (b) the call ordering between persistence writes and the
-// underlying RPC using vitest's mock.invocationCallOrder.
-//
-// Why not test serviceWorker.ts directly: SW has top-level side effects
-// (setupContextMenu, ApplicationInsights init, native port connect) that
-// make import-for-test brittle. The bridge is the smallest unit that
-// captures the persistence contract.
-
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+    chromeMockSpies,
+    deferNextStorageGet,
+    deferNextStorageRemove,
+    deferNextStorageSet,
+    getStorageSnapshot,
     installChromeMock,
     resetChromeMock,
-    chromeMockSpies,
 } from '../test/chromeMock'
-import { handleAnalyzeForward } from './analyzeBridge'
-import type { AnalyzePersistContext } from '../utils/analysisStore'
+import {
+    ANALYSIS_PERSISTENCE_WARNING_ORDER,
+    type AnalysisPersistenceWarning,
+    type AnalyzeCompletion,
+    type AnalyzePersistContext,
+} from '../utils/analysisStore'
+import {
+    handleAnalyzeForward,
+    isAnalyzePayload,
+    normalizeAnalyzeHostOutcome,
+    parseAnalyzeForwardRequest,
+    parseAnalyzeForwardResult,
+    parseAnalyzePersistContext,
+    parseAnalyzeSuccess,
+    type AnalyzeNativeAction,
+    type AnalyzeNativePayload,
+} from './analyzeBridge'
 
 installChromeMock()
 
 const CTX: AnalyzePersistContext = {
     caseNumber: '1234567890123456',
-    requestId: 'req-A',
-    successTitle: '🤖 Copilot Analyze',
-    errorTitle: '❌ Analysis Failed',
+    requestId: 'request-1',
+    successTitle: 'Analyze result',
+    errorTitle: 'Analyze failed',
 }
 
-function makeHostSuccess() {
-    // Outer host wrapper { status, data } where data is the inner
-    // handle_analyze_error return { status, data: { markdown, saved_to } }
-    return {
+const HOST_PAYLOAD: AnalyzeNativePayload = {
+    text: 'full context',
+    context: 'Case form',
+    timestamp: '7/21/2026, 10:00:00 AM',
+    rootPath: '',
+    product: 'Dynamics 365',
+    caseNumber: '1234567890123456',
+}
+
+const FORWARDED: AnalyzeNativeAction = {
+    action: 'analyze_error',
+    requestId: CTX.requestId,
+    payload: HOST_PAYLOAD,
+}
+
+const HOST_SUCCESS = {
+    status: 'success',
+    data: {
         status: 'success',
-        data: {
-            status: 'success',
-            data: {
-                markdown: '# Report\nBody',
-                saved_to: 'C:\\path\\dh_case_report.md',
-                session_name: 'co-1234567890123456',
-            },
+        data: { markdown: '# Report', saved_to: 'report.md', ignored: 'drop' },
+    },
+} as const
+
+const HOST_ERROR = {
+    status: 'success',
+    data: {
+        status: 'error',
+        error: 'Host analysis failed',
+        error_code: 'repository_instructions_missing',
+        errorKind: 'unavailable',
+        httpStatus: 503,
+        ignored: 'drop',
+    },
+} as const
+
+const INVALID_PARSE = {
+    ok: false,
+    response: {
+        status: 'error',
+        error_code: 'invalid_analyze_persistence_context',
+        error: 'Analyze persistence context is invalid.',
+    },
+} as const
+
+const MALFORMED = {
+    status: 'error',
+    error_code: 'malformed_native_response',
+    error: 'The Native Host returned a malformed Analyze response.',
+} as const
+
+const START_FAILED = {
+    status: 'error',
+    error_code: 'analysis_persistence_start_failed',
+    error: 'Analyze persistence could not be started.',
+} as const
+
+function validAnalyzePayload(): Record<string, unknown> {
+    return {
+        action: 'analyze_error',
+        requestId: 'request-1',
+        payload: { ...HOST_PAYLOAD },
+        _persist: {
+            caseNumber: '1234567890123456',
+            successTitle: 'Analyze result',
+            errorTitle: 'Analyze failed',
         },
     }
 }
 
-function makeHostError(msg: string) {
-    return {
-        status: 'success',
-        data: { status: 'error', error: msg },
-    }
+function assertInvalid(value: unknown): void {
+    expect(parseAnalyzeForwardRequest(value)).toEqual(INVALID_PARSE)
 }
 
-async function readStorage(key: string): Promise<any> {
-    const out = await chrome.storage.local.get(key)
-    return out[key]
-}
-
-describe('handleAnalyzeForward — SW persistence bridge', () => {
+describe('Analyze request parsing', () => {
     beforeEach(() => {
         resetChromeMock()
     })
 
-    afterEach(() => {
-        vi.useRealTimers()
-    })
-
-    // P-I1: pending marker is written BEFORE the host RPC fires.
-    it('P-I1: writes dh_pending_analysis before invoking send()', async () => {
-        const orderLog: string[] = []
-        const send = vi.fn(async (_payload) => {
-            orderLog.push('send')
-            return makeHostSuccess()
+    it('constructs an exact fresh frozen action and context', () => {
+        const symbol = Symbol('attacker')
+        const raw = validAnalyzePayload()
+        raw.requestId = ' top-level '
+        Object.defineProperties(raw, {
+            type: { value: 'NATIVE_MSG', enumerable: true },
+            extension_warnings: { value: ['secret'], enumerable: true },
+            arbitrary: { value: 'drop', enumerable: true },
+            [symbol]: { value: 'drop', enumerable: true },
+        })
+        Object.defineProperty(raw, '__proto__', {
+            value: { polluted: true },
+            enumerable: true,
         })
 
-        // Wrap storageSet to log when the pending key lands.
-        const originalSet = chromeMockSpies.storageSet.getMockImplementation()!
-        chromeMockSpies.storageSet.mockImplementation((items: any, cb?: any) => {
-            if (items && 'dh_pending_analysis' in items) {
-                orderLog.push('pending_set')
+        const parsed = parseAnalyzeForwardRequest(raw)
+
+        expect(parsed.ok).toBe(true)
+        if (!parsed.ok) throw new Error('Expected valid Analyze request')
+        expect(parsed.forwarded).toEqual({
+            action: 'analyze_error',
+            requestId: ' top-level ',
+            payload: HOST_PAYLOAD,
+        })
+        expect(parsed.context).toEqual({ ...CTX, requestId: ' top-level ' })
+        expect(Object.isFrozen(parsed.forwarded)).toBe(true)
+        expect(Object.isFrozen(parsed.forwarded.payload)).toBe(true)
+        expect(Object.isFrozen(parsed.context)).toBe(true)
+        expect(Object.getPrototypeOf(parsed.forwarded)).toBe(Object.prototype)
+        expect(Object.getPrototypeOf(parsed.forwarded.payload)).toBe(Object.prototype)
+        expect(Reflect.ownKeys(parsed.forwarded)).toEqual([
+            'action', 'requestId', 'payload',
+        ])
+        expect(Object.keys(parsed.forwarded.payload)).toEqual([
+            'text', 'context', 'timestamp', 'rootPath', 'product', 'caseNumber',
+        ])
+        expect(Reflect.ownKeys(parsed.forwarded.payload)).toEqual([
+            'text', 'context', 'timestamp', 'rootPath', 'product', 'caseNumber',
+            'toJSON',
+        ])
+        expect(Object.getOwnPropertyDescriptor(
+            parsed.forwarded.payload,
+            'toJSON',
+        )).toEqual(expect.objectContaining({
+            value: undefined,
+            enumerable: false,
+        }))
+        expect(Reflect.ownKeys(raw)).toEqual(expect.arrayContaining([
+            'action', 'requestId', 'payload', '_persist', 'type',
+            'extension_warnings', 'arbitrary', '__proto__', symbol,
+        ]))
+        expect(parsed.forwarded).not.toHaveProperty('_persist')
+        expect(parsed.forwarded).not.toHaveProperty('type')
+        expect(parsed.forwarded).not.toHaveProperty('extension_warnings')
+        expect(parsed.forwarded).not.toHaveProperty('arbitrary')
+        expect(Object.getOwnPropertyDescriptor(parsed.forwarded, '__proto__')).toBeUndefined()
+        expect(({} as { polluted?: boolean }).polluted).toBeUndefined()
+    })
+
+    it.each([
+        ['missing requestId', (value: Record<string, unknown>) => { delete value.requestId }],
+        ['empty requestId', (value: Record<string, unknown>) => { value.requestId = '' }],
+        ['number requestId', (value: Record<string, unknown>) => { value.requestId = 7 }],
+        ['missing _persist', (value: Record<string, unknown>) => { delete value._persist }],
+        ['null _persist', (value: Record<string, unknown>) => { value._persist = null }],
+        ['array _persist', (value: Record<string, unknown>) => { value._persist = [] }],
+        ['function _persist', (value: Record<string, unknown>) => { value._persist = () => undefined }],
+        ['number caseNumber', (value: Record<string, unknown>) => {
+            ;(value._persist as Record<string, unknown>).caseNumber = 7
+        }],
+        ['empty successTitle', (value: Record<string, unknown>) => {
+            ;(value._persist as Record<string, unknown>).successTitle = ''
+        }],
+        ['number successTitle', (value: Record<string, unknown>) => {
+            ;(value._persist as Record<string, unknown>).successTitle = 7
+        }],
+        ['empty errorTitle', (value: Record<string, unknown>) => {
+            ;(value._persist as Record<string, unknown>).errorTitle = ''
+        }],
+        ['number errorTitle', (value: Record<string, unknown>) => {
+            ;(value._persist as Record<string, unknown>).errorTitle = 7
+        }],
+        ['only persisted requestId', (value: Record<string, unknown>) => {
+            delete value.requestId
+            ;(value._persist as Record<string, unknown>).requestId = 'fallback'
+        }],
+    ])('rejects malformed persistence metadata: %s', (_name, mutate) => {
+        const value = validAnalyzePayload()
+        mutate(value)
+        assertInvalid(value)
+        expect(chromeMockSpies.storageSet).not.toHaveBeenCalled()
+    })
+
+    it('accepts an empty case number and explicit empty root path', () => {
+        const value = validAnalyzePayload()
+        ;(value._persist as Record<string, unknown>).caseNumber = ''
+        ;(value.payload as Record<string, unknown>).rootPath = ''
+
+        const parsed = parseAnalyzeForwardRequest(value)
+
+        expect(parsed.ok).toBe(true)
+        if (!parsed.ok) throw new Error('Expected valid empty strings')
+        expect(parsed.context.caseNumber).toBe('')
+        expect(parsed.forwarded.payload.rootPath).toBe('')
+    })
+
+    it.each(['text', 'context', 'timestamp', 'rootPath'])(
+        'rejects a missing or non-string required payload %s',
+        key => {
+            for (const malformed of [undefined, null, 7, {}, []]) {
+                const value = validAnalyzePayload()
+                if (malformed === undefined) {
+                    delete (value.payload as Record<string, unknown>)[key]
+                } else {
+                    ;(value.payload as Record<string, unknown>)[key] = malformed
+                }
+                assertInvalid(value)
             }
-            if (items && 'dh_last_analysis' in items) {
-                orderLog.push('last_set')
+        },
+    )
+
+    it.each(['product', 'caseNumber'])(
+        'accepts an absent or string optional payload %s and rejects other present values',
+        key => {
+            const absent = validAnalyzePayload()
+            delete (absent.payload as Record<string, unknown>)[key]
+            expect(parseAnalyzeForwardRequest(absent).ok).toBe(true)
+            const empty = validAnalyzePayload()
+            ;(empty.payload as Record<string, unknown>)[key] = ''
+            expect(parseAnalyzeForwardRequest(empty).ok).toBe(true)
+            for (const malformed of [undefined, null, 7, {}, []]) {
+                const value = validAnalyzePayload()
+                ;(value.payload as Record<string, unknown>)[key] = malformed
+                assertInvalid(value)
             }
-            return originalSet(items, cb)
-        })
+        },
+    )
 
-        await handleAnalyzeForward({ action: 'analyze_error' }, CTX, { send })
-
-        const pendingIdx = orderLog.indexOf('pending_set')
-        const sendIdx = orderLog.indexOf('send')
-        expect(pendingIdx).toBeGreaterThanOrEqual(0)
-        expect(sendIdx).toBeGreaterThanOrEqual(0)
-        expect(pendingIdx).toBeLessThan(sendIdx)
+    it('accepts only absent or exact true rootPathOverrideProvided', () => {
+        const absent = validAnalyzePayload()
+        expect(parseAnalyzeForwardRequest(absent).ok).toBe(true)
+        const present = validAnalyzePayload()
+        ;(present.payload as Record<string, unknown>).rootPathOverrideProvided = true
+        const parsed = parseAnalyzeForwardRequest(present)
+        expect(parsed.ok).toBe(true)
+        if (!parsed.ok) throw new Error('Expected true override')
+        expect(parsed.forwarded.payload.rootPathOverrideProvided).toBe(true)
+        for (const malformed of [false, undefined, null, 'true', 1, {}, []]) {
+            const value = validAnalyzePayload()
+            ;(value.payload as Record<string, unknown>).rootPathOverrideProvided = malformed
+            assertInvalid(value)
+        }
     })
 
-    // P-I2: on success, dh_last_analysis is written AND dh_pending_analysis
-    // is removed (because clearPendingIfMatches sees a matching requestId).
-    it('P-I2: success writes dh_last_analysis and clears dh_pending_analysis', async () => {
-        const send = vi.fn(async () => makeHostSuccess())
-
-        await handleAnalyzeForward({ action: 'analyze_error' }, CTX, { send })
-
-        const last = await readStorage('dh_last_analysis')
-        const pending = await readStorage('dh_pending_analysis')
-
-        expect(last).toMatchObject({
-            caseNumber: CTX.caseNumber,
-            status: 'success',
-            title: CTX.successTitle,
-            content: '# Report\nBody',
-            seen: false,
-            savedTo: 'C:\\path\\dh_case_report.md',
+    it.each([
+        ['requestId', 'top'],
+        ['_persist', 'top'],
+        ['caseNumber', 'persist'],
+        ['successTitle', 'persist'],
+        ['errorTitle', 'persist'],
+        ['text', 'payload'],
+        ['context', 'payload'],
+        ['timestamp', 'payload'],
+        ['rootPath', 'payload'],
+        ['product', 'payload'],
+        ['caseNumber', 'payload'],
+        ['rootPathOverrideProvided', 'payload'],
+    ])('rejects a getter for %s %s without invoking it', (key, location) => {
+        const getter = vi.fn(() => 'SECRET-GETTER')
+        const value = validAnalyzePayload()
+        const target = location === 'top'
+            ? value
+            : location === 'persist'
+                ? value._persist as object
+                : value.payload as object
+        Object.defineProperty(target, key, {
+            get: getter,
+            enumerable: true,
+            configurable: true,
         })
-        expect(typeof last.timestamp).toBe('number')
-        expect(pending).toBeUndefined()
+
+        assertInvalid(value)
+        expect(getter).not.toHaveBeenCalled()
     })
 
-    // P-I3: host returned {status: 'error', error: '...'} → recorded as
-    // error with content === error message verbatim.
-    it('P-I3: host error writes dh_last_analysis with status=error and content=host message', async () => {
-        const send = vi.fn(async () =>
-            makeHostError('Copilot request timed out after 600.0 seconds.'),
-        )
-
-        await handleAnalyzeForward({ action: 'analyze_error' }, CTX, { send })
-
-        const last = await readStorage('dh_last_analysis')
-        expect(last).toMatchObject({
-            caseNumber: CTX.caseNumber,
-            status: 'error',
-            title: CTX.errorTitle,
-            content: 'Copilot request timed out after 600.0 seconds.',
-            seen: false,
-        })
-        expect(await readStorage('dh_pending_analysis')).toBeUndefined()
+    it('contains throwing descriptor proxies without conversion or logging', () => {
+        const secret = 'SECRET-DESCRIPTOR-PROXY'
+        const toJSON = vi.fn(() => { throw new Error(secret) })
+        const toString = vi.fn(() => { throw new Error(secret) })
+        const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
+        const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+        const ownKeys = vi.fn(() => { throw { secret, toJSON, toString } })
+        const descriptors = vi.fn(() => { throw { secret, toJSON, toString } })
+        const values = [
+            new Proxy(validAnalyzePayload(), { ownKeys }),
+            new Proxy(validAnalyzePayload(), {
+                getOwnPropertyDescriptor: descriptors,
+            }),
+        ]
+        try {
+            for (const value of values) assertInvalid(value)
+            expect(ownKeys).toHaveBeenCalledTimes(1)
+            expect(descriptors).toHaveBeenCalledTimes(1)
+            expect(toJSON).not.toHaveBeenCalled()
+            expect(toString).not.toHaveBeenCalled()
+            expect(JSON.stringify([
+                ...consoleLog.mock.calls,
+                ...consoleWarn.mock.calls,
+                ...consoleError.mock.calls,
+            ])).not.toContain(secret)
+        } finally {
+            consoleLog.mockRestore()
+            consoleWarn.mockRestore()
+            consoleError.mockRestore()
+        }
     })
 
-    // P-I4: send() rejection (e.g., native port disconnected) recorded as
-    // error with content === exception message; pending cleared; throw
-    // re-propagated so SW can still sendResponse the failure to FAB.
-    it('P-I4: send rejection writes dh_last_analysis with status=error and rethrows', async () => {
-        const send = vi.fn(async () => {
-            throw new Error('Native Host disconnected unexpectedly')
-        })
-
-        await expect(
-            handleAnalyzeForward({ action: 'analyze_error' }, CTX, { send }),
-        ).rejects.toThrow('Native Host disconnected unexpectedly')
-
-        const last = await readStorage('dh_last_analysis')
-        expect(last).toMatchObject({
-            caseNumber: CTX.caseNumber,
-            status: 'error',
-            title: CTX.errorTitle,
-            content: 'Native Host disconnected unexpectedly',
-            seen: false,
-        })
-        expect(await readStorage('dh_pending_analysis')).toBeUndefined()
+    it('rejects outer and nested runtime wrappers', () => {
+        assertInvalid({ type: 'NATIVE_MSG', payload: validAnalyzePayload() })
+        const nested = validAnalyzePayload()
+        nested.payload = { type: 'NATIVE_MSG', payload: { ...HOST_PAYLOAD } }
+        assertInvalid(nested)
     })
 
-    // Edge case 6.3: A's late response must not wipe B's pending.
-    // Simulated by setting a pending marker for a different requestId
-    // before A's response is recorded. The clearPendingIfMatches guard
-    // should leave B's marker intact.
-    it('edge 6.3: late response does not clear newer pending with different requestId', async () => {
-        // B's pending arrives first (simulating user navigated to case B
-        // and started a new analysis while A was still in flight).
-        await chrome.storage.local.set({
-            dh_pending_analysis: {
-                caseNumber: '9999999999999999',
-                requestId: 'req-B',
-                startTime: Date.now(),
+    it.each(['unknown', 'type', 'extension_warnings', '__proto__'])(
+        'rejects unknown payload key %s without pollution',
+        key => {
+            const value = validAnalyzePayload()
+            Object.defineProperty(value.payload, key, {
+                value: key === '__proto__' ? { polluted: true } : 'secret',
+                enumerable: true,
+                configurable: true,
+            })
+            assertInvalid(value)
+            expect(({} as { polluted?: boolean }).polluted).toBeUndefined()
+        },
+    )
+
+    it('rejects a payload symbol', () => {
+        const value = validAnalyzePayload()
+        Object.defineProperty(value.payload, Symbol('secret'), {
+            value: 'secret',
+            enumerable: true,
+        })
+        assertInvalid(value)
+    })
+
+    it('rejects arrays and revoked or throwing payload proxies', () => {
+        const revoked = Proxy.revocable({ ...HOST_PAYLOAD }, {})
+        revoked.revoke()
+        const values: unknown[] = [
+            [],
+            revoked.proxy,
+            new Proxy({ ...HOST_PAYLOAD }, {
+                ownKeys() { throw new Error('SECRET-OWN-KEYS') },
+            }),
+            new Proxy({ ...HOST_PAYLOAD }, {
+                getOwnPropertyDescriptor() {
+                    throw new Error('SECRET-DESCRIPTOR')
+                },
+            }),
+        ]
+        for (const payload of values) {
+            const value = validAnalyzePayload()
+            value.payload = payload
+            assertInvalid(value)
+        }
+        expect(({} as { polluted?: boolean }).polluted).toBeUndefined()
+    })
+
+    it('uses one request descriptor snapshot for context and action', () => {
+        const source = validAnalyzePayload()
+        const ownKeys = vi.fn(() => Reflect.ownKeys(source))
+        const descriptors = new Map<PropertyKey, number>()
+        const proxy = new Proxy(source, {
+            ownKeys,
+            getOwnPropertyDescriptor(target, key) {
+                descriptors.set(key, (descriptors.get(key) ?? 0) + 1)
+                return Reflect.getOwnPropertyDescriptor(target, key)
             },
         })
 
-        const send = vi.fn(async () => makeHostSuccess())
-
-        // Now A's response lands. A's recordAnalyzeStart will overwrite
-        // B's pending — that's actually a known limitation (single-slot
-        // pending) but the *clear-after-success* must not fire on B.
-        // To isolate the clear behavior, call recordAnalyzeSuccess
-        // directly via the bridge but skip recordAnalyzeStart by
-        // pre-faking that A never wrote pending. We do that by passing
-        // a tweaked bridge call... actually the cleanest test is:
-        // - set B's pending
-        // - call handleAnalyzeForward for A; recordAnalyzeStart will
-        //   overwrite to A's pending (single-slot reality)
-        // - manually re-set B's pending after recordAnalyzeStart but
-        //   before send resolves — we can't easily intercept that timing
-        //   without a deferred mock.
-        // Simpler: assert the clearPendingIfMatches helper isolation
-        // by faking the SW path that skips recordAnalyzeStart. The
-        // bridge function calls clearPendingIfMatches(ctx.requestId)
-        // which only removes the marker if requestId matches. So:
-        //   set B's pending, run a success bridge call for A's ctx,
-        //   the post-success clear sees pending.requestId='req-B' !==
-        //   ctx.requestId='req-A' → leaves B in place.
-        // BUT recordAnalyzeStart at the top overwrites pending with A's
-        // requestId, defeating the test. Reorder: use a custom send
-        // that re-injects B's pending after start fired but before it
-        // resolves.
-        const sendWithReinjection = vi.fn(async () => {
-            await chrome.storage.local.set({
-                dh_pending_analysis: {
-                    caseNumber: '9999999999999999',
-                    requestId: 'req-B',
-                    startTime: Date.now(),
-                },
-            })
-            return makeHostSuccess()
-        })
-
-        await handleAnalyzeForward(
-            { action: 'analyze_error' },
-            CTX,
-            { send: sendWithReinjection },
-        )
-
-        // After: dh_last_analysis is A's success, dh_pending_analysis
-        // is still B's marker (clearPendingIfMatches saw 'req-B' !==
-        // 'req-A' and left it alone).
-        const last = await readStorage('dh_last_analysis')
-        const pending = await readStorage('dh_pending_analysis')
-        expect(last.caseNumber).toBe(CTX.caseNumber)
-        expect(pending).toMatchObject({
-            caseNumber: '9999999999999999',
-            requestId: 'req-B',
-        })
-        // Silence unused-mock warnings.
-        void send
+        expect(parseAnalyzeForwardRequest(proxy).ok).toBe(true)
+        expect(ownKeys).toHaveBeenCalledTimes(1)
+        for (const count of descriptors.values()) expect(count).toBe(1)
     })
 
-    // Smoke: non-analyze actions bypass persistence entirely.
-    it('passes through when ctx is null (non-analyze message)', async () => {
-        const send = vi.fn(async () => ({ status: 'success', data: 'ok' }))
+    it('parses context independently without reading persisted requestId', () => {
+        const value = validAnalyzePayload()
+        const getter = vi.fn(() => 'persisted-fallback')
+        Object.defineProperty(value._persist, 'requestId', {
+            get: getter,
+            enumerable: true,
+        })
 
-        const out = await handleAnalyzeForward(
-            { action: 'get_config' },
-            null,
-            { send },
+        expect(parseAnalyzePersistContext(value)).toEqual(CTX)
+        expect(getter).not.toHaveBeenCalled()
+    })
+
+    it('classifies Analyze without invoking action accessors', () => {
+        expect(isAnalyzePayload({ action: 'analyze_error' })).toBe(true)
+        expect(isAnalyzePayload({ action: 'ping' })).toBe(false)
+        expect(isAnalyzePayload({ action: new String('analyze_error') })).toBe(false)
+        const getter = vi.fn(() => 'analyze_error')
+        const value = {}
+        Object.defineProperty(value, 'action', { get: getter })
+        expect(isAnalyzePayload(value)).toBe(false)
+        expect(getter).not.toHaveBeenCalled()
+    })
+})
+
+describe('strict Analyze Host outcome parsing', () => {
+    beforeEach(() => {
+        resetChromeMock()
+    })
+
+    it('normalizes an exact Analyze success and drops extra fields', () => {
+        expect(normalizeAnalyzeHostOutcome(HOST_SUCCESS)).toEqual({
+            status: 'success',
+            data: { markdown: '# Report', saved_to: 'report.md' },
+        })
+        expect(parseAnalyzeSuccess({ markdown: '# Report' })).toEqual({
+            markdown: '# Report',
+        })
+        expect(parseAnalyzeSuccess({
+            markdown: '# Report',
+            saved_to: 'report.md',
+            ignored: 'drop',
+        })).toEqual({ markdown: '# Report', savedTo: 'report.md' })
+    })
+
+    it.each([
+        null,
+        [],
+        {},
+        { markdown: 7 },
+        { markdown: '# Report', saved_to: null },
+        { markdown: '# Report', saved_to: 7 },
+    ])('rejects malformed Analyze success data %#', value => {
+        expect(parseAnalyzeSuccess(value)).toBeNull()
+        expect(normalizeAnalyzeHostOutcome({
+            status: 'success',
+            data: { status: 'success', data: value },
+        })).toEqual(MALFORMED)
+    })
+
+    it('normalizes safe inner and outer Host errors', () => {
+        expect(normalizeAnalyzeHostOutcome(HOST_ERROR)).toEqual({
+            status: 'error',
+            error: 'Host analysis failed',
+            error_code: 'repository_instructions_missing',
+            errorKind: 'unavailable',
+            httpStatus: 503,
+        })
+        expect(normalizeAnalyzeHostOutcome({
+            status: 'error',
+            error: { unsafe: true },
+            message: 'Safe outer message',
+            error_code: 'future_code',
+            errorKind: 'unknown',
+            httpStatus: 401,
+            ignored: 'drop',
+        })).toEqual({
+            status: 'error',
+            error: 'Safe outer message',
+            error_code: 'future_code',
+            errorKind: 'unknown',
+            httpStatus: 401,
+        })
+    })
+
+    it('validates normalized success, error, and ordered warning subsets', () => {
+        const success = {
+            status: 'success',
+            data: { markdown: '# Report', saved_to: 'report.md', ignored: 'drop' },
+            extension_warnings: ['analysis_result_not_persisted'],
+            ignored: 'drop',
+        }
+        const parsedSuccess = parseAnalyzeForwardResult(success)
+        expect(parsedSuccess).toEqual({
+            status: 'success',
+            data: { markdown: '# Report', saved_to: 'report.md' },
+            extension_warnings: ['analysis_result_not_persisted'],
+        })
+        expect(parsedSuccess).not.toBe(success)
+        expect(Object.getPrototypeOf(parsedSuccess)).toBe(Object.prototype)
+
+        expect(parseAnalyzeForwardResult({
+            status: 'error',
+            error: 'Safe failure',
+            error_code: 'future_code',
+            errorKind: 'auth',
+            httpStatus: 401,
+            extension_warnings: [
+                'analysis_result_not_persisted',
+                'analysis_pending_cleanup_failed',
+            ],
+            ignored: 'drop',
+        })).toEqual({
+            status: 'error',
+            error: 'Safe failure',
+            error_code: 'future_code',
+            errorKind: 'auth',
+            httpStatus: 401,
+            extension_warnings: [
+                'analysis_result_not_persisted',
+                'analysis_pending_cleanup_failed',
+            ],
+        })
+    })
+
+    it('rejects oversized sparse warning arrays before iteration', () => {
+        const secret = 'SECRET-OVERSIZED-WARNING'
+        const getter = vi.fn(() => secret)
+        const toJSON = vi.fn(() => { throw new Error(secret) })
+        const toString = vi.fn(() => { throw new Error(secret) })
+        const warnings: unknown[] = []
+        Object.defineProperty(warnings, '0', {
+            get: getter,
+            enumerable: true,
+            configurable: true,
+        })
+        warnings.length = 0xffffffff
+
+        const NativeSet = Set
+        let setAdditions = 0
+        class GuardedSet<T> extends NativeSet<T> {
+            override add(value: T): this {
+                setAdditions += 1
+                if (setAdditions > ANALYSIS_PERSISTENCE_WARNING_ORDER.length + 1) {
+                    throw new Error(secret)
+                }
+                return super.add(value)
+            }
+        }
+        const descriptorKeys: PropertyKey[] = []
+        const nativeGetOwnPropertyDescriptor = Reflect.getOwnPropertyDescriptor
+        const descriptorSpy = vi.spyOn(Reflect, 'getOwnPropertyDescriptor')
+            .mockImplementation((target, key) => {
+                descriptorKeys.push(key)
+                return nativeGetOwnPropertyDescriptor(target, key)
+            })
+        const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
+        const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.stubGlobal('Set', GuardedSet)
+        let result: ReturnType<typeof parseAnalyzeForwardResult>
+        try {
+            result = parseAnalyzeForwardResult({
+                status: 'success',
+                data: { markdown: '# Report' },
+                extension_warnings: warnings,
+                unsafe: { secret, toJSON, toString },
+            })
+        } finally {
+            vi.unstubAllGlobals()
+            descriptorSpy.mockRestore()
+            consoleLog.mockRestore()
+            consoleWarn.mockRestore()
+            consoleError.mockRestore()
+        }
+
+        expect(result).toEqual(MALFORMED)
+        expect(setAdditions).toBe(0)
+        expect(descriptorKeys).toEqual(['length'])
+        expect(descriptorKeys.filter(key => (
+            typeof key === 'string' && /^\d+$/.test(key)
+        ))).toEqual([])
+        expect(getter).not.toHaveBeenCalled()
+        expect(toJSON).not.toHaveBeenCalled()
+        expect(toString).not.toHaveBeenCalled()
+        expect(JSON.stringify(result)).not.toContain(secret)
+        expect(JSON.stringify([
+            ...consoleLog.mock.calls,
+            ...consoleWarn.mock.calls,
+            ...consoleError.mock.calls,
+        ])).not.toContain(secret)
+    })
+
+    it.each([
+        null,
+        [],
+        {},
+        { status: 'success' },
+        { status: 'success', data: null },
+        { status: 'success', data: {} },
+        { status: 'success', data: { markdown: 7 } },
+        { status: 'success', data: { markdown: '', saved_to: null } },
+        { status: 'error', error: 7 },
+        { status: 'error', error: 'x', error_code: 7 },
+        { status: 'error', error: 'x', errorKind: 7 },
+        { status: 'error', error: 'x', httpStatus: Number.POSITIVE_INFINITY },
+        { status: 'success', data: { markdown: '' }, extension_warnings: 'bad' },
+        { status: 'success', data: { markdown: '' }, extension_warnings: ['unknown'] },
+        {
+            status: 'success',
+            data: { markdown: '' },
+            extension_warnings: [
+                'analysis_pending_cleanup_failed',
+                'analysis_result_not_persisted',
+            ],
+        },
+        {
+            status: 'success',
+            data: { markdown: '' },
+            extension_warnings: [
+                'analysis_result_not_persisted',
+                'analysis_result_not_persisted',
+            ],
+        },
+    ])('returns the fixed malformed response for invalid normalized input %#', value => {
+        expect(parseAnalyzeForwardResult(value)).toEqual(MALFORMED)
+    })
+
+    it('contains accessors and revoked proxies at each accepted layer', () => {
+        const getter = vi.fn(() => 'secret')
+        const accessor = {}
+        Object.defineProperty(accessor, 'status', { get: getter, enumerable: true })
+        const revokedTop = Proxy.revocable({ status: 'success' }, {})
+        const revokedData = Proxy.revocable({ markdown: '# Report' }, {})
+        revokedTop.revoke()
+        revokedData.revoke()
+
+        expect(normalizeAnalyzeHostOutcome(accessor)).toEqual(MALFORMED)
+        expect(normalizeAnalyzeHostOutcome(revokedTop.proxy)).toEqual(MALFORMED)
+        expect(parseAnalyzeForwardResult(revokedTop.proxy)).toEqual(MALFORMED)
+        expect(parseAnalyzeForwardResult({
+            status: 'success',
+            data: revokedData.proxy,
+        })).toEqual(MALFORMED)
+        expect(getter).not.toHaveBeenCalled()
+    })
+
+    it('never coerces, serializes, logs, stores, or returns malformed secrets', () => {
+        const secret = 'SECRET-MALFORMED-ANALYZE'
+        const toJSON = vi.fn(() => { throw new Error(secret) })
+        const toString = vi.fn(() => { throw new Error(secret) })
+        const unsafe = { secret, toJSON, toString }
+        const consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
+        const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+        try {
+            const result = normalizeAnalyzeHostOutcome({
+                status: 'success',
+                data: { status: 'success', data: { markdown: unsafe } },
+            })
+            expect(result).toEqual(MALFORMED)
+            expect(result).not.toHaveProperty('secret')
+            expect(JSON.stringify(getStorageSnapshot())).not.toContain(secret)
+            expect(toJSON).not.toHaveBeenCalled()
+            expect(toString).not.toHaveBeenCalled()
+            expect(JSON.stringify([
+                ...consoleLog.mock.calls,
+                ...consoleWarn.mock.calls,
+                ...consoleError.mock.calls,
+            ])).not.toContain(secret)
+            expect(chromeMockSpies.storageSet).not.toHaveBeenCalled()
+        } finally {
+            consoleLog.mockRestore()
+            consoleWarn.mockRestore()
+            consoleError.mockRestore()
+        }
+    })
+})
+
+describe('handleAnalyzeForward persistence outcomes', () => {
+    beforeEach(() => {
+        resetChromeMock()
+    })
+
+    it('revalidates direct context before start or send', async () => {
+        const send = vi.fn()
+        const recordStart = vi.fn()
+        const completePersistence = vi.fn()
+
+        await expect(handleAnalyzeForward(FORWARDED, {
+            ...CTX,
+            requestId: '',
+        }, { send, recordStart, completePersistence })).resolves.toEqual(
+            INVALID_PARSE.response,
         )
+        expect(recordStart).not.toHaveBeenCalled()
+        expect(send).not.toHaveBeenCalled()
+        expect(completePersistence).not.toHaveBeenCalled()
+    })
 
-        expect(out).toEqual({ status: 'success', data: 'ok' })
-        expect(await readStorage('dh_pending_analysis')).toBeUndefined()
-        expect(await readStorage('dh_last_analysis')).toBeUndefined()
+    it('returns start failure before Host send for injected rejection', async () => {
+        const send = vi.fn()
+        const completePersistence = vi.fn()
+
+        await expect(handleAnalyzeForward(FORWARDED, CTX, {
+            send,
+            recordStart: vi.fn(async () => { throw new Error('SECRET START') }),
+            completePersistence,
+        })).resolves.toEqual(START_FAILED)
+        expect(send).not.toHaveBeenCalled()
+        expect(completePersistence).not.toHaveBeenCalled()
+    })
+
+    it('returns start failure before Host send for callback lastError', async () => {
+        const write = deferNextStorageSet('dh_latest_analysis_owner')
+        const send = vi.fn()
+        const result = handleAnalyzeForward(FORWARDED, CTX, { send })
+        await vi.waitFor(() => expect(chromeMockSpies.storageSet).toHaveBeenCalledOnce())
+        write.reject(new Error('SECRET START WRITE'))
+
+        await expect(result).resolves.toEqual(START_FAILED)
+        expect(send).not.toHaveBeenCalled()
+    })
+
+    it('normalizes before completion and omits an empty warning array', async () => {
+        const completePersistence = vi.fn(async () => [])
+        const send = vi.fn(async (_forwarded: AnalyzeNativeAction) => HOST_SUCCESS)
+
+        const result = await handleAnalyzeForward(FORWARDED, CTX, {
+            send,
+            recordStart: vi.fn(async () => undefined),
+            completePersistence,
+        })
+
+        expect(result).toEqual({
+            status: 'success',
+            data: { markdown: '# Report', saved_to: 'report.md' },
+        })
+        expect(completePersistence).toHaveBeenCalledWith(
+            CTX,
+            { status: 'success', markdown: '# Report', savedTo: 'report.md' },
+            undefined,
+        )
+        expect(send).toHaveBeenCalledWith(FORWARDED)
+        expect(send.mock.calls[0][0]).not.toHaveProperty('extension_warnings')
+    })
+
+    it('preserves every Host outcome across the persistence failure matrix', async () => {
+        const outcomes = [
+            {
+                name: 'success',
+                send: async () => HOST_SUCCESS,
+                expected: {
+                    status: 'success',
+                    data: { markdown: '# Report', saved_to: 'report.md' },
+                },
+            },
+            {
+                name: 'Host error',
+                send: async () => HOST_ERROR,
+                expected: {
+                    status: 'error',
+                    error: 'Host analysis failed',
+                    error_code: 'repository_instructions_missing',
+                    errorKind: 'unavailable',
+                    httpStatus: 503,
+                },
+            },
+            {
+                name: 'send rejection',
+                send: async () => {
+                    throw new Error('Native Host disconnected unexpectedly')
+                },
+                expected: {
+                    status: 'error',
+                    error: 'Native Host disconnected unexpectedly',
+                },
+            },
+        ] as const
+        const failures: ReadonlyArray<{
+            name: string
+            warnings: AnalysisPersistenceWarning[]
+        }> = [
+            { name: 'none', warnings: [] },
+            {
+                name: 'result-only',
+                warnings: ['analysis_result_not_persisted'],
+            },
+            {
+                name: 'cleanup-only',
+                warnings: ['analysis_pending_cleanup_failed'],
+            },
+            {
+                name: 'both',
+                warnings: [
+                    'analysis_result_not_persisted',
+                    'analysis_pending_cleanup_failed',
+                ],
+            },
+        ]
+
+        for (const outcome of outcomes) {
+            for (const failure of failures) {
+                const result = await handleAnalyzeForward(FORWARDED, CTX, {
+                    send: vi.fn(outcome.send),
+                    recordStart: vi.fn(async () => undefined),
+                    completePersistence: vi.fn(async () => [...failure.warnings]),
+                })
+                const expected = {
+                    ...outcome.expected,
+                    ...(failure.warnings.length > 0
+                        ? { extension_warnings: failure.warnings }
+                        : {}),
+                }
+                expect(
+                    result,
+                    `${outcome.name} with ${failure.name} persistence failure`,
+                ).toEqual(expected)
+                if (failure.warnings.length === 0) {
+                    expect(result).not.toHaveProperty('extension_warnings')
+                } else {
+                    expect(result.extension_warnings).toEqual(failure.warnings)
+                }
+            }
+        }
+    })
+
+    it('preserves every Host outcome across real persistence failures', async () => {
+        const outcomes = [
+            {
+                name: 'success',
+                send: async () => HOST_SUCCESS,
+                expected: {
+                    status: 'success',
+                    data: { markdown: '# Report', saved_to: 'report.md' },
+                },
+            },
+            {
+                name: 'Host error',
+                send: async () => HOST_ERROR,
+                expected: {
+                    status: 'error',
+                    error: 'Host analysis failed',
+                    error_code: 'repository_instructions_missing',
+                    errorKind: 'unavailable',
+                    httpStatus: 503,
+                },
+            },
+            {
+                name: 'send rejection',
+                send: async () => {
+                    throw new Error('Native Host disconnected unexpectedly')
+                },
+                expected: {
+                    status: 'error',
+                    error: 'Native Host disconnected unexpectedly',
+                },
+            },
+        ] as const
+        const failures = [
+            {
+                name: 'result-only',
+                result: true,
+                cleanup: false,
+                warnings: [
+                    'analysis_result_not_persisted',
+                ] satisfies AnalysisPersistenceWarning[],
+            },
+            {
+                name: 'cleanup-only',
+                result: false,
+                cleanup: true,
+                warnings: [
+                    'analysis_pending_cleanup_failed',
+                ] satisfies AnalysisPersistenceWarning[],
+            },
+            {
+                name: 'both',
+                result: true,
+                cleanup: true,
+                warnings: [
+                    'analysis_result_not_persisted',
+                    'analysis_pending_cleanup_failed',
+                ] satisfies AnalysisPersistenceWarning[],
+            },
+        ] as const
+
+        for (const outcome of outcomes) {
+            for (const failure of failures) {
+                resetChromeMock()
+                const resultWrite = failure.result
+                    ? deferNextStorageSet('dh_last_analysis')
+                    : null
+                const cleanupRemoves = failure.cleanup
+                    ? [
+                          deferNextStorageRemove(
+                              'dh_pending_analysis:request-1',
+                          ),
+                          deferNextStorageRemove(
+                              'dh_pending_analysis:request-1',
+                          ),
+                          deferNextStorageRemove(
+                              'dh_pending_analysis:request-1',
+                          ),
+                      ]
+                    : []
+                const delays: number[] = []
+                const cleanupAttempts: number[] = []
+                const send = vi.fn(outcome.send)
+                const running = handleAnalyzeForward(FORWARDED, CTX, {
+                    send,
+                    persistence: {
+                        now: () => 10,
+                        delay: async milliseconds => {
+                            delays.push(milliseconds)
+                        },
+                        logCleanupFailure: attempt => {
+                            cleanupAttempts.push(attempt)
+                        },
+                    },
+                })
+
+                if (resultWrite) {
+                    await vi.waitFor(() => expect(chromeMockSpies.storageSet)
+                        .toHaveBeenCalledTimes(2))
+                    resultWrite.reject(new Error(
+                        `SECRET ${outcome.name} RESULT WRITE`,
+                    ))
+                }
+                for (let index = 0; index < cleanupRemoves.length; index += 1) {
+                    await vi.waitFor(() => expect(chromeMockSpies.storageRemove)
+                        .toHaveBeenCalledTimes(index + 1))
+                    cleanupRemoves[index].reject(new Error(
+                        `SECRET ${outcome.name} CLEANUP ${index + 1}`,
+                    ))
+                }
+
+                await expect(
+                    running,
+                    `${outcome.name} with ${failure.name} persistence failure`,
+                ).resolves.toEqual({
+                    ...outcome.expected,
+                    extension_warnings: failure.warnings,
+                })
+                expect(send).toHaveBeenCalledTimes(1)
+                expect(send).toHaveBeenCalledWith(FORWARDED)
+                expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(2)
+                expect(chromeMockSpies.storageGet).toHaveBeenCalledTimes(
+                    failure.cleanup ? 4 : 2,
+                )
+                expect(chromeMockSpies.storageRemove).toHaveBeenCalledTimes(
+                    failure.cleanup ? 3 : 1,
+                )
+                expect(delays).toEqual(failure.cleanup ? [50, 200] : [])
+                expect(cleanupAttempts).toEqual(
+                    failure.cleanup ? [1, 2, 3] : [],
+                )
+            }
+        }
+    })
+
+    it.each([
+        ['success', HOST_SUCCESS, {
+            status: 'success',
+            data: { markdown: '# Report', saved_to: 'report.md' },
+        }],
+        ['error', HOST_ERROR, {
+            status: 'error',
+            error: 'Host analysis failed',
+            error_code: 'repository_instructions_missing',
+            errorKind: 'unavailable',
+            httpStatus: 503,
+        }],
+    ])('preserves normalized Host %s while attaching warnings', async (
+        _name,
+        hostOutcome,
+        expected,
+    ) => {
+        const completePersistence = vi.fn(async () => [
+            'analysis_result_not_persisted',
+            'analysis_pending_cleanup_failed',
+        ] satisfies AnalysisPersistenceWarning[])
+
+        const result = await handleAnalyzeForward(FORWARDED, CTX, {
+            send: vi.fn(async () => hostOutcome),
+            recordStart: vi.fn(async () => undefined),
+            completePersistence,
+        })
+
+        expect(result).toEqual({
+            ...expected,
+            extension_warnings: [
+                'analysis_result_not_persisted',
+                'analysis_pending_cleanup_failed',
+            ],
+        })
+    })
+
+    it('normalizes a send rejection, persists it, and attaches cleanup warning', async () => {
+        const completionSeen: AnalyzeCompletion[] = []
+        const completePersistence = vi.fn(async (_context, completion) => {
+            completionSeen.push(completion)
+            return ['analysis_pending_cleanup_failed'] as AnalysisPersistenceWarning[]
+        })
+
+        const result = await handleAnalyzeForward(FORWARDED, CTX, {
+            send: vi.fn(async () => {
+                throw new Error('Native Host disconnected unexpectedly')
+            }),
+            recordStart: vi.fn(async () => undefined),
+            completePersistence,
+        })
+
+        expect(result).toEqual({
+            status: 'error',
+            error: 'Native Host disconnected unexpectedly',
+            extension_warnings: ['analysis_pending_cleanup_failed'],
+        })
+        expect(completionSeen).toEqual([{
+            status: 'error',
+            error: 'Native Host disconnected unexpectedly',
+        }])
+    })
+
+    it('uses a fixed rejection fallback without coercion', async () => {
+        const toString = vi.fn(() => 'SECRET-REJECTION')
+        const rejection = { message: { unsafe: true }, toString }
+
+        const result = await handleAnalyzeForward(FORWARDED, CTX, {
+            send: vi.fn(async () => { throw rejection }),
+            recordStart: vi.fn(async () => undefined),
+            completePersistence: vi.fn(async () => []),
+        })
+
+        expect(result).toEqual({ status: 'error', error: 'Native Host error' })
+        expect(toString).not.toHaveBeenCalled()
+    })
+
+    it.each([
+        ['success', HOST_SUCCESS, {
+            status: 'success',
+            data: { markdown: '# Report', saved_to: 'report.md' },
+        }],
+        ['error', HOST_ERROR, {
+            status: 'error',
+            error: 'Host analysis failed',
+            error_code: 'repository_instructions_missing',
+            errorKind: 'unavailable',
+            httpStatus: 503,
+        }],
+        ['rejection', new Error('Native Host disconnected unexpectedly'), {
+            status: 'error',
+            error: 'Native Host disconnected unexpectedly',
+        }],
+    ])('contains unexpected completion failure after %s', async (
+        kind,
+        outcome,
+        expected,
+    ) => {
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const send = kind === 'rejection'
+            ? vi.fn(async () => { throw outcome })
+            : vi.fn(async () => outcome)
+        try {
+            const result = await handleAnalyzeForward(FORWARDED, CTX, {
+                send,
+                recordStart: vi.fn(async () => undefined),
+                completePersistence: vi.fn(async () => {
+                    throw new Error('SECRET COMPLETION FAILURE')
+                }),
+            })
+            expect(result).toEqual({
+                ...expected,
+                extension_warnings: [
+                    'analysis_result_not_persisted',
+                    'analysis_pending_cleanup_failed',
+                ],
+            })
+            expect(JSON.stringify(warning.mock.calls)).not.toContain('SECRET')
+        } finally {
+            warning.mockRestore()
+        }
+    })
+
+    it('Host success survives result write failure', async () => {
+        const resultWrite = deferNextStorageSet('dh_last_analysis')
+        const running = handleAnalyzeForward(FORWARDED, CTX, {
+            send: vi.fn(async () => HOST_SUCCESS),
+            persistence: {
+                now: () => 10,
+                delay: async () => undefined,
+                logCleanupFailure: () => undefined,
+            },
+        })
+        await vi.waitFor(() => expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(2))
+        resultWrite.reject(new Error('SECRET RESULT WRITE'))
+
+        await expect(running).resolves.toEqual({
+            status: 'success',
+            data: { markdown: '# Report', saved_to: 'report.md' },
+            extension_warnings: ['analysis_result_not_persisted'],
+        })
+    })
+
+    it('Host outcome survives real owner-read failure with pending cleanup', async () => {
+        const ownerRead = deferNextStorageGet('dh_latest_analysis_owner')
+        const firstCleanup = deferNextStorageRemove(
+            'dh_pending_analysis:request-1',
+        )
+        const delays: number[] = []
+        const cleanupAttempts: number[] = []
+        const running = handleAnalyzeForward(FORWARDED, CTX, {
+            send: vi.fn(async () => HOST_SUCCESS),
+            persistence: {
+                now: () => 10,
+                delay: async milliseconds => { delays.push(milliseconds) },
+                logCleanupFailure: attempt => { cleanupAttempts.push(attempt) },
+            },
+        })
+        await vi.waitFor(() => expect(chromeMockSpies.storageGet).toHaveBeenCalledOnce())
+        ownerRead.reject(new Error('SECRET OWNER READ'))
+        await vi.waitFor(() => expect(chromeMockSpies.storageRemove).toHaveBeenCalledOnce())
+        firstCleanup.reject(new Error('SECRET FIRST CLEANUP'))
+
+        const result = await running
+        expect.soft(result).toEqual({
+            status: 'success',
+            data: { markdown: '# Report', saved_to: 'report.md' },
+            extension_warnings: ['analysis_result_not_persisted'],
+        })
+        expect.soft(chromeMockSpies.storageSet).toHaveBeenCalledTimes(1)
+        expect.soft(chromeMockSpies.storageGet).toHaveBeenCalledTimes(3)
+        expect.soft(chromeMockSpies.storageRemove).toHaveBeenCalledTimes(2)
+        expect.soft(delays).toEqual([50])
+        expect.soft(cleanupAttempts).toEqual([1])
+        expect.soft(getStorageSnapshot()).not.toHaveProperty('dh_last_analysis')
+        expect.soft(getStorageSnapshot()).not.toHaveProperty(
+            'dh_pending_analysis:request-1',
+        )
+    })
+
+    it('Host error survives all cleanup failures', async () => {
+        const removes = [
+            deferNextStorageRemove('dh_pending_analysis:request-1'),
+            deferNextStorageRemove('dh_pending_analysis:request-1'),
+            deferNextStorageRemove('dh_pending_analysis:request-1'),
+        ]
+        const running = handleAnalyzeForward(FORWARDED, CTX, {
+            send: vi.fn(async () => HOST_ERROR),
+            persistence: {
+                now: () => 10,
+                delay: async () => undefined,
+                logCleanupFailure: () => undefined,
+            },
+        })
+        for (let index = 0; index < removes.length; index += 1) {
+            await vi.waitFor(() => expect(chromeMockSpies.storageRemove)
+                .toHaveBeenCalledTimes(index + 1))
+            removes[index].reject(new Error(`SECRET REMOVE ${index}`))
+        }
+
+        await expect(running).resolves.toEqual({
+            status: 'error',
+            error: 'Host analysis failed',
+            error_code: 'repository_instructions_missing',
+            errorKind: 'unavailable',
+            httpStatus: 503,
+            extension_warnings: ['analysis_pending_cleanup_failed'],
+        })
+    })
+
+    it('Host success survives result and cleanup failure in fixed warning order', async () => {
+        const resultWrite = deferNextStorageSet('dh_last_analysis')
+        const removes = [
+            deferNextStorageRemove('dh_pending_analysis:request-1'),
+            deferNextStorageRemove('dh_pending_analysis:request-1'),
+            deferNextStorageRemove('dh_pending_analysis:request-1'),
+        ]
+        const running = handleAnalyzeForward(FORWARDED, CTX, {
+            send: vi.fn(async () => HOST_SUCCESS),
+            persistence: {
+                now: () => 10,
+                delay: async () => undefined,
+                logCleanupFailure: () => undefined,
+            },
+        })
+        await vi.waitFor(() => expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(2))
+        resultWrite.reject(new Error('SECRET RESULT'))
+        for (let index = 0; index < removes.length; index += 1) {
+            await vi.waitFor(() => expect(chromeMockSpies.storageRemove)
+                .toHaveBeenCalledTimes(index + 1))
+            removes[index].reject(new Error(`SECRET REMOVE ${index}`))
+        }
+
+        await expect(running).resolves.toEqual({
+            status: 'success',
+            data: { markdown: '# Report', saved_to: 'report.md' },
+            extension_warnings: [
+                'analysis_result_not_persisted',
+                'analysis_pending_cleanup_failed',
+            ],
+        })
     })
 })

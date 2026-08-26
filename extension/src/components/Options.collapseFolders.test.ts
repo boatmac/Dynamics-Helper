@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { collapseFolders } from './Options';
-import type { MenuItem } from './MenuLogic';
+import type { MenuItem } from '../utils/bookmarkItems';
 
 /**
  * collapseFolders is the shared helper used by BOTH the initial mount path
