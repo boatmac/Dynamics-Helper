@@ -614,6 +614,252 @@ Plan A archive/package-content validation, process stop, transaction-ID
 generation, package claim, or product mutation occurs for the newly supplied
 package.
 
+## Native Request Handle And Progress
+
+Plan D preserves request-scoped progress while exposing the final-wire request ID
+to strict response parsers. `NativePortLease.request` returns one immutable handle
+synchronously:
+
+```ts
+export interface NativeProgress {
+    readonly requestId: string
+    readonly payload: string
+}
+
+export interface NativePendingRequest {
+    readonly requestId: string
+    readonly response: Promise<unknown>
+}
+
+request(message: Readonly<Record<string, unknown>>): NativePendingRequest
+
+export interface NativePortClientHooks {
+    onProgress?: (lease: NativePortLease, progress: NativeProgress) => void
+    onUnsolicited?: (lease: NativePortLease, value: unknown) => void
+    onDisconnect?: (portId: number) => void
+}
+
+export class NativeProtocolError extends Error {
+    readonly code = 'invalid_native_response'
+    constructor() {
+        super('Dynamics Helper received an invalid Native Host response.')
+    }
+}
+```
+
+- `postNativeMessageWire` remains the sole ID/final-wire authority and returns the
+  exact supplied/generated ID synchronously. Callers never generate a second
+  correlation ID.
+- The pending response entry is created before the helper registers/posts. The
+  deferred is created first, but the pending-map entry is created only by
+  `postNativeMessageWire`'s `register` callback. The returned handle is frozen
+  and uses the helper's returned ID. `request()`
+  returns only after successful posting. Validation, disconnected lease,
+  duplicate ID, registration, or post failures throw synchronously and return no
+  handle; a later asynchronous disconnect or safely correlated protocol failure
+  rejects an existing `response`.
+- A matching exact `{requestId,status:"progress",data:string}` invokes one
+  `onProgress(lease, frozenProgress)` callback and leaves the pending response
+  unresolved and registered.
+- One descriptor-safe transport classifier reads only own data `requestId` and
+  `status`. For an active ID, exact `status:"progress"` additionally requires the
+  exact progress key set plus nonempty string `data`; it invokes progress and
+  retains pending. Active-ID `status:"success"|"error"` removes pending and
+  resolves the raw envelope regardless of action-specific extra keys; Analyze or
+  update parsers own final-envelope validation. Any other safely correlated
+  status/shape removes and rejects with `NativeProtocolError`. Stale IDs are
+  dropped. Missing, empty, accessor-backed, or non-string IDs are dropped and
+  never routed unsolicited. Only an absent own `requestId` can enter the
+  unsolicited parser.
+- Analyze transport returns `lease.request(action).response`, preserving Plan E's
+  parser-owned action identity and request ID. The transport classifier is the
+  Analyze response-ID authority; Analyze's existing bridge continues consuming
+  only the raw final Promise. Non-Analyze guarded sends do the same. Update
+  coordinator calls retain the full handle and pass `pending.requestId` plus
+  `await pending.response` to `parseNativeActionResponse`.
+- Main-client progress is forwarded exactly as
+  `{type:'NATIVE_PROGRESS',requestId,payload}` through the existing content/FAB
+  path; progress never advances update state or completes Analyze. The Service
+  Worker, content bridge, and FAB each use exact own-data parsers, accept only
+  nonempty primitive request/payload strings, reconstruct/freeze the next-hop object/detail, and
+  ignore malformed/page-injected values without logging or coercion.
+- Synchronous `onProgress` exceptions are contained; they never remove/settle the
+  pending entry and never log raw progress payloads.
+- Disconnect rejects all pending responses and permanently invalidates the lease.
+  Registration/post failure cleanup remains solely in `postNativeMessageWire`.
+
+Tests cover supplied/generated IDs, immutable handles, register-before-post,
+progress-then-final, progress callback failure isolation, wrong/stale progress,
+matching success/error, malformed correlated traffic, no-ID unsolicited events,
+disconnect, and strict parser correlation.
+
+## Development Runtime Update Policy
+
+Transactional and legacy self-update execution is packaged/frozen-only.
+
+- `PROVIDED_PROTOCOL_CAPABILITIES` remains the full product/package tuple after
+  cutover, but runtime `get_capabilities`, `health_check`, and `get_config`
+  responses filter out `transactional-update-v1` when `source_runtime=True`.
+- `HostGateResult` exposes
+  `updateProtocol: 'transactional' | 'legacy' | 'disabled'`, not a boolean.
+  Packaged + transactional capability selects `transactional`; older packaged
+  Host selects `legacy`; explicit development integrity always selects
+  `disabled`, even if an otherwise valid capability envelope also advertises
+  transactional. Any malformed capability or integrity envelope remains gate
+  failure.
+- Source mode keeps check-for-update/available-version UI, but disables Update
+  Now with fixed Host code `source_update_disabled`, exact error envelope
+  `{requestId:'<original-request-id>',status:'error',error_code:'source_update_disabled',error:'Dynamics Helper
+  self-update is disabled while the source Host is registered. Switch to the
+  packaged Host to update.'}`, and typed UI state
+  `{kind:'source-update-disabled',update:PendingUpdate,error:NormalizedUpdateError}`.
+  Both Options and FAB disable update execution controls while retaining update
+  checking and availability display. It
+  never allocates an update ID,
+  writes `dh_update_runtime`, sends any of the five update actions, invokes the
+  legacy updater, polls status, finalizes, or reloads.
+- Host source mode rejects all five update actions before constructing
+  `UpdateService`, opening a package, or touching filesystem/registry/network.
+  Analyze/config/health remain available.
+- The five actions are exactly `check_update_ready`, `perform_update`,
+  `activate_update`, `finalize_update_status`, and
+  `acknowledge_update_finalization`. Each returns the request-correlated envelope
+  above, emits no progress, and maps through the strict
+  `source_update_disabled` normalized error-code/message entry.
+- Plan D does not search or borrow ignored `dist/` as a source-mode runner and
+  never weakens Plan C's install-root/current-runtime equality.
+- If switched to source mode during a persisted transaction, retain recovery
+  state and direct the developer back to packaged mode; do not mutate it from
+  source mode. The resume matrix is exact: `preparing|prepared` probes main mode
+  before prepare/activation effects; `activating` always queries status first and
+  probes main only when status confirms exact `prepared`; `waiting-for-host-exit`
+  through all detached nonterminal phases never reconnects main and uses only
+  status Host; terminal observation first persists `terminal-reload-pending` and
+  reloads without a main probe; only the fresh Worker probes before disposition,
+  finalize, or acknowledge. `legacy-reload-pending` has no transaction ID and
+  derives `{kind:'legacy-update-paused-in-development',update}` when its fresh
+  Worker sees development mode. From `waiting-for-host-exit` through all detached nonterminal phases,
+  never reconnect/probe the main Host; poll only the status Host so the packaged
+  executable is not relaunched or locked during replacement.
+  Explicit development at a safe probe point yields
+  `{kind:'recovery-paused-in-development',update,transactionId}`, leaves
+  `dh_update_runtime` and `pending_update` byte-equivalent, and makes zero main
+  update/status-reload/finalization effects after that probe. Returning to
+  packaged mode resumes unchanged state. Detached Plan C recovery may progress
+  independently; source code never substitutes itself or `dist` as runner
+  authority.
+
+The valid gate matrix is exact: malformed capability or integrity is gate
+failure; valid development integrity always produces `disabled` regardless of an
+otherwise valid transactional capability bit; verified packaged plus the bit is
+`transactional`; verified packaged without it is `legacy`.
+
+Source startup skips legacy updater cleanup/migration code that can rename or
+replace the venv interpreter. Tests instantiate source startup and prove no
+  updater cleanup or any update-owned product, transaction, recovery, registry,
+or runner mutation.
+Network update checking and `pending_update` availability persistence remain
+allowed; “zero side effects” refers specifically to update execution,
+transaction, registry, runner, status, reload, and finalization effects.
+
+Tests cover source/frozen capability envelopes, development overriding an
+erroneous transactional bit, packaged legacy versus transactional selection,
+zero source update side effects, retained availability UI, and no `dist` search.
+
+## Non-Moving PR Metadata Evidence
+
+Final PR metadata is captured only after all tracked work and final substantive
+review are complete and the exact final HEAD `H` is separately authorized and
+pushed. No tracked commit follows this evidence.
+
+- Write append-only ignored artifacts under
+  `.scratch/final-review/plan-d/<H>/<YYYYMMDDTHHMMSSZ>/pr-metadata-receipt.json`
+  and sibling `final-findings.md`. Create the timestamp directory exclusively;
+  never overwrite or adopt an existing path. Serialize JSON/frontmatter as
+  UTF-8 without BOM and LF only.
+- The strict receipt has exact top-level keys `schema`, `repository`,
+  `observedAtUtc`, `authorization`, `collector`, `subject`, `preQuery`,
+  `postQuery`, `expected`, `observed`, `assertions`, `review`, `verdict`. Schema is
+  `dynamics-helper.plan-d.pr-metadata-receipt/v1`. Collector has exact tool,
+  version, and ordered queried fields. Subject has full `headOid`, first
+  `parentOid`, `treeOid`, branch, remote, remoteRef, and observed remoteOid.
+  Expected values are captured before network
+  output; observed stores exact PR #1/#2 JSON fields. Assertions have fixed
+  ordered IDs and boolean PASS. Review stores SHA-256 of the already-complete
+  substantive review body. Verdict is exact `PASS`.
+- Canonical JSON uses the following complete ordered shape, ASCII escaping,
+  separators `(',', ':')`, no insignificant whitespace, one trailing LF, UTF-8
+  without BOM, and exclusive file creation:
+
+```json
+{
+  "schema":"dynamics-helper.plan-d.pr-metadata-receipt/v1",
+  "repository":"boatmac/Dynamics-Helper",
+  "observedAtUtc":"YYYY-MM-DDTHH:MM:SSZ",
+  "authorization":{"scope":"push-exact-head-and-read-pr-metadata","confirmed":true},
+  "collector":{"tool":"gh","version":"NONEMPTY","fields":["number","state","isDraft","baseRefName","baseRefOid","headRefName","headRefOid","url"]},
+  "subject":{"headOid":"H","parentOid":"FIRST_PARENT","treeOid":"TREE","branch":"hardening/plan-d-runtime-installer","remote":"origin","remoteRef":"refs/heads/hardening/plan-d-runtime-installer","remoteOid":"H"},
+  "preQuery":{"headOid":"H","parentOid":"FIRST_PARENT","treeOid":"TREE","branch":"hardening/plan-d-runtime-installer","clean":true},
+  "postQuery":{"headOid":"H","parentOid":"FIRST_PARENT","treeOid":"TREE","branch":"hardening/plan-d-runtime-installer","clean":true},
+  "expected":{"pr1":{"number":1,"state":"OPEN","isDraft":true,"baseRefName":"master","headRefName":"docs/prompt-scope-cleanup-design","headRefOid":"f60911ed6c9eee45aff5f478d4d43f43e180c905"},"pr2":{"number":2,"state":"OPEN","isDraft":true,"baseRefName":"docs/prompt-scope-cleanup-design","baseRefOid":"f60911ed6c9eee45aff5f478d4d43f43e180c905","headRefName":"hardening/plan-d-runtime-installer","headRefOid":"H"}},
+  "observed":{"pr1":{"number":1,"state":"OPEN","isDraft":true,"baseRefName":"master","baseRefOid":"OID","headRefName":"docs/prompt-scope-cleanup-design","headRefOid":"f60911ed6c9eee45aff5f478d4d43f43e180c905","url":"https://github.com/boatmac/Dynamics-Helper/pull/1"},"pr2":{"number":2,"state":"OPEN","isDraft":true,"baseRefName":"docs/prompt-scope-cleanup-design","baseRefOid":"f60911ed6c9eee45aff5f478d4d43f43e180c905","headRefName":"hardening/plan-d-runtime-installer","headRefOid":"H","url":"https://github.com/boatmac/Dynamics-Helper/pull/2"}},
+  "assertions":[{"id":"authorization-confirmed","pass":true},{"id":"exact-head-pushed","pass":true},{"id":"local-head-unchanged","pass":true},{"id":"local-tree-unchanged","pass":true},{"id":"worktree-remains-clean","pass":true},{"id":"pr1-frozen-draft","pass":true},{"id":"pr1-head-exact","pass":true},{"id":"pr2-stacked-draft","pass":true},{"id":"pr2-base-exact","pass":true},{"id":"pr2-head-exact","pass":true}],
+  "review":{"path":"SUBSTANTIVE_REVIEW_PATH","sha256":"REVIEW_SHA256"},
+  "verdict":"PASS"
+}
+```
+
+`H`, parent/tree/OID, review path/hash, timestamp, and collector version are
+strict runtime values with the types/lengths implied above, never literal
+placeholders in the emitted receipt.
+- PR #1 must remain OPEN Draft, base `master`, head
+  `docs/prompt-scope-cleanup-design`, head OID
+  `f60911ed6c9eee45aff5f478d4d43f43e180c905`. PR #2 must remain OPEN
+  Draft, base that parent branch, head `hardening/plan-d-runtime-installer`, and
+  head OID exact `H`.
+- Capture pre-query HEAD/first-parent/tree/branch and clean index/worktree. The
+  separately authorized exact non-force push and repository-qualified PR queries
+  are one bracketed operation. Re-read all four local values and clean state after
+  query; any mismatch blocks without editing PRs. The network read requires the
+  same explicit authorization or a separate one. `authorization.confirmed=true`
+  records that both exact non-force push and metadata-read authority were granted,
+  whether jointly or separately.
+- Freeze/hash the substantive review body before querying. After PASS, hash exact
+  receipt bytes. Final ignored findings use exact frontmatter schema
+  `dynamics-helper.plan-d.final-findings/v1` binding `H`, `H^`, review-body hash,
+  receipt path/hash, PR gate PASS, blocking count zero, and completion UTC, then
+  append the unchanged review body. Verification recomputes both hashes, parses
+  every named assertion/verdict, and requires both paths ignored/untracked.
+- The substantive review body is complete before the query at canonical
+  repository-relative ignored path
+  `.scratch/final-review/plan-d/<H>/substantive-review.md`. It must already be
+  UTF-8 without BOM, LF-only, and end in exactly one LF. Its exact raw-byte
+  SHA-256 is stored in `review.sha256`. Sibling
+  `final-findings.md` is exclusive-created as UTF-8/no-BOM/LF with exact
+  frontmatter keys/order `schema`, `subject_head_oid`, `subject_parent_oid`,
+  `subject_tree_oid`, `review_body_sha256`, `review_verdict`,
+  `blocking_findings`, `pr_metadata_gate`, `pr_metadata_receipt`,
+  `pr_metadata_receipt_sha256`, `completed_at_utc`. Exact bytes are opening
+  `---\n`, one `key: JSON-string-or-integer` line per key in that order, closing
+  `---\n`, then the byte-identical substantive review body with no additional
+  separator or trailing conversion. OIDs/hashes are lowercase strings, verdicts
+  are JSON strings, blocking count is integer `0`, receipt path is the canonical
+  repository-relative path, and completion time is `YYYY-MM-DDTHH:MM:SSZ`.
+- Verification requires current and recorded HEAD/first-parent/tree/branch/clean
+  state, exact recorded `subject.remoteOid` and live remote ref OID `H`, every expected/observed PR field, exact ordered
+  assertion IDs/all `true`, receipt/review hashes, canonical path grammar, and
+  both files/directories ignored and untracked.
+- C-D0 and committed Plan D reports may describe this future gate but never claim
+  its outcome. Any tracked review fix invalidates prior ignored evidence and
+  restarts push/review/receipt from the new HEAD.
+- The seal point is after both files are exclusive-created and the complete
+  read-only verifier passes. After sealing, only read-only verification is
+  allowed: no tracked/untracked worktree edit, `git add`/index edit, receipt or
+  findings replacement/deletion, commit, amend, rebase, merge, retarget, push,
+  checkout, reset, cherry-pick, tag/ref mutation, or PR state/draft/base/head
+  mutation. Any mutation invalidates the evidence and requires a new directory
+  and complete sequence.
+
 ## Verification And Completion
 
 - Review the revised Plan D plan before Task 1 and resolve every Critical or
