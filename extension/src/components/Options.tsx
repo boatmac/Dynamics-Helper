@@ -701,6 +701,7 @@ const OptionsInner: React.FC = () => {
     // usable, then schedule any missed Host update through the same catch-up
     // effect as a successful response.
     const prefsHydratedRef = useRef(false);
+    const [prefsHydrated, setPrefsHydrated] = useState(false);
 
     const [promptHealthIssue, setPromptHealthIssue] = useState<PromptSourceIssue | null>(null);
     const [configUpdateIssue, setConfigUpdateIssue] = useState<ConfigUpdateIssue | null>(null);
@@ -1497,6 +1498,7 @@ const OptionsInner: React.FC = () => {
                      // open. Without this fallback the guard would deadlock
                      // the user when host crashes / starts up slowly.
                      prefsHydratedRef.current = true;
+                     setPrefsHydrated(true);
 
                      // Catch-up attempt for user edits made during the window.
                      // Host is unreachable so this RPC will almost certainly
@@ -1681,6 +1683,7 @@ const OptionsInner: React.FC = () => {
                         const merged = changed ? newPrefs : prev;
                         setCurrentPrefs(merged);
                         prefsHydratedRef.current = true;
+                        setPrefsHydrated(true);
                         requestHydrationMirror(merged);
                     }
                     requestHydrationCatchUp();
@@ -1697,6 +1700,7 @@ const OptionsInner: React.FC = () => {
                         },
                     );
                     prefsHydratedRef.current = true;
+                    setPrefsHydrated(true);
 
                     // Catch-up still attempted in the non-success branch — if
                     // the user edited during the window, their changes are in
@@ -2246,10 +2250,38 @@ const OptionsInner: React.FC = () => {
             const fetchedAt = typeof cache.dh_model_list_fetched_at === 'number' ? cache.dh_model_list_fetched_at : 0;
             const stale = Date.now() - fetchedAt > MODEL_CACHE_MAX_AGE_MS;
 
+            const acceptModels = (models: ModelInfo[], rewriteCache: boolean) => {
+                let changed = false;
+                const supportedValues = new Set(['low', 'medium', 'high', 'xhigh']);
+                const normalized = models.map(model => {
+                    const sourceEfforts = Array.isArray(model.supported_reasoning_efforts)
+                        ? model.supported_reasoning_efforts
+                        : [];
+                    const efforts = sourceEfforts.filter(effort => supportedValues.has(effort));
+                    const defaultEffort = efforts.includes(model.default_reasoning_effort || '')
+                        ? model.default_reasoning_effort
+                        : null;
+                    changed ||= efforts.length !== sourceEfforts.length
+                        || defaultEffort !== (model.default_reasoning_effort ?? null);
+                    return {
+                        ...model,
+                        supported_reasoning_efforts: efforts,
+                        default_reasoning_effort: defaultEffort,
+                    };
+                });
+
+                setModelList(normalized);
+                if (rewriteCache && changed) {
+                    chrome.storage.local.set({ dh_model_list: normalized });
+                }
+
+                return normalized;
+            };
+
             // Populate from cache immediately so the dropdown works offline /
             // before the network call returns (graceful degradation).
             if (cached && cached.length) {
-                setModelList(cached);
+                acceptModels(cached, true);
             }
 
             // Skip the host RPC unless forced, or the cache is empty / stale.
@@ -2272,8 +2304,10 @@ const OptionsInner: React.FC = () => {
                         setModelFetchError({ kind }); // keep cached list intact
                         return;
                     }
-                    const models = (response.data?.models || []) as ModelInfo[];
-                    setModelList(models);
+                    const models = acceptModels(
+                        (response.data?.models || []) as ModelInfo[],
+                        false,
+                    );
                     setModelFetchError(null);
                     chrome.storage.local.set({
                         dh_model_list: models,
@@ -2290,6 +2324,22 @@ const OptionsInner: React.FC = () => {
         fetchModels(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        if (!prefsHydrated) return;
+        const current = prefsRef.current;
+        const selected = modelList.find(model => model.id === current.model);
+        const currentEffort = current.reasoningEffort || '';
+        if (
+            selected
+            && currentEffort
+            && !selected.supported_reasoning_efforts?.includes(currentEffort)
+        ) {
+            updatePref({ reasoningEffort: '' });
+        }
+        // updatePref synchronously updates prefsRef, preventing StrictMode replay.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [prefsHydrated, modelList, prefs.model, prefs.reasoningEffort]);
 
     const handleTeamRefresh = async () => {
         const manifestUrl = prefsRef.current.teamManifestUrl;

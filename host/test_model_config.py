@@ -13,6 +13,7 @@ Covers:
 
 import inspect
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from host.dh_native_host import NativeHost
@@ -79,6 +80,28 @@ class TestListModelsSecrecy(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(marker, observed)
         self.assertEqual(result["error"], "list Copilot models failed (RuntimeError).")
 
+    async def test_list_models_filters_unsupported_reasoning_efforts(self):
+        host = NativeHost.__new__(NativeHost)
+        host.client = MagicMock()
+        host.client.list_models = AsyncMock(return_value=[SimpleNamespace(
+            id="model-a",
+            name="Model A",
+            supported_reasoning_efforts=["low", "max", "high", "future"],
+            default_reasoning_effort="max",
+        )])
+
+        result = await host.handle_list_models()
+
+        self.assertEqual(result, {
+            "status": "success",
+            "data": {"models": [{
+                "id": "model-a",
+                "name": "Model A",
+                "supported_reasoning_efforts": ["low", "high"],
+                "default_reasoning_effort": None,
+            }]},
+        })
+
 
 class TestOuterSdkErrorSecrecy(unittest.IsolatedAsyncioTestCase):
     async def test_process_message_outer_exception_never_exposes_marker(self):
@@ -122,6 +145,13 @@ class TestModelConfigContract(unittest.TestCase):
         """The message dispatch must route the list_models action."""
         src = inspect.getsource(dhm.NativeHost.process_message)
         self.assertIn('action == "list_models"', src)
+
+    def test_release_requirements_pin_reviewed_sdk(self):
+        from pathlib import Path
+
+        requirements = Path("host/requirements.txt").read_text(encoding="utf-8")
+        self.assertIn("github-copilot-sdk==1.0.5", requirements)
+        self.assertNotIn("github-copilot-sdk>=1.0.5,<1.1", requirements)
 
 
 if __name__ == "__main__":

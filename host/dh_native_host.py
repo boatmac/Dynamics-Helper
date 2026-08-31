@@ -128,7 +128,7 @@ import urllib.request
 from dataclasses import dataclass
 import hashlib
 
-VERSION = "2.0.74-beta.4"
+VERSION = "2.0.75-beta.1"
 
 # --- Cross-repo session-id coordination anchor (2026-07-03) ---
 # DH derives each Copilot session id as a deterministic UUIDv5 from the bare
@@ -782,7 +782,11 @@ class NativeHost:
 
         if status["status"] == "ok" and selected_error is not None:
             status = selected_error.to_result()
-        if status["status"] == "ok" and dh_error is not None:
+        if (
+            status["status"] == "ok"
+            and not (effective_root and use_workspace_only)
+            and dh_error is not None
+        ):
             status = dh_error.to_result()
         if status["status"] == "ok" and user_prompt_error is not None:
             status = user_prompt_error.to_result()
@@ -2171,13 +2175,20 @@ class NativeHost:
                 mid = getattr(m, "id", None)
                 if not mid:
                     continue
-                efforts = getattr(m, "supported_reasoning_efforts", None) or []
+                efforts = [
+                    effort
+                    for effort in (
+                        getattr(m, "supported_reasoning_efforts", None) or []
+                    )
+                    if effort in {"low", "medium", "high", "xhigh"}
+                ]
+                default_effort = getattr(m, "default_reasoning_effort", None)
                 out.append({
                     "id": mid,
                     "name": getattr(m, "name", None) or mid,
-                    "supported_reasoning_efforts": list(efforts),
-                    "default_reasoning_effort": getattr(
-                        m, "default_reasoning_effort", None
+                    "supported_reasoning_efforts": efforts,
+                    "default_reasoning_effort": (
+                        default_effort if default_effort in efforts else None
                     ),
                 })
             logger.info(f"list_models returned {len(out)} model(s).")

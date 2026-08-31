@@ -13,7 +13,7 @@
 
 ## 1. Version decision
 
-**Target: `github-copilot-sdk==1.0.5`** (pin `>=1.0.5,<1.1`).
+**Target: `github-copilot-sdk==1.0.5`** (exact release pin).
 
 - `1.0.5` is the latest **stable on PyPI** (2026-07-01).
 - `1.0.6-preview.0/1` are **GitHub-only**, not on PyPI, and add only
@@ -230,7 +230,7 @@ and confirm the suite fails; revert.
 ### 6.1 requirements.txt
 ```diff
 - github-copilot-sdk==0.3.0
-+ github-copilot-sdk>=1.0.5,<1.1
++ github-copilot-sdk==1.0.5
 ```
 Check whether 1.0.5's transitive deps differ from 0.3.0 (probe venv pulled
 `pydantic 2.13`, `httpx 0.28`, `anyio 4.14`, `python-dateutil`,
@@ -306,7 +306,7 @@ the shim deletes cleanly, and the real SDK↔CLI handshake works today.
    Host suite **77/77** green (was 74). Break-and-fail verified:
    re-adding `SubprocessConfig` to the import crashes module load → 15
    errors; reverted → 77 green.
-6. ✅ requirements.txt → `>=1.0.5,<1.1` + regenerated httpx-stack pins;
+6. ✅ requirements.txt → `==1.0.5` + regenerated httpx-stack pins;
    dropped the unused 0.3.0-era requests stack.
 7. ✅ `host/venv` upgraded to 1.0.5 atomically with source. Full module
    load verified (exit 0). AGENTS.md § 3 + § 9.5 updated for the new

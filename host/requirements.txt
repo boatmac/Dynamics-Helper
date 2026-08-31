@@ -1,8 +1,8 @@
 # Direct dependency: the GitHub Copilot SDK (a JSON-RPC client for the
-# Copilot CLI — see AGENTS.md § 9.5). Range allows 1.0.x patch uptake
-# without auto-jumping a breaking minor. Upgraded 0.3.0 → 1.0.5 on
+# Copilot CLI — see AGENTS.md § 9.5). This release boundary is verified
+# against exact 1.0.5. Upgraded 0.3.0 → 1.0.5 on
 # 2026-07-03 (docs/sdk-upgrade-2026-07-1.0.5.md).
-github-copilot-sdk>=1.0.5,<1.1
+github-copilot-sdk==1.0.5
 
 # Transitive dependencies of github-copilot-sdk 1.0.5, pinned for
 # reproducible PyInstaller builds. Regenerate with `pip freeze` after

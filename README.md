@@ -34,7 +34,7 @@ To install the latest **Beta** (pre-release) build instead of stable, run:
 & ([scriptblock]::Create((irm https://aka.ms/mcdyhelper))) -Beta
 ```
 
-This pre-seeds the host config so future automatic update checks also consider Beta releases. You can change your mind any time from the Options page (toggle **Receive beta updates**, then click Save Changes).
+This pre-seeds the host config so future automatic update checks also consider Beta releases. You can change your mind any time from the Options page by toggling **Receive beta updates**; the change saves automatically.
 
 ### Manual Install
 
