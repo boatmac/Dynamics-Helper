@@ -10,6 +10,11 @@ resource limits, and fresh frozen-toolchain gates in the July whole-branch desig
 and August Plan D execution refresh. All other Plan A/B/C/E and Plan D contracts
 remain unchanged.
 
+The later quarantine section additionally supersedes this document's ordinary
+child-exit table only for explicit bootstrap/Host quarantine modes and supersedes
+the August early-mode table only for exact exits `41` and `42`. Ordinary install,
+registration, transaction-recovery, and every unmentioned row remain unchanged.
+
 ## Execution Authority
 
 Let `B` be the commit containing only this design path. `B` must be a direct
@@ -157,6 +162,8 @@ The bootstrap supports only these invocations:
 ```text
 dh_installer_bootstrap_v<VERSION>.exe
 dh_installer_bootstrap_v<VERSION>.exe --archive <absolute-existing-zip>
+dh_installer_bootstrap_v<VERSION>.exe --quarantine-partial-install
+dh_installer_bootstrap_v<VERSION>.exe --quarantine-partial-install --archive <absolute-existing-zip>
 dh_installer_bootstrap_v<VERSION>.exe --bootstrap-probe
 ```
 
@@ -403,6 +410,8 @@ Bootstrap handling of the staged Host is exact:
   The bootstrap never starts live product bytes.
 - `20`, `30`, `31`, or `40` with exact empty stdout/stderr: do not register and
   preserve that exit.
+- `41` with exact empty stdout/stderr: do not register; emit only the fixed
+  mixed-install quarantine guidance below and preserve `41`.
 - `50` is valid only with empty stdout and exact stderr `early_mode_failed\n`;
   preserve exit `50` but replace raw bytes with the bootstrap's fixed failure.
 - `10`, an unknown exit, timeout, output overflow, any other nonempty stream, or
@@ -415,6 +424,19 @@ Staged registration is exact:
 - `50` with empty stdout and exact stderr `early_mode_failed\n`: preserve `50`
   with only fixed bootstrap diagnostics.
 - Every other exit/stream/timeout/overflow/launch result maps to fixed `50`.
+
+Explicit bootstrap quarantine mode uses a separate exact child table and does
+not pass through the ordinary install/registration table:
+
+- child `0` with empty streams: emit exact quarantine-success guidance and return
+  `0`;
+- child `31` with empty streams: return `31` with empty streams;
+- child `42` with empty streams: emit exact no-longer-required guidance and
+  return `42`;
+- child `50` with empty stdout and exact `early_mode_failed\n`: emit only
+  `bootstrap_internal_failure\n` and return `50`;
+- every other child exit/stream/timeout/overflow/launch result maps to fixed
+  bootstrap `50`.
 
 `--register-installed` is a new frozen production-main-only early mode. Exact
 arity is one absolute canonical live root, which must equal Plan C's fixed
@@ -450,14 +472,243 @@ Bootstrap-local outcomes are exact:
 | Invalid argv/runtime/elevated/constants/self/path | `2` | empty | `invalid_bootstrap_invocation\n` |
 | Release/HTTP/asset/self-digest failure | `40` | empty | `bootstrap_download_failed\n` |
 | Archive limit/ZIP/package/version failure | `40` | empty | `package_validation_failed\n` |
+| Unclassifiable mixed/partial installation | `41` | empty | exact quarantine guidance below |
+| Quarantine completed | `0` | empty | exact success guidance below |
+| Quarantine no longer required | `42` | empty | `Dynamics Helper no longer finds a partial installation requiring quarantine. Run this bootstrap normally.\n` |
 | Staged or registration child retry | `31` | empty | empty |
 | Transaction rolled back | `20` | empty | `installation_rolled_back\n` |
 | Recovery required | `30` | empty | exact three recovery lines below |
 | Complete install/registration | `0` | empty | empty |
 | Child launch/output/timeout/tree/internal failure | `50` | empty | `bootstrap_internal_failure\n` |
 
-Only the bootstrap's reviewed fixed bytes reach its streams; child bytes are
-used solely for exact contract comparison and are never forwarded.
+Only reviewed bootstrap templates reach its streams; dynamic quarantine paths
+occupy explicit template fields after canonical validation and PowerShell-literal
+escaping. Child bytes are comparison-only and never forwarded.
+
+## Mixed Or Partial Install Quarantine
+
+This section explicitly supersedes the August early-mode table's generic
+recovery/internal-failure rows for the exact conditions below. Exit `30` remains
+transaction recovery only. Exit `41` means unclassifiable installed identity with
+no active transaction authority. Exit `42` means a user-requested quarantine is
+no longer required.
+
+The staged installer acquires the operation mutex and calls pending-finalization
+reconciliation first. If reconciliation performs any durable cleanup, the
+current invocation returns `31` immediately and does not classify, unregister,
+stop, or move; the user retries. Only a no-op reconciliation followed by a clear
+barrier may enter classification. If active, owner, cursor, or nonterminal
+journal authority remains, ordinary resume/recovery owns it and quarantine
+returns `31` without further effect. Therefore an install result `41` itself has
+zero live-installation, registry, transaction, and user-file mutation.
+
+The requested install identity must be one absent leaf or an absolute canonical
+ordinary non-reparse directory under canonical existing `%LOCALAPPDATA%`. An
+absent single leaf is fresh and creates nothing during classification. A
+reparse/wrong-kind root, multi-level absence, or inaccessible parent is fixed
+internal failure, not quarantine. Under an ordinary root, unknown top-level user
+paths do not affect classification and are preserved. Exact classifications are:
+
+- **fresh:** the single leaf is absent; or an existing ordinary root has both
+  metadata files, every fixed product root (`dh_native_host.exe`, `_internal`,
+  `system_prompt.md`, `register.py`, `extension`), generated `manifest.json`, and
+  `updates` absent; unknown user paths may remain;
+- **installed:** both metadata files are canonical/valid/coupled, version and
+  capabilities agree, every declared Host file matches, and declared Extension
+  files plus manifest effective version match; stale undeclared descendants are
+  permitted exactly as Plan B already captures them;
+- **legacy:** both metadata files are absent; all five fixed product roots exist
+  with exact ordinary file/directory kinds; `_internal` and `extension` are
+  recursively enumerated without following reparse points, are nonempty where
+  required, contain only readable ordinary entries with no case collisions, and
+  `extension/manifest.json` is ordinary, strict-valid, and supplies the prior
+  effective version; root generated `manifest.json` and root `updates` are both
+  absent. If either generated path exists, legacy does not match and authority/
+  stale-state rules decide `31` or quarantine;
+- **quarantine required:** exactly one metadata file; malformed/disagreeing
+  metadata; declared/live hash/version mismatch; Extension-only state; any
+  nonempty proper subset of fixed legacy roots; fixed child wrong kind/reparse/
+  case collision; unreadable fixed child; generated `manifest.json` or `updates`
+  without valid installed/transaction authority; or any other contradictory
+  product identity. Active/finalization authority under `updates` already returns
+  `31`; stale generated update state with no authority requires quarantine.
+
+An ordinary install classifies before creating an absent root or stopping a
+process. Quarantine-required returns
+`EXIT_MANUAL_QUARANTINE_REQUIRED = 41` before installed-Host stop/wait, ID
+generation, install-root creation, package preparation, product/config/registry
+mutation, or transaction authority creation. Child stdout/stderr are empty.
+
+On exact install exit `41`, the bootstrap returns `41`, stdout empty, and emits
+UTF-8/LF bytes exactly once. It emits validated paths only as single-quoted
+PowerShell literals with internal apostrophes doubled. Online mode's complete
+stderr is:
+
+```text
+Dynamics Helper found an unclassifiable partial installation. No live installation, registry, or user file was changed.
+Close Chrome, then run this same bootstrap in PowerShell:
+& '<validated-bootstrap-path>' --quarantine-partial-install
+After that succeeds, run the bootstrap normally.
+```
+
+Offline mode's complete stderr is:
+
+```text
+Dynamics Helper found an unclassifiable partial installation. No live installation, registry, or user file was changed.
+Close Chrome, then run this same bootstrap in PowerShell:
+& '<validated-bootstrap-path>' --quarantine-partial-install --archive '<validated-zip-path>'
+After that succeeds, run the bootstrap normally with the same --archive argument.
+```
+
+The explicit quarantine bootstrap modes first obtain and Plan-A-validate the
+same versioned package through the ordinary online or share-zero offline flow.
+In offline mode, canonical ZIP and every ancestor are mutually disjoint from the
+live root, generated quarantine root, and their descendants. A ZIP inside a tree
+that may move is rejected before staged invocation, so the exact same archive
+path remains valid after quarantine.
+They generate a destination exactly
+`%LOCALAPPDATA%\DynamicsHelper.quarantine.<YYYYMMDDTHHMMSSZ>.<32-lowercase-hex>`
+using injected UTC/CSPRNG, then invoke only the validated staged Host:
+
+```text
+<stage>\host\dh_native_host.exe --quarantine-partial-install <canonical-live-root> <canonical-quarantine-root>
+```
+
+The new early mode is staged-role-only, not merely production-main-only. Before
+dependencies it requires executable exact `<stage-root>\host\dh_native_host.exe`,
+canonical plain stage/host ancestors, strict validation of the complete staged
+package against its own version, and rejects source mode or live-root
+self-invocation. It then validates exact arity and requires live root byte-for-
+byte equal canonical fixed `%LOCALAPPDATA%\DynamicsHelper` identity,
+same-parent/same-volume quarantine grammar, absent destination, and disjointness.
+Under operation mutex it reconciles/barriers and reclassifies. Fresh/installed/
+legacy returns `EXIT_QUARANTINE_NOT_REQUIRED = 42`; mixed continues.
+
+Before any registry/RunOnce mutation, the staged Host opens the exact live root
+directory with `DELETE|FILE_READ_ATTRIBUTES`, share mode
+`FILE_SHARE_READ|FILE_SHARE_WRITE` (deliberately no `FILE_SHARE_DELETE`),
+`OPEN_EXISTING`, and
+`FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT`. It records canonical
+final path and volume/file identity. This handle namespace-locks the source root
+against another rename and is the handle used for the eventual rename.
+
+It then snapshots all Chrome/Edge main/status Native Host registry values. Main
+values must both be absent or equal canonical live manifest; status values both
+absent or equal canonical live recovery status manifest. For every referenced
+manifest it opens a retained read/content identity handle with write sharing
+disabled, records exact canonical bytes/hash/path/file identity, and validates
+strict manifest contents. Through Plan C's injected `RunOnceStore`, it snapshots
+exact `DynamicsHelperUpdateRecovery`; its command must be absent or strict-valid
+for canonical live recovery runner/active mode, whose file identity is also
+captured before mutation. Split/foreign/missing/replaced values fail with no
+mutation. Before mutation it also opens every existing fixed executable candidate
+with read/attribute access and share mode
+`FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE`, records exact final path,
+ordinary/non-reparse kind, volume/file identity, and keeps these snapshot handles
+open. All snapshot child handles permit the later root-directory rename.
+
+Only after all root/manifest/runner identity evidence is retained does it
+unregister both Native names, remove RunOnce, verify all three absent, then
+stop/wait exact live `dh_native_host.exe`,
+`dh_update_status_host.exe`, and `dh_update_runner.exe` identities, and
+re-enumerates until none remain under a separate 30-second monotonic drain
+deadline. Drain timeout occurs before move while the staged Host is alive and
+uses the identity-gated restoration rule below. It then opens every existing fixed executable
+candidate (`dh_native_host.exe`,
+`updates/recovery/dh_update_status_host.exe`, and
+`updates/recovery/dh_update_runner.exe`) through injected `CreateFileW` with
+`FILE_READ_ATTRIBUTES`, share mode exactly `FILE_SHARE_DELETE`, `OPEN_EXISTING`,
+and `FILE_FLAG_OPEN_REPARSE_POINT`. It validates each handle's final path, file
+identity, ordinary-file kind, and non-reparse status. Existing process opens make
+this acquisition fail; once acquired, the handles allow same-volume rename but
+deny a new executable read/open. Each restrictive handle must match the
+corresponding pre-mutation snapshot volume/file identity and source path. Hold all
+snapshot/restrictive/root/manifest handles through move/postconditions.
+Recheck both Native/RunOnce absence, zero old/quarantine process identities, and mixed
+classification immediately before move. Any pre-move failure keeps identity
+handles open and applies one restoration rule: restore prior Native/RunOnce
+values only when root handle still has original
+identity/exact source path, every referenced manifest handle has original
+identity/path/bytes, and each executable/runner identity can be revalidated at
+its exact source descendant. Revalidate immediately before each restore write.
+If any evidence cannot be verified, keep registration absent, classify
+uncertainty, and return `50`. Successful restoration is round-trip verified
+through owning adapters; only then close all handles.
+
+The move is identity-bound and never resolves the source path again. It calls
+injected Win32 `SetFileInformationByHandle` on the retained root handle with
+`FileRenameInfo`, `ReplaceIfExists=FALSE`, `RootDirectory=NULL`, and the exact
+absolute quarantine destination. The root handle has `DELETE` access and excludes
+delete sharing, so no concurrent source rename can win. Handle rename remains
+same-volume and fails if destination exists. Success requires source absent,
+destination an ordinary canonical directory, registry absent, all process sets
+empty, all executable and root-directory barrier handles still held, and
+operation mutex held. It
+queries process image paths for both old and quarantine candidates again before
+success. Every retained barrier handle must still have its original file identity
+and its final path must equal the exact corresponding quarantine descendant; an
+old path or any third path is post-move uncertainty. After success Native/RunOnce
+registration remains absent and old paths no longer exist, so Chrome cannot
+launch old code. The root directory
+handle must retain the original volume/file identity and its final path must be
+the exact quarantine root; root substitution or a different destination identity
+is uncertainty. Close barrier handles only after these checks.
+The complete quarantine stays intact.
+
+Move outcome handling is exact. If `SetFileInformationByHandle` fails, not-moved
+requires source is the original ordinary root, destination absent, and retained
+root handle still has original identity and exact source final path. Keep every
+root/manifest/snapshot/restrictive identity handle open, restore Native/RunOnce
+exactly, round-trip verify restoration while those handles remain valid, then
+close them and return `50`; any handle/path/content mismatch is
+uncertainty and never restores registration. If move succeeds and source is absent
+while destination is the expected ordinary root, keep registry absent and apply
+success postconditions. Any source/destination/access combination outside those
+two rows is post-move uncertainty: keep registry absent, best-effort terminate
+only exact old/quarantine process identities, do not move/restore/delete either
+root, return child `50` with `early_mode_failed\n`, and let bootstrap emit only
+fixed `bootstrap_internal_failure\n`. Dynamic candidate paths never enter the
+runtime error stream; documentation tells the user to inspect both fixed naming
+patterns.
+
+Successful quarantine returns child `0` with empty streams. Bootstrap stdout is
+empty and stderr is UTF-8/LF with the exact validated quarantine path:
+
+```text
+Dynamics Helper moved the partial installation to:
+<canonical-quarantine-root>
+Run this bootstrap again without --quarantine-partial-install.
+After installation, inspect the quarantine before manually restoring only config.json, copilot-instructions.md, or user_prompt.md.
+Do not restore product files, release-integrity.json, installed-product.json, manifest.json, or updates.
+```
+
+No automatic restore is supported. Documentation permits only `config.json`,
+`copilot-instructions.md`, and `user_prompt.md` as manual review/restoration
+candidates after successful fresh install. It forbids executables, `_internal`,
+`extension`, product metadata, generated `manifest.json`, and `updates/**`;
+unknown data remains in quarantine.
+
+The exact early-mode additions are:
+
+| Mode/state | Exit | stdout | stderr |
+|---|---:|---|---|
+| `--install-package`, no authority, mixed/partial identity | `41` | empty | empty |
+| `--quarantine-partial-install`, authority/contention remains | `31` | empty | empty |
+| `--quarantine-partial-install`, state is fresh/installed/legacy | `42` | empty | empty |
+| `--quarantine-partial-install`, atomic move and postconditions pass | `0` | empty | empty |
+| `--quarantine-partial-install`, safe failure/uncertainty | `50` | empty | `early_mode_failed\n` |
+
+Tests cover every classification row, unknown-user preservation, root/reparse/
+access cases, absent-root ordering, operation-lock/reconciliation order, exact
+exit/stream/bootstrap bytes, registry snapshot/unregister/restore, split/foreign
+denial, exact process identity wait, executable barrier handle flags/final-path/
+identity validation, blocked concurrent executable open, restart-race recheck,
+30-second drain timeout with exact Native/RunOnce restoration, RunOnce
+snapshot/clear/foreign denial, destination collision, atomic move flags, exact
+two-row/uncertain outcome matrix,
+online/offline command path escaping, fresh rerun after move, and absence of any
+automatic restore/copy path. Both online/offline bootstrap quarantine modes and a
+disposable-VM exit-41/quarantine/fresh-rerun scenario are mandatory.
 
 ## Recovery Guidance
 
@@ -938,7 +1189,9 @@ Planned focused files are:
   classification and coordinator-only denial.
 - `host/update_entrypoint.py`, `host/test_update_entrypoint.py`,
   `host/update_installer.py`, and `host/test_update_installer.py`: exact staged
-  `--register-installed` external-verification/registration/settlement mode.
+  `--register-installed` external-verification/registration/settlement plus
+  staged-only `--quarantine-partial-install` classification/registry/process/
+  atomic-move responsibilities.
 - `AGENTS.md`, `ARCHITECTURE.md`, `DEVELOPER_GUIDE.md`, `USER_GUIDE.md`,
   `README.md`, `releases/notes-prompt-scope-cleanup-draft.md`, and
   `docs/session-handoff-2026-07-15.md`: replace the 6.18.0/current
@@ -962,7 +1215,11 @@ Bootstrap tests cover exact argv/probe bytes, elevation rejection, duplicate-key
 JSON, tag/prerelease grammar, exact asset pairing, self digest, ZIP embedded and
 metadata digest equality, redirect allowlist, timeout/size/EOF errors, exclusive
 handle reuse, intent isolation, child environment sanitation, every exit,
-recovery text, cleanup, and orphan non-adoption.
+recovery/quarantine text, cleanup, and orphan non-adoption. Exact UTF-8/LF
+stdout/stderr bytes include one trailing LF where text is present. Bootstrap
+quarantine tests cover online/offline package validation, generated target
+grammar, staged early-mode invocation, exit `31/42/0/50`, and no direct registry,
+process, or move operation in bootstrap code.
 The release helper builds ignored
 `dist/dh_bootstrap_process_probe/dh_bootstrap_process_probe.exe` from a tracked
 test-only entry excluded from both release assets. The exact gate command is
@@ -1030,6 +1287,12 @@ The scan also covers `release_helper.py` fallback notes and
 `host/debug_integration_test.py`; no current workflow may direct users to a root
 script or extracted ZIP.
 
+Documentation must describe exit `41`, explicit `--quarantine-partial-install`,
+close-Chrome guidance, atomic whole-root quarantine, registration remaining
+absent until fresh install, the three manual-restore candidates, and the exact
+forbidden restore paths. It must never instruct users to run a raw `Move-Item`
+quarantine command or automatically restore from quarantine.
+
 Release-helper tests validate both the generated fallback body and every supplied
 `--notes-file` before remote mutation. Current notes must name the exact versioned
 bootstrap and must not contain active `install.bat`, extracted-ZIP, `aka.ms | iex`,
@@ -1043,7 +1306,10 @@ Windows VM uses exact local `--archive` mode to verify stable and prerelease fir
 install, upgrade, rollback, exit-30 guidance, MOTW/antivirus behavior,
 non-elevated onefile startup, the real handle allowlist/suspended Job
 assignment/grandchild zero-count probe, orphan non-reuse, and rerun after interruption
-between commit and registration. After separately authorized publication, a
+between commit and registration. It also constructs a mixed installation,
+requires install exit `41` with zero live/registry/user mutation, runs explicit
+offline quarantine mode, verifies atomic sibling move and registry absence, then
+reruns fresh installation and manually checks the restore allowlist. After separately authorized publication, a
 second short VM smoke verifies the exact public tag metadata, GitHub asset
 digests, and no-argument download path before the release is declared complete.
 Until both are recorded, the status remains:
