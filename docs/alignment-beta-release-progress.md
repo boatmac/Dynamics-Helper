@@ -6,9 +6,9 @@
 - Branch: `release/alignment-2.0.75-beta.1`
 - Base: `1ba54f310bba59ed3243efd45abe57d0c7a86d1f`
 - Target version: `2.0.75-beta.1`
-- Current phase: release-candidate commit preparation
-- Last completed: authorized cache exception passed RED/GREEN, hydration-race review, Extension 343/343, and production build
-- Next action: commit complete tracked RC source, then run exact-commit rebuild and verification
+- Current phase: COMPLETE
+- Last completed: GitHub prerelease and downloaded asset independently verified
+- Next action: resume Plan D only as a separate task from the recovery point below
 - Publication authorization: approved by the user on 2026-08-31, conditional on every test/build/artifact gate passing
 
 ## Scope Seal
@@ -32,9 +32,9 @@
 | Complete Extension tests | PASS | 343/343 across 19 files; failures 0 |
 | Extension build | PASS | TypeScript; 2,218 modules; default-menu byte identity; version 2.0.75-beta.1 |
 | Host frozen build/probe | PASS | SDK 1.0.5; PyInstaller 6.22.2; isolated SDK health; EXE SHA-256 `13cf520e2e0dd2c1859387ddd1ca7b6fa18139b87514f4d623bbc4fa5555cc5d` |
-| ZIP validation | PENDING | pre-commit candidate passed 69 entries/54 files; removed before exact-commit rebuild |
-| Exact-commit rebuild | PENDING | not run |
-| Tag and GitHub prerelease | PENDING | not created; nothing pushed or published |
+| ZIP validation | PASS | 69 entries/54 files; size 15,433,504; SHA-256 `6af76b995a2313a844213165c7793d4939cdcd528b8cb37ee3c7e123e49f84c8` |
+| Exact-commit rebuild | PASS | tag commit `488f6f5ad1e38301d19b26355b41c8db0acd4763`; Host 210/210; Extension 343/343; both builds and frozen health passed |
+| Tag and GitHub prerelease | PASS | `v2.0.75-beta.1`; one verified ZIP asset; https://github.com/boatmac/Dynamics-Helper/releases/tag/v2.0.75-beta.1 |
 
 ## Observations
 
@@ -66,3 +66,18 @@
 3. Resume only the first `PENDING` gate after confirming all earlier PASS evidence.
 4. If a source feature is partially applied, finish or abort that unit before any later gate.
 5. Never create the tag unless every local gate through exact-commit rebuild is PASS.
+
+## Plan D Recovery Point
+
+- Worktree: `C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`
+- Branch: `hardening/plan-d-runtime-installer`
+- HEAD when this release work began: `d9067e33a22212caff6ac5d1005965baba000e94`
+- Preserved WIP: `docs/superpowers/plans/2026-07-18-hardening-d-runtime-installer.md`
+- The alignment release worktree did not edit, stage, commit, tag, or push from
+  the Plan D worktree.
+- Before Plan D implementation resumes, resolve the pre-cutover `updater` module
+  contract conflict and the ordinary-installer live-Host relaunch race described
+  in the prior review. Do not reopen the completed alignment release scope.
+
+The release tag remains fixed at `488f6f5`; this post-release progress update is
+documentation evidence on the release branch and is not part of the shipped ZIP.
