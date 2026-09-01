@@ -415,6 +415,15 @@ class TestPromptConfigApi(
             "dh_specific_instructions_unreadable",
         )
 
+    def test_get_config_repository_mode_ignores_inactive_dh_health_error(self):
+        self._write(self.dh_path, b"\xff")
+        self._write_user_config(root=self.root, repository_only=True)
+
+        config = self.host._get_session_config(include_prompt_status=True)
+
+        self.assertNotIn("_user_instructions_raw", config)
+        self.assertEqual(config["prompt_source_status"], {"status": "ok"})
+
     def test_get_config_unreadable_user_prompt_omits_value_and_reports_health(self):
         prompt_path = os.path.join(self.user_dir, "user_prompt.md")
         self._write(prompt_path, b"\xff\xfe")

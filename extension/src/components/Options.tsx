@@ -677,6 +677,7 @@ const OptionsInner: React.FC = () => {
     // usable, then schedule any missed Host update through the same catch-up
     // effect as a successful response.
     const prefsHydratedRef = useRef(false);
+    const [prefsHydrated, setPrefsHydrated] = useState(false);
 
     const [promptHealthIssue, setPromptHealthIssue] = useState<PromptSourceIssue | null>(null);
     const [configUpdateIssue, setConfigUpdateIssue] = useState<ConfigUpdateIssue | null>(null);
@@ -803,11 +804,18 @@ const OptionsInner: React.FC = () => {
         supported_reasoning_efforts?: string[];
         default_reasoning_effort?: string | null;
     }
-    const [modelList, setModelList] = useState<ModelInfo[]>([]);
+    const [modelCatalog, setModelCatalog] = useState<{
+        models: ModelInfo[];
+        canRepairEffort: boolean;
+    }>({ models: [], canRepairEffort: false });
+    const modelList = modelCatalog.models;
     const [modelFetching, setModelFetching] = useState<boolean>(false);
     const [modelFetchError, setModelFetchError] = useState<null | {
         kind: 'auth' | 'unavailable' | 'unknown';
     }>(null);
+    const modelFetchGenerationRef = useRef(0);
+    const modelFetchInFlightRef = useRef<number | null>(null);
+    const modelForceRefreshPendingRef = useRef(false);
     // Sidebar-nav layout (spec 2026-07-03-options-sidebar-nav-layout). The
     // Options page is a left nav + wide content pane; only the active section
     // renders. This is a pure shell change — every field's JSX/state/persist
@@ -1498,6 +1506,7 @@ const OptionsInner: React.FC = () => {
                      // open. Without this fallback the guard would deadlock
                      // the user when host crashes / starts up slowly.
                      prefsHydratedRef.current = true;
+                     setPrefsHydrated(true);
 
                      // Catch-up attempt for user edits made during the window.
                      // Host is unreachable so this RPC will almost certainly
@@ -1682,6 +1691,7 @@ const OptionsInner: React.FC = () => {
                         const merged = changed ? newPrefs : prev;
                         setCurrentPrefs(merged);
                         prefsHydratedRef.current = true;
+                        setPrefsHydrated(true);
                         requestHydrationMirror(merged);
                     }
                     requestHydrationCatchUp();
@@ -1698,6 +1708,7 @@ const OptionsInner: React.FC = () => {
                         },
                     );
                     prefsHydratedRef.current = true;
+                    setPrefsHydrated(true);
 
                     // Catch-up still attempted in the non-success branch — if
                     // the user edited during the window, their changes are in
@@ -2464,19 +2475,156 @@ const OptionsInner: React.FC = () => {
     // classified fetch failures (never a silent empty list — spec § 5).
     const MODEL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
     const fetchModels = (force: boolean = false) => {
+        if (modelFetchInFlightRef.current !== null) {
+            modelForceRefreshPendingRef.current ||= force;
+            return;
+        }
+        const generation = ++modelFetchGenerationRef.current;
+        modelFetchInFlightRef.current = generation;
+        const ownsRequest = () =>
+            modelFetchGenerationRef.current === generation
+            && modelFetchInFlightRef.current === generation;
+        const finishRequest = () => {
+            if (!ownsRequest()) return;
+            modelFetchInFlightRef.current = null;
+            setModelFetching(false);
+            if (modelForceRefreshPendingRef.current) {
+                modelForceRefreshPendingRef.current = false;
+                fetchModels(true);
+            }
+        };
+
         chrome.storage.local.get(['dh_model_list', 'dh_model_list_fetched_at'], (cache) => {
-            const cached: ModelInfo[] | null = Array.isArray(cache.dh_model_list) ? cache.dh_model_list : null;
-            const fetchedAt = typeof cache.dh_model_list_fetched_at === 'number' ? cache.dh_model_list_fetched_at : 0;
-            const stale = Date.now() - fetchedAt > MODEL_CACHE_MAX_AGE_MS;
+            if (!ownsRequest()) return;
+            const cachedProperty = ownDataProperty(cache, 'dh_model_list');
+            const cached = cachedProperty.kind === 'value'
+                && Array.isArray(cachedProperty.value)
+                ? cachedProperty.value
+                : null;
+            const fetchedAtProperty = ownDataProperty(cache, 'dh_model_list_fetched_at');
+            const fetchedAt = fetchedAtProperty.kind === 'value'
+                && typeof fetchedAtProperty.value === 'number'
+                && Number.isFinite(fetchedAtProperty.value)
+                ? fetchedAtProperty.value
+                : 0;
+            const cacheAge = Date.now() - fetchedAt;
+            const stale = cacheAge < 0 || cacheAge > MODEL_CACHE_MAX_AGE_MS;
+
+            const normalizeModels = (rows: unknown[]) => {
+                let changed = false;
+                let structurallyValid = true;
+                const supportedValues = new Set(['low', 'medium', 'high', 'xhigh']);
+                const models: ModelInfo[] = [];
+
+                try {
+                    for (const row of rows) {
+                        const id = ownDataProperty(row, 'id');
+                        if (
+                            id.kind !== 'value'
+                            || typeof id.value !== 'string'
+                            || !id.value.trim()
+                        ) {
+                            changed = true;
+                            structurallyValid = false;
+                            continue;
+                        }
+
+                        const name = ownDataProperty(row, 'name');
+                        const effortsProperty = ownDataProperty(
+                            row,
+                            'supported_reasoning_efforts',
+                        );
+                        let efforts: string[] | undefined;
+                        if (
+                            effortsProperty.kind === 'value'
+                            && Array.isArray(effortsProperty.value)
+                        ) {
+                            efforts = [];
+                            for (const effort of effortsProperty.value) {
+                                if (typeof effort !== 'string') {
+                                    changed = true;
+                                    structurallyValid = false;
+                                    efforts = undefined;
+                                    break;
+                                } else if (supportedValues.has(effort)) {
+                                    efforts.push(effort);
+                                } else {
+                                    changed = true;
+                                }
+                            }
+                        } else if (effortsProperty.kind !== 'absent') {
+                            changed = true;
+                            structurallyValid = false;
+                        }
+
+                        const defaultProperty = ownDataProperty(
+                            row,
+                            'default_reasoning_effort',
+                        );
+                        const defaultEffort = efforts
+                            && defaultProperty.kind === 'value'
+                            && typeof defaultProperty.value === 'string'
+                            && efforts.includes(defaultProperty.value)
+                            ? defaultProperty.value
+                            : null;
+                        changed ||= defaultProperty.kind !== 'value'
+                            || defaultProperty.value !== defaultEffort;
+
+                        models.push({
+                            id: id.value,
+                            name: name.kind === 'value'
+                                && typeof name.value === 'string'
+                                && name.value
+                                ? name.value
+                                : id.value,
+                            ...(efforts
+                                ? { supported_reasoning_efforts: efforts }
+                                : {}),
+                            default_reasoning_effort: defaultEffort,
+                        });
+                    }
+                } catch {
+                    changed = true;
+                    structurallyValid = false;
+                }
+
+                return { models, changed, structurallyValid };
+            };
 
             // Populate from cache immediately so the dropdown works offline /
             // before the network call returns (graceful degradation).
+            let normalizedCache: ReturnType<typeof normalizeModels> | null = null;
             if (cached && cached.length) {
-                setModelList(cached);
+                normalizedCache = normalizeModels(cached);
+                setModelCatalog({
+                    models: normalizedCache.models,
+                    canRepairEffort: !stale && normalizedCache.structurallyValid,
+                });
             }
 
             // Skip the host RPC unless forced, or the cache is empty / stale.
-            if (!force && cached && cached.length && !stale) {
+            const needsHost = force
+                || !normalizedCache
+                || !normalizedCache.structurallyValid
+                || normalizedCache.models.length === 0
+                || stale;
+            if (!needsHost && normalizedCache) {
+                if (!normalizedCache.changed) {
+                    finishRequest();
+                    return;
+                }
+                chrome.storage.local.set(
+                    { dh_model_list: normalizedCache.models },
+                    () => {
+                        if (!ownsRequest()) return;
+                        if (chrome.runtime.lastError) {
+                            setModelFetchError({ kind: 'unavailable' });
+                        } else {
+                            setModelFetchError(null);
+                        }
+                        finishRequest();
+                    },
+                );
                 return;
             }
 
@@ -2484,24 +2632,56 @@ const OptionsInner: React.FC = () => {
             chrome.runtime.sendMessage(
                 { type: "NATIVE_MSG", payload: { action: "list_models" } },
                 (response) => {
-                    setModelFetching(false);
+                    if (!ownsRequest()) return;
                     if (chrome.runtime.lastError) {
                         // Host unreachable — keep cached list, surface as unavailable.
                         setModelFetchError({ kind: 'unavailable' });
+                        finishRequest();
                         return;
                     }
                     if (!response || response.status !== "success") {
                         const kind = (response?.errorKind as 'auth' | 'unavailable' | 'unknown') || 'unknown';
                         setModelFetchError({ kind }); // keep cached list intact
+                        finishRequest();
                         return;
                     }
-                    const models = (response.data?.models || []) as ModelInfo[];
-                    setModelList(models);
-                    setModelFetchError(null);
-                    chrome.storage.local.set({
-                        dh_model_list: models,
-                        dh_model_list_fetched_at: Date.now(),
+                    const data = ownDataProperty(response, 'data');
+                    const modelsProperty = data.kind === 'value'
+                        ? ownDataProperty(data.value, 'models')
+                        : { kind: 'invalid' as const };
+                    const rows = modelsProperty.kind === 'value'
+                        && Array.isArray(modelsProperty.value)
+                        ? modelsProperty.value
+                        : [];
+                    const normalized = normalizeModels(rows);
+                    if (
+                        modelsProperty.kind !== 'value'
+                        || !Array.isArray(modelsProperty.value)
+                        || !normalized.structurallyValid
+                    ) {
+                        setModelFetchError({ kind: 'unknown' });
+                        finishRequest();
+                        return;
+                    }
+                    setModelCatalog({
+                        models: normalized.models,
+                        canRepairEffort: true,
                     });
+                    chrome.storage.local.set(
+                        {
+                            dh_model_list: normalized.models,
+                            dh_model_list_fetched_at: Date.now(),
+                        },
+                        () => {
+                            if (!ownsRequest()) return;
+                            if (chrome.runtime.lastError) {
+                                setModelFetchError({ kind: 'unavailable' });
+                            } else {
+                                setModelFetchError(null);
+                            }
+                            finishRequest();
+                        },
+                    );
                 }
             );
         });
@@ -2513,6 +2693,23 @@ const OptionsInner: React.FC = () => {
         fetchModels(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        if (!prefsHydrated || !modelCatalog.canRepairEffort) return;
+        const current = prefsRef.current;
+        const selected = modelList.find(model => model.id === current.model);
+        const currentEffort = current.reasoningEffort || '';
+        if (
+            selected
+            && currentEffort
+            && Array.isArray(selected.supported_reasoning_efforts)
+            && !selected.supported_reasoning_efforts.includes(currentEffort)
+        ) {
+            updatePref({ reasoningEffort: '' });
+        }
+        // updatePref synchronously updates prefsRef, preventing StrictMode replay.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [prefsHydrated, modelCatalog, prefs.model, prefs.reasoningEffort]);
 
     const handleTeamRefresh = async () => {
         const manifestUrl = prefsRef.current.teamManifestUrl;
@@ -3792,9 +3989,14 @@ const OptionsInner: React.FC = () => {
                                                         // not support reasoning effort configuration".
                                                         const newModel = e.target.value;
                                                         const sel = modelList.find(m => m.id === newModel);
-                                                        const supported = sel?.supported_reasoning_efforts || [];
+                                                        const supported = sel?.supported_reasoning_efforts;
                                                         const patch: { model: string; reasoningEffort?: '' } = { model: newModel };
-                                                        if (prefs.reasoningEffort && !supported.includes(prefs.reasoningEffort)) {
+                                                        if (
+                                                            modelCatalog.canRepairEffort
+                                                            && prefs.reasoningEffort
+                                                            && Array.isArray(supported)
+                                                            && !supported.includes(prefs.reasoningEffort)
+                                                        ) {
                                                             patch.reasoningEffort = '';
                                                         }
                                                         updatePref(patch);
@@ -3834,18 +4036,20 @@ const OptionsInner: React.FC = () => {
                                                         // "Use CLI default" is offered, preventing the
                                                         // create_session "does not support reasoning effort"
                                                         // failure. When no model is picked (inherit CLI
-                                                        // default) we also can't know support → no efforts.
+                                                         // default) we also can't know support, so all four
+                                                         // reviewed effort values remain available.
                                                         const sel = modelList.find(m => m.id === prefs.model);
-                                                        const efforts = sel?.supported_reasoning_efforts || [];
+                                                         const efforts = sel?.supported_reasoning_efforts
+                                                             ?? ['low', 'medium', 'high', 'xhigh'];
                                                         return efforts.map(ef => <option key={ef} value={ef}>{ef}</option>);
                                                     })()}
                                                 </select>
-                                                {prefs.model && (() => {
-                                                    const sel = modelList.find(m => m.id === prefs.model);
-                                                    const supported = sel?.supported_reasoning_efforts || [];
-                                                    return supported.length === 0 ? (
-                                                        <p className="text-[10px] text-slate-400 mt-1">{t('effortUnsupported')}</p>
-                                                    ) : null;
+                                                 {prefs.model && (() => {
+                                                     const sel = modelList.find(m => m.id === prefs.model);
+                                                     const supported = sel?.supported_reasoning_efforts;
+                                                     return Array.isArray(supported) && supported.length === 0 ? (
+                                                         <p className="text-[10px] text-slate-400 mt-1">{t('effortUnsupported')}</p>
+                                                     ) : null;
                                                 })()}
 
                                                 {/* Context tier */}

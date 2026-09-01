@@ -782,7 +782,11 @@ class NativeHost:
 
         if status["status"] == "ok" and selected_error is not None:
             status = selected_error.to_result()
-        if status["status"] == "ok" and dh_error is not None:
+        if (
+            status["status"] == "ok"
+            and not (effective_root and use_workspace_only)
+            and dh_error is not None
+        ):
             status = dh_error.to_result()
         if status["status"] == "ok" and user_prompt_error is not None:
             status = user_prompt_error.to_result()
@@ -2162,15 +2166,28 @@ class NativeHost:
                 mid = getattr(m, "id", None)
                 if not mid:
                     continue
-                efforts = getattr(m, "supported_reasoning_efforts", None) or []
-                out.append({
+                row = {
                     "id": mid,
                     "name": getattr(m, "name", None) or mid,
-                    "supported_reasoning_efforts": list(efforts),
-                    "default_reasoning_effort": getattr(
+                }
+                raw_efforts = getattr(m, "supported_reasoning_efforts", None)
+                if (
+                    isinstance(raw_efforts, list)
+                    and all(isinstance(effort, str) for effort in raw_efforts)
+                ):
+                    efforts = [
+                        effort
+                        for effort in raw_efforts
+                        if effort in {"low", "medium", "high", "xhigh"}
+                    ]
+                    default_effort = getattr(
                         m, "default_reasoning_effort", None
-                    ),
-                })
+                    )
+                    row["supported_reasoning_efforts"] = efforts
+                    row["default_reasoning_effort"] = (
+                        default_effort if default_effort in efforts else None
+                    )
+                out.append(row)
             logger.info(f"list_models returned {len(out)} model(s).")
             return {"status": "success", "data": {"models": out}}
         except Exception as e:
