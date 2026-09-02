@@ -39,6 +39,18 @@ type RuntimeMessageListener = (
   sender: chrome.runtime.MessageSender,
   sendResponse: ReturnType<typeof vi.fn>,
 ) => unknown
+type AlarmListener = (alarm: chrome.alarms.Alarm) => void
+type PortMessageListener = (message: unknown, port: chrome.runtime.Port) => void
+type PortDisconnectListener = (port: chrome.runtime.Port) => void
+
+export interface NativePortHarness {
+  readonly name: string
+  readonly posted: unknown[]
+  readonly port: chrome.runtime.Port
+  readonly disconnect: ReturnType<typeof vi.fn>
+  emitMessage(message: unknown): void
+  emitDisconnect(): void
+}
 
 let pendingByAction: PendingMap = new Map()
 let pendingStorageGets: DeferredStorageGet[] = []
@@ -50,6 +62,9 @@ let storageChangeListeners = new Set<StorageChangeListener>()
 let runtimeMessageListeners = new Set<RuntimeMessageListener>()
 let activeTabs: Array<{ id?: number }> = []
 let tabMessageLog: Array<{ tabId: number; message: unknown }> = []
+let manifestVersion = '2.0.70-beta.5-test'
+let queuedNativePorts: NativePortHarness[] = []
+let alarmListeners = new Set<AlarmListener>()
 
 function makeDeferred(): DeferredResponse {
   let resolve!: (v: unknown) => void
@@ -72,6 +87,9 @@ export function resetChromeMock(): void {
   runtimeMessageListeners = new Set()
   activeTabs = []
   tabMessageLog = []
+  manifestVersion = '2.0.70-beta.5-test'
+  queuedNativePorts = []
+  alarmListeners = new Set()
   sendMessage.mockClear()
   tabsQuery.mockClear()
   tabsSendMessage.mockClear()
@@ -82,6 +100,12 @@ export function resetChromeMock(): void {
   storageRemove.mockClear()
   storageOnChangedAddListener.mockClear()
   storageOnChangedRemoveListener.mockClear()
+  connectNative.mockClear()
+  runtimeReload.mockClear()
+  alarmsCreate.mockClear()
+  alarmsClear.mockClear()
+  alarmsOnAlarmAddListener.mockClear()
+  alarmsOnAlarmRemoveListener.mockClear()
   if (typeof chrome !== 'undefined' && chrome.runtime) {
     ;(chrome.runtime as typeof chrome.runtime & {
       lastError?: { message: string }
@@ -420,6 +444,72 @@ export function setActiveTabs(tabs: Array<{ id?: number }>): void {
   activeTabs = tabs.map(tab => ({ ...tab }))
 }
 
+export function setManifestVersion(version: string): void {
+  manifestVersion = version
+}
+
+function listenerEvent<T extends (...args: any[]) => unknown>(listeners: Set<T>) {
+  return {
+    addListener: vi.fn((listener: T) => listeners.add(listener)),
+    removeListener: vi.fn((listener: T) => listeners.delete(listener)),
+    hasListener: vi.fn((listener: T) => listeners.has(listener)),
+    hasListeners: vi.fn(() => listeners.size > 0),
+  }
+}
+
+export function queueNativePort(name: string): NativePortHarness {
+  const messageListeners = new Set<PortMessageListener>()
+  const disconnectListeners = new Set<PortDisconnectListener>()
+  const posted: unknown[] = []
+  let port!: chrome.runtime.Port
+  const disconnect = vi.fn(() => undefined)
+  const harness: NativePortHarness = {
+    name,
+    posted,
+    get port() {
+      return port
+    },
+    disconnect,
+    emitMessage(message: unknown) {
+      for (const listener of [...messageListeners]) listener(message, port)
+    },
+    emitDisconnect() {
+      for (const listener of [...disconnectListeners]) listener(port)
+    },
+  }
+  port = {
+    name,
+    sender: undefined,
+    onMessage: listenerEvent(messageListeners),
+    onDisconnect: listenerEvent(disconnectListeners),
+    postMessage: vi.fn((message: unknown) => posted.push(message)),
+    disconnect,
+  } as unknown as chrome.runtime.Port
+  queuedNativePorts.push(harness)
+  return harness
+}
+
+const connectNative = vi.fn((application: string) => {
+  const index = queuedNativePorts.findIndex(port => port.name === application)
+  if (index < 0) throw new Error('No queued Native port')
+  return queuedNativePorts.splice(index, 1)[0].port
+})
+
+const runtimeReload = vi.fn(() => undefined)
+
+const alarmsCreate = vi.fn((_name: string, _info: chrome.alarms.AlarmCreateInfo) => undefined)
+const alarmsClear = vi.fn((_name: string, callback?: (wasCleared: boolean) => void) => {
+  if (callback) queueMicrotask(() => callback(true))
+  return Promise.resolve(true)
+})
+const alarmsOnAlarmAddListener = vi.fn((listener: AlarmListener) => alarmListeners.add(listener))
+const alarmsOnAlarmRemoveListener = vi.fn((listener: AlarmListener) => alarmListeners.delete(listener))
+
+export function emitAlarm(name: string): void {
+  const alarm = { name, scheduledTime: Date.now() } as chrome.alarms.Alarm
+  for (const listener of [...alarmListeners]) listener(alarm)
+}
+
 export function emitRuntimeMessage(message: unknown): void {
   const sender = { id: 'test-extension' } as chrome.runtime.MessageSender
   for (const listener of [...runtimeMessageListeners]) {
@@ -441,8 +531,13 @@ export function installChromeMock(): void {
   ;(globalThis as unknown as { chrome: unknown }).chrome = {
     runtime: {
       sendMessage,
-      getManifest: () => ({ version: '2.0.70-beta.5-test' }),
+      getManifest: () => ({
+        version: manifestVersion.split('-', 1)[0],
+        ...(manifestVersion.includes('-') ? { version_name: manifestVersion } : {}),
+      }),
       getURL: (path: string) => `chrome-extension://test/${path}`,
+      connectNative,
+      reload: runtimeReload,
       lastError: undefined,
       onMessage: {
         addListener: runtimeOnMessageAddListener,
@@ -464,6 +559,14 @@ export function installChromeMock(): void {
       query: tabsQuery,
       sendMessage: tabsSendMessage,
     },
+    alarms: {
+      create: alarmsCreate,
+      clear: alarmsClear,
+      onAlarm: {
+        addListener: alarmsOnAlarmAddListener,
+        removeListener: alarmsOnAlarmRemoveListener,
+      },
+    },
   }
 }
 
@@ -477,4 +580,12 @@ export const chromeMockSpies = {
   storageRemove,
   storageOnChangedAddListener,
   storageOnChangedRemoveListener,
+  runtimeOnMessageAddListener,
+  runtimeOnMessageRemoveListener,
+  connectNative,
+  runtimeReload,
+  alarmsCreate,
+  alarmsClear,
+  alarmsOnAlarmAddListener,
+  alarmsOnAlarmRemoveListener,
 }
