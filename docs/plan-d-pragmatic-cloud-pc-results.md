@@ -15,6 +15,10 @@ those boundaries.
 
 ## Automated Gates
 
+Cloud-PC work is blocked until both artifact rows have complete source commits
+and ZIP SHA-256 values and all five rows below are exactly `PASS`. `PENDING` or
+`Not recorded` fails the runbook's entry gate.
+
 | Gate | Result | Evidence |
 |---|---|---|
 | Host full suite | PENDING | Not run against B |
@@ -25,18 +29,31 @@ those boundaries.
 
 ## Cloud PC Scenarios
 
-| Scenario | Baseline | Transaction ID | Terminal state | Versions/integrity | Smoke | Result |
-|---|---|---|---|---|---|---|
-| Uninterrupted A to B | `plan-d-a` | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
-| Interrupted recovery | `plan-d-a` | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
-| Matching-installer repair | `plan-d-a` | N/A | Not recorded | Not recorded | Not recorded | PENDING |
+Set `Result` to `PASS` only when every other field in that row is complete,
+`Analyze` and `Options` are each `PASS`, and the terminal state is one of these
+exact outcomes. A row containing `PENDING` or `Not recorded` cannot be `PASS`.
+
+- Uninterrupted A to B: `complete/committed B`.
+- Interrupted recovery: `complete/committed B` or `complete/rolled-back A`.
+- Matching-installer repair: `installer-repaired B`.
+
+`Versions/integrity` must record matching Host/Extension `2.0.76-beta.1` and
+verified integrity for B, or matching `2.0.74-beta.4` and verified integrity for
+Scenario 2's allowed A rollback.
+
+| Scenario | Baseline | Transaction ID | Terminal state | Versions/integrity | Analyze | Options | Result |
+|---|---|---|---|---|---|---|---|
+| Uninterrupted A to B | `plan-d-a` | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
+| Interrupted recovery | `plan-d-a` | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
+| Matching-installer repair | `plan-d-a` | N/A | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
 
 ## Environment Handoff
 
 | Step | Result |
 |---|---|
 | Keep old beta1 workstation unchanged | PENDING |
-| Disable beta updates or extension on old workstation | PENDING |
+| Confirm displayed `v2.0.75-beta.1` on old workstation | PENDING |
+| Confirm selected beta-updates or Extension control is disabled | PENDING |
 | Explicit publish approval | PENDING |
 | Verify published B asset hash | PENDING |
 | Migrate workload to qualified cloud PC | PENDING |
