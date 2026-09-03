@@ -10,7 +10,7 @@ those boundaries.
 
 | Artifact | Version | Source commit | ZIP SHA-256 | Result |
 |---|---|---|---|---|
-| A | `2.0.74-beta.4` | Not recorded | Not recorded | PENDING |
+| A | `2.0.74-beta.4` | `c77bd3a722259b098a8b8f4a4d1c941cc714e0cd` | `f605720d22fdc18be37673ac19b843d063e929a8a46f1132f54014f830aff6b5` | BUILT |
 | B | `2.0.76-beta.1` | Not recorded | Not recorded | PENDING |
 
 ## Automated Gates
