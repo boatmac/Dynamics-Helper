@@ -351,19 +351,24 @@ redirected drive. The old workstation remains unchanged and must never receive
 A or B.
 
 In `Qualification Entry Gate`, require a read-only fail-closed check before
-connecting to or changing the cloud PC. It must reject `PENDING`, `Not
-recorded`, a missing/malformed A or B source commit, a missing/malformed
-lowercase 64-hex ZIP SHA-256, or any of these five rows not exactly `PASS` with
-non-placeholder evidence: Host full suite, Extension full suite, Extension
-production build, Frozen Host build/probe, and Static/reachability checks.
+connecting to or changing the cloud PC. A/B version cells must exactly match the
+reviewed versions, source commits must be lowercase 7-40 hex, ZIP SHA-256 values
+must be lowercase 64-hex, and artifact Result must be non-empty and contain none
+of `PENDING`, `Not recorded`, or `Not run`. Each of these five rows must have
+Result exactly `PASS` and non-empty Evidence containing none of those three
+phrases: Host full suite, Extension full suite, Extension production build,
+Frozen Host build/probe, and Static/reachability checks.
 
 In `Empty-Cloud-PC Marker`, require explicit operator confirmation that the
 machine is still effectively empty and contains no customer workload before
 creating `C:\DH-CloudPC\PLAN_D_EMPTY_CLOUD_PC.marker`. Its exact no-BOM content
-is `PLAN_D_EFFECTIVELY_EMPTY_CLOUD_PC_V1`. Existing different bytes, a missing
-marker, or a non-file marker fail closed. Every installer invocation and every
-command that can terminate a browser, Host, or runner must validate those exact
-bytes before any other effect.
+is the UTF-8 no-BOM bytes of `PLAN_D_EFFECTIVELY_EMPTY_CLOUD_PC_V1`. Creation
+must use those raw bytes. Establishment and every marker guard must use
+`ReadAllBytes` plus exact length and byte-sequence equality; text decoding or
+`ReadAllText` is forbidden. Existing different bytes, a missing marker, or a
+non-file marker fail closed. Every installer invocation and every command that
+can terminate a browser, Host, or runner must validate those exact bytes before
+any other effect.
 
 - [ ] **Step 2: Document exact artifact identity commands**
 
