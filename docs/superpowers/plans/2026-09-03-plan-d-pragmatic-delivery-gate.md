@@ -299,7 +299,26 @@ git commit -m "test(release): decouple fixtures from product version"
 
 - [ ] **Step 1: Write the runbook preconditions and safety stop**
 
-Create `docs/plan-d-pragmatic-cloud-pc-runbook.md` with this opening contract:
+Create `docs/plan-d-pragmatic-cloud-pc-runbook.md`. It must use these section
+names so later tasks have stable operator references:
+
+- `Safety Contract`
+- `Scope And Evidence Rules`
+- `Qualification Entry Gate`
+- `Empty-Cloud-PC Marker`
+- `Artifact Identity`
+- `Installer Commands`
+- `Establish plan-d-a`
+- `Controlled Candidate Start`
+- `Terminal Verification And Cleanup`
+- `Scenario 1: Uninterrupted A To B`
+- `Scenario 2: Interrupted Recovery`, with `Read-Only Watchers`, `One-Shot
+  Original-Runner Interruption`, `Zero-Executor Checkpoint`, `Recovery-Runner
+  Witness`, and `Retry Rules`
+- `Scenario 3: Matching-Installer Repair`
+- `Environment Handoff`
+
+Open with this contract:
 
 ```markdown
 # Plan D Pragmatic Cloud PC Runbook
@@ -318,9 +337,33 @@ Create `docs/plan-d-pragmatic-cloud-pc-runbook.md` with this opening contract:
   record PASS/FAIL only, never its case ID, content, report, or screenshots.
 - Never delete `%LOCALAPPDATA%\DynamicsHelper\updates` during recovery.
 - Never publish, tag, push, or rebuild B while qualification is active.
+- Do not perform any cloud-PC operation until A/B identities are complete and
+  all five Automated Gates in the result ledger are `PASS`.
 - Stop immediately if the observed starting version, ZIP SHA-256, Native Host
   registration target, or transaction ID differs from the result ledger.
 ```
+
+State that the cloud PC is effectively empty and has no snapshot. Every
+scenario re-establishes `plan-d-a` with the complete A installer; no scenario
+uses snapshot rollback. Copy A and B through local-drive redirection into
+`C:\DH-CloudPC`, and never execute an archive, script, or installer from a
+redirected drive. The old workstation remains unchanged and must never receive
+A or B.
+
+In `Qualification Entry Gate`, require a read-only fail-closed check before
+connecting to or changing the cloud PC. It must reject `PENDING`, `Not
+recorded`, a missing/malformed A or B source commit, a missing/malformed
+lowercase 64-hex ZIP SHA-256, or any of these five rows not exactly `PASS` with
+non-placeholder evidence: Host full suite, Extension full suite, Extension
+production build, Frozen Host build/probe, and Static/reachability checks.
+
+In `Empty-Cloud-PC Marker`, require explicit operator confirmation that the
+machine is still effectively empty and contains no customer workload before
+creating `C:\DH-CloudPC\PLAN_D_EMPTY_CLOUD_PC.marker`. Its exact no-BOM content
+is `PLAN_D_EFFECTIVELY_EMPTY_CLOUD_PC_V1`. Existing different bytes, a missing
+marker, or a non-file marker fail closed. Every installer invocation and every
+command that can terminate a browser, Host, or runner must validate those exact
+bytes before any other effect.
 
 - [ ] **Step 2: Document exact artifact identity commands**
 
@@ -353,6 +396,11 @@ $root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';[pscustomobject]@{ActiveAutho
 ```
 
 Expected before each scenario: all booleans `false` and `RunnerCount` `0`.
+The runbook must additionally require a successful `get_capabilities` response
+containing `transactional-update-v1`, a packaged/verified
+`verify_installation` response, exact matching Host/Extension versions, and a
+production Native Messaging registration rooted at
+`%LOCALAPPDATA%\DynamicsHelper`.
 
 - [ ] **Step 3: Document exact DevTools update commands**
 
@@ -365,7 +413,7 @@ const privateBUrl = window.prompt('Paste the short-lived private B ZIP URL'); if
 ```
 
 ```javascript
-await chrome.storage.local.remove('pending_update'); await chrome.storage.local.set({dh_update_state:{kind:'available',update:{version:'2.0.76-beta.1',url:privateBUrl,isPrerelease:true}}}); const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,version:s?.update?.version,isPrerelease:s?.update?.isPrerelease})
+await chrome.storage.local.remove('pending_update'); await chrome.storage.local.set({dh_update_state:{kind:'available',update:{version:'2.0.76-beta.1',url:privateBUrl,isPrerelease:true}}}); const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,version:s?.update?.version,isPrerelease:s?.update?.isPrerelease,errorCode:s?.errorCode})
 ```
 
 ```javascript
@@ -375,51 +423,104 @@ chrome.runtime.reload()
 After reopening the Options page and its DevTools, document:
 
 ```javascript
-const r=await chrome.runtime.sendMessage({type:'DH_UPDATE_GET_STATE'}); ({handled:r?.handled,kind:r?.state?.kind,version:r?.state?.update?.version})
+const r=await chrome.runtime.sendMessage({type:'DH_UPDATE_GET_STATE'}); ({handled:r?.handled,kind:r?.state?.kind,version:r?.state?.update?.version,errorCode:r?.state?.errorCode})
 ```
 
 Register a sanitized storage listener before starting so the transaction ID is
 captured without printing `update.url`:
 
 ```javascript
-globalThis.dhUpdateWatch=(changes,area)=>{const s=changes.dh_update_state?.newValue;if(area==='local'&&s)console.log({kind:s.kind,transactionId:s.transactionId,targetVersion:s.targetVersion,outcome:s.outcome,code:s.code})}; chrome.storage.onChanged.addListener(globalThis.dhUpdateWatch)
+globalThis.dhUpdateWatch=(changes,area)=>{const s=changes.dh_update_state?.newValue;if(area==='local'&&s)console.log({kind:s.kind,transactionId:s.transactionId,targetVersion:s.targetVersion,outcome:s.outcome,code:s.code,errorCode:s.errorCode})}; chrome.storage.onChanged.addListener(globalThis.dhUpdateWatch)
 ```
 
 ```javascript
-void chrome.runtime.sendMessage({type:'DH_UPDATE_START'}).then(r=>{const s=r?.state;console.log({handled:r?.handled,kind:s?.kind,transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code})}).catch(e=>console.error(typeof e?.message==='string'?e.message:'Update start request disconnected'))
+void chrome.runtime.sendMessage({type:'DH_UPDATE_START'}).then(r=>{const s=r?.state;console.log({handled:r?.handled,kind:s?.kind,transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode})}).catch(()=>console.error('Update start request disconnected'))
 ```
 
 After any reload, reopen Options DevTools and inspect only safe fields:
 
 ```javascript
-const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code,version:s?.update?.version})
+const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode,version:s?.update?.version})
 ```
 
-Require the operator to copy only `kind`, `transactionId`, `targetVersion`, and `outcome` into the ledger; never copy `update.url`.
+Every safe `dh_update_state` projection in candidate seeding, baseline,
+`DH_UPDATE_GET_STATE`, storage watching, `DH_UPDATE_START`, reload, terminal
+verification, and Scenario 3 cleanup must include `errorCode`. It may include
+`hasUpdateUrl`, but must never print `update.url`, a complete state object, or a
+thrown message that could contain the URL. Require the operator to copy only
+reviewed safe fields into the ledger.
 
 - [ ] **Step 4: Document the three cloud-PC scenarios exactly**
 
-For each scenario, require the `plan-d-a` baseline defined in the runbook,
-actions, stop conditions, installer recovery order, and pass criteria:
+For every scenario, require the complete `plan-d-a` baseline, the installer
+recovery order, explicit stop conditions, matching Host/Extension versions,
+verified integrity, Analyze `PASS`, and Options `PASS`.
 
-1. Establish `plan-d-a` with the complete A installer, then run uninterrupted
-   A-to-B to terminal `complete/committed` B.
-2. Re-establish `plan-d-a` with the complete A installer. Start the runbook's
-   one-shot post-activation interrupter before starting the update. The
-   interrupter waits for a validated browser-owned A-to-B journal in
-   `waiting-for-host-exit` or a later nonterminal phase, then kills only the
-   original `--complete-update` runner carrying the same 32-hex transaction ID whose executable is
-   exactly `%LOCALAPPDATA%\DynamicsHelper\updates\recovery\dh_update_runner.exe`.
-   Within ten seconds, exit all browser windows, terminate only any remaining
-   main Host, and verify that browser/Host/runner counts are zero while the same
-   authority and armed RunOnce remain. Start the bounded recovery witness, then
-   reopen the browser/Options without editing state or deleting `updates/**`.
-   Require the witness to capture an exact-path `--recover-active` runner under
-   the same transaction with a PID different from the killed runner. Accept only
-   complete B (`committed`) or complete A (`rolled-back`) with matching versions
-   and verified integrity.
-3. Re-establish `plan-d-a`, install B, create a sentinel, reinstall the exact B
-   ZIP, and verify removal:
+`Scenario 1: Uninterrupted A To B` must accept only
+`complete/committed B` at `2.0.76-beta.1`. It must preserve the transaction ID
+before reload removes transient state, prove final authority/workspace/cursor
+cleanup, and reject rollback, `recovery-required`, version disagreement,
+integrity failure, or premature success UI.
+
+`Scenario 2: Interrupted Recovery` must require:
+
+- a mandatory read-only timeline watcher that emits only authority,
+  transaction, phase, and PIDs;
+- an optional process-start watcher that prints only safe process mode/PIDs,
+  requires CIM event permission, and exits with a fixed safe diagnostic on
+  Access Denied or unavailable CIM events; watcher unavailability is not a gate
+  failure because the mandatory recovery witness polls independently;
+- a one-shot PowerShell 7 interrupter started before `DH_UPDATE_START`, with a
+  ten-minute deadline and the strict empty-cloud-PC marker guard as its first
+  guard;
+- strict `active.json` lowercase 32-hex transaction/path authority validation
+  before every journal read, and a browser-owned journal with prior
+  `2.0.74-beta.4`, target `2.0.76-beta.1`, a non-empty initiating-process
+  identity, and a post-`prepared` nonterminal phase;
+- no kill while the journal is `prepared`; terminal-before-kill is a missed
+  interruption, not evidence;
+- RunOnce armed before the kill; exactly one runner whose executable is exactly
+  `%LOCALAPPDATA%\DynamicsHelper\updates\recovery\dh_update_runner.exe`, whose
+  command is canonical `--complete-update` with the same transaction and
+  initiating-process identity, and which does not contain `--recover-active`;
+- PID-only termination of that proven runner, wait-for-exit, and preservation
+  in the same PowerShell window of transaction ID, killed PID, and
+  `$global:DhKilledAtUtc=[DateTime]::UtcNow`;
+- marker-guarded browser termination and marker-guarded main-Host termination;
+  main Host selection must use `Win32_Process`/CIM and an exact
+  `%LOCALAPPDATA%\DynamicsHelper\dh_native_host.exe` `ExecutablePath`, then stop
+  only the selected PID; no name-only Host kill is allowed;
+- a zero-executor checkpoint in the same PowerShell window that validates the
+  strict marker first, then the captured transaction, PID, and UTC kill time
+  before any five-second stability wait; its pre-wait UTC delta must be `0..10`
+  seconds, then it must prove no browser, exact-path main Host, runner, or killed
+  PID remains while the same active/journal authority and armed RunOnce persist;
+  output only safe elapsed seconds and reviewed identifiers;
+- a five-minute recovery witness started before reopening the browser; it must
+  validate the strict marker first, revalidate the same active/journal authority,
+  and capture exactly one runner at the exact recovery path with an
+  executable-plus-`--recover-active` command, excluding `--complete-update`, and
+  a PID different from the killed PID; and
+- acceptance only of `complete/committed B` or `complete/rolled-back A` under
+  the same transaction, with matching versions and verified integrity.
+
+Every command that terminates a browser, Host, or runner must begin with the
+strict marker guard. Interruption commands must print no full command line, URL,
+prompt content, complete local-storage object, or unreviewed error message, and
+must never write a journal, storage record, RunOnce value, or `updates/**` file.
+The Retry table must select actions from `kind` plus the safe `errorCode` field:
+wait for `activating`/`polling` and error-free reload/ack phases; retry cleanup
+once for reload/ack with `errorCode`; retry activation once only for
+post-`prepared` activation with `errorCode`; classify preparing error or
+`prepared` as not recovery evidence; and fail the gate on `recovery-required`.
+
+`Scenario 3: Matching-Installer Repair` must re-establish A, then before the
+first B installer compute an in-memory map for each existing user-owned
+`config.json`, `copilot-instructions.md`, and `user_prompt.md`. Store only the
+file-name set and lowercase SHA-256 values in that PowerShell session; print
+only a file count and never persist or record names, content, or hashes. Install
+B, create the sentinel, run the exact B installer again, and verify sentinel
+removal:
 
 ```powershell
 $sentinel="$env:LOCALAPPDATA\DynamicsHelper\_internal\dh-cloud-pc-sentinel.txt"; [System.IO.File]::WriteAllText($sentinel,'remove me'); Test-Path -LiteralPath $sentinel
@@ -431,6 +532,15 @@ Test-Path -LiteralPath "$env:LOCALAPPDATA\DynamicsHelper\_internal\dh-cloud-pc-s
 
 Expected before reinstall: `True`; after reinstall: `False`.
 
+After the second B installer, recompute the same three-file map and require the
+same set and hashes. Then require B versions/integrity, Analyze/Options `PASS`,
+and a safe storage projection containing `errorCode` and boolean
+`hasUpdateUrl`. Final state must have `hasUpdateUrl: false`, no `errorCode`, and
+public `DH_UPDATE_GET_STATE` `idle`. A terminal `complete` record may be cleared
+only after `updates/active.json` is absent, using a guard that rechecks
+`kind === 'complete'`; any nonterminal or `recovery-required` state must not be
+cleared. Record Scenario 3 terminal state as `installer-repaired B`.
+
 For integrity/capability inspection, document sending ordinary Native messages from the **Options page DevTools console**, not the Service Worker console:
 
 ```javascript
@@ -441,121 +551,32 @@ await chrome.runtime.sendMessage({type:'NATIVE_MSG',payload:{action:'get_capabil
 await chrome.runtime.sendMessage({type:'NATIVE_MSG',payload:{action:'verify_installation'}})
 ```
 
-Add these exact interruption commands and rules to the runbook.
-
-First add a read-only timeline watcher. It emits only authority, transaction,
-phase, and process IDs:
-
-```powershell
-$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$active=Join-Path $root 'updates\active.json';$last='';while($true){$tx='';$phase='';$authority=$false;if(Test-Path -LiteralPath $active){try{$a=[IO.File]::ReadAllText($active)|ConvertFrom-Json;$tx=[string]$a.transaction_id;if(($tx -match '^[0-9a-f]{32}$') -and ([string]$a.journal_path -ceq "transactions/$tx/journal.json")){$j=[IO.File]::ReadAllText((Join-Path $root "updates\transactions\$tx\journal.json"))|ConvertFrom-Json;$phase=[string]$j.phase;$authority=$true}}catch{$tx='';$phase='';$authority=$false}};$main=@(Get-Process -Name dh_native_host -ErrorAction SilentlyContinue);$runner=@(Get-Process -Name dh_update_runner -ErrorAction SilentlyContinue);$key=@($authority,$tx,$phase,($main.Id -join ','),($runner.Id -join ','))-join '|';if($key -cne $last){[pscustomobject]@{At=(Get-Date).ToUniversalTime().ToString('o');Authority=$authority;TransactionId=$tx;JournalPhase=$phase;MainHostPids=@($main.Id);RunnerPids=@($runner.Id)}|ConvertTo-Json -Compress;$last=$key};Start-Sleep -Milliseconds 25}
-```
-
-Add a process-start watcher. It inspects but never prints the complete command
-line:
-
-```powershell
-$id='DH.Update.ProcessStart.'+[guid]::NewGuid().ToString('N');$q="SELECT * FROM Win32_ProcessStartTrace WHERE ProcessName='dh_native_host.exe' OR ProcessName='dh_update_runner.exe'";Register-CimIndicationEvent -Query $q -SourceIdentifier $id|Out-Null;try{while($true){$e=Wait-Event -SourceIdentifier $id;$n=$e.SourceEventArgs.NewEvent;$p=Get-CimInstance Win32_Process -Filter "ProcessId=$($n.ProcessID)" -ErrorAction SilentlyContinue;$cmd=[string]$p.CommandLine;$mode=if($n.ProcessName -ieq 'dh_update_runner.exe'){if($cmd -match '(?i)--recover-active(?:\s|$)'){'recover-active'}elseif($cmd -match '(?i)--complete-update(?:\s|$)'){'complete-update'}else{'unknown-runner'}}else{'main-host'};[pscustomobject]@{At=(Get-Date).ToUniversalTime().ToString('o');Name=[string]$n.ProcessName;Pid=[int]$n.ProcessID;ParentPid=[int]$n.ParentProcessID;Mode=$mode}|ConvertTo-Json -Compress;Remove-Event -EventIdentifier $e.EventIdentifier}}finally{Unregister-Event -SourceIdentifier $id -ErrorAction SilentlyContinue}
-```
-
-Add the one-shot interrupter. Run it in a PowerShell 7 window before
-`DH_UPDATE_START`, leave that window open for all subsequent interruption
-commands, and start the update from Options DevTools. It waits at most ten
-minutes. Before `active.json` exists it polls; after the file first appears, any
-read, JSON, authority, or journal validation error fails immediately. A
-`prepared` journal is observed but never killed. A terminal journal means the
-interruption was missed. The command validates the exact A-to-B browser journal,
-requires RunOnce before the kill, proves that the sole runner has the exact
-recovery executable path and canonical `--complete-update` command for the same
-transaction and initiating-process identity, explicitly excludes
-`--recover-active`, captures the transaction and killed PID in global variables,
-kills by PID, waits for exit, and then revalidates the same nonterminal
-post-activation authority:
-
-```powershell
-$ErrorActionPreference='Stop';Remove-Variable -Scope Global -Name DhExpectedTransactionId,DhKilledRunnerPid,DhRecoveryRunnerPid -ErrorAction SilentlyContinue;$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$active=Join-Path $root 'updates\active.json';$runnerPath=[IO.Path]::GetFullPath((Join-Path $root 'updates\recovery\dh_update_runner.exe'));$runOnceKey='Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce';$post=@('waiting-for-host-exit','host-backed-up','host-installed','extension-backed-up','extension-installed','metadata-installed','probing','rolling-back');$terminal=@('committed','rolled-back','recovery-required');if(Test-Path -LiteralPath $active){throw 'Baseline invalid: active.json already exists'};if(@(Get-CimInstance Win32_Process -Filter "Name='dh_update_runner.exe'" -ErrorAction Stop).Count){throw 'Baseline invalid: update runner already exists'};$authoritySeen=$false;$interrupted=$false;$deadline=[DateTime]::UtcNow.AddMinutes(10);while([DateTime]::UtcNow -lt $deadline){if(-not(Test-Path -LiteralPath $active)){if($authoritySeen){throw 'Active authority disappeared before interruption'};Start-Sleep -Milliseconds 25;continue};$authoritySeen=$true;try{$a=[IO.File]::ReadAllText($active)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable active authority'};if(($a.transaction_id -isnot [string]) -or ($a.transaction_id -cnotmatch '^[0-9a-f]{32}$')){throw 'Active transaction ID is not lowercase 32-hex'};$tx=$a.transaction_id;$expectedJournal="transactions/$tx/journal.json";if(($a.journal_path -isnot [string]) -or ($a.journal_path -cne $expectedJournal)){throw 'Active journal authority mismatch'};$journalPath=Join-Path $root "updates\transactions\$tx\journal.json";try{$j=[IO.File]::ReadAllText($journalPath)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable transaction journal'};if(($j.transaction_id -isnot [string]) -or ($j.transaction_id -cne $tx) -or ($j.initiator -isnot [string]) -or ($j.initiator -cne 'browser') -or ($j.prior_version -isnot [string]) -or ($j.prior_version -cne '2.0.74-beta.4') -or ($j.target_version -isnot [string]) -or ($j.target_version -cne '2.0.76-beta.1') -or ($j.phase -isnot [string])){throw 'Transaction journal authority mismatch'};$phase=$j.phase;if($phase -ceq 'prepared'){Start-Sleep -Milliseconds 25;continue};if($terminal -ccontains $phase){throw "Interruption missed: transaction reached terminal phase $phase"};if($post -cnotcontains $phase){throw "Unexpected nonterminal journal phase: $phase"};$ip=$j.initiating_process;if(($null -eq $ip) -or ($ip.pid -isnot [long]) -or ($ip.pid -le 0) -or ($ip.creation_token -isnot [string]) -or ($ip.creation_token -cnotmatch '^win-create-time-[1-9][0-9]*$')){throw 'Post-activation initiating process is missing or invalid'};try{$runOnce=[string](Get-ItemPropertyValue -LiteralPath $runOnceKey -Name 'DynamicsHelperUpdateRecovery' -ErrorAction Stop)}catch{throw 'RunOnce recovery is not armed before interruption'};if([string]::IsNullOrWhiteSpace($runOnce)){throw 'RunOnce recovery is not armed before interruption'};$allRunners=@(Get-CimInstance Win32_Process -Filter "Name='dh_update_runner.exe'" -ErrorAction Stop);if($allRunners.Count -ne 1){throw "Expected exactly one update runner; found $($allRunners.Count)"};$runner=$allRunners[0];$cmd=[string]$runner.CommandLine;$completePattern='(?i)^\s*(?:"[^"]+"|\S+)\s+--complete-update\s+'+[regex]::Escape($tx)+'\s+'+[regex]::Escape([string]$ip.pid)+'\s+'+[regex]::Escape($ip.creation_token)+'\s*$';$recoverPattern='(?i)(?:^|\s)--recover-active(?:\s|$)';if(-not [string]::Equals([string]$runner.ExecutablePath,$runnerPath,[StringComparison]::OrdinalIgnoreCase)){throw 'Original runner executable path mismatch'};if([string]::IsNullOrWhiteSpace($cmd) -or ($cmd -notmatch $completePattern) -or ($cmd -match $recoverPattern)){throw 'Original runner invocation is not the expected complete-update command'};$global:DhExpectedTransactionId=$tx;$global:DhKilledRunnerPid=[int]$runner.ProcessId;$phaseAtKill=$phase;$runnerProcess=Get-Process -Id $global:DhKilledRunnerPid -ErrorAction Stop;try{Stop-Process -Id $global:DhKilledRunnerPid -Force -ErrorAction Stop;if(-not $runnerProcess.WaitForExit(10000)){throw 'Killed runner did not exit within ten seconds'}}finally{$runnerProcess.Dispose()};if(-not(Test-Path -LiteralPath $active)){throw 'Active authority disappeared after runner exit'};try{$a2=[IO.File]::ReadAllText($active)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable active authority after runner exit'};if(($a2.transaction_id -isnot [string]) -or ($a2.transaction_id -cne $global:DhExpectedTransactionId) -or ($a2.journal_path -isnot [string]) -or ($a2.journal_path -cne "transactions/$($global:DhExpectedTransactionId)/journal.json")){throw 'Active authority changed after runner exit'};try{$j2=[IO.File]::ReadAllText($journalPath)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable transaction journal after runner exit'};$ip2=$j2.initiating_process;if(($j2.transaction_id -isnot [string]) -or ($j2.transaction_id -cne $global:DhExpectedTransactionId) -or ($j2.initiator -isnot [string]) -or ($j2.initiator -cne 'browser') -or ($j2.prior_version -isnot [string]) -or ($j2.prior_version -cne '2.0.74-beta.4') -or ($j2.target_version -isnot [string]) -or ($j2.target_version -cne '2.0.76-beta.1') -or ($null -eq $ip2) -or ($ip2.pid -isnot [long]) -or ($ip2.pid -ne $ip.pid) -or ($ip2.creation_token -isnot [string]) -or ($ip2.creation_token -cne $ip.creation_token) -or ($j2.phase -isnot [string]) -or ($post -cnotcontains $j2.phase)){throw 'Journal is not the same post-activation nonterminal transaction after runner exit'};[pscustomobject]@{Event='original-runner-killed';TransactionId=$global:DhExpectedTransactionId;PhaseAtKill=$phaseAtKill;PhaseAfterKill=$j2.phase;RunnerPid=$global:DhKilledRunnerPid;RunOnceArmedBeforeKill=$true}|ConvertTo-Json -Compress;$interrupted=$true;break};if(-not $interrupted){throw 'Interrupter timed out after ten minutes without a valid post-activation runner'}
-```
-
-After it prints `original-runner-killed`, close all browser windows within ten
-seconds, then run:
-
-```powershell
-Get-Process -Name chrome,msedge -ErrorAction SilentlyContinue | Stop-Process -Force
-```
-
-```powershell
-Get-Process -Name dh_native_host -ErrorAction SilentlyContinue | Stop-Process -Force
-```
-
-In the same PowerShell window, run the zero-executor checkpoint. It must consume,
-not replace, `$global:DhExpectedTransactionId` and
-`$global:DhKilledRunnerPid`; strictly compare the active transaction with the
-captured transaction; prove the killed PID, all browsers, all main Hosts, and all
-runners are absent; and revalidate the same post-activation journal and armed
-RunOnce:
-
-```powershell
-$ErrorActionPreference='Stop';if(($global:DhExpectedTransactionId -isnot [string]) -or ($global:DhExpectedTransactionId -cnotmatch '^[0-9a-f]{32}$')){throw 'Missing captured transaction ID; rerun the interrupter'};if(($global:DhKilledRunnerPid -isnot [int]) -or ($global:DhKilledRunnerPid -le 0)){throw 'Missing captured killed-runner PID; rerun the interrupter'};$expectedTx=$global:DhExpectedTransactionId;$killedPid=$global:DhKilledRunnerPid;Start-Sleep -Seconds 5;$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$active=Join-Path $root 'updates\active.json';$b=@(Get-Process -Name chrome,msedge -ErrorAction SilentlyContinue);$m=@(Get-Process -Name dh_native_host -ErrorAction SilentlyContinue);$r=@(Get-CimInstance Win32_Process -Filter "Name='dh_update_runner.exe'" -ErrorAction Stop);$killedPidRecords=@(Get-CimInstance Win32_Process -Filter "ProcessId=$killedPid" -ErrorAction Stop);if($b.Count -or $m.Count -or $r.Count -or $killedPidRecords.Count){throw 'Zero-executor checkpoint failed: browser, main Host, runner, or killed PID is still alive'};if(-not(Test-Path -LiteralPath $active)){throw 'Active authority disappeared before recovery witness'};try{$a=[IO.File]::ReadAllText($active)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable active authority at zero-executor checkpoint'};if(($a.transaction_id -isnot [string]) -or ($a.transaction_id -cne $expectedTx) -or ($a.journal_path -isnot [string]) -or ($a.journal_path -cne "transactions/$expectedTx/journal.json")){throw 'Zero-executor active authority does not match the interrupted transaction'};$journalPath=Join-Path $root "updates\transactions\$expectedTx\journal.json";try{$j=[IO.File]::ReadAllText($journalPath)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable transaction journal at zero-executor checkpoint'};$post=@('waiting-for-host-exit','host-backed-up','host-installed','extension-backed-up','extension-installed','metadata-installed','probing','rolling-back');$checkpointIp=$j.initiating_process;if(($j.transaction_id -isnot [string]) -or ($j.transaction_id -cne $expectedTx) -or ($j.initiator -isnot [string]) -or ($j.initiator -cne 'browser') -or ($j.prior_version -isnot [string]) -or ($j.prior_version -cne '2.0.74-beta.4') -or ($j.target_version -isnot [string]) -or ($j.target_version -cne '2.0.76-beta.1') -or ($null -eq $checkpointIp) -or ($checkpointIp.pid -isnot [long]) -or ($checkpointIp.pid -le 0) -or ($checkpointIp.creation_token -isnot [string]) -or ($checkpointIp.creation_token -cnotmatch '^win-create-time-[1-9][0-9]*$') -or ($j.phase -isnot [string]) -or ($post -cnotcontains $j.phase)){throw 'Zero-executor journal is not the interrupted post-activation transaction'};try{$runOnce=[string](Get-ItemPropertyValue -LiteralPath 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce' -Name 'DynamicsHelperUpdateRecovery' -ErrorAction Stop)}catch{throw 'RunOnce recovery is not armed at zero-executor checkpoint'};if([string]::IsNullOrWhiteSpace($runOnce)){throw 'RunOnce recovery is not armed at zero-executor checkpoint'};[pscustomobject]@{Event='zero-executor-checkpoint';TransactionId=$expectedTx;JournalPhase=$j.phase;KilledRunnerPid=$killedPid;NoBrowser=$true;NoMainHost=$true;NoRunner=$true;RunOnceArmed=$true}|ConvertTo-Json -Compress
-```
-
-Before reopening the browser, start this recovery witness in the same PowerShell
-window. It first emits `recovery-witness-armed`, then waits at most five minutes.
-Immediately after that armed event appears, reopen the same browser profile and
-Options without editing state or sending a manual ping. The command fails if it
-cannot capture exactly one runner at the exact recovery path with a command line
-consisting of the executable plus `--recover-active`, if the PID equals the
-killed runner PID, or if the active authority is no longer the captured
-transaction. It reports only the safe mode, exact executable path, transaction,
-phase, and PIDs, never the complete command line:
-
-```powershell
-$ErrorActionPreference='Stop';if(($global:DhExpectedTransactionId -isnot [string]) -or ($global:DhExpectedTransactionId -cnotmatch '^[0-9a-f]{32}$')){throw 'Missing captured transaction ID; rerun the interrupter'};if(($global:DhKilledRunnerPid -isnot [int]) -or ($global:DhKilledRunnerPid -le 0)){throw 'Missing captured killed-runner PID; rerun the interrupter'};$expectedTx=$global:DhExpectedTransactionId;$killedPid=$global:DhKilledRunnerPid;$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$active=Join-Path $root 'updates\active.json';$runnerPath=[IO.Path]::GetFullPath((Join-Path $root 'updates\recovery\dh_update_runner.exe'));$journalPath=Join-Path $root "updates\transactions\$expectedTx\journal.json";$post=@('waiting-for-host-exit','host-backed-up','host-installed','extension-backed-up','extension-installed','metadata-installed','probing','rolling-back');$readExpectedState={if(-not(Test-Path -LiteralPath $active)){throw 'Recovery witness lost active authority'};try{$authority=[IO.File]::ReadAllText($active)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable active authority during recovery witness'};if(($authority.transaction_id -isnot [string]) -or ($authority.transaction_id -cne $expectedTx) -or ($authority.journal_path -isnot [string]) -or ($authority.journal_path -cne "transactions/$expectedTx/journal.json")){throw 'Recovery witness active authority does not match the interrupted transaction'};try{$journal=[IO.File]::ReadAllText($journalPath)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable transaction journal during recovery witness'};$witnessIp=$journal.initiating_process;if(($journal.transaction_id -isnot [string]) -or ($journal.transaction_id -cne $expectedTx) -or ($journal.initiator -isnot [string]) -or ($journal.initiator -cne 'browser') -or ($journal.prior_version -isnot [string]) -or ($journal.prior_version -cne '2.0.74-beta.4') -or ($journal.target_version -isnot [string]) -or ($journal.target_version -cne '2.0.76-beta.1') -or ($null -eq $witnessIp) -or ($witnessIp.pid -isnot [long]) -or ($witnessIp.pid -le 0) -or ($witnessIp.creation_token -isnot [string]) -or ($witnessIp.creation_token -cnotmatch '^win-create-time-[1-9][0-9]*$') -or ($journal.phase -isnot [string]) -or ($post -cnotcontains $journal.phase)){throw 'Recovery witness journal is not the interrupted post-activation transaction'};return $journal};$state=& $readExpectedState;if(@(Get-CimInstance Win32_Process -Filter "Name='dh_update_runner.exe'" -ErrorAction Stop).Count){throw 'Recovery witness must start with zero runners'};[pscustomobject]@{Event='recovery-witness-armed';TransactionId=$expectedTx;KilledRunnerPid=$killedPid;TimeoutSeconds=300}|ConvertTo-Json -Compress;$witnessed=$false;$deadline=[DateTime]::UtcNow.AddMinutes(5);while([DateTime]::UtcNow -lt $deadline){$state=& $readExpectedState;$runners=@(Get-CimInstance Win32_Process -Filter "Name='dh_update_runner.exe'" -ErrorAction Stop);if($runners.Count -eq 0){Start-Sleep -Milliseconds 25;continue};if($runners.Count -ne 1){throw "Recovery witness expected exactly one runner; found $($runners.Count)"};$runner=$runners[0];$cmd=[string]$runner.CommandLine;$recoverPattern='(?i)^\s*(?:"[^"]+"|\S+)\s+--recover-active\s*$';$completePattern='(?i)(?:^|\s)--complete-update(?:\s|$)';if(-not [string]::Equals([string]$runner.ExecutablePath,$runnerPath,[StringComparison]::OrdinalIgnoreCase)){throw 'Recovery runner executable path mismatch'};if([string]::IsNullOrWhiteSpace($cmd) -or ($cmd -notmatch $recoverPattern) -or ($cmd -match $completePattern)){throw 'Recovery runner invocation is not exact recover-active mode'};$recoveryPid=[int]$runner.ProcessId;if($recoveryPid -eq $killedPid){throw 'Recovery runner reused the killed runner PID'};$state=& $readExpectedState;$global:DhRecoveryRunnerPid=$recoveryPid;[pscustomobject]@{Event='recovery-runner-witnessed';TransactionId=$expectedTx;JournalPhase=$state.phase;ExecutablePath=$runnerPath;Mode='recover-active';RunnerPid=$recoveryPid;KilledRunnerPid=$killedPid}|ConvertTo-Json -Compress;$witnessed=$true;break};if(-not $witnessed){throw 'Recovery witness timed out after five minutes without an exact recover-active runner'}
-```
-
-Only after `recovery-runner-witnessed` may this attempt continue to terminal
-verification. Failure to capture that event is a failed recovery-proof attempt.
-
-Document this Retry table:
-
-| State | Action |
-|---|---|
-| `activating` or `polling`, no error | Wait for status polling and recovery kick. |
-| `reload-pending` or `ack-pending`, no error | Wait; do not click Retry. |
-| `reload-pending` or `ack-pending` with `errorCode` | Click Retry cleanup once. |
-| `activating` with error and journal post-`prepared` | Click Retry once; it must query status before activation. |
-| `preparing` with error or journal still `prepared` | This is not durable-recovery evidence; re-establish A and rerun. |
-| `recovery-required` | Gate failure; preserve evidence and use matching installer recovery. |
-
-Every interruption command must:
-
-- validate `active.json` transaction/path authority before reading the journal;
-- require journal initiator `browser`, prior `2.0.74-beta.4`, target
-  `2.0.76-beta.1`, and a non-empty initiating process in every accepted
-  post-activation state;
-- prove the sole original runner by exact executable path, exact
-  `--complete-update` invocation carrying the same 32-hex transaction ID, exclusion of
-  `--recover-active`, and PID, then kill and wait by that PID;
-- never kill `prepared`, and classify terminal-before-kill as a missed
-  interruption rather than evidence;
-- require RunOnce before the kill and at the zero-executor checkpoint;
-- preserve the captured transaction/PID across the same PowerShell window and
-  require an exact-path `--recover-active` witness with a different PID before
-  accepting resumed execution;
-- print no complete command line, URL, prompt content, or local storage object;
-  and
-- never write journal, storage, RunOnce, or any `updates/**` file.
-
 - [ ] **Step 5: Document A installation and environment-handoff gates**
 
-In the cloud-PC setup section, require extracting A and running its `install.bat`.
-The `plan-d-a` baseline is valid only after version, capabilities, integrity,
-absence of `updates/active.json`, coordinator state exactly `idle`, Analyze, and
-Options checks pass. A complete A installer re-establishes the product before
-each scenario; it is not a snapshot rollback.
+In `Installer Commands`, require both A and B commands to begin with the strict
+cloud-PC marker guard and independently prove Chrome/Edge, every main Host, and
+every update runner are absent before invocation. Delete an existing extraction
+directory with `Remove-Item ... -ErrorAction Stop`, expand the recorded ZIP into
+a fresh local directory with `Expand-Archive ... -ErrorAction Stop`, require
+`installer_core.ps1` to exist, and run it directly through
+`pwsh -NoProfile -ExecutionPolicy Bypass -File`. Capture/display stdout, capture
+the native exit code immediately, and fail unless it is `0` and normalized
+stdout contains the exact preselected existing marker: `SUCCESS: Installation
+Complete!` for a fresh install or `SUCCESS: Update Complete!` when the installed
+manifest existed before invocation. Explicitly forbid `install.bat`; its pause
+wrapper does not provide the fail-closed exit/marker contract.
+
+The `plan-d-a` baseline is valid only after exact A `2.0.74-beta.4` versions,
+capabilities, packaged integrity, production registration, absence of
+`updates/active.json`, no runner/finalization cursor/RunOnce, coordinator state
+exactly `idle` with no retained URL or `errorCode`, Analyze `PASS`, and Options
+`PASS`. A complete A installer re-establishes the product before every scenario;
+it is not a snapshot rollback.
 
 After A installation and browser reload, inspect only safe state fields:
 
 ```javascript
-const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,hasUpdateUrl:typeof s?.update?.url==='string',transactionId:s?.transactionId,outcome:s?.outcome,code:s?.code})
+const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,hasUpdateUrl:typeof s?.update?.url==='string',transactionId:s?.transactionId,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode})
 ```
 
 If the state is `complete`, record its safe fields and confirm
@@ -566,37 +587,20 @@ record and reload:
 const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state');if(s?.kind!=='complete')throw new Error('Only a terminal complete state may be cleared');await chrome.storage.local.remove('dh_update_state');chrome.runtime.reload()
 ```
 
-Reopen Options and require `DH_UPDATE_GET_STATE` to return `idle`. Never clear
-`preparing`, `activating`, `polling`, `reload-pending`, `ack-pending`, or
-`recovery-required` to force a baseline.
+Reopen Options and require the safe `DH_UPDATE_GET_STATE` projection, including
+`errorCode`, to return `idle` without a retained URL. Never clear `preparing`,
+`activating`, `polling`, `reload-pending`, `ack-pending`, or
+`recovery-required` to force a baseline. Installer invocation is exclusively the
+fail-closed direct `installer_core.ps1` flow defined above; no Task 2 command or
+later task may invoke `install.bat`.
 
-Before every A or B installer invocation, close all Chrome/Edge windows and run:
-
-```powershell
-$b=@(Get-Process -Name chrome,msedge -ErrorAction SilentlyContinue);if($b.Count){throw 'Close all Chrome and Edge windows before running the installer'}
-```
-
-Extract A into a fresh directory and invoke it:
-
-```powershell
-$zip='C:\DH-CloudPC\DynamicsHelper_v2.0.74-beta.4.zip';$extract='C:\DH-CloudPC\A-extracted';if(Test-Path -LiteralPath $extract){Remove-Item -LiteralPath $extract -Recurse -Force};Expand-Archive -LiteralPath $zip -DestinationPath $extract; & "$extract\install.bat"
-```
-
-Extract B into a fresh directory for matching-installer Scenario 3:
-
-```powershell
-$zip='C:\DH-CloudPC\DynamicsHelper_v2.0.76-beta.1.zip';$extract='C:\DH-CloudPC\B-extracted';if(Test-Path -LiteralPath $extract){Remove-Item -LiteralPath $extract -Recurse -Force};Expand-Archive -LiteralPath $zip -DestinationPath $extract; & "$extract\install.bat"
-```
-
-The installer is interactive. Wait for its terminal success or failure message;
-do not infer success from files merely appearing.
-
-In a final separately marked section, state that after cloud-PC qualification the
-old beta1 workstation remains unchanged as a fallback. Before B is published,
-obtain fresh confirmation and either turn off **Receive beta updates** in its
-Options page or disable its Dynamics Helper extension. Do not click Update and do
-not install A or B there. Migrate the real workload to the cloud PC only after
-the qualified B environment remains healthy.
+In `Environment Handoff`, state that after cloud-PC qualification the old beta1
+workstation remains unchanged as a fallback. Before any old-workstation row is
+`PASS`, read its displayed Extension version and require exactly
+`v2.0.75-beta.1`, then verify the explicitly selected freeze action is disabled:
+either **Receive beta updates** is off or the Dynamics Helper Extension is
+disabled. Do not click Update, send an update request, or install A/B there.
+Migrate the real workload only after qualified B remains healthy.
 
 - [ ] **Step 6: Create the sanitized result ledger**
 
@@ -620,6 +624,10 @@ those boundaries.
 
 ## Automated Gates
 
+Cloud-PC work is blocked until both artifact rows have complete source commits
+and ZIP SHA-256 values and all five rows below are exactly `PASS`. `PENDING` or
+`Not recorded` fails the runbook's entry gate.
+
 | Gate | Result | Evidence |
 |---|---|---|
 | Host full suite | PENDING | Not run against B |
@@ -630,18 +638,31 @@ those boundaries.
 
 ## Cloud PC Scenarios
 
-| Scenario | Baseline | Transaction ID | Terminal state | Versions/integrity | Smoke | Result |
-|---|---|---|---|---|---|---|
-| Uninterrupted A to B | `plan-d-a` | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
-| Interrupted recovery | `plan-d-a` | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
-| Matching-installer repair | `plan-d-a` | N/A | Not recorded | Not recorded | Not recorded | PENDING |
+Set `Result` to `PASS` only when every other field in that row is complete,
+`Analyze` and `Options` are each `PASS`, and the terminal state is one of these
+exact outcomes. A row containing `PENDING` or `Not recorded` cannot be `PASS`.
+
+- Uninterrupted A to B: `complete/committed B`.
+- Interrupted recovery: `complete/committed B` or `complete/rolled-back A`.
+- Matching-installer repair: `installer-repaired B`.
+
+`Versions/integrity` must record matching Host/Extension `2.0.76-beta.1` and
+verified integrity for B, or matching `2.0.74-beta.4` and verified integrity for
+Scenario 2's allowed A rollback.
+
+| Scenario | Baseline | Transaction ID | Terminal state | Versions/integrity | Analyze | Options | Result |
+|---|---|---|---|---|---|---|---|
+| Uninterrupted A to B | `plan-d-a` | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
+| Interrupted recovery | `plan-d-a` | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
+| Matching-installer repair | `plan-d-a` | N/A | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
 
 ## Environment Handoff
 
 | Step | Result |
 |---|---|
 | Keep old beta1 workstation unchanged | PENDING |
-| Disable beta updates or extension on old workstation | PENDING |
+| Confirm displayed `v2.0.75-beta.1` on old workstation | PENDING |
+| Confirm selected beta-updates or Extension control is disabled | PENDING |
 | Explicit publish approval | PENDING |
 | Verify published B asset hash | PENDING |
 | Migrate workload to qualified cloud PC | PENDING |
@@ -655,7 +676,7 @@ log belongs in this file.
 Run:
 
 ```powershell
-$matches=Select-String -Path "docs/plan-d-pragmatic-cloud-pc-runbook.md","docs/plan-d-pragmatic-cloud-pc-results.md" -Pattern 'https://.*\?|sig=|se=|sp=|sv='; if($matches){$matches;exit 1}
+$matches=Select-String -Path "docs/plan-d-pragmatic-cloud-pc-runbook.md","docs/plan-d-pragmatic-cloud-pc-results.md" -Pattern 'https://[^\s''"<>]*\?|(?:[?&](?:sig|se|sp|sv)=)[^\s''"<>]*'; if($matches){$matches;exit 1}
 ```
 
 Expected: no matches.
@@ -1080,6 +1101,11 @@ $bRoot="C:\Users\zhaobo\AppData\Local\Temp\opencode\Dynamics-Helper-plan-d-b"; R
 - Modify: `docs/plan-d-pragmatic-cloud-pc-results.md` only with non-secret outcomes
 - Modify: `.superpowers/sdd/plan-d-reliable-update-progress.md` (ignored, do not stage)
 
+Before any Task 6 cloud/Azure/cloud-PC operation, run the runbook's
+`Qualification Entry Gate`. Stop unless A/B source commits and lowercase
+64-hex ZIP SHA-256 values are complete and all five Automated Gates are exactly
+`PASS` with recorded evidence.
+
 - [ ] **Step 1: Obtain explicit Azure Storage target approval**
 
 Before any cloud mutation, use the `question` tool to ask the user to select an
@@ -1138,6 +1164,11 @@ installers, change cloud-PC Native Messaging registration, and terminate its
 test update processes. Earlier design or plan approval is not installation
 approval.
 
+After confirmation, create and strictly reread the runbook's
+`C:\DH-CloudPC\PLAN_D_EMPTY_CLOUD_PC.marker` with exact content
+`PLAN_D_EFFECTIVELY_EMPTY_CLOUD_PC_V1`. Do not continue if the marker is missing,
+not a regular file, or has different bytes.
+
 - [ ] **Step 5: Transfer A/B and establish `cloud-clean`**
 
 Connect to the cloud PC with local-drive redirection enabled. In File Explorer,
@@ -1152,10 +1183,12 @@ Install browser/Copilot prerequisites and record `cloud-clean`.
 
 - [ ] **Step 6: Install A and establish `plan-d-a`**
 
-Follow `docs/plan-d-pragmatic-cloud-pc-runbook.md`. Run A's complete installer,
-verify production registration, versions, capabilities, integrity, synthetic
-Analyze, and Options persistence. Verify `updates/active.json` is absent and
-coordinator state is exactly `idle` with no retained update URL before recording
+Follow `docs/plan-d-pragmatic-cloud-pc-runbook.md`. Run A's complete installer
+through its marker-guarded direct `installer_core.ps1` command; do not invoke
+`install.bat`. Verify production registration, versions, capabilities,
+integrity, synthetic Analyze, and Options persistence. Verify
+`updates/active.json` is absent and the coordinator's safe projection, including
+`errorCode`, is exactly idle with no retained update URL before recording
 `plan-d-a`. Record no private URL.
 
 For every Analyze smoke check, use only the designated non-customer Dynamics
@@ -1185,17 +1218,23 @@ scenario.
 - [ ] **Step 2: Run interrupted recovery**
 
 After Scenario 1, run the complete A installer and verify the full `plan-d-a`
-baseline contract. Start the runbook's process/timeline watchers and one-shot
-post-activation interrupter, then start a fresh A-to-B transaction. Accept the
-interruption only when it reports `original-runner-killed` after proving the
-sole exact-path runner is the original `--complete-update` process carrying the
-same 32-hex transaction ID, not `--recover-active`, and the journal is
-post-activation nonterminal.
-Within ten seconds, exit all browser windows and terminate a remaining main
-Host. In the same PowerShell window, verify the zero-executor checkpoint using
-the captured transaction ID and killed runner PID: browser, main Host, runner,
-and killed-PID counts are zero; the same active authority and post-activation
-journal remain; and RunOnce is still armed.
+baseline contract. Start the mandatory timeline watcher, optionally start the
+process-start watcher when CIM event permission is available, and start the
+one-shot post-activation interrupter before a fresh A-to-B transaction. Access
+Denied/unavailable CIM events disable only the optional watcher; they do not
+replace or fail the mandatory polling witness. Accept the interruption only when
+it reports `original-runner-killed` after proving strict same-transaction active
+and browser-owned A-to-B journal authority, armed RunOnce, and the sole exact
+recovery-path runner's canonical same-transaction/process-identity
+`--complete-update` command with `--recover-active` excluded. The interrupter
+must save transaction ID, killed PID, and UTC kill time.
+
+Immediately run the marker-guarded browser stop and exact-installed-
+`ExecutablePath` CIM/PID main-Host stop. In the same PowerShell window, start the
+zero-executor checkpoint no more than ten seconds after the captured UTC kill
+time and before its five-second stability wait. Require no browser, exact-path
+main Host, runner, or killed PID; the same active/journal authority; and armed
+RunOnce. A missed pre-wait deadline fails this recovery-proof attempt.
 
 Before reopening the browser, start the runbook's five-minute recovery witness.
 Only after it reports `recovery-witness-armed`, reopen the same browser profile
@@ -1217,32 +1256,42 @@ installer, and rerun; none of those outcomes is a pass or recovery evidence.
 After Scenario 2 reaches a terminal verified product, run the complete A
 installer and verify the full `plan-d-a` baseline contract. Install the exact B
 ZIP locally, verify B, create the `_internal` sentinel, rerun the same B
-installer, and confirm the sentinel is gone. Compare backups of `config.json`,
-`copilot-instructions.md`, and `user_prompt.md` byte-for-byte when each file
-exists. Run final B integrity and smoke checks.
+installer, and confirm the sentinel is gone. Before the first B install, capture
+the set and SHA-256 of each existing `config.json`, `copilot-instructions.md`,
+and `user_prompt.md` in memory in one PowerShell window. After the second B
+install, recompute and require the identical set and hashes. Print only file
+counts; never persist or record names, contents, or hashes. Run final B
+integrity and separate Analyze/Options smoke checks.
 
 Inspect a sanitized storage projection and require that no update URL is retained
 after this installer-established B state:
 
 ```javascript
-const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,hasUpdateUrl:typeof s?.update?.url==='string',transactionId:s?.transactionId,outcome:s?.outcome})
+const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,hasUpdateUrl:typeof s?.update?.url==='string',transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode})
 ```
 
-Expected: `hasUpdateUrl` is `false`. If it is `true`, do not print the value;
-remove only the already-terminal coordinator record, reload the extension, and
-verify a safe idle state:
+Final state must have `hasUpdateUrl: false`, no `errorCode`, and public
+`DH_UPDATE_GET_STATE` `idle`. If the projection is terminal `complete`, do not
+print any retained URL; first prove `updates/active.json` is absent, then use
+this guarded clear and reload:
 
 ```javascript
-await chrome.storage.local.remove('dh_update_state'); chrome.runtime.reload()
+const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state');if(s?.kind!=='complete')throw new Error('Only a terminal complete state may be cleared');await chrome.storage.local.remove('dh_update_state');chrome.runtime.reload()
 ```
 
-This cleanup is allowed only after the transaction has finalized and the exact B
-installer has established a verified product. It is forbidden during a
-nonterminal or recovery-required state.
+This cleanup is allowed only after the transaction has finalized, active
+authority is absent, and the exact B installer has established a verified
+product. It is forbidden during a nonterminal or `recovery-required` state.
+Record Scenario 3 only as `installer-repaired B` with all fields complete.
 
 - [ ] **Step 4: Finalize the cloud-PC ledger**
 
-Fill every cloud-PC result row with PASS/FAIL and sanitized evidence. Run:
+Fill every cloud-PC row with separate Analyze and Options results plus sanitized
+evidence. A row may be `PASS` only with every field complete and its allowed
+terminal outcome: Scenario 1 `complete/committed B`; Scenario 2
+`complete/committed B` or `complete/rolled-back A`; Scenario 3
+`installer-repaired B`. No row containing `PENDING` or `Not recorded` may be
+`PASS`. Run:
 
 ```powershell
 $matches=Select-String -Path "docs/plan-d-pragmatic-cloud-pc-results.md" -Pattern 'https://.*\?|[?&](sig|se|sp|sv)='; if($matches){$matches;exit 1}
