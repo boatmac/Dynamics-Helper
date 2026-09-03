@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from host.dh_native_host import NativeHost
 from install_integrity import InstallationVerification
+from product_info import VERSION
 
 
 class HostIntegrityActionTests(unittest.IsolatedAsyncioTestCase):
@@ -28,7 +29,7 @@ class HostIntegrityActionTests(unittest.IsolatedAsyncioTestCase):
                 "requestId": "cap-1",
                 "status": "success",
                 "data": {
-                    "host_version": "2.0.74-beta.4",
+                    "host_version": VERSION,
                     "capabilities": [
                         "prompt-scope-v1",
                         "transactional-update-v1",

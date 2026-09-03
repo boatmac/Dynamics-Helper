@@ -29,6 +29,8 @@ from package_manifest import (
     update_manifest_to_dict,
     write_release_documents,
 )
+from product_info import VERSION
+from test_update_support import current_extension_manifest_bytes
 
 
 def make_stage(root: Path) -> Path:
@@ -39,7 +41,7 @@ def make_stage(root: Path) -> Path:
         "host/system_prompt.md": b"core",
         "host/register.py": b"register",
         "host/config.json": b"{}\n",
-        "extension/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+        "extension/manifest.json": current_extension_manifest_bytes(),
         "extension/assets/app.js": b"app",
         "installer_core.ps1": b"installer",
         "install.bat": b"wrapper",
@@ -48,7 +50,7 @@ def make_stage(root: Path) -> Path:
         path = stage.joinpath(*relative.split("/"))
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
-    documents = generate_release_documents(stage, "2.0.74-beta.4")
+    documents = generate_release_documents(stage, VERSION)
     write_release_documents(stage, documents)
     return stage
 
@@ -106,11 +108,11 @@ class StagedPackageValidationTests(unittest.TestCase):
 
     def test_valid_stage_returns_resolved_models(self):
         stage = self._fresh_stage()
-        result = validate_staged_package(stage, expected_version="2.0.74-beta.4")
+        result = validate_staged_package(stage, expected_version=VERSION)
         self.assertEqual(result.stage_root, stage.resolve())
-        self.assertEqual(result.manifest.package_version, "2.0.74-beta.4")
-        self.assertEqual(result.release_integrity.package_version, "2.0.74-beta.4")
-        self.assertEqual(result.installed_product.package_version, "2.0.74-beta.4")
+        self.assertEqual(result.manifest.package_version, VERSION)
+        self.assertEqual(result.release_integrity.package_version, VERSION)
+        self.assertEqual(result.installed_product.package_version, VERSION)
 
     def test_staged_mutation_table(self):
         mutations = (
@@ -497,9 +499,9 @@ class HostileArchiveTests(unittest.TestCase):
         validated = stage_and_validate_archive(
             archive,
             destination,
-            expected_version="2.0.74-beta.4",
+            expected_version=VERSION,
         )
-        self.assertEqual(validated.manifest.package_version, "2.0.74-beta.4")
+        self.assertEqual(validated.manifest.package_version, VERSION)
 
     def test_dos_regular_entry_reaches_manifest_validation(self):
         archive = self._write_archive(

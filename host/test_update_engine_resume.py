@@ -24,6 +24,7 @@ from test_update_support import (
     InjectedCrash,
     InjectedFault,
     RecordingHooks,
+    current_extension_manifest_bytes,
 )
 from update_engine import (
     PreparedTransactionConflict,
@@ -297,12 +298,7 @@ def make_matrix_package(root: Path, name: str, *, prior: bool = False):
         "host/system_prompt.md": b"old-core" if prior else b"new-core",
         "host/register.py": b"old-register" if prior else b"new-register",
         "host/config.json": b"{}\n",
-        "extension/manifest.json": json.dumps(
-            {"version": "2.0.74", "version_name": VERSION},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("ascii")
-        + b"\n",
+        "extension/manifest.json": current_extension_manifest_bytes(),
         "extension/assets/app.js": b"old-app" if prior else b"new-app",
         "installer_core.ps1": b"installer",
         "install.bat": b"wrapper",

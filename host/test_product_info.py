@@ -1,3 +1,4 @@
+import json
 import re
 import tempfile
 import unittest
@@ -11,11 +12,17 @@ from product_info import (
     HostCapabilities,
     get_host_capabilities,
 )
+from test_update_support import current_extension_manifest_bytes
+
+
+def _extension_versions() -> tuple[str, str]:
+    package = json.loads(Path("extension/package.json").read_text(encoding="utf-8"))
+    manifest = json.loads(Path("extension/manifest.json").read_text(encoding="utf-8"))
+    return package["version"], manifest.get("version_name") or manifest["version"]
 
 
 class TestProductInfo(unittest.TestCase):
     def test_transactional_update_capability_contract(self):
-        self.assertEqual(VERSION, "2.0.74-beta.4")
         self.assertEqual(REQUIRED_PROTOCOL_CAPABILITIES, ("prompt-scope-v1",))
         self.assertEqual(
             PROVIDED_PROTOCOL_CAPABILITIES,
@@ -27,13 +34,43 @@ class TestProductInfo(unittest.TestCase):
         self.assertEqual(
             actual,
             HostCapabilities(
-                host_version="2.0.74-beta.4",
+                host_version=VERSION,
                 required=("prompt-scope-v1",),
                 provided=("prompt-scope-v1", "transactional-update-v1"),
             ),
         )
         with self.assertRaises((AttributeError, TypeError)):
             actual.host_version = "changed"
+
+    def test_current_extension_manifest_fixture_tracks_the_real_carrier(self):
+        manifest = json.loads(
+            Path("extension/manifest.json").read_text(encoding="utf-8")
+        )
+        expected = {"version": manifest["version"]}
+        if "version_name" in manifest:
+            expected["version_name"] = manifest["version_name"]
+        self.assertEqual(json.loads(current_extension_manifest_bytes()), expected)
+
+    def test_authoritative_version_carriers_agree(self):
+        package_version, extension_version = _extension_versions()
+        manifest = json.loads(
+            Path("extension/manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(package_version, VERSION)
+        self.assertEqual(extension_version, VERSION)
+        self.assertEqual(manifest["version"], VERSION.split("-", 1)[0])
+
+    def test_release_helper_targets_all_authoritative_version_carriers(self):
+        root = Path(release_helper.__file__).resolve().parent
+        self.assertEqual(
+            release_helper.PACKAGE_JSON.resolve(), root / "extension/package.json"
+        )
+        self.assertEqual(
+            release_helper.MANIFEST_JSON.resolve(), root / "extension/manifest.json"
+        )
+        self.assertEqual(
+            release_helper.HOST_FILE.resolve(), root / "host/product_info.py"
+        )
 
     def test_release_helper_updates_the_product_info_version_source(self):
         self.assertEqual(

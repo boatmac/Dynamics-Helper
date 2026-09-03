@@ -9,6 +9,8 @@ from unittest.mock import patch
 import release_helper
 from package_archive import validate_staged_package, write_deterministic_archive
 from package_manifest import ManifestError, load_installed_product, load_update_manifest, sha256_file
+from product_info import VERSION
+from test_update_support import current_extension_manifest_bytes
 from updater import Updater
 
 
@@ -41,7 +43,7 @@ class TestReleaseStaging(unittest.TestCase):
         self.source = self.root / "source"
         self.stage = self.root / "stage"
         files = {
-            "extension/dist/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+            "extension/dist/manifest.json": current_extension_manifest_bytes(),
             "extension/dist/assets/app.js": b"app",
             "dist/dh_native_host/dh_native_host.exe": b"host-exe",
             "dist/dh_native_host/_internal/python313.dll": b"runtime",
@@ -74,7 +76,7 @@ class TestReleaseStaging(unittest.TestCase):
         result = release_helper.stage_release(
             self.source,
             self.stage,
-            "2.0.74-beta.4",
+            VERSION,
         )
         self.assertEqual(result, self.stage)
         self.assertEqual(before, self._snapshot(self.source))
@@ -102,7 +104,7 @@ class TestReleaseStaging(unittest.TestCase):
             release_helper.stage_release(
                 self.source,
                 self.stage,
-                "2.0.74-beta.4",
+                VERSION,
             )
         self.assertFalse(self.stage.exists())
 
@@ -114,7 +116,7 @@ class TestReleaseStaging(unittest.TestCase):
             release_helper.stage_release(
                 self.source,
                 self.stage,
-                "2.0.74-beta.4",
+                VERSION,
             )
         self.assertEqual(sentinel.read_bytes(), b"keep")
 
@@ -128,7 +130,7 @@ class TestReleaseStaging(unittest.TestCase):
             release_helper.stage_release(
                 self.source,
                 self.stage,
-                "2.0.74-beta.4",
+                VERSION,
             )
         self.assertEqual(sentinel.read_bytes(), b"keep")
         self.assertFalse((self.stage / "sentinel.txt").exists())
@@ -146,7 +148,7 @@ class TestReleaseStaging(unittest.TestCase):
             self.assertRaises(FileExistsError),
         ):
             release_helper.create_zip(
-                "2.0.74-beta.4",
+                VERSION,
                 source_root=self.source,
                 output_dir=output,
             )
@@ -164,7 +166,7 @@ class TestReleaseStaging(unittest.TestCase):
                 release_helper.stage_release(
                     self.source,
                     self.stage,
-                    "2.0.74-beta.4",
+                    VERSION,
                 )
         preflight.assert_called_once()
         copytree.assert_not_called()
@@ -173,7 +175,7 @@ class TestReleaseStaging(unittest.TestCase):
         output = self.root / "out"
         first_path = Path(
             release_helper.create_zip(
-                "2.0.74-beta.4",
+                VERSION,
                 source_root=self.source,
                 output_dir=output,
             )
@@ -185,7 +187,7 @@ class TestReleaseStaging(unittest.TestCase):
         )
         second_path = Path(
             release_helper.create_zip(
-                "2.0.74-beta.4",
+                VERSION,
                 source_root=self.source,
                 output_dir=output,
             )
@@ -200,19 +202,19 @@ class TestReleaseStaging(unittest.TestCase):
         shutil.copytree(self.source, source)
         archive = Path(
             release_helper.create_zip(
-                "2.0.74-beta.4",
+                VERSION,
                 source_root=source,
                 output_dir=output,
             )
         )
-        self.assertEqual(archive.name, "DynamicsHelper_v2.0.74-beta.4.zip")
+        self.assertEqual(archive.name, f"DynamicsHelper_v{VERSION}.zip")
         self.assertTrue(archive.is_file())
 
     def test_historical_updater_bootstraps_both_metadata_files(self):
         release_helper.stage_release(
             self.source,
             self.stage,
-            "2.0.74-beta.4",
+            VERSION,
         )
         archive = self.root / "release.zip"
         write_deterministic_archive(self.stage, archive)
@@ -378,7 +380,7 @@ class PlanCPackagingTests(unittest.TestCase):
         source = self.root / "source"
         stage = self.root / "stage"
         files = {
-            "extension/dist/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+            "extension/dist/manifest.json": current_extension_manifest_bytes(),
             "extension/dist/assets/app.js": b"app",
             "dist/dh_native_host/dh_native_host.exe": b"host-exe",
             "dist/dh_native_host/_internal/python313.dll": b"runtime",
@@ -392,7 +394,7 @@ class PlanCPackagingTests(unittest.TestCase):
             path = source.joinpath(*relative.split("/"))
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(payload)
-        release_helper.stage_release(source, stage, "2.0.74-beta.4")
+        release_helper.stage_release(source, stage, VERSION)
         self.assertFalse((stage / "updates").exists())
         self.assertEqual(
             validate_staged_package(stage).manifest.entries,

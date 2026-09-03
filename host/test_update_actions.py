@@ -1,7 +1,7 @@
 import asyncio
 import inspect
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from host.dh_native_host import NativeHost, _select_update_candidate
 from update_journal import TerminalVersion
@@ -399,14 +399,15 @@ class UpdateCandidateSelectionTests(unittest.TestCase):
         return {"name": name, "browser_download_url": url}
 
     def test_exactly_one_direct_https_zip_is_selected_and_version_normalized(self):
-        self.assertEqual(
-            _select_update_candidate([self.release(assets=[self.asset()])]),
-            {
-                "version": TARGET,
-                "url": URL,
-                "is_prerelease": True,
-            },
-        )
+        with patch("host.dh_native_host.VERSION", PRIOR):
+            self.assertEqual(
+                _select_update_candidate([self.release(assets=[self.asset()])]),
+                {
+                    "version": TARGET,
+                    "url": URL,
+                    "is_prerelease": True,
+                },
+            )
 
     def test_zero_multiple_or_unsafe_zip_assets_produce_no_candidate(self):
         cases = (
@@ -420,7 +421,14 @@ class UpdateCandidateSelectionTests(unittest.TestCase):
         )
         for release in cases:
             with self.subTest(release=release):
-                self.assertIsNone(_select_update_candidate([release]))
+                with patch("host.dh_native_host.VERSION", PRIOR):
+                    self.assertIsNone(_select_update_candidate([release]))
+
+    def test_equal_current_candidate_is_not_selected(self):
+        with patch("host.dh_native_host.VERSION", TARGET):
+            self.assertIsNone(
+                _select_update_candidate([self.release(assets=[self.asset()])])
+            )
 
 
 if __name__ == "__main__":

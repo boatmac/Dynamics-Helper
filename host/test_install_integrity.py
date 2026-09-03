@@ -22,6 +22,7 @@ from package_manifest import (
     write_release_documents,
 )
 from product_info import VERSION
+from test_update_support import current_extension_manifest_bytes
 
 
 class InstallationVerifierTests(unittest.TestCase):
@@ -38,7 +39,7 @@ class InstallationVerifierTests(unittest.TestCase):
             "host/system_prompt.md": b"core",
             "host/register.py": b"register",
             "host/config.json": b"{}\n",
-            "extension/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+            "extension/manifest.json": current_extension_manifest_bytes(),
             "extension/assets/app.js": b"app",
             "installer_core.ps1": b"installer",
             "install.bat": b"wrapper",
@@ -165,7 +166,7 @@ class UpdateProbeTests(unittest.TestCase):
             "host/system_prompt.md": b"core",
             "host/register.py": b"register",
             "host/config.json": b"{}\n",
-            "extension/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+            "extension/manifest.json": current_extension_manifest_bytes(),
             "extension/assets/app.js": b"app",
             "installer_core.ps1": b"installer",
             "install.bat": b"wrapper",

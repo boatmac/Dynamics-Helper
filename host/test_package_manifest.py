@@ -39,6 +39,8 @@ from package_manifest import (
     update_manifest_to_dict,
     write_release_documents,
 )
+from product_info import VERSION
+from test_update_support import current_extension_manifest_bytes
 
 
 HASH_A = "0" * 64
@@ -378,7 +380,7 @@ class ReleaseDocumentGenerationTests(unittest.TestCase):
             "host/system_prompt.md": b"core",
             "host/register.py": b"register",
             "host/config.json": b"{}\n",
-            "extension/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+            "extension/manifest.json": current_extension_manifest_bytes(),
             "extension/assets/app.js": b"app",
             "installer_core.ps1": b"installer",
             "install.bat": b"wrapper",
@@ -391,7 +393,7 @@ class ReleaseDocumentGenerationTests(unittest.TestCase):
 
     def test_generated_documents_have_exact_ownership_and_hash_links(self):
         stage = self._make_stage()
-        docs = generate_release_documents(stage, "2.0.74-beta.4")
+        docs = generate_release_documents(stage, VERSION)
         self.assertEqual(docs.update_manifest.required_capabilities, ("prompt-scope-v1",))
         self.assertEqual(
             docs.update_manifest.provided_capabilities,
@@ -462,7 +464,7 @@ class ReleaseDocumentGenerationTests(unittest.TestCase):
 
     def test_write_release_documents_materializes_external_metadata_hashes(self):
         stage = self._make_stage()
-        docs = generate_release_documents(stage, "2.0.74-beta.4")
+        docs = generate_release_documents(stage, VERSION)
         write_release_documents(stage, docs)
         parsed = load_update_manifest(stage / "update-manifest.json")
         hashes = {entry.path: entry.sha256 for entry in parsed.entries}
@@ -478,7 +480,7 @@ class ReleaseDocumentGenerationTests(unittest.TestCase):
 
     def test_valid_stage_requires_and_accepts_internal_whole_product_directory(self):
         stage = self._make_stage()
-        documents = generate_release_documents(stage, "2.0.74-beta.4")
+        documents = generate_release_documents(stage, VERSION)
         entries = {entry.path: entry for entry in documents.update_manifest.entries}
         self.assertNotIn("host/_internal", entries)
         self.assertEqual(
@@ -529,12 +531,12 @@ class ReleaseDocumentGenerationTests(unittest.TestCase):
                 )
             with self.subTest(case=case):
                 with self.assertRaises(ManifestError):
-                    generate_release_documents(stage, "2.0.74-beta.4")
+                    generate_release_documents(stage, VERSION)
 
     def test_flat_host_runtime_file_is_product_owned(self):
         stage = self._make_stage()
         (stage / "host" / "helper.dll").write_bytes(b"helper")
-        documents = generate_release_documents(stage, "2.0.74-beta.4")
+        documents = generate_release_documents(stage, VERSION)
         entries = {entry.path: entry for entry in documents.update_manifest.entries}
         self.assertEqual(
             entries["host/helper.dll"].ownership,
@@ -543,7 +545,7 @@ class ReleaseDocumentGenerationTests(unittest.TestCase):
 
     def test_metadata_writer_preserves_colliding_unowned_siblings(self):
         stage = self._make_stage()
-        documents = generate_release_documents(stage, "2.0.74-beta.4")
+        documents = generate_release_documents(stage, VERSION)
         collisions = (
             stage / ".tmp-deadbeef",
             stage / "host" / ".tmp-deadbeef",
