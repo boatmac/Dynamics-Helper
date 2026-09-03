@@ -162,9 +162,21 @@ Expected: the old updater is no longer production reachable; success, rollback, 
 
 ## Final Delivery Gate
 
+- Scope note: the original exhaustive disposable-VM matrix below is superseded
+  by the approved single-user risk decision in
+  `docs/superpowers/specs/2026-09-03-plan-d-pragmatic-delivery-gate-design.md`. The
+  executable runbook is defined by
+  `docs/superpowers/plans/2026-09-03-plan-d-pragmatic-delivery-gate.md`.
 - [ ] From the exact committed cutover HEAD, rerun full Host and Extension suites with progress.
 - [ ] Rebuild Extension and frozen Host.
-- [ ] In a disposable Windows VM, test one successful update; forced Host, Extension, `_internal`, metadata, and probe failures; Worker/Host/runner restart; and both legacy mixed-upgrade directions.
-- [ ] Confirm no transactional failure reports success after cutover, record any unavoidable pre-cutover legacy success message separately, and require Host/Extension versions to match after transactional success or rollback.
+- [ ] On the effectively empty cloud PC, test one successful A-to-B update, one
+  exact original-runner interruption followed by same-transaction recovery, and
+  one matching-installer `_internal` repair.
+- [ ] Rerun automated Host/Extension fault, rollback, unsafe-package,
+  state-machine, and mixed-install coverage. Record explicitly that these
+  exhaustive boundaries were not repeated on the cloud PC.
+- [ ] Keep the old `v2.0.75-beta.1` workstation unchanged as a fallback, publish
+  only the exact qualified B ZIP after explicit approval, verify the public asset
+  hash, and migrate workload only after the qualified cloud PC remains healthy.
 - [ ] Record final results in `.superpowers/sdd/plan-d-reliable-update-progress.md`.
 - [ ] Request separate authorization before versioning, tagging, publishing, or installing on the real machine.
