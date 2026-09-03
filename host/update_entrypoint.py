@@ -41,6 +41,7 @@ EXIT_ALREADY_IN_PROGRESS = 31
 EXIT_PROBE_FAILED = 40
 EXIT_INTERNAL_FAILURE = 50
 INVALID_EARLY_INVOCATION = b"invalid_early_invocation\n"
+MANUAL_RECOVERY_REQUIRED = b"manual_recovery_required\n"
 
 
 class EntryMode(StrEnum):
@@ -49,6 +50,7 @@ class EntryMode(StrEnum):
     REGISTER = "register"
     COMPLETE_UPDATE = "complete-update"
     INSTALL_PACKAGE = "install-package"
+    SETTLE_INSTALLER_REPAIR = "settle-installer-repair"
     RECOVER_ACTIVE = "recover-active"
     RECOVER_UPDATE = "recover-update"
 
@@ -100,6 +102,7 @@ class ValidatedRegistration:
 class ValidatedProbe:
     entrypoint: Path
     manifest_path: Path
+    package_root: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -177,6 +180,7 @@ COMMANDS = {
     "--register": EntryMode.REGISTER,
     "--complete-update": EntryMode.COMPLETE_UPDATE,
     "--install-package": EntryMode.INSTALL_PACKAGE,
+    "--settle-installer-repair": EntryMode.SETTLE_INSTALLER_REPAIR,
     "--recover-active": EntryMode.RECOVER_ACTIVE,
     "--recover-update": EntryMode.RECOVER_UPDATE,
 }
@@ -184,6 +188,7 @@ COMMAND_ARITIES = {
     EntryMode.REGISTER: 0,
     EntryMode.COMPLETE_UPDATE: 3,
     EntryMode.INSTALL_PACKAGE: 1,
+    EntryMode.SETTLE_INSTALLER_REPAIR: 0,
     EntryMode.RECOVER_ACTIVE: 0,
     EntryMode.RECOVER_UPDATE: 1,
 }
@@ -195,6 +200,7 @@ MODE_ROLES = {
         {ExecutableRole.PRODUCTION_MAIN, ExecutableRole.SOURCE_MAIN}
     ),
     EntryMode.INSTALL_PACKAGE: frozenset({ExecutableRole.PRODUCTION_MAIN}),
+    EntryMode.SETTLE_INSTALLER_REPAIR: frozenset({ExecutableRole.PRODUCTION_MAIN}),
     EntryMode.COMPLETE_UPDATE: frozenset({ExecutableRole.DETACHED_RUNNER}),
     EntryMode.RECOVER_ACTIVE: frozenset({ExecutableRole.DETACHED_RUNNER}),
     EntryMode.RECOVER_UPDATE: frozenset({ExecutableRole.DETACHED_RUNNER}),
@@ -346,7 +352,7 @@ def validate_probe_invocation(
             type(source_runtime) is not bool
             or source_runtime
             or role is not ExecutableRole.PRODUCTION_MAIN
-            or len(argv) != 2
+            or len(argv) not in (2, 3)
             or any(type(argument) is not str for argument in argv)
             or argv[0] != "--update-probe"
         ):
@@ -359,7 +365,14 @@ def validate_probe_invocation(
         if resolved != manifest:
             raise ValueError("noncanonical probe manifest")
         _require_plain_entrypoint_file(resolved)
-        return ValidatedProbe(canonical, resolved)
+        package_root = None
+        if len(argv) == 3:
+            requested_root = Path(argv[2])
+            if not requested_root.is_absolute() or ".." in requested_root.parts:
+                raise ValueError("invalid package root")
+            package_root = requested_root.resolve(strict=True)
+            _require_plain_entrypoint_directory(package_root)
+        return ValidatedProbe(canonical, resolved, package_root)
     except EarlyInvocationError:
         raise
     except (OSError, RuntimeError, TypeError, ValueError) as error:
@@ -482,6 +495,9 @@ def validate_early_invocation(
                 raise ValueError("package entrypoint mismatch")
             _validate_frozen_probe_host_root(entrypoint)
             payload = ValidatedInstallPackage(package_root)
+        elif selection.mode is EntryMode.SETTLE_INSTALLER_REPAIR:
+            _validate_frozen_probe_host_root(entrypoint)
+            payload = entrypoint.parent
         elif selection.mode is EntryMode.COMPLETE_UPDATE:
             payload = validate_complete_update_command(entrypoint, selection.arguments)
         elif selection.mode is EntryMode.RECOVER_ACTIVE:
@@ -554,7 +570,12 @@ def dispatch_early_mode(
         if "--update-probe" in argv:
             try:
                 probe = validate_probe_invocation(entrypoint, argv, source_runtime=source_runtime)
-                probe_argv = (str(probe.entrypoint), "--update-probe", str(probe.manifest_path))
+                probe_argv = (
+                    str(probe.entrypoint),
+                    "--update-probe",
+                    str(probe.manifest_path),
+                    *(() if probe.package_root is None else (str(probe.package_root),)),
+                )
             except EarlyInvocationError:
                 absolute = entrypoint.absolute()
                 probe_argv = (str(absolute), "--update-probe")
@@ -575,6 +596,14 @@ def dispatch_early_mode(
         mode = invocation.selection.mode
         if mode is EntryMode.MAIN_HOST:
             return None
+        if mode is EntryMode.SETTLE_INSTALLER_REPAIR:
+            from update_service import settle_installer_repair
+
+            return (
+                EXIT_SUCCESS
+                if settle_installer_repair(invocation.payload)
+                else EXIT_RECOVERY_REQUIRED
+            )
         deps = dependencies_factory() if dependencies_factory else production_early_mode_dependencies()
         if not isinstance(deps, EarlyModeDependencies):
             raise TypeError("invalid dependencies")

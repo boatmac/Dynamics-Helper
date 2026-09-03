@@ -15,8 +15,6 @@ const ERROR_MESSAGES = Object.freeze({
   update_cleanup_failed: 'The update finished but cleanup is incomplete. Retry cleanup.',
   source_update_disabled: 'Automatic update is disabled while the source Host is registered.',
   manual_recovery_required: 'Automatic recovery could not finish. Run the matching full installer.',
-  finalization_ack_pending: 'A previous update is awaiting cleanup. Retry cleanup.',
-  finalization_not_current: 'This update finalization is no longer current.',
 })
 
 export type UpdateErrorCode = keyof typeof ERROR_MESSAGES
@@ -51,6 +49,11 @@ export interface UpdateTransaction {
   readonly priorVersion: string
 }
 
+export interface VerifiedUpdateProduct {
+  readonly version: string
+  readonly mode: 'packaged' | 'development'
+}
+
 export type UpdateState =
   | Readonly<{ kind: 'idle' }>
   | Readonly<{ kind: 'available'; update: UpdateCandidate }>
@@ -62,8 +65,8 @@ export type UpdateState =
       lastProgressAt: number
       recoveryKick: 'unused' | 'pending' | 'confirmed'
     } & UpdateTransaction)>
-  | Readonly<({ kind: 'reload-pending'; outcome: 'committed' | 'rolled-back' } & UpdateTransaction)>
-  | Readonly<({ kind: 'ack-pending'; receipt: FinalizationReceipt } & UpdateTransaction)>
+  | Readonly<({ kind: 'reload-pending'; outcome: 'committed' | 'rolled-back'; errorCode?: UpdateErrorCode } & UpdateTransaction)>
+  | Readonly<({ kind: 'ack-pending'; receipt: FinalizationReceipt; errorCode?: UpdateErrorCode } & UpdateTransaction)>
   | Readonly<{ kind: 'complete'; update: UpdateCandidate; outcome: 'committed' | 'rolled-back' }>
   | Readonly<{
       kind: 'recovery-required'
@@ -87,7 +90,9 @@ export interface UpdateRuntimeDeps {
   kickRecovery(): Promise<void>
   broadcast(state: UpdateState): Promise<void>
   requestFreshCheck(): Promise<void>
-  getVerifiedVersion(): Promise<string | null>
+  freshWorkerVersion: string
+  workerInstanceId: string
+  getVerifiedProduct(): Promise<VerifiedUpdateProduct | null>
   verifyInstalled(
     transaction: UpdateTransaction,
     outcome: 'committed' | 'rolled-back',
@@ -431,7 +436,12 @@ export function parseUpdateState(value: unknown): UpdateState | null {
     })
   }
 
-  const optional = kind === 'preparing' || kind === 'activating'
+  const optional = [
+    'preparing',
+    'activating',
+    'reload-pending',
+    'ack-pending',
+  ].includes(kind)
     ? ['errorCode']
     : []
   const extras = kind === 'preparing'
@@ -486,7 +496,12 @@ export function parseUpdateState(value: unknown): UpdateState | null {
   }
   if (kind === 'reload-pending') {
     if (parsed.outcome !== 'committed' && parsed.outcome !== 'rolled-back') return null
-    return Object.freeze({ kind, ...tx, outcome: parsed.outcome })
+    return Object.freeze({
+      kind,
+      ...tx,
+      outcome: parsed.outcome,
+      ...(errorCode ? { errorCode } : {}),
+    })
   }
   const receipt = parseFinalizationReceipt(parsed.receipt)
   if (
@@ -499,7 +514,12 @@ export function parseUpdateState(value: unknown): UpdateState | null {
         : tx.priorVersion
     )
   ) return null
-  return Object.freeze({ kind: 'ack-pending', ...tx, receipt })
+  return Object.freeze({
+    kind: 'ack-pending',
+    ...tx,
+    receipt,
+    ...(errorCode ? { errorCode } : {}),
+  })
 }
 
 function parseActionEnvelope<T>(
@@ -665,10 +685,22 @@ export function createStatusPortSender() {
 }
 
 export interface UpdateRuntime {
-  initialize(options?: Readonly<{ resume?: boolean }>): Promise<UpdateState>
+  initialize(options?: Readonly<{
+    resume?: boolean
+    priorWorkerVersion?: string | null
+    priorWorkerInstance?: string | null
+  }>): Promise<UpdateState>
+  resume(): Promise<UpdateState>
   acceptCandidate(value: unknown): Promise<UpdateState>
+  clearAvailable(): Promise<UpdateState>
   start(): Promise<UpdateState>
   ordinaryMainHostAllowed(): Promise<boolean>
+  beginOrdinaryMainHostRequest<T>(
+    start: () => Promise<T>,
+  ): Promise<Readonly<
+    | { allowed: false }
+    | { allowed: true; response: Promise<T> }
+  >>
   registerAlarmListener(): void
   handleMessage(value: unknown): Promise<
     | Readonly<{ handled: true; state: UpdateState }>
@@ -782,13 +814,9 @@ function clearUpdateAlarm(): Promise<void> {
 }
 
 function updateStateNeedsAlarm(state: UpdateState): boolean {
-  return [
-    'preparing',
-    'activating',
-    'polling',
-    'reload-pending',
-    'ack-pending',
-  ].includes(state.kind)
+  return state.kind === 'preparing'
+    || state.kind === 'activating' && state.errorCode === undefined
+    || ['polling', 'reload-pending', 'ack-pending'].includes(state.kind)
     || state.kind === 'recovery-required' && state.transaction !== undefined
 }
 
@@ -802,6 +830,8 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
   let hydrationSucceeded = false
   let queue = Promise.resolve()
   let alarmRegistered = false
+  let reloadRequested = false
+  let mayFinalizeReloadPending = true
   const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
     const run = queue.then(operation, operation)
     queue = run.then(() => undefined, () => undefined)
@@ -822,7 +852,7 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
   }
   const ordinaryMainAllowedForState = (current: UpdateState): boolean => {
     if (!hydrationSucceeded) return false
-    if (current.kind === 'activating') return false
+    if (current.kind === 'activating' && current.errorCode === undefined) return false
     if (
       current.kind === 'polling'
       || current.kind === 'reload-pending'
@@ -895,23 +925,33 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
       return state
     }
     let raw: unknown
-    try {
-      raw = await pending.response
-    } catch {
+    const settled = await awaitBeforeDeadline(pending, deps.now() + 120_000)
+    if (settled.kind !== 'resolved') {
       scheduleUpdateAlarm()
       return state
     }
+    raw = settled.value
     const parsed = parseAcknowledgeResponse(pending.requestId, raw)
     if (!parsed) {
-      scheduleUpdateAlarm()
-      return state
+      return persist({
+        kind: 'ack-pending',
+        ...transactionFields(transaction),
+        receipt,
+        errorCode: 'update_cleanup_failed',
+      })
     }
     if (
       !parsed.ok
       || parsed.data.transactionId !== transaction.transactionId
     ) {
-      scheduleUpdateAlarm()
-      return state
+      return persist({
+        kind: 'ack-pending',
+        ...transactionFields(transaction),
+        receipt,
+        errorCode: parsed && !parsed.ok
+          ? parsed.errorCode
+          : 'update_cleanup_failed',
+      })
     }
     const complete = await persist({
       kind: 'complete',
@@ -933,20 +973,31 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
       return state
     }
     let raw: unknown
-    try {
-      raw = await pending.response
-    } catch {
+    const settled = await awaitBeforeDeadline(pending, deps.now() + 120_000)
+    if (settled.kind !== 'resolved') {
       scheduleUpdateAlarm()
       return state
     }
+    raw = settled.value
     const parsed = parseFinalizeResponse(pending.requestId, raw)
     if (!parsed) {
-      scheduleUpdateAlarm()
-      return state
+      return persist({
+        kind: 'reload-pending',
+        ...transactionFields(transaction),
+        outcome,
+        errorCode: 'update_cleanup_failed',
+      })
+    }
+    if (!parsed.ok) {
+      return persist({
+        kind: 'reload-pending',
+        ...transactionFields(transaction),
+        outcome,
+        errorCode: parsed.errorCode,
+      })
     }
     if (
-      !parsed.ok
-      || parsed.data.transactionId !== transaction.transactionId
+      parsed.data.transactionId !== transaction.transactionId
       || parsed.data.outcome !== outcome
       || parsed.data.terminal_version.fresh_install
       || parsed.data.terminal_version.version !== (
@@ -957,7 +1008,7 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
     ) {
       return persist({
         kind: 'recovery-required',
-        code: parsed && !parsed.ok ? parsed.errorCode : 'update_cleanup_failed',
+        code: 'update_cleanup_failed',
         action: 'verify-terminal',
         transaction: transactionFields(transaction),
       })
@@ -1035,6 +1086,7 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
           ...transactionFields(transaction),
           outcome: parsed.data.phase,
         })
+        reloadRequested = true
         chrome.runtime.reload()
         return next
       }
@@ -1107,6 +1159,7 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
         ...transactionFields(transaction),
         outcome: status.phase,
       })
+      reloadRequested = true
       chrome.runtime.reload()
       return next
     }
@@ -1223,8 +1276,12 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
     const status = parsed.data
     if (status.phase === 'prepared') {
       if (current.activationRetryUsed) {
-        scheduleUpdateAlarm()
-        return current
+        return persist({
+          kind: 'activating',
+          ...transactionFields(current),
+          activationRetryUsed: true,
+          errorCode: current.errorCode ?? 'update_activation_failed',
+        })
       }
       if (!await retryVersionIsCurrent(current)) {
         return persistRetryVersionFailure(current)
@@ -1237,6 +1294,7 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
         ...transactionFields(current),
         outcome: status.phase,
       })
+      reloadRequested = true
       chrome.runtime.reload()
       return next
     }
@@ -1268,7 +1326,7 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
       kind: 'activating',
       ...transactionFields(transaction),
       activationRetryUsed,
-    })
+    }) as Extract<UpdateState, { kind: 'activating' }>
     let pending: NativePendingRequest
     try {
       pending = deps.requestMain(activateMessage(transaction))
@@ -1280,22 +1338,16 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
       )
     }
     let raw: unknown
-    try {
-      raw = await pending.response
-    } catch {
-      return persistActivatingError(
-        transaction,
-        activationRetryUsed,
-        'update_activation_failed',
-      )
+    const settled = await awaitBeforeDeadline(pending, deps.now() + 120_000)
+    if (settled.kind !== 'resolved') {
+      scheduleUpdateAlarm()
+      return resumeActivating(activating)
     }
+    raw = settled.value
     const parsed = parseActivateResponse(pending.requestId, raw)
     if (!parsed) {
-      return persistActivatingError(
-        transaction,
-        activationRetryUsed,
-        'invalid_update_request',
-      )
+      scheduleUpdateAlarm()
+      return resumeActivating(activating)
     }
     if (!parsed.ok) {
       return persistActivatingError(
@@ -1305,11 +1357,8 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
       )
     }
     if (parsed.data.transactionId !== transaction.transactionId) {
-      return persistActivatingError(
-        transaction,
-        activationRetryUsed,
-        'invalid_update_request',
-      )
+      scheduleUpdateAlarm()
+      return resumeActivating(activating)
     }
     const polling = await persist({
       kind: 'polling',
@@ -1335,11 +1384,11 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
       return persistPreparingError(transaction, 'update_prepare_failed')
     }
     let raw: unknown
-    try {
-      raw = await pending.response
-    } catch {
+    const settled = await awaitBeforeDeadline(pending, deps.now() + 120_000)
+    if (settled.kind !== 'resolved') {
       return persistPreparingError(transaction, 'update_prepare_failed')
     }
+    raw = settled.value
     const parsed = parsePrepareResponse(pending.requestId, raw)
     if (!parsed) return persistPreparingError(transaction, 'invalid_update_request')
     if (!parsed.ok) return persistPreparingError(transaction, parsed.errorCode)
@@ -1350,10 +1399,15 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
     ) return persistPreparingError(transaction, 'invalid_update_request')
     return sendActivation(transaction, false)
   }
-  const verifiedVersion = async (): Promise<string | null> => {
+  const verifiedProduct = async (): Promise<VerifiedUpdateProduct | null> => {
     try {
-      const value = await deps.getVerifiedVersion()
-      return internalVersion(value)
+      const value = await deps.getVerifiedProduct()
+      const version = internalVersion(value?.version)
+      if (
+        !version
+        || value?.mode !== 'packaged' && value?.mode !== 'development'
+      ) return null
+      return Object.freeze({ version, mode: value.mode })
     } catch {
       return null
     }
@@ -1361,9 +1415,10 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
   const retryVersionIsCurrent = async (
     transaction: UpdateTransaction,
   ): Promise<boolean> => {
-    const current = await verifiedVersion()
-    return current === transaction.priorVersion
-      && isStrictlyNewerVersion(transaction.targetVersion, current)
+    const current = await verifiedProduct()
+    return current?.mode === 'packaged'
+      && current.version === transaction.priorVersion
+      && isStrictlyNewerVersion(transaction.targetVersion, current.version)
   }
   const persistRetryVersionFailure = (
     transaction: UpdateTransaction,
@@ -1376,7 +1431,19 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
   const retryPreparation = async (
     transaction: UpdateTransaction,
   ): Promise<UpdateState> => {
-    if (!await retryVersionIsCurrent(transaction)) {
+    const current = await verifiedProduct()
+    if (current?.mode === 'development') {
+      return persist({
+        kind: 'preparing',
+        ...transactionFields(transaction),
+        errorCode: 'source_update_disabled',
+      })
+    }
+    if (
+      current?.mode !== 'packaged'
+      || current.version !== transaction.priorVersion
+      || !isStrictlyNewerVersion(transaction.targetVersion, current.version)
+    ) {
       return persistRetryVersionFailure(transaction)
     }
     await persist({
@@ -1387,9 +1454,23 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
     return sendPreparation(transaction, false)
   }
   const startCurrent = async (): Promise<UpdateState> => {
-    if (state.kind === 'available') {
-      const current = await verifiedVersion()
-      if (!current || !isStrictlyNewerVersion(state.update.version, current)) {
+    if (
+      state.kind === 'available'
+      || state.kind === 'complete' && state.outcome === 'rolled-back'
+    ) {
+      const update = state.update
+      const current = await verifiedProduct()
+      if (current?.mode === 'development') {
+        return persist({
+          kind: 'recovery-required',
+          code: 'source_update_disabled',
+          action: 'recheck-installation',
+        })
+      }
+      if (
+        !current
+        || !isStrictlyNewerVersion(update.version, current.version)
+      ) {
         return persist({
           kind: 'recovery-required',
           code: 'installation_integrity_failed',
@@ -1397,9 +1478,9 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
         })
       }
       const transaction = createTransaction(
-        state.update,
+        update,
         deps.createTransactionId(),
-        current,
+        current.version,
       )
       if (!transaction) return state
       return sendPreparation(transaction, true)
@@ -1412,6 +1493,12 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
     }
     if (state.kind === 'recovery-required') {
       return resumeRecoveryRequired(state)
+    }
+    if (state.kind === 'reload-pending') {
+      return verifyAndFinalize(state, state.outcome)
+    }
+    if (state.kind === 'ack-pending') {
+      return completeAcknowledgment(state, state.receipt)
     }
     return state
   }
@@ -1426,6 +1513,7 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
       return resumeActivating(state)
     }
     if (state.kind === 'reload-pending') {
+      if (reloadRequested || !mayFinalizeReloadPending) return state
       return verifyAndFinalize(state, state.outcome)
     }
     if (state.kind === 'ack-pending') {
@@ -1442,6 +1530,8 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
   }
   return {
     initialize: options => serialize(async () => {
+      mayFinalizeReloadPending = options?.priorWorkerVersion === undefined
+        || options.priorWorkerInstance !== deps.workerInstanceId
       const stored = await storageGet([UPDATE_STATE_KEY, 'pending_update'])
       const property = ownDataProperty(stored, UPDATE_STATE_KEY)
       const legacyPresent = ownDataProperty(stored, 'pending_update').kind === 'value'
@@ -1450,17 +1540,77 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
         const parsed = parseUpdateState(property.value)
         if (!parsed) throw new Error('Invalid update state.')
         state = parsed
-      } else if (stateWasAbsent) {
-        await persist({ kind: 'idle' })
-      } else {
+      } else if (!stateWasAbsent) {
         throw new Error('Invalid update state.')
       }
       if (legacyPresent) {
         await storageRemove('pending_update')
       }
+      const unavailableMarker = state.kind === 'recovery-required'
+        && state.transaction === undefined
+        && (
+          state.code === 'installation_integrity_failed'
+          || state.code === 'source_update_disabled'
+        )
+        && state.action === 'recheck-installation'
+      const installerMarker = unavailableMarker
+        && state.kind === 'recovery-required'
+        && state.code === 'installation_integrity_failed'
+      const safeState = state.kind === 'idle'
+        || state.kind === 'available'
+        || state.kind === 'complete'
+        || unavailableMarker
+      const shouldVerify = stateWasAbsent
+        || state.kind === 'available'
+        || state.kind === 'complete'
+        || unavailableMarker
+        || legacyPresent && safeState
+      let requestFreshCheck = false
+      if (shouldVerify) {
+        const current = await verifiedProduct()
+        if (!current) {
+          if (!installerMarker) {
+            await persist({
+              kind: 'recovery-required',
+              code: 'installation_integrity_failed',
+              action: 'recheck-installation',
+            })
+          }
+          hydrationSucceeded = true
+          return state
+        }
+        if (current.mode === 'development') {
+          if (state.kind === 'available' || unavailableMarker) {
+            await persist({
+              kind: 'recovery-required',
+              code: 'source_update_disabled',
+              action: 'recheck-installation',
+            })
+            hydrationSucceeded = true
+            return state
+          }
+        } else if (
+          state.kind === 'available'
+          && !isStrictlyNewerVersion(state.update.version, current.version)
+        ) {
+          await persist({ kind: 'idle' })
+          requestFreshCheck = true
+        } else if (
+          state.kind === 'complete'
+          && options?.priorWorkerVersion !== undefined
+          && options.priorWorkerVersion !== deps.freshWorkerVersion
+        ) {
+          await persist({ kind: 'idle' })
+          requestFreshCheck = true
+        }
+        if (stateWasAbsent || unavailableMarker) {
+          await persist({ kind: 'idle' })
+          requestFreshCheck = true
+        }
+      }
       await synchronizeUpdateAlarm(state)
       if (
-        (stateWasAbsent || legacyPresent)
+        (stateWasAbsent || legacyPresent && safeState || unavailableMarker || requestFreshCheck)
         && (state.kind === 'idle' || state.kind === 'available' || state.kind === 'complete')
       ) {
         try {
@@ -1477,35 +1627,69 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
       if (!update || !['idle', 'available', 'complete'].includes(state.kind)) {
         return state
       }
-      const current = await verifiedVersion()
       if (
-        !current
-        || !isStrictlyNewerVersion(update.version, current)
+        state.kind === 'complete'
+        && state.outcome === 'rolled-back'
+        && state.update.version === update.version
       ) return state
+      const current = await verifiedProduct()
+      if (!current) {
+        return persist({
+          kind: 'recovery-required',
+          code: 'installation_integrity_failed',
+          action: 'recheck-installation',
+        })
+      }
+      if (current.mode === 'development') {
+        return persist({
+          kind: 'recovery-required',
+          code: 'source_update_disabled',
+          action: 'recheck-installation',
+        })
+      }
+      if (!isStrictlyNewerVersion(update.version, current.version)) return state
       return persist({ kind: 'available', update })
     }),
+    clearAvailable: () => serialize(async () => state.kind === 'available'
+      ? persist({ kind: 'idle' })
+      : state),
     start: () => serialize(startCurrent),
-    ordinaryMainHostAllowed: () => serialize(async () => (
-      ordinaryMainAllowedForState(state)
-    )),
+    resume: () => serialize(resumeCurrent),
+    ordinaryMainHostAllowed: () => !ordinaryMainAllowedForState(state)
+      ? Promise.resolve(false)
+      : serialize(async () => ordinaryMainAllowedForState(state)),
+    beginOrdinaryMainHostRequest: start => !ordinaryMainAllowedForState(state)
+      ? Promise.resolve(Object.freeze({ allowed: false as const }))
+      : serialize(async () => {
+      if (!ordinaryMainAllowedForState(state)) {
+        return Object.freeze({ allowed: false as const })
+      }
+      return Object.freeze({
+        allowed: true as const,
+        response: start(),
+      })
+    }),
     registerAlarmListener: () => {
       if (alarmRegistered) return
       chrome.alarms.onAlarm.addListener(alarmListener)
       alarmRegistered = true
     },
-    handleMessage: value => serialize(async () => {
+    handleMessage: value => {
       const parsed = exactObject(value, ['type'])
       if (!parsed || typeof parsed.type !== 'string') {
-        return Object.freeze({ handled: false as const })
+        return Promise.resolve(Object.freeze({ handled: false as const }))
       }
       if (parsed.type === 'DH_UPDATE_GET_STATE') {
-        return Object.freeze({ handled: true as const, state })
+        return Promise.resolve(Object.freeze({ handled: true as const, state }))
       }
       if (parsed.type === 'DH_UPDATE_START') {
-        return Object.freeze({ handled: true as const, state: await startCurrent() })
+        return serialize(async () => Object.freeze({
+          handled: true as const,
+          state: await startCurrent(),
+        }))
       }
-      return Object.freeze({ handled: false as const })
-    }),
+      return Promise.resolve(Object.freeze({ handled: false as const }))
+    },
     getState: () => state,
   }
 }

@@ -197,7 +197,7 @@ class UpdateProbeTests(unittest.TestCase):
                 status="success",
                 host_version=VERSION,
                 extension_version=VERSION,
-                capabilities=("prompt-scope-v1",),
+                capabilities=("prompt-scope-v1", "transactional-update-v1"),
             ),
         )
 

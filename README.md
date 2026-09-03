@@ -9,7 +9,9 @@ A productivity tool for Technical Support Engineers (TSEs) to analyze support ti
 * **Privacy Focused:** PII is scrubbed locally before sending to the AI. No raw customer data leaves your machine.
 * **Fluent UI Support:** Automatically scrapes error context from Microsoft Dynamics 365 and Azure Portal.
 * **Session Persistence:** Continue investigations in the Copilot CLI with `/resume` — conversation history and tool state are preserved.
-* **Self-Updating:** In-app update notifications with one-click install.
+* **Reliable Self-Updating:** One-click transactional updates verify the whole
+  Host/Extension product, survive restarts, and automatically roll back ordinary
+  failures.
 * **Team Bookmark Catalog:** Shared bookmark collections synced via Azure Blob, with personal bookmarks and drag-and-drop support.
 * **Right-Click Analysis:** Select text on any page and analyze it directly from the context menu.
 * **Auto-Analyze:** Optionally trigger analysis automatically when navigating to a new case.
@@ -92,6 +94,15 @@ This pre-seeds the host config so future automatic update checks also consider B
 4. Click **Analyze** to get an AI-generated Root Cause Analysis.
 5. The result is saved as a Markdown report and displayed in a popover.
 6. Continue the investigation in the Copilot CLI: `copilot /resume {session_id}` (the session ID is shown in the report).
+
+## Reliable Updates
+
+Update progress is durable across Service Worker and Extension restarts. A
+terminal update or rollback is re-verified and finalized before success is
+reported. Mixed or unrecoverable installations show persistent guidance to run
+the matching full installer. Standalone bootstrap and per-write power-loss
+guarantees remain deferred, so an extreme interruption may still require that
+installer.
 
 ## Development
 

@@ -16,11 +16,12 @@ The project consists of three main components:
 
 ### `extension/` (Frontend)
 
-* **`src/components/FAB.tsx`**: The main UI component. It contains the Analyze logic, derives its safety timeout from the Host preference with a 10-second grace period, localizes prompt-source errors at render time, and uses the `isUserEdited` ref pattern to protect user edits from background scans. All user-facing strings use `t()` from `useTranslation()` for i18n support.
-* **`src/components/Options.tsx`**: The extension settings page. Handles preferences, Root Path, MCP/Skill directory config, team catalog sync, and update checking. DH-specific Instructions and Custom User Prompt textareas include an Edit/Preview toggle for rendered Markdown preview.
+* **`src/components/FAB.tsx`**: The main UI component. It contains the Analyze logic, derives its safety timeout from the Host preference with a 10-second grace period, localizes prompt-source errors at render time, and uses the `isUserEdited` ref pattern to protect user edits from background scans. Its update UI is projection-only: payload-free `DH_UPDATE_GET_STATE` / `DH_UPDATE_START` plus `DH_UPDATE_STATE` rendering.
+* **`src/components/Options.tsx`**: The extension settings page. Handles preferences, Root Path, MCP/Skill directory config, team catalog sync, and projected update status. It never owns update storage, Host update payloads, or reload. DH-specific Instructions and Custom User Prompt textareas include an Edit/Preview toggle for rendered Markdown preview.
 * **`src/components/MarkdownPreview.tsx`**: Shared Markdown renderer using `react-markdown` + `remark-gfm`. Provides styled GFM rendering (headings, code blocks, tables, links, lists, blockquotes). Used by Options.tsx for preview toggles.
 * **`src/utils/pageReader.ts`**: Logic for scraping Dynamics/Azure Portal pages to extract case numbers, error text, and context. Uses a 4-strategy cascade (header controls, label search, header container regex, ticket title fallback).
-* **`src/background/serviceWorker.ts`**: Service worker handling telemetry (with stable anonymous UUID via `chrome.storage.local`), native messaging relay, analysis-result persistence, and extension version injection. Native-message logging is metadata-only; it must not log prompt-bearing payloads.
+* **`src/background/serviceWorker.ts`**: Service worker handling telemetry, native messaging relay, analysis-result persistence, and the sole production update coordinator. Native-message logging is metadata-only; it must not log prompt-bearing payloads.
+* **`src/background/updateRuntime.ts`**: Strict update parsers and serialized durable state machine for `dh_update_state`, restart resume, alarms, detached status polling, terminal reload, and receipt-backed finalization.
 * **`src/background/teamManifestSync.ts`**: Team sync response boundary. Manifest-only fetches re-read `dh_prefs` after every fetch result, including failure/null/304. Selected-team responses preserve `committed|unchanged|failed|skipped|stale` plus captured identity.
 * **`src/utils/analysisPrompt.ts`**: Idempotent send-time Custom User Prompt assembly for both constructed and preformatted FAB context.
 * **`src/utils/telemetry.ts`**: Azure Application Insights integration for anonymous telemetry.
@@ -36,7 +37,10 @@ The project consists of three main components:
   * **Config Loading:** Prioritizes `%LOCALAPPDATA%` config over the local directory.
   * **Session Persistence:** Uses deterministic UUID v5 session IDs (derived from case IDs via `_case_to_session_id()`) for Copilot `/resume` support.
   * **Case ID Validation:** `_extract_case_id()` validates 16-digit case IDs and 19-digit task IDs.
-* **`updater.py`**: Self-update mechanism. Downloads updates from GitHub releases. Copies all host files (exe, `_internal/` runtime, `system_prompt.md`) while protecting user files (`config.json`, `copilot-instructions.md`, logs) via `_USER_FILES` set. Handles locked `.exe` files by renaming to `.exe.old` (with `.old2`, `.old3` fallback for antivirus locks).
+* **`update_service.py`**: Active production updater composing validated archive staging, Plan B transaction mutation/rollback, and Plan C detached recovery/finalization. `updater.py` remains only for verified legacy `.old*` cleanup; `Updater.apply_update` is not production reachable.
+* **`update_operation.py`**: Distinct cross-process Plan D operation mutex. It
+  wraps full service operations and is always acquired before the Plan B/C
+  mutation mutex.
 * **`pii_scrubber.py`**: PII redaction utility for sanitizing text before sending to the LLM.
 * **`system_prompt.md`**: The base persona for the AI Agent.
 
@@ -521,26 +525,48 @@ Look for these log lines in `%LOCALAPPDATA%\DynamicsHelper\native_host.log`:
 
 ## Self-Update Mechanism
 
-The extension checks for updates on startup (via `health_check` action) and displays an "Update Available" notification in the Options page and FAB.
+The Service Worker is the only production update coordinator. FAB and Options
+render its projection and never infer success from a Host response.
 
 ### Flow
 
-1. **Check:** `NativeHost.check_for_updates()` queries the GitHub Releases API.
-2. **Notify:** If a newer version exists, sends `NATIVE_UPDATE_AVAILABLE` message to the extension.
-3. **Download:** User clicks "Update Now" → `updater.download_update()` fetches the release zip.
-4. **Apply:** The updater extracts files. The exe is swapped via rename-to-`.old` strategy. Other host files (`_internal/`, `system_prompt.md`) are overwritten directly. User files (`config.json`, `copilot-instructions.md`, logs) are protected.
-5. **Reload:** After a successful update, the FAB calls `chrome.runtime.reload()` to reload the extension (not just the page). The `pending_update` entry in `chrome.storage.local` is cleared on success. The Options page also includes version guards to dismiss stale update banners.
-6. **Restart:** The host process exits; Chrome relaunches it on the next native message.
+1. `check_for_updates` accepts only a strictly newer release with exactly one
+   direct HTTPS ZIP.
+2. The Worker probes `get_capabilities` and `verify_installation`; version,
+   `transactional-update-v1`, and packaged integrity must agree.
+3. UI hydration/start messages are exact payload-free
+   `DH_UPDATE_GET_STATE`/`DH_UPDATE_START`; broadcasts are `DH_UPDATE_STATE`.
+4. The Worker persists each state before sending strict `perform_update` and
+   `activate_update` actions. `UpdateService` validates/stages, creates the Plan
+   B transaction, installs Plan C recovery, and launches detached activation.
+5. Status-only polling and a 30-second MV3 alarm resume interrupted work.
+   Ordinary forward failures roll back the complete previous product.
+6. Only committed/rolled-back status permits Extension reload. The new Worker
+   re-verifies terminal version/capability/integrity, persists the finalization
+   receipt, and acknowledges cleanup before reporting completion.
+7. Mixed or incomplete installs persist matching-full-installer guidance until
+   a later startup verifies the repaired complete product.
 
-### Locked File Handling
+`installer_core.ps1` removes the old `_internal` tree before copying the
+packaged runtime. This exact-tree repair is required because installation
+verification rejects both missing and extra runtime files. It first creates a
+temporary combined product view and runs the packaged Host `--update-probe`
+before stopping the live Host or mutating the destination; package-root mode
+also validates exact Plan A inventory/hashes. After copy, a live probe and
+frozen-only `--settle-installer-repair` settle compatible preserved authority to
+the target/prior terminal version or fail without deleting evidence.
 
-When replacing `dh_native_host.exe`, the file may be locked by the OS or antivirus:
-
-1. Try `rename → .exe.old`
-2. If locked: try `.exe.old2`, `.exe.old3` as fallback
-3. Other host files (`_internal/` directory, `system_prompt.md`) are overwritten directly
-4. User files (`config.json`, `copilot-instructions.md`, log files) are never overwritten
-5. Log errors for debugging
+`updateRuntime.initialize({resume:false})` hydrates durable state without
+waiting on recovery; Service Worker starts `resume()` in the background. Exact
+pre-launch activation errors are explicit-retry states that allow ordinary Host
+traffic, while lost/post-launch responses remain suppressed and reconcile via
+the status Host. Development verification projects `source_update_disabled`
+without allocating a transaction. Rolled-back completion remains visible; the
+same failed candidate cannot overwrite it, and retry begins only on user intent.
+Prepare/activate/finalize/ack leases use bounded cancellation deadlines.
+Finalize/ack errors remain in their exact persisted phase, and retry invokes the
+same idempotent action. A Worker-instance token requires a fresh Worker after
+reload before terminal finalization.
 
 ---
 
@@ -599,16 +625,18 @@ closed. Test Host subprocesses with fresh `LOCALAPPDATA`, `APPDATA`,
 
 For safe tests, call pure helpers against temporary synthetic source/stage
 trees. Do not invoke the release CLI: it also edits versions and can perform Git
-or publishing operations. Plan A keeps the legacy updater active and does not
-advertise `transactional-update-v1`.
+or publishing operations. Plan D production routing consumes Plan A metadata and
+advertises `transactional-update-v1` only with the complete cutover.
 
-### Dormant Plan B Transaction API
+### Plan B Transaction API
 
-Plan B is implemented and consumed by Plan C special modes, but ordinary update
-clicks remain on the historical Python updater and installation remains on the
-PowerShell installer path until Plan D completes its gates. Plan C/D consume
-these exact interfaces rather than writing journal, active, or workspace paths
-directly:
+Plan B is the active mutation and rollback engine beneath `UpdateService`.
+Plan C/D consume these exact interfaces rather than writing journal, active, or
+workspace paths directly:
+
+Plan D uses a separate cross-process operation mutex around complete service
+operations. Lock order is `operation -> mutation`; Plan B/C never acquire the
+outer operation mutex themselves.
 
 ```text
 parse_transaction_id(value: object) -> str
@@ -650,10 +678,10 @@ synthesized post-operation state (648 cases), plus 67 journal-transition crash
 cases. Run all Plan B focused tests with `PYTHONPATH=host` and isolated values
 for `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP`.
 
-### Dormant Plan C Detached Recovery API
+### Plan C Detached Recovery API
 
-Plan C exposes recovery/finalization primitives but does not replace the active
-legacy updater. Source and frozen entrypoint identity is exact:
+Plan C exposes the recovery/finalization primitives used after Plan D activation.
+Source and frozen entrypoint identity is exact:
 
 * Source development registers `host/host_manifest.json`; its `path` field is
   the absolute `host/launch_host.bat` path, and the batch wrapper forwards Chrome
@@ -672,6 +700,7 @@ dh_native_host.py --register
 dh_native_host.exe [<allowlisted-origin> [--parent-window=<nonnegative-decimal>]]
 dh_native_host.exe --register
 dh_native_host.exe --install-package <absolute-canonical-package-root>
+dh_native_host.exe --settle-installer-repair
 dh_native_host.exe --update-probe <absolute-canonical-probe-manifest>
 dh_update_runner.exe --complete-update <32-lower-hex-id> <positive-decimal-pid> <win-create-time-ticks>
 dh_update_runner.exe --recover-active
@@ -758,8 +787,10 @@ try {
 }
 ```
 
-The version command must report exactly `6.18.0`. Build/spec/dist outputs remain
-ignored and untracked. Do not provision PyInstaller automatically.
+The current version command must report exactly `6.22.2`. Historical Plan C
+evidence at its fixed commit remains `6.18.0`; do not relabel that chronology.
+Build/spec/dist outputs remain ignored and untracked. Do not provision
+PyInstaller automatically.
 
 Manual recovery commands are exactly:
 
@@ -769,8 +800,12 @@ Manual recovery commands are exactly:
 ```
 
 For `recovery-required`, preserve backups and evidence; never advise deleting
-them. Real handle inheritance, RunOnce, registration, forced rollback, browser
-status argv, and interrupted installer resume require a disposable VM.
+them. Frozen startup recovery runs before normal initialization; unsafe manual
+recovery exits `30` with empty stdout and exact stderr
+`manual_recovery_required\n`. Real handle inheritance, RunOnce, registration,
+forced rollback, browser status argv, and interrupted installer resume require a
+disposable VM. Standalone bootstrap and per-write power-loss guarantees remain
+deferred; an extreme interruption may require the matching full installer.
 
 ### 1. Release Automation
 

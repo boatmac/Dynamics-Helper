@@ -393,7 +393,10 @@ class ReleaseDocumentGenerationTests(unittest.TestCase):
         stage = self._make_stage()
         docs = generate_release_documents(stage, "2.0.74-beta.4")
         self.assertEqual(docs.update_manifest.required_capabilities, ("prompt-scope-v1",))
-        self.assertEqual(docs.update_manifest.provided_capabilities, ("prompt-scope-v1",))
+        self.assertEqual(
+            docs.update_manifest.provided_capabilities,
+            ("prompt-scope-v1", "transactional-update-v1"),
+        )
         self.assertEqual(
             {
                 entry.path

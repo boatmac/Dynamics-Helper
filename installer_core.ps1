@@ -10,6 +10,41 @@ $DestDir = "$env:LOCALAPPDATA\$AppName"
 
 # CRITICAL FIX: Must match the Host ID defined in extension/background/serviceWorker.ts
 $HostName = "com.dynamics.helper.native"
+$HostSrc = "$PSScriptRoot\host"
+$ExtSrc = "$PSScriptRoot\extension"
+$PackageManifest = "$PSScriptRoot\update-manifest.json"
+
+# Validate the complete packaged product before changing user state or stopping
+# the live Host. The probe expects the installed layout, so materialize a
+# temporary combined Host/Extension view from the extracted release.
+foreach ($RequiredPath in @(
+    "$HostSrc\dh_native_host.exe",
+    "$HostSrc\_internal",
+    "$HostSrc\release-integrity.json",
+    "$HostSrc\installed-product.json",
+    "$ExtSrc\manifest.json",
+    $PackageManifest
+)) {
+    if (-not (Test-Path $RequiredPath)) {
+        Write-Error "The installer package is incomplete: '$RequiredPath' is missing."
+    }
+}
+$PreflightRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("DynamicsHelper-preflight-" + [guid]::NewGuid().ToString("N"))
+try {
+    New-Item -ItemType Directory -Path $PreflightRoot | Out-Null
+    Copy-Item "$HostSrc\*" -Destination $PreflightRoot -Recurse -Force
+    New-Item -ItemType Directory -Path "$PreflightRoot\extension" | Out-Null
+    Copy-Item "$ExtSrc\*" -Destination "$PreflightRoot\extension" -Recurse -Force
+    Get-ChildItem -Path $PreflightRoot -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
+    $PreflightOutput = & "$PreflightRoot\dh_native_host.exe" --update-probe $PackageManifest $PSScriptRoot 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "The installer package failed integrity validation. Output: $PreflightOutput"
+    }
+} finally {
+    if (Test-Path $PreflightRoot) {
+        Remove-Item $PreflightRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 
 Write-Host "==========================================" -ForegroundColor Cyan
 Write-Host "   Dynamics Helper Installer / Updater" -ForegroundColor Cyan
@@ -64,9 +99,11 @@ if (-not (Test-Path $DestDir)) {
 
 # 3. Copy Host Files
 Write-Host "[*] Installing Host files..."
-$HostSrc = "$PSScriptRoot\host"
-if (-not (Test-Path $HostSrc)) {
-    Write-Error "Could not find 'host' folder in '$PSScriptRoot'. Please extract the zip file completely before running."
+
+# The packaged runtime is one exact product tree. Remove the old runtime first
+# so a matching full installer can repair stale or mixed _internal bytes.
+if (Test-Path "$DestDir\_internal") {
+    Remove-Item "$DestDir\_internal" -Recurse -Force
 }
 
 # Copy all host files (exe + DLLs from --onedir build + config files)
@@ -105,12 +142,6 @@ if (Test-Path "$HostSrc\system_prompt.md") {
 # 4. Copy Extension Files
 Write-Host "[*] Installing Extension files..."
 $ExtDest = "$DestDir\extension"
-$ExtSrc = "$PSScriptRoot\extension"
-
-if (-not (Test-Path $ExtSrc)) {
-    Write-Error "Could not find 'extension' folder in '$PSScriptRoot'. Please extract the zip file completely."
-}
-
 # Clean old extension files to remove stale files
 if (Test-Path $ExtDest) {
     Remove-Item $ExtDest -Recurse -Force
@@ -124,6 +155,18 @@ if ($FileCount -eq 0) {
     Write-Error "Extension copy failed! Destination '$ExtDest' is empty. Check permissions or disk space."
 }
 Write-Host "    - Extension files copied to: $ExtDest ($FileCount files)"
+
+# Verify the exact installed product and settle any preserved transaction to the
+# matching target/prior terminal state before registration can report success.
+$ExePath = "$DestDir\dh_native_host.exe"
+$LiveProbeOutput = & $ExePath --update-probe $PackageManifest 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "The installed product failed integrity validation. Output: $LiveProbeOutput"
+}
+$SettlementOutput = & $ExePath --settle-installer-repair 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "The preserved update transaction could not be settled. Output: $SettlementOutput"
+}
 
 # 5. Registry Update
 $ManifestPath = "$DestDir\manifest.json"
@@ -141,7 +184,6 @@ Write-Host "Configuring Native Host Manifest..." -ForegroundColor Gray
 # 2. Update the Windows Registry for Chrome and Edge
 # This ensures perfect consistency regardless of the user's shell environment.
 
-$ExePath = "$DestDir\dh_native_host.exe"
 if (-not (Test-Path $ExePath)) {
     Write-Host ""
     Write-Host "!! Executable not found at: $ExePath !!" -ForegroundColor Red

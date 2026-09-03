@@ -162,6 +162,49 @@ describe('handleAnalyzeRequest', () => {
         expect(transportA.send.mock.calls[0][0]).toBe(acquiredAction)
     })
 
+    it('rechecks authorization after persistence immediately before send', async () => {
+        const transport = { send: vi.fn(async () => HOST_SUCCESS) }
+        const authorizeSend = vi.fn(async (_forwarded: unknown) => ({
+            allowed: false as const,
+            response: DENIED,
+        }))
+        const acquireAuthorizedTransport = vi.fn(async () => ({
+            allowed: true as const,
+            transport,
+            authorizeSend,
+        }))
+
+        await expect(handleAnalyzeRequest(validAnalyzePayload(), {
+            acquireAuthorizedTransport,
+        })).resolves.toEqual(DENIED)
+
+        expect(authorizeSend).toHaveBeenCalledTimes(1)
+        expect(authorizeSend).toHaveBeenCalledWith({
+            action: 'analyze_error',
+            requestId: 'request-1',
+            payload: HOST_PAYLOAD,
+        })
+        expect(transport.send).not.toHaveBeenCalled()
+    })
+
+    it('uses the response started inside final authorization without a second send', async () => {
+        const transport = { send: vi.fn(async () => HOST_SUCCESS) }
+        const authorizeSend = vi.fn(async () => ({
+            allowed: true as const,
+            response: Promise.resolve(HOST_SUCCESS),
+        }))
+
+        await expect(handleAnalyzeRequest(validAnalyzePayload(), {
+            acquireAuthorizedTransport: vi.fn(async () => ({
+                allowed: true as const,
+                transport,
+                authorizeSend,
+            })),
+        })).resolves.toEqual({ status: 'success', data: HOST_SUCCESS.data.data })
+
+        expect(transport.send).not.toHaveBeenCalled()
+    })
+
     it('fails a disconnected lease without reacquiring or reconnecting', async () => {
         const transportB = {
             send: vi.fn(async () => HOST_SUCCESS),

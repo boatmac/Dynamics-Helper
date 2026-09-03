@@ -14,11 +14,13 @@ from product_info import (
 
 
 class TestProductInfo(unittest.TestCase):
-    def test_plan_a_capability_contract(self):
+    def test_transactional_update_capability_contract(self):
         self.assertEqual(VERSION, "2.0.74-beta.4")
         self.assertEqual(REQUIRED_PROTOCOL_CAPABILITIES, ("prompt-scope-v1",))
-        self.assertEqual(PROVIDED_PROTOCOL_CAPABILITIES, ("prompt-scope-v1",))
-        self.assertNotIn("transactional-update-v1", PROVIDED_PROTOCOL_CAPABILITIES)
+        self.assertEqual(
+            PROVIDED_PROTOCOL_CAPABILITIES,
+            ("prompt-scope-v1", "transactional-update-v1"),
+        )
 
     def test_projection_is_frozen_and_exact(self):
         actual = get_host_capabilities()
@@ -27,7 +29,7 @@ class TestProductInfo(unittest.TestCase):
             HostCapabilities(
                 host_version="2.0.74-beta.4",
                 required=("prompt-scope-v1",),
-                provided=("prompt-scope-v1",),
+                provided=("prompt-scope-v1", "transactional-update-v1"),
             ),
         )
         with self.assertRaises((AttributeError, TypeError)):

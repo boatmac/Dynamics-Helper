@@ -47,6 +47,11 @@ import { localizePromptSourceError } from '../utils/promptSourceErrors';
 import { safeErrorText } from '../utils/safeErrorText';
 import { ownDataProperty } from '../utils/ownData';
 import {
+    parseUpdateState,
+    type UpdateErrorCode,
+    type UpdateState,
+} from '../background/updateRuntime';
+import {
     collapseBookmarkFolders,
     loadBookmarkItems,
     parseBookmarkDocument,
@@ -72,6 +77,69 @@ type PromptSourceIssue = {
     errorCode?: string;
     fallback: string;
 };
+
+function projectedUpdateState(value: unknown): UpdateState | null {
+    const property = ownDataProperty(value, 'state');
+    return property.kind === 'value' ? parseUpdateState(property.value) : null;
+}
+
+function projectedUpdateVersion(state: UpdateState): string | null {
+    if (state.kind === 'available' || state.kind === 'complete') {
+        return state.update.version;
+    }
+    if (state.kind === 'recovery-required') {
+        return state.transaction?.targetVersion ?? null;
+    }
+    return state.kind === 'idle' ? null : state.targetVersion;
+}
+
+function projectedUpdateError(state: UpdateState): UpdateErrorCode | null {
+    if (state.kind === 'recovery-required') return state.code;
+    if (state.kind === 'preparing' || state.kind === 'activating') {
+        return state.errorCode ?? null;
+    }
+    if (state.kind === 'reload-pending' || state.kind === 'ack-pending') {
+        return state.errorCode ?? null;
+    }
+    return null;
+}
+
+function updateErrorText(errorCode: UpdateErrorCode, t: (key: string) => string): string {
+    const keys: Record<UpdateErrorCode, string> = {
+        invalid_update_request: 'invalidUpdateRequest',
+        installation_integrity_failed: 'updateInstallerRequired',
+        update_already_in_progress: 'updateAlreadyInProgress',
+        update_prepare_failed: 'updatePrepareFailed',
+        update_activation_failed: 'updateActivationFailed',
+        update_not_terminal: 'updateNotTerminal',
+        update_cleanup_failed: 'updateCleanupFailed',
+        source_update_disabled: 'sourceUpdateDisabled',
+        manual_recovery_required: 'manualRecoveryRequired',
+    };
+    return t(keys[errorCode]);
+}
+
+function updateIsBusy(state: UpdateState): boolean {
+    if (state.kind === 'preparing' || state.kind === 'activating') {
+        return state.errorCode === undefined;
+    }
+    if (state.kind === 'reload-pending' || state.kind === 'ack-pending') {
+        return state.errorCode === undefined;
+    }
+    return state.kind === 'polling';
+}
+
+function updateCanStart(state: UpdateState): boolean {
+    return state.kind === 'available'
+        || state.kind === 'recovery-required' && state.transaction !== undefined
+        || state.kind === 'preparing' && state.errorCode !== undefined
+        || state.kind === 'activating'
+            && state.errorCode !== undefined
+            && !state.activationRetryUsed
+        || (state.kind === 'reload-pending' || state.kind === 'ack-pending')
+            && state.errorCode !== undefined
+        || state.kind === 'complete' && state.outcome === 'rolled-back';
+}
 
 type TeamMirrorIdentity = Readonly<{
     enabled: boolean;
@@ -770,8 +838,25 @@ const OptionsInner: React.FC = () => {
         }
     }, []);
     const [hostVersion, setHostVersion] = useState<string>("");
-    const [updateAvailable, setUpdateAvailable] = useState<{version: string, url: string} | null>(null);
-    const [isUpdating, setIsUpdating] = useState(false);
+    const [updateState, setUpdateState] = useState<UpdateState>({ kind: 'idle' });
+    const updateVersion = updateState.kind === 'complete' && updateState.outcome === 'rolled-back'
+        ? getExtensionVersion()
+        : projectedUpdateVersion(updateState);
+    const updateError = projectedUpdateError(updateState);
+    const isUpdating = updateIsBusy(updateState);
+    const canStartUpdate = updateCanStart(updateState);
+    const showUpdateAction = updateState.kind !== 'idle'
+        && (updateState.kind !== 'complete' || updateState.outcome === 'rolled-back');
+    const updateActionLabel = updateState.kind === 'available'
+        ? t('updateNow')
+        : isUpdating
+            ? t('updating')
+            : t('retryUpdate');
+    const updateCompletion = updateState.kind === 'complete'
+        ? `${t(updateState.outcome === 'committed' ? 'updateComplete' : 'updateRolledBack')} ${t('version')} ${updateVersion}`
+        : null;
+    const latestTranslationRef = useRef(t);
+    latestTranslationRef.current = t;
     
     // Editor State
     const [editingItemPath, setEditingItemPath] = useState<number[] | null>(null); // path of indices
@@ -2784,119 +2869,73 @@ const OptionsInner: React.FC = () => {
         });
     };
 
-    // Listen for updates
-    //
-    // `t` is captured in a ref because the runtime-message handler is
-    // registered once at mount (deps []) — putting `t` in the dep array
-    // would remove+re-add the listener on every language change and can
-    // drop messages that arrive during the swap. Same pattern as
-    // isAnalyzingRef in FAB.tsx (see AGENTS.md § notes on ref-vs-deps
-    // trade-offs). Without this ref, `t()` inside handleRuntimeMsg
-    // returns the language that was active AT MOUNT TIME — for a user
-    // who set language=zh but whose prefs hydrate from the host after
-    // the effect runs, the 'You are up to date!' string stays in English
-    // even after the UI otherwise switches to Chinese.
-    const tRef = useRef(t);
+    // The Service Worker owns update storage, Host actions, and reloads.
+    // Options only hydrates and renders its projected state.
     useEffect(() => {
-        tRef.current = t;
-    }, [t]);
-
-    useEffect(() => {
+        let mounted = true;
+        let liveProjectionSeen = false;
+        const applyProjection = (value: unknown) => {
+            const next = projectedUpdateState(value);
+            if (mounted && next) setUpdateState(next);
+        };
         const handleRuntimeMsg = (message: unknown) => {
             const type = ownDataProperty(message, 'type');
-            if (type.kind !== 'value') return;
-            if (type.value === "NATIVE_UPDATE_AVAILABLE") {
-                const updateMessage = message as {
-                    payload: { version: string; url: string };
-                };
-                const currentVer = getExtensionVersion();
-                if (updateMessage.payload.version === currentVer) {
-                    setUpdateAvailable(null);
-                    chrome.storage.local.remove("pending_update");
-                    return;
+            if (type.kind === 'value' && type.value === 'DH_UPDATE_STATE') {
+                const next = projectedUpdateState(message);
+                if (next) {
+                    liveProjectionSeen = true;
+                    applyProjection({ state: next });
                 }
-                console.log("[Options] Received update available:", updateMessage.payload);
-                setUpdateAvailable(updateMessage.payload);
-                showSuccess(`${updateMessage.payload.version.replace(/^v?/, 'v')} ${tRef.current('availableForUpdate')}`, 5000);
-            }
-            
-            if (type.value === "NATIVE_UPDATE_NOT_AVAILABLE") {
-                showSuccess(tRef.current('upToDate'), 3000);
-            }
-
-            if (type.value === "NATIVE_UPDATE_ERROR") {
+            } else if (type.kind === 'value' && type.value === 'NATIVE_UPDATE_ERROR') {
                 const payload = ownDataProperty(message, 'payload');
                 const candidate = payload.kind === 'value'
                     ? ownDataProperty(payload.value, 'error')
                     : { kind: 'invalid' as const };
                 showError(safeErrorText([
                     candidate.kind === 'value' ? candidate.value : undefined,
-                ], tRef.current('updateCheckFailed')), 5000);
+                ], latestTranslationRef.current('updateCheckFailed')), 5000);
             }
         };
 
         chrome.runtime.onMessage.addListener(handleRuntimeMsg);
-        
-        // Trigger check on load (fire and forget, legacy hosts might ignore 'check_updates')
-        chrome.runtime.sendMessage({ 
-            type: "NATIVE_MSG", 
-            payload: { action: "check_updates" } 
-        });
-
-        return () => chrome.runtime.onMessage.removeListener(handleRuntimeMsg);
-    }, []);
-
-    // Check persistent storage for pending updates on mount
-    useEffect(() => {
-        chrome.storage.local.get("pending_update", (data) => {
-            const pending = data.pending_update as {version: string, url: string} | undefined;
-            if (pending && pending.version && pending.url) {
-                const currentVer = getExtensionVersion();
-                if (pending.version === currentVer) {
-                    // Already updated — stale entry, clean up
-                    chrome.storage.local.remove("pending_update");
-                    return;
+        void chrome.runtime.sendMessage({ type: 'DH_UPDATE_GET_STATE' })
+            .then(response => {
+                const handled = ownDataProperty(response, 'handled');
+                if (
+                    handled.kind === 'value'
+                    && handled.value === true
+                    && !liveProjectionSeen
+                ) {
+                    applyProjection(response);
+                } else if (handled.kind !== 'value' || handled.value !== true) {
+                    showError(t('updateRequestFailed'), 5000);
                 }
-                console.log("[Options] Found pending update in storage:", pending);
-                setUpdateAvailable(pending);
-            }
-        });
+            })
+            .catch(() => undefined);
+
+        return () => {
+            mounted = false;
+            chrome.runtime.onMessage.removeListener(handleRuntimeMsg);
+        };
     }, []);
 
-    const handleUpdate = () => {
-        if (!updateAvailable) return;
-        if (!confirm(t('updateConfirm').replace('{version}', updateAvailable.version))) return;
-
-        setIsUpdating(true);
-        showSuccess(t('downloadingUpdate'));
-
-        chrome.runtime.sendMessage({
-            type: "NATIVE_MSG",
-            payload: { 
-                action: "perform_update", 
-                payload: { url: updateAvailable.url } 
-            }
-        }, (response) => {
-            setIsUpdating(false);
-            if (chrome.runtime.lastError) {
-                showError(`${t('updateFailed')}: ` + chrome.runtime.lastError.message);
-                return;
-            }
-            
-            if (response && response.status === "success") {
-                setUpdateAvailable(null);
-                chrome.storage.local.remove("pending_update");
-                showSuccess(t('updateSuccess'));
-                setTimeout(() => {
-                    chrome.runtime.reload();
-                }, 1000);
+    const handleUpdate = async () => {
+        if (!canStartUpdate) return;
+        if (updateState.kind === 'available' && updateVersion) {
+            if (!confirm(t('updateConfirm').replace('{version}', updateVersion))) return;
+        }
+        try {
+            const response = await chrome.runtime.sendMessage({ type: 'DH_UPDATE_START' });
+            const handled = ownDataProperty(response, 'handled');
+            if (handled.kind === 'value' && handled.value === true) {
+                const next = projectedUpdateState(response);
+                if (next) setUpdateState(next);
             } else {
-                showError(`${t('updateFailed')}: ${safeErrorText(
-                    [response?.error, response?.message],
-                    t('unknownError'),
-                )}`);
+                showError(t('updateRequestFailed'), 5000);
             }
-        });
+        } catch {
+            showError(t('updateRequestFailed'), 5000);
+        }
     };
 
     // About & Help: copy the log folder path (Explorer expands %LOCALAPPDATA%).
@@ -2904,24 +2943,6 @@ const OptionsInner: React.FC = () => {
         navigator.clipboard?.writeText('%LOCALAPPDATA%\\DynamicsHelper')
             .then(() => showSuccess(t('copied'), 2000))
             .catch(() => {/* clipboard blocked; no-op */});
-    };
-
-    const handleCheckUpdates = () => {
-        showSuccess(t('checkingForUpdates'));
-        chrome.runtime.sendMessage({ 
-            type: "NATIVE_MSG", 
-            payload: { action: "check_updates" } 
-        });
-        
-        // Safety timeout (60s) in case host doesn't respond.
-        // Only flip to "timed out" if the status is still the "checking" message
-        // (i.e. user hasn't received a real response in the meantime).
-        const checkingMsg = t('checkingForUpdates');
-        const timedOutMsg = t('checkTimedOut');
-        setTimeout(() => {
-            setStatus(prev => (prev?.message === checkingMsg ? { message: timedOutMsg, type: 'error' } : prev));
-            setTimeout(() => setStatus(prev => (prev?.message === timedOutMsg ? null : prev)), 3000);
-        }, 60000);
     };
 
     // Merged view for the bookmark manager. Personal items are editable;
@@ -3287,25 +3308,23 @@ const OptionsInner: React.FC = () => {
                                 <div className="flex gap-3 text-xs text-slate-500 font-medium uppercase tracking-wider items-center">
                                     <span>Extension v{getExtensionVersion()}</span>
                                     {hostVersion && <span>• {t('hostVersion')} v{hostVersion}</span>}
-                                    <button 
-                                        onClick={handleCheckUpdates} 
-                                        className="ml-1 p-1 hover:text-teal-600 hover:bg-teal-50 rounded-full transition-colors" 
-                                        title={t('updateAvailable')}
-                                    >
-                                        <RefreshCw size={12} />
-                                    </button>
                                 </div>
                             </div>
                         </div>
                         <div className="flex gap-3">
-                            {updateAvailable && (
+                            {showUpdateAction && (
                                 <button 
-                                    onClick={handleUpdate} 
-                                    disabled={isUpdating}
-                                    className="flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg text-sm font-medium transition-colors animate-pulse"
+                                    onClick={() => { void handleUpdate(); }}
+                                    disabled={!canStartUpdate}
+                                    className={cn(
+                                        'flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-colors',
+                                        updateError
+                                            ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+                                            : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100',
+                                    )}
                                 >
                                     {isUpdating ? <RotateCcw size={16} className="animate-spin" /> : <Download size={16} />}
-                                    {isUpdating ? t('updating') : t('updateNow')}
+                                    {updateActionLabel}{updateVersion ? ` ${updateVersion}` : ''}
                                 </button>
                             )}
                              <button onClick={handleReset} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-800 rounded-lg text-sm font-medium transition-colors">
@@ -3332,6 +3351,24 @@ const OptionsInner: React.FC = () => {
                                         {t('retryResetCleanup')}
                                     </button>
                                 )}
+                        </div>
+                    )}
+
+                    {updateError && (
+                        <div
+                            className="bg-amber-50 text-amber-800 text-center py-3 px-4 font-medium text-sm border-b border-amber-200"
+                            role="alert"
+                        >
+                            {updateErrorText(updateError, t)}
+                        </div>
+                    )}
+
+                    {updateCompletion && (
+                        <div
+                            className="bg-emerald-50 text-emerald-800 text-center py-3 px-4 font-medium text-sm border-b border-emerald-200"
+                            role="status"
+                        >
+                            {updateCompletion}
                         </div>
                     )}
 
@@ -4193,20 +4230,19 @@ const OptionsInner: React.FC = () => {
                                     {hostVersion && <span>• {t('hostVersion')} v{hostVersion}</span>}
                                 </div>
                                 <div className="flex items-center gap-2 mt-3">
-                                    <button
-                                        onClick={handleCheckUpdates}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 text-xs font-medium rounded-lg border border-slate-200 transition-colors shadow-sm"
-                                    >
-                                        <RefreshCw size={12} /> {t('checkForUpdates')}
-                                    </button>
-                                    {updateAvailable && (
+                                    {showUpdateAction && (
                                         <button
-                                            onClick={handleUpdate}
-                                            disabled={isUpdating}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-medium transition-colors"
+                                            onClick={() => { void handleUpdate(); }}
+                                            disabled={!canStartUpdate}
+                                            className={cn(
+                                                'flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-medium transition-colors',
+                                                updateError
+                                                    ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+                                                    : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100',
+                                            )}
                                         >
                                             {isUpdating ? <RotateCcw size={12} className="animate-spin" /> : <Download size={12} />}
-                                            {isUpdating ? t('updating') : t('updateNow')}
+                                            {updateActionLabel}{updateVersion ? ` ${updateVersion}` : ''}
                                         </button>
                                     )}
                                 </div>

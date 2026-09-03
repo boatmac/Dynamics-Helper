@@ -17,6 +17,7 @@ class HostIntegrityActionTests(unittest.IsolatedAsyncioTestCase):
         self.host.send_progress = MagicMock()
         self.host.send_message = MagicMock()
         self.host._installation_verifier = MagicMock()
+        self.host._source_runtime = False
 
     async def test_get_capabilities_exact_envelope(self):
         await self.host.process_message(
@@ -28,7 +29,10 @@ class HostIntegrityActionTests(unittest.IsolatedAsyncioTestCase):
                 "status": "success",
                 "data": {
                     "host_version": "2.0.74-beta.4",
-                    "capabilities": ["prompt-scope-v1"],
+                    "capabilities": [
+                        "prompt-scope-v1",
+                        "transactional-update-v1",
+                    ],
                 },
             }
         )
@@ -112,12 +116,11 @@ class HostIntegrityActionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.host.handle_analyze_error.assert_awaited_once_with({})
 
-    async def test_plan_a_perform_update_still_uses_legacy_updater(self):
-        self.host.loop = asyncio.get_running_loop()
-        fake = MagicMock()
-        fake.download_update.return_value = "synthetic.zip"
-        fake.apply_update.return_value = True
-        with patch("updater.Updater", return_value=fake):
+    async def test_legacy_url_only_update_is_rejected_without_updater(self):
+        self.host._source_runtime = False
+        self.host._installation_ready = False
+        self.host._update_service = None
+        with patch("updater.Updater") as updater:
             await self.host.process_message(
                 {
                     "action": "perform_update",
@@ -125,8 +128,48 @@ class HostIntegrityActionTests(unittest.IsolatedAsyncioTestCase):
                     "payload": {"url": "https://example.invalid/release.zip"},
                 }
             )
-        fake.download_update.assert_called_once()
-        fake.apply_update.assert_called_once_with("synthetic.zip")
+        updater.assert_not_called()
+        self.assertEqual(
+            self.host.send_message.call_args.args[0]["error_code"],
+            "installation_integrity_failed",
+        )
+
+    async def test_mixed_install_update_check_emits_guidance_before_network(self):
+        self.host._installation_ready = False
+        self.host.last_update_check = 0
+        with patch("host.dh_native_host.urllib.request.urlopen") as open_url:
+            await self.host.check_for_updates(force=True)
+
+        open_url.assert_not_called()
+        self.host.send_message.assert_called_once_with(
+            {
+                "action": "update_error",
+                "payload": {
+                    "error": (
+                        "The installed Host and Extension do not match. "
+                        "Run the matching full installer."
+                    )
+                },
+            }
+        )
+
+    def test_source_startup_never_runs_production_legacy_cleanup(self):
+        with (
+            patch("host.dh_native_host._source_runtime", True),
+            patch(
+                "host.dh_native_host.InstallationVerifier.verify",
+                return_value=InstallationVerification(
+                    mode="development",
+                    integrity="development",
+                    host_version="2.0.74-beta.4",
+                ),
+            ),
+            patch("updater.Updater.cleanup_old_version") as cleanup,
+        ):
+            host = NativeHost()
+
+        self.assertTrue(host._source_runtime)
+        cleanup.assert_not_called()
 
     def test_integrity_serializer_annotation_resolves(self):
         hints = typing.get_type_hints(

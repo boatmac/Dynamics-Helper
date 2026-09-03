@@ -18,6 +18,7 @@ class EarlyCliDispatchTests(unittest.TestCase):
         self.root = Path(self.tempdir.name)
         self.live = self.root / "live"
         stage = self.root / "stage"
+        self.stage = stage
         files = {
             "host/dh_native_host.exe": b"host-exe",
             "host/_internal/python313.dll": b"runtime",
@@ -43,6 +44,7 @@ class EarlyCliDispatchTests(unittest.TestCase):
         for name in (
             "early_cli.py",
             "install_integrity.py",
+            "package_archive.py",
             "package_manifest.py",
             "product_info.py",
         ):
@@ -109,7 +111,10 @@ class EarlyCliDispatchTests(unittest.TestCase):
                 "status": "success",
                 "host_version": VERSION,
                 "extension_version": VERSION,
-                "capabilities": ["prompt-scope-v1"],
+                "capabilities": [
+                    "prompt-scope-v1",
+                    "transactional-update-v1",
+                ],
             },
         )
         self.assertEqual(completed.stdout.count("\n"), 1)
@@ -130,6 +135,22 @@ class EarlyCliDispatchTests(unittest.TestCase):
                     '{"error_code":"package_probe_failed","status":"error"}\n',
                 )
                 self.assertEqual(completed.stderr, "")
+
+    def test_package_probe_rejects_unmanifested_release_files(self):
+        completed = self._run_probe(self.manifest, str(self.stage.resolve()))
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+        (self.stage / "host" / "user_prompt.md").write_text(
+            "must not install",
+            encoding="utf-8",
+        )
+        rejected = self._run_probe(self.manifest, str(self.stage.resolve()))
+        self.assertEqual(rejected.returncode, 1)
+        self.assertEqual(
+            rejected.stdout,
+            '{"error_code":"package_probe_failed","status":"error"}\n',
+        )
+        self.assertEqual(rejected.stderr, "")
 
 
 if __name__ == "__main__":

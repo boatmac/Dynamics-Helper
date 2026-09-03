@@ -1,7 +1,7 @@
 import re
 import tempfile
-import threading
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal, Protocol
@@ -34,6 +34,7 @@ from update_platform import (
     ProcessAdapter,
     WindowsProcessAdapter,
 )
+from update_operation import create_windows_operation_mutex
 from update_recovery import (
     FinalizationFilesystem,
     FinalizationError,
@@ -106,20 +107,22 @@ _ERROR_MESSAGES = {
     "manual_recovery_required": (
         "Automatic recovery could not finish. Run the matching full installer."
     ),
-    "finalization_ack_pending": (
-        "A previous update is awaiting cleanup. Retry cleanup."
-    ),
-    "finalization_not_current": "This update finalization is no longer current.",
 }
 
 
 class UpdateServiceError(RuntimeError):
-    def __init__(self, error_code: str) -> None:
+    def __init__(
+        self,
+        error_code: str,
+        *,
+        activation_launched: bool = False,
+    ) -> None:
         try:
             message = _ERROR_MESSAGES[error_code]
         except (KeyError, TypeError) as error:
             raise ValueError("unknown update service error code") from error
         self.error_code = error_code
+        self.activation_launched = activation_launched
         super().__init__(message)
 
 
@@ -195,7 +198,7 @@ def is_strictly_newer_version(target: object, prior: object) -> bool:
     return _compare_prerelease(target_pre, prior_pre) > 0
 
 
-def _require_https_url(value: object) -> str:
+def _require_https_url(value: object, *, require_zip_path: bool = False) -> str:
     if type(value) is not str or not value:
         raise ArchiveDownloadError()
     try:
@@ -207,6 +210,8 @@ def _require_https_url(value: object) -> str:
         or not parsed.netloc
         or parsed.username is not None
         or parsed.password is not None
+        or bool(parsed.fragment)
+        or require_zip_path and not parsed.path.lower().endswith(".zip")
     ):
         raise ArchiveDownloadError()
     return value
@@ -255,7 +260,7 @@ class HttpsArchiveDownloader:
     def download(self, url: str, destination: Path) -> None:
         if not isinstance(destination, Path):
             raise ArchiveDownloadError()
-        request_url = _require_https_url(url)
+        request_url = _require_https_url(url, require_zip_path=True)
         if destination.exists() or destination.is_symlink():
             raise ArchiveDownloadError()
         owned = False
@@ -307,7 +312,7 @@ def _validate_prepare_request(
 ) -> tuple[str, str, str]:
     try:
         return (
-            _require_https_url(url),
+            _require_https_url(url, require_zip_path=True),
             parse_transaction_id(transaction_id),
             _require_internal_version(target_version),
         )
@@ -354,6 +359,9 @@ class UpdateService:
         temp_root_factory: Callable[[], TemporaryRoot] = _default_temp_root_factory,
         engine_factory: Callable[[Path], UpdateEngine] | None = None,
         mutex_factory: Callable[[Path], MutationMutex] = create_windows_mutation_mutex,
+        operation_mutex_factory: Callable[
+            [Path], MutationMutex
+        ] = create_windows_operation_mutex,
         finalization_filesystem: FinalizationFilesystem | None = None,
     ) -> None:
         if not isinstance(install_root, Path) or not install_root.is_absolute():
@@ -368,6 +376,7 @@ class UpdateService:
         self.downloader = downloader or HttpsArchiveDownloader()
         self.verifier = verifier
         self.mutex_factory = mutex_factory
+        self.operation_mutex_factory = operation_mutex_factory
         self.engine = engine or UpdateEngine(
             root,
             mutex_factory=self.mutex_factory,
@@ -383,7 +392,31 @@ class UpdateService:
             )
         )
         self.finalization_filesystem = finalization_filesystem
-        self._operation_lock = threading.Lock()
+
+    @contextmanager
+    def _operation_scope(self, failure_code: str):
+        body_error = None
+        try:
+            with self.operation_mutex_factory(self.install_root):
+                try:
+                    yield
+                except BaseException as error:
+                    body_error = error
+                    raise
+        except UpdateAlreadyInProgress as error:
+            raise UpdateServiceError("update_already_in_progress") from error
+        except UpdateServiceError:
+            raise
+        except Exception as error:
+            launched = bool(
+                failure_code == "update_activation_failed"
+                and isinstance(body_error, UpdateServiceError)
+                and body_error.activation_launched
+            )
+            raise UpdateServiceError(
+                failure_code,
+                activation_launched=launched,
+            ) from error
 
     def _verified_prior_version(self) -> str:
         try:
@@ -424,7 +457,7 @@ class UpdateService:
             raise UpdateServiceError("update_already_in_progress") from error
         except FinalizationError as error:
             if error.error_code == "finalization_ack_pending":
-                raise UpdateServiceError("finalization_ack_pending") from error
+                raise UpdateServiceError("update_cleanup_failed") from error
             raise UpdateServiceError("update_prepare_failed") from error
         except Exception as error:
             raise UpdateServiceError("update_prepare_failed") from error
@@ -440,7 +473,7 @@ class UpdateService:
             transaction_id,
             target_version,
         )
-        with self._operation_lock:
+        with self._operation_scope("update_prepare_failed"):
             self._require_prepare_barrier()
 
             prior = self._verified_prior_version()
@@ -494,7 +527,7 @@ class UpdateService:
                 raise UpdateServiceError("update_already_in_progress") from error
             except FinalizationError as error:
                 if error.error_code == "finalization_ack_pending":
-                    raise UpdateServiceError("finalization_ack_pending") from error
+                    raise UpdateServiceError("update_cleanup_failed") from error
                 raise UpdateServiceError("update_prepare_failed") from error
             except PreparedTransactionConflict as error:
                 raise UpdateServiceError("update_already_in_progress") from error
@@ -512,27 +545,43 @@ class UpdateService:
 
     def activate(self, transaction_id: str) -> ActivatedUpdate:
         tx = _validate_transaction_id(transaction_id)
-        with self._operation_lock:
-            try:
-                _load_prepared_browser_journal(self.install_root, tx)
-                paths = TransactionPaths.for_install(self.install_root, tx)
-                identity = self.process.capture_current_identity(
-                    self.install_root / "dh_native_host.exe"
-                )
-                recovery = self.install_root / "updates" / "recovery"
-                launch_complete_update(self.process, recovery, paths, identity)
-                self.controller.wait_until_ready(
-                    tx,
-                    identity,
-                    timeout_seconds=_ACTIVATION_READY_TIMEOUT_SECONDS,
-                )
-            except Exception as error:
-                raise UpdateServiceError("update_activation_failed") from error
-            return ActivatedUpdate(tx)
+        launched = False
+        try:
+            with self._operation_scope("update_activation_failed"):
+                try:
+                    _load_prepared_browser_journal(self.install_root, tx)
+                    paths = TransactionPaths.for_install(self.install_root, tx)
+                    identity = self.process.capture_current_identity(
+                        self.install_root / "dh_native_host.exe"
+                    )
+                    recovery = self.install_root / "updates" / "recovery"
+                    launch_complete_update(self.process, recovery, paths, identity)
+                    launched = True
+                    self.controller.wait_until_ready(
+                        tx,
+                        identity,
+                        timeout_seconds=_ACTIVATION_READY_TIMEOUT_SECONDS,
+                    )
+                except BaseException as error:
+                    raise UpdateServiceError(
+                        "update_activation_failed",
+                        activation_launched=(
+                            launched
+                            or getattr(error, "process_launched", False)
+                        ),
+                    ) from error
+        except UpdateServiceError as error:
+            if launched and not error.activation_launched:
+                raise UpdateServiceError(
+                    "update_activation_failed",
+                    activation_launched=True,
+                ) from error
+            raise
+        return ActivatedUpdate(tx)
 
     def finalize(self, transaction_id: str) -> FinalizationReceipt:
         tx = _validate_transaction_id(transaction_id)
-        with self._operation_lock:
+        with self._operation_scope("update_cleanup_failed"):
             try:
                 return finalize_update_status(
                     self.install_root,
@@ -545,10 +594,11 @@ class UpdateService:
             except FinalizationError as error:
                 if error.error_code == "transaction_not_terminal":
                     code = "update_not_terminal"
-                elif error.error_code == "finalization_ack_pending":
-                    code = "finalization_ack_pending"
-                elif error.error_code == "finalization_not_current":
-                    code = "finalization_not_current"
+                elif error.error_code in {
+                    "finalization_ack_pending",
+                    "finalization_not_current",
+                }:
+                    code = "update_cleanup_failed"
                 else:
                     code = "update_cleanup_failed"
                 raise UpdateServiceError(code) from error
@@ -557,7 +607,7 @@ class UpdateService:
 
     def acknowledge(self, transaction_id: str) -> bool:
         tx = _validate_transaction_id(transaction_id)
-        with self._operation_lock:
+        with self._operation_scope("update_cleanup_failed"):
             try:
                 acknowledged = acknowledge_update_finalization(
                     self.install_root,
@@ -566,12 +616,7 @@ class UpdateService:
                     mutex_factory=self.mutex_factory,
                 )
             except FinalizationError as error:
-                if error.error_code == "finalization_not_current":
-                    code = "finalization_not_current"
-                elif error.error_code == "finalization_ack_pending":
-                    code = "finalization_ack_pending"
-                else:
-                    code = "update_cleanup_failed"
+                code = "update_cleanup_failed"
                 raise UpdateServiceError(code) from error
             except Exception as error:
                 raise UpdateServiceError("update_cleanup_failed") from error
@@ -628,3 +673,49 @@ def launch_startup_recovery_if_needed(
     except Exception:
         return "manual-recovery"
     return "recovery-launched"
+
+
+def settle_installer_repair(
+    install_root: Path,
+    *,
+    verifier: InstallationVerificationProvider | None = None,
+    operation_mutex_factory: Callable[
+        [Path], MutationMutex
+    ] = create_windows_operation_mutex,
+    mutation_mutex_factory: Callable[
+        [Path], MutationMutex
+    ] = create_windows_mutation_mutex,
+    engine_factory: Callable[[Path], UpdateEngine] | None = None,
+) -> bool:
+    try:
+        root = install_root.resolve(strict=True)
+        verification = (verifier or InstallationVerifier(root, frozen=True)).verify()
+        if (
+            verification.integrity != "verified"
+            or not verification.host_version
+            or verification.host_version != verification.extension_version
+        ):
+            return False
+        operation = operation_mutex_factory(root)
+        with operation:
+            active_path = root / "updates" / "active.json"
+            if not active_path.exists() and not active_path.is_symlink():
+                return True
+            journal = _load_active_journal(root)
+            engine = (engine_factory or (
+                lambda path: UpdateEngine(
+                    path,
+                    mutex_factory=mutation_mutex_factory,
+                )
+            ))(root)
+            settled = engine.settle_installer_repair(
+                journal.transaction_id,
+                verification.host_version,
+            )
+            if settled.transaction_id != journal.transaction_id:
+                return False
+            return True
+    except UpdateAlreadyInProgress:
+        raise
+    except BaseException:
+        return False

@@ -1,7 +1,10 @@
 import sys
 from pathlib import Path
 
-from update_entrypoint import dispatch_early_mode  # noqa: E402
+from update_entrypoint import (  # noqa: E402
+    MANUAL_RECOVERY_REQUIRED,
+    dispatch_early_mode,
+)
 
 _source_runtime = not bool(getattr(sys, "frozen", False))
 _early_entrypoint = (
@@ -20,6 +23,19 @@ _early_exit = (
 )
 if _early_exit is not None:
     raise SystemExit(_early_exit)
+
+from update_service import launch_startup_recovery_if_needed  # noqa: E402
+
+_startup_recovery = (
+    launch_startup_recovery_if_needed(Path(sys.executable).resolve().parent)
+    if __name__ == "__main__" and not _source_runtime
+    else "continue"
+)
+if _startup_recovery != "continue":
+    if _startup_recovery == "manual-recovery":
+        sys.stderr.buffer.write(MANUAL_RECOVERY_REQUIRED)
+        sys.stderr.buffer.flush()
+    raise SystemExit(0 if _startup_recovery == "recovery-launched" else 30)
 
 # --- STDOUT PROTECTION ---
 # Native Messaging requires STDOUT to be exclusively used for length-prefixed JSON.
@@ -91,6 +107,14 @@ from pathlib import Path
 
 from install_integrity import InstallationVerification, InstallationVerifier
 from product_info import VERSION, get_host_capabilities
+from update_service import (
+    ActivatedUpdate,
+    PreparedUpdate,
+    UpdateService,
+    UpdateServiceError,
+    normalize_update_version,
+)
+from update_journal import parse_transaction_id
 
 # --- Cross-repo session-id coordination anchor (2026-07-03) ---
 # DH derives each Copilot session id as a deterministic UUIDv5 from the bare
@@ -103,6 +127,24 @@ from product_info import VERSION, get_host_capabilities
 _NAMESPACE_MYCASE = uuid.UUID("816bee4e-8eee-4c0b-ae69-70879d032f4d")
 _WORKING_DIRECTORY_UNSET = object()
 _PAYLOAD_FIELD_UNSET = object()
+_UPDATE_ACTIONS = frozenset(
+    {
+        "perform_update",
+        "activate_update",
+        "finalize_update_status",
+        "acknowledge_update_finalization",
+    }
+)
+_UPDATE_UNEXPECTED_ERROR_CODES = {
+    "perform_update": "update_prepare_failed",
+    "activate_update": "update_activation_failed",
+    "finalize_update_status": "update_cleanup_failed",
+    "acknowledge_update_finalization": "update_cleanup_failed",
+}
+_INSTALLATION_INTEGRITY_MESSAGE = (
+    "The installed Host and Extension do not match. "
+    "Run the matching full installer."
+)
 
 _PROMPT_ERROR_MESSAGES = {
     "dh_core_prompt_missing": (
@@ -418,8 +460,78 @@ def _version_gt(remote_tag: str, local_tag: str) -> bool:
     return _compare_prerelease(r_pre, l_pre) > 0
 
 
+def _direct_https_zip_url(value: object) -> str | None:
+    if type(value) is not str or not value:
+        return None
+    try:
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or bool(parsed.fragment)
+        or not parsed.path.lower().endswith(".zip")
+    ):
+        return None
+    return value
+
+
+def _select_update_candidate(releases: object) -> dict[str, object] | None:
+    if type(releases) is not list:
+        return None
+    best: tuple[str, dict[str, object]] | None = None
+    for release in releases:
+        if type(release) is not dict or set(release) < {
+            "tag_name",
+            "prerelease",
+            "assets",
+        }:
+            continue
+        tag = release.get("tag_name")
+        prerelease = release.get("prerelease")
+        assets = release.get("assets")
+        if type(tag) is not str or type(prerelease) is not bool or type(assets) is not list:
+            continue
+        try:
+            version = normalize_update_version(tag)
+        except ValueError:
+            continue
+        if not _version_gt(version, VERSION):
+            continue
+        zip_urls = []
+        malformed_asset = False
+        for asset in assets:
+            if type(asset) is not dict:
+                malformed_asset = True
+                break
+            name = asset.get("name")
+            if type(name) is not str or not name.lower().endswith(".zip"):
+                continue
+            direct = _direct_https_zip_url(asset.get("browser_download_url"))
+            if direct is None:
+                malformed_asset = True
+                break
+            zip_urls.append(direct)
+        if malformed_asset or len(zip_urls) != 1:
+            continue
+        candidate = {
+            "version": version,
+            "url": zip_urls[0],
+            "is_prerelease": prerelease,
+        }
+        if best is None or _version_gt(version, best[0]):
+            best = (version, candidate)
+    return None if best is None else best[1]
+
+
 class NativeHost:
     def __init__(self):
+        self._source_runtime = _source_runtime
         self.input_queue = asyncio.Queue()
         self.client = None
         self.session = None
@@ -447,6 +559,28 @@ class NativeHost:
         self._installation_verifier = InstallationVerifier(
             Path(self._get_install_dir())
         )
+        try:
+            startup_verification = self._installation_verifier.verify()
+        except Exception:
+            startup_verification = InstallationVerification(
+                mode="packaged" if not self._source_runtime else "development",
+                integrity="failed",
+                error_code="installation_integrity_failed",
+            )
+        self._installation_ready = (
+            self._source_runtime
+            or (
+                startup_verification.mode == "packaged"
+                and startup_verification.integrity == "verified"
+                and startup_verification.host_version == VERSION
+                and startup_verification.extension_version == VERSION
+            )
+        )
+        self._update_service = (
+            UpdateService(Path(self._get_install_dir()))
+            if not self._source_runtime and self._installation_ready
+            else None
+        )
 
         # Log startup location
         logger.info(
@@ -454,13 +588,14 @@ class NativeHost:
         )
         logger.info(f"User Data Dir: {USER_DATA_DIR}")
 
-        # Cleanup old version if exists (Atomic Update)
-        try:
-            from updater import Updater
+        if not self._source_runtime and self._installation_ready:
+            # Legacy cleanup is safe only after the complete packaged install verifies.
+            try:
+                from updater import Updater
 
-            Updater.cleanup_old_version(sys.executable)
-        except Exception as e:
-            logger.error(f"Failed to cleanup old version: {e}")
+                Updater.cleanup_old_version(sys.executable)
+            except Exception as e:
+                logger.error("Failed to cleanup old version (%s).", type(e).__name__)
 
         # Fix for v2.0.45 Updater Bug (Wrong Directory) & Nested Extension
         # v2.0.45 erroneously extracted extension to ../extension (AppData/Local/extension)
@@ -474,7 +609,7 @@ class NativeHost:
                 base_dir = os.path.dirname(os.path.abspath(__file__))
                 is_prod = False
 
-            if is_prod:
+            if is_prod and self._installation_ready:
                 # The "Wrong" location defined by v2.0.45 logic (Parent/extension)
                 wrong_ext_dir = os.path.join(os.path.dirname(base_dir), "extension")
                 # The "Right" location (Current/extension)
@@ -838,6 +973,14 @@ class NativeHost:
         which GitHub server-side filters to stable only.
         """
         try:
+            if not self._source_runtime and not self._installation_ready:
+                self.send_message(
+                    {
+                        "action": "update_error",
+                        "payload": {"error": _INSTALLATION_INTEGRITY_MESSAGE},
+                    }
+                )
+                return
             now = time.time()
             if not force and (now - self.last_update_check) < 3600:
                 return
@@ -890,20 +1033,8 @@ class NativeHost:
             else:
                 candidates = [data]
 
-            # Pick the highest semver-greater release.
-            best_release = None
-            best_tag = None
-            for release in candidates:
-                tag = release.get("tag_name", "")
-                if not tag:
-                    continue
-                if not _version_gt(tag, VERSION):
-                    continue
-                if best_tag is None or _version_gt(tag, best_tag):
-                    best_tag = tag
-                    best_release = release
-
-            if best_release is None:
+            selected = _select_update_candidate(candidates)
+            if selected is None:
                 logger.info(
                     f"No update available (Local: {VERSION}, "
                     f"checked {len(candidates)} release(s))"
@@ -917,29 +1048,12 @@ class NativeHost:
                     )
                 return
 
-            logger.info(f"Update available: {best_tag}")
-
-            # Find the .zip asset URL on the chosen release.
-            assets = best_release.get("assets", [])
-            zip_url = None
-            for asset in assets:
-                if asset.get("name", "").endswith(".zip"):
-                    zip_url = asset.get("browser_download_url")
-                    break
-
-            final_url = zip_url if zip_url else best_release.get(
-                "html_url",
-                "https://github.com/boatmac/Dynamics-Helper/releases",
-            )
+            logger.info("A newer validated update package is available.")
 
             self.send_message(
                 {
                     "action": "update_available",
-                    "payload": {
-                        "version": best_tag,
-                        "url": final_url,
-                        "is_prerelease": bool(best_release.get("prerelease", False)),
-                    },
+                    "payload": selected,
                 }
             )
 
@@ -2091,7 +2205,7 @@ class NativeHost:
                 self.running = False
                 break
 
-    def send_message(self, message_content):
+    def send_message(self, message_content, *, raise_on_error=False):
         """Writes a message to stdout in Native Messaging format."""
         try:
             logger.debug(
@@ -2109,6 +2223,90 @@ class NativeHost:
             write_message(output_stream, message_content)
         except Exception as e:
             logger.error("Error sending Native Messaging response (%s).", type(e).__name__)
+            if raise_on_error:
+                raise
+
+    def _send_message_or_raise(self, message_content):
+        self.send_message(message_content, raise_on_error=True)
+
+    @staticmethod
+    def _exact_update_payload(message, action):
+        if type(message) is not dict or set(message) != {
+            "requestId",
+            "action",
+            "payload",
+        }:
+            raise UpdateServiceError("invalid_update_request")
+        if type(message.get("requestId")) is not str or message.get("action") != action:
+            raise UpdateServiceError("invalid_update_request")
+        payload = message.get("payload")
+        expected = (
+            {"url", "transactionId", "targetVersion"}
+            if action == "perform_update"
+            else {"transactionId"}
+        )
+        if type(payload) is not dict or set(payload) != expected:
+            raise UpdateServiceError("invalid_update_request")
+        if any(type(payload[key]) is not str or not payload[key] for key in expected):
+            raise UpdateServiceError("invalid_update_request")
+        try:
+            parse_transaction_id(payload["transactionId"])
+            if action == "perform_update":
+                if normalize_update_version(payload["targetVersion"]) != payload["targetVersion"]:
+                    raise ValueError("noncanonical target version")
+                if _direct_https_zip_url(payload["url"]) is None:
+                    raise ValueError("invalid update URL")
+        except Exception as error:
+            raise UpdateServiceError("invalid_update_request") from error
+        return payload
+
+    @staticmethod
+    def _update_error_response(request_id, error):
+        return {
+            "requestId": request_id,
+            "status": "error",
+            "error_code": error.error_code,
+            "error": str(error),
+        }
+
+    async def _run_update_action(self, action, payload):
+        service = self._update_service
+        if service is None:
+            raise UpdateServiceError("installation_integrity_failed")
+        loop = getattr(self, "loop", None) or asyncio.get_running_loop()
+        if action == "perform_update":
+            result = await loop.run_in_executor(
+                None,
+                service.prepare,
+                payload["url"],
+                payload["transactionId"],
+                payload["targetVersion"],
+            )
+            if type(result) is not PreparedUpdate:
+                raise UpdateServiceError("update_prepare_failed")
+            return {
+                "state": "update_prepared",
+                "transactionId": result.transaction_id,
+                "targetVersion": result.target_version,
+                "priorVersion": result.prior_version,
+            }
+        if action == "activate_update":
+            result = await loop.run_in_executor(None, service.activate, payload["transactionId"])
+            if type(result) is not ActivatedUpdate:
+                raise UpdateServiceError("update_activation_failed")
+            return {
+                "state": "update_activated",
+                "transactionId": result.transaction_id,
+            }
+        if action == "finalize_update_status":
+            result = await loop.run_in_executor(None, service.finalize, payload["transactionId"])
+            return result.to_dict()
+        acknowledged = await loop.run_in_executor(
+            None, service.acknowledge, payload["transactionId"]
+        )
+        if acknowledged is not True:
+            raise UpdateServiceError("update_cleanup_failed")
+        return {"transactionId": payload["transactionId"], "acknowledged": True}
 
     def send_progress(self, message):
         """Sends a progress update to the client."""
@@ -2642,17 +2840,53 @@ class NativeHost:
 
     async def process_message(self, message):
         """Dispatches messages to handlers."""
-        action = message.get("action")
-        payload = message.get("payload", {})
-        request_id = message.get("requestId")
+        action = message.get("action") if type(message) is dict else None
+        payload = message.get("payload", {}) if type(message) is dict else {}
+        request_id = message.get("requestId") if type(message) is dict else None
+        is_update_action = type(action) is str and action in _UPDATE_ACTIONS
 
         # Set current request ID for progress updates
         self.current_request_id = request_id
 
         response = {"requestId": request_id, "status": "success", "data": None}
+        response_sent = False
+        activation_launched = False
+
+        if (
+            action == "perform_update"
+            and type(message) is dict
+            and type(payload) is dict
+            and set(payload) == {"url"}
+        ):
+            response = self._update_error_response(
+                request_id,
+                UpdateServiceError("installation_integrity_failed"),
+            )
+            self.current_request_id = None
+            self.send_message(response)
+            return
 
         try:
-            if action == "ping":
+            if is_update_action:
+                if self._source_runtime:
+                    raise UpdateServiceError("source_update_disabled")
+                if not self._installation_ready:
+                    raise UpdateServiceError("installation_integrity_failed")
+                payload = self._exact_update_payload(message, action)
+                response["data"] = await self._run_update_action(action, payload)
+                if action == "activate_update":
+                    activation_launched = True
+                    try:
+                        self._send_message_or_raise(response)
+                    except Exception as error:
+                        self.running = False
+                        raise UpdateServiceError(
+                            "update_activation_failed"
+                        ) from error
+                    response_sent = True
+                    self.running = False
+
+            elif action == "ping":
                 self.send_progress("Pinging...")
                 response["data"] = "pong"
 
@@ -2715,43 +2949,6 @@ class NativeHost:
                 self.send_progress("Updating configuration...")
                 response["data"] = await self.handle_update_config(payload)
 
-            elif action == "perform_update":
-                self.send_progress("Starting update process...")
-                url = payload.get("url")
-                if not url:
-                    response["status"] = "error"
-                    response["error"] = "No update URL provided"
-                else:
-                    try:
-                        from updater import Updater
-
-                        upd = Updater(sys.executable)
-
-                        self.send_progress("Downloading update...")
-                        if self.loop:
-                            zip_path = await self.loop.run_in_executor(
-                                None, upd.download_update, url
-                            )
-
-                            self.send_progress(
-                                "Applying update (this will restart the host)..."
-                            )
-                            # Apply update (extract and swap)
-                            await self.loop.run_in_executor(
-                                None, upd.apply_update, zip_path
-                            )
-
-                            response["data"] = {
-                                "message": "Update applied successfully. Please reload."
-                            }
-                        else:
-                            response["status"] = "error"
-                            response["error"] = "Event loop not available"
-                    except Exception as e:
-                        logger.error("Update failed (%s).", type(e).__name__)
-                        response["status"] = "error"
-                        response["error"] = "Update failed."
-
             elif action == "get_config":
                 # Return the effective configuration (merging defaults + user + workspace)
                 session_config = self._get_session_config(
@@ -2779,19 +2976,41 @@ class NativeHost:
             else:
                 response["status"] = "error"
                 response["error"] = "unknown_action"
-                response["message"] = f"Unknown action: {action}"
+                response["message"] = (
+                    f"Unknown action: {action}"
+                    if type(action) is str
+                    else "Unknown action."
+                )
 
+        except UpdateServiceError as error:
+            if (
+                action == "activate_update"
+                and getattr(error, "activation_launched", False)
+            ):
+                activation_launched = True
+                response_sent = True
+            response = self._update_error_response(request_id, error)
         except Exception as e:
             self._safe_sdk_error("process Host action", e)
-            response["status"] = "error"
-            response["error"] = "internal_error"
-            response["message"] = (
-                f"Host action failed ({type(e).__name__})."
-            )
+            if is_update_action:
+                response = self._update_error_response(
+                    request_id,
+                    UpdateServiceError(_UPDATE_UNEXPECTED_ERROR_CODES[action]),
+                )
+            else:
+                response["status"] = "error"
+                response["error"] = "internal_error"
+                response["message"] = (
+                    f"Host action failed ({type(e).__name__})."
+                )
+        finally:
+            if activation_launched:
+                self.running = False
 
         # Clear current request ID after processing
         self.current_request_id = None
-        self.send_message(response)
+        if not response_sent:
+            self.send_message(response)
 
     async def run(self):
         """Main async loop."""

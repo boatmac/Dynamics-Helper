@@ -10,7 +10,10 @@ class HostCapabilities:
 
 VERSION = "2.0.74-beta.4"
 REQUIRED_PROTOCOL_CAPABILITIES = ("prompt-scope-v1",)
-PROVIDED_PROTOCOL_CAPABILITIES = ("prompt-scope-v1",)
+PROVIDED_PROTOCOL_CAPABILITIES = (
+    "prompt-scope-v1",
+    "transactional-update-v1",
+)
 
 
 def get_host_capabilities() -> HostCapabilities:

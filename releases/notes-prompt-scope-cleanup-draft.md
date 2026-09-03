@@ -52,19 +52,35 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Options normalizes omitted team identity to the empty string for every manifest current/response check, so no-team committed/unchanged requests deduplicate while failed/stale/skipped requests remain retryable and old callbacks are ignored after team selection.
 - One shared string-only selector now covers Analyze persistence, Native response normalization, config updates, prompt health, Options warnings, FAB nested errors, and Service Worker immediate paths. Objects, arrays, functions, symbols, and null are never coerced; valid strings and allowlisted metadata are preserved.
 
-## Dormant update recovery hardening
+## Reliable transactional automatic updates
 
-This build includes frozen-tested detached recovery primitives: exact staged
-Host/Extension preflight, identity-safe detached runners, RunOnce recovery, a
-read-only status Native Host, and bounded receipt-backed terminal cleanup. These
-primitives are dormant infrastructure only. Update clicks still use the
-historical Python updater, while installation still uses the historical
-PowerShell installer path. `transactional-update-v1` is not yet advertised.
+Plan D now activates the previously hardened package, transaction, and detached
+recovery layers. The Service Worker owns durable `dh_update_state`, exact
+capability/version/integrity checks, status polling, terminal reload, and
+receipt-backed finalization. FAB and Options only render projected state and send
+payload-free start requests.
 
-The first historical upgrade into this build therefore remains nontransactional.
-A complete copy bootstraps integrity metadata; a partial but startable copy is
-reported as `installation_integrity_failed`. Transactional routing is enabled
-only after the remaining Extension-data and runtime-installer plans complete.
+Exactly four strict Host actions route to `UpdateService`. Ordinary application
+failures restore the complete previous Host/Extension product; interruption
+resumes through the detached runner, RunOnce recovery, and read-only status Host.
+Mixed installs retain matching-full-installer guidance. Unsafe frozen startup
+recovery exits `30` with empty stdout and exact stderr
+`manual_recovery_required\n` before normal
+Host initialization.
+
+Plan D operations use a distinct cross-process mutex above the Plan B/C mutation
+mutex. The matching installer now replaces `_internal` as an exact tree so stale
+runtime files cannot survive repair, and probes a temporary complete product
+view before any live mutation. Startup state hydration remains responsive while
+recovery resumes in the background; source mode is check-only, exact pre-launch
+activation failures are explicit-retry states, and rollback remains visible with
+an explicit retry path.
+
+Final hardening bounds every main update lease, retries finalize/ack in their
+exact persisted phase, and requires a newly loaded Worker before terminal
+finalization. The matching installer validates exact release inventory, probes
+the repaired live product, and settles compatible preserved transaction
+authority without deleting contradictory evidence.
 
 ## Verification
 
@@ -76,7 +92,7 @@ only after the remaining Extension-data and runtime-installer plans complete.
   `1/1` against the built runtime.
 - Committed-head full Host discovery ran **523** tests with that same sole frozen
   skip; the separate frozen selector passed.
-- Plan C frozen gate passed exact PyInstaller **6.18.0**, all **15/15** required
+- Historical Plan C frozen gate passed exact PyInstaller **6.18.0**, all **15/15** required
   modules, and an onedir inventory of **73 internal files / 10 directories**.
 - Plan A/B regressions passed **134/134**; full Extension remained **340/340**;
   isolated compile/static/scope gates and restored break-and-fail mutations
@@ -88,11 +104,18 @@ only after the remaining Extension-data and runtime-installer plans complete.
   finalizers. Full committed-head verification is rerun after this correction.
 - Follow-up hardening adds durable first-receipt-directory publication, exact
   finalization contention errors, crash-resumable partial status unregister,
-  and Plan B cleanup crash replay. These remain dormant until Plan D routing.
+  and Plan B cleanup crash replay. Production Plan D now consumes these paths.
 - Final clean-head verification passed focused **206** (one expected frozen
   skip), Plan A/B **134/134**, full Host **547** (same sole skip), Extension
   **340/340**, compile/build/static/scope, and rebuilt frozen probe **1/1**. A
   final post-evidence no-drift rerun and broad branch verdict remain pending.
+- Plan D cutover gates pass Host **663/663** in bounded, disjoint source
+  partitions (one expected environment-gated frozen skip), Extension
+  **894/894**, production Extension build **2,228 modules**, Python compilation,
+  and diff/static checks. The approved project venv built the frozen Host with
+  exact PyInstaller **6.22.2**; the graph contains all **17/17** reviewed hidden
+  imports, the onedir inventory is **35 internal files / 10 directories**, and
+  the real frozen staged-probe integration passes **1/1**.
 
 ## Upgrade notes
 
@@ -105,8 +128,13 @@ runs before normal startup side effects. These checks detect incomplete or
 mixed product files; SHA-256 values are consistency checks, not package
 authentication.
 
-The first upgrade into this build still runs the historical in-place updater.
-A complete ordinary-file copy bootstraps both Host metadata files, while a
-partial but startable copy is reported as `installation_integrity_failed`.
-That first upgrade is not transactional, and the active updater remains the
-legacy implementation until the later transaction/runtime plans are completed.
+The first upgrade from `v2.0.75-beta.1` into the cutover release still runs the
+old version's historical in-place updater and is not retroactively
+transactional. Cutover startup immediately verifies Host, Extension, capability,
+and package integrity. A complete install enables all future transactional
+updates; either mixed direction persists matching-full-installer guidance.
+
+Subsequent updates cannot report success before terminal verification and
+finalization. Standalone bootstrap and per-write power-loss guarantees remain
+deferred, so an extreme interruption may still require the matching full
+installer.

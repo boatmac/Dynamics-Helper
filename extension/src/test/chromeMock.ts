@@ -40,6 +40,8 @@ type RuntimeMessageListener = (
   sendResponse: ReturnType<typeof vi.fn>,
 ) => unknown
 type AlarmListener = (alarm: chrome.alarms.Alarm) => void
+type RuntimeInstalledListener = (details: chrome.runtime.InstalledDetails) => void
+type RuntimeStartupListener = () => void
 type PortMessageListener = (message: unknown, port: chrome.runtime.Port) => void
 type PortDisconnectListener = (port: chrome.runtime.Port) => void
 
@@ -65,6 +67,8 @@ let tabMessageLog: Array<{ tabId: number; message: unknown }> = []
 let manifestVersion = '2.0.70-beta.5-test'
 let queuedNativePorts: NativePortHarness[] = []
 let alarmListeners = new Set<AlarmListener>()
+let runtimeInstalledListeners = new Set<RuntimeInstalledListener>()
+let runtimeStartupListeners = new Set<RuntimeStartupListener>()
 
 function makeDeferred(): DeferredResponse {
   let resolve!: (v: unknown) => void
@@ -90,6 +94,8 @@ export function resetChromeMock(): void {
   manifestVersion = '2.0.70-beta.5-test'
   queuedNativePorts = []
   alarmListeners = new Set()
+  runtimeInstalledListeners = new Set()
+  runtimeStartupListeners = new Set()
   sendMessage.mockClear()
   tabsQuery.mockClear()
   tabsSendMessage.mockClear()
@@ -106,6 +112,10 @@ export function resetChromeMock(): void {
   alarmsClear.mockClear()
   alarmsOnAlarmAddListener.mockClear()
   alarmsOnAlarmRemoveListener.mockClear()
+  runtimeOnInstalledAddListener.mockClear()
+  runtimeOnInstalledRemoveListener.mockClear()
+  runtimeOnStartupAddListener.mockClear()
+  runtimeOnStartupRemoveListener.mockClear()
   if (typeof chrome !== 'undefined' && chrome.runtime) {
     ;(chrome.runtime as typeof chrome.runtime & {
       lastError?: { message: string }
@@ -504,6 +514,18 @@ const alarmsClear = vi.fn((_name: string, callback?: (wasCleared: boolean) => vo
 })
 const alarmsOnAlarmAddListener = vi.fn((listener: AlarmListener) => alarmListeners.add(listener))
 const alarmsOnAlarmRemoveListener = vi.fn((listener: AlarmListener) => alarmListeners.delete(listener))
+const runtimeOnInstalledAddListener = vi.fn((listener: RuntimeInstalledListener) => {
+  runtimeInstalledListeners.add(listener)
+})
+const runtimeOnInstalledRemoveListener = vi.fn((listener: RuntimeInstalledListener) => {
+  runtimeInstalledListeners.delete(listener)
+})
+const runtimeOnStartupAddListener = vi.fn((listener: RuntimeStartupListener) => {
+  runtimeStartupListeners.add(listener)
+})
+const runtimeOnStartupRemoveListener = vi.fn((listener: RuntimeStartupListener) => {
+  runtimeStartupListeners.delete(listener)
+})
 
 export function emitAlarm(name: string): void {
   const alarm = { name, scheduledTime: Date.now() } as chrome.alarms.Alarm
@@ -543,6 +565,14 @@ export function installChromeMock(): void {
         addListener: runtimeOnMessageAddListener,
         removeListener: runtimeOnMessageRemoveListener,
       },
+      onInstalled: {
+        addListener: runtimeOnInstalledAddListener,
+        removeListener: runtimeOnInstalledRemoveListener,
+      },
+      onStartup: {
+        addListener: runtimeOnStartupAddListener,
+        removeListener: runtimeOnStartupRemoveListener,
+      },
     },
     storage: {
       local: {
@@ -570,6 +600,38 @@ export function installChromeMock(): void {
   }
 }
 
+export async function dispatchRuntimeMessage(message: unknown): Promise<unknown> {
+  const sender = { id: 'test-extension' } as chrome.runtime.MessageSender
+  let responded = false
+  let response: unknown
+  let resolveResponse!: () => void
+  const responsePromise = new Promise<void>(resolve => {
+    resolveResponse = resolve
+  })
+  for (const listener of [...runtimeMessageListeners]) {
+    const sendResponse = vi.fn((value?: unknown) => {
+      if (responded) return
+      responded = true
+      response = value
+      resolveResponse()
+    })
+    const keepOpen = listener(message, sender, sendResponse)
+    if (keepOpen === true && !responded) await responsePromise
+  }
+  return response
+}
+
+export function emitInstalled(
+  reason: chrome.runtime.OnInstalledReason = chrome.runtime.OnInstalledReason.UPDATE,
+): void {
+  const details = { reason } as chrome.runtime.InstalledDetails
+  for (const listener of [...runtimeInstalledListeners]) listener(details)
+}
+
+export function emitStartup(): void {
+  for (const listener of [...runtimeStartupListeners]) listener()
+}
+
 export const chromeMockSpies = {
   sendMessage,
   runtimeSendMessage: sendMessage,
@@ -588,4 +650,8 @@ export const chromeMockSpies = {
   alarmsClear,
   alarmsOnAlarmAddListener,
   alarmsOnAlarmRemoveListener,
+  runtimeOnInstalledAddListener,
+  runtimeOnInstalledRemoveListener,
+  runtimeOnStartupAddListener,
+  runtimeOnStartupRemoveListener,
 }

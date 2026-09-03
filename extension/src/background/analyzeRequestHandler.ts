@@ -9,12 +9,22 @@ export interface AuthorizedAnalyzeTransport {
     send(forwarded: AnalyzeNativeAction): Promise<unknown>
 }
 
+type AnalyzeSendAuthorization =
+    | { allowed: false; response: AnalyzeForwardResponse }
+    | { allowed: true; response: Promise<unknown> }
+
 export interface AnalyzeRequestHandlerDeps {
     acquireAuthorizedTransport(
         forwarded: Readonly<AnalyzeNativeAction>,
     ): Promise<
         | { allowed: false; response: AnalyzeForwardResponse }
-        | { allowed: true; transport: AuthorizedAnalyzeTransport }
+        | {
+              allowed: true
+              transport: AuthorizedAnalyzeTransport
+              authorizeSend?: (
+                  forwarded: Readonly<AnalyzeNativeAction>,
+              ) => Promise<AnalyzeSendAuthorization>
+          }
     >
 }
 
@@ -42,7 +52,15 @@ export async function handleAnalyzeRequest(
     return handleAnalyzeForward(
         parsed.forwarded,
         parsed.context,
-        { send: action => acquisition.transport.send(action) },
+        {
+            send: async action => {
+                if (acquisition.authorizeSend) {
+                    const authorization = await acquisition.authorizeSend(action)
+                    return authorization.response
+                }
+                return acquisition.transport.send(action)
+            },
+        },
     )
 }
 

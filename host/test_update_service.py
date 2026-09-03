@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from install_integrity import InstallationVerification
-from package_archive import write_deterministic_archive
+from package_archive import validate_staged_package, write_deterministic_archive
 from package_manifest import (
     canonical_json_bytes,
     generate_release_documents,
@@ -25,6 +25,7 @@ from update_journal import (
     JournalPhase,
     JournalReason,
     TerminalVersion,
+    TransactionPaths,
     UpdateInitiator,
 )
 from update_mutex import UpdateAlreadyInProgress
@@ -54,6 +55,7 @@ from update_service import (
     is_strictly_newer_version,
     launch_startup_recovery_if_needed,
     normalize_update_version,
+    settle_installer_repair,
 )
 
 
@@ -158,6 +160,8 @@ class HttpsArchiveDownloaderTests(unittest.TestCase):
             "file:///update.zip",
             "//example.invalid/update.zip",
             "https:///update.zip",
+            "https://example.invalid/release",
+            "https://example.invalid/update.zip#fragment",
             7,
         ):
             with self.subTest(url=url):
@@ -183,7 +187,7 @@ class HttpsArchiveDownloaderTests(unittest.TestCase):
     def test_passes_fixed_timeout_and_accepts_https_redirect(self):
         response = FakeDownloadResponse(
             [b"abc"],
-            final_url="https://cdn.example.invalid/release.zip",
+            final_url="https://objects.example.invalid/signed/opaque?token=safe",
             content_length="3",
         )
         opener = MagicMock(return_value=response)
@@ -376,6 +380,31 @@ class RecordingController:
         return SimpleNamespace(phase=JournalPhase.WAITING_FOR_HOST_EXIT)
 
 
+class SharedOperationMutexFactory:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+
+    def __call__(self, _install_root):
+        outer = self
+
+        class Mutex:
+            held = False
+
+            def __enter__(self):
+                if not outer.lock.acquire(blocking=False):
+                    raise UpdateAlreadyInProgress()
+                self.held = True
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                if self.held:
+                    self.held = False
+                    outer.lock.release()
+                return False
+
+        return Mutex()
+
+
 class UpdateServiceFixture(unittest.TestCase):
     TX = "0123456789abcdef0123456789abcdef"
 
@@ -501,12 +530,6 @@ class UpdateServicePreparationTests(UpdateServiceFixture):
             ),
             "manual_recovery_required": (
                 "Automatic recovery could not finish. Run the matching full installer."
-            ),
-            "finalization_ack_pending": (
-                "A previous update is awaiting cleanup. Retry cleanup."
-            ),
-            "finalization_not_current": (
-                "This update finalization is no longer current."
             ),
         }
         self.assertEqual(_ERROR_MESSAGES, expected)
@@ -831,7 +854,7 @@ class UpdateServicePreparationTests(UpdateServiceFixture):
 
         self.assertEqual(
             captured.exception.error_code,
-            "finalization_ack_pending",
+            "update_cleanup_failed",
         )
         self.assertEqual(self.downloader.calls, [])
 
@@ -959,8 +982,85 @@ class UpdateServicePreparationTests(UpdateServiceFixture):
 
         self.assertFalse(prepare_thread.is_alive())
         self.assertFalse(finalize_thread.is_alive())
-        self.assertEqual(failures, [])
-        self.assertTrue(finalization_entered.is_set())
+        self.assertEqual(len(failures), 1)
+        self.assertIsInstance(failures[0], UpdateServiceError)
+        self.assertEqual(failures[0].error_code, "update_already_in_progress")
+        self.assertFalse(finalization_entered.is_set())
+
+    def test_distinct_services_contend_across_last_barrier_and_create(self):
+        package = SimpleNamespace(manifest=object())
+        second_barrier_entered = threading.Event()
+        release_prepare = threading.Event()
+        finalization_entered = threading.Event()
+        prepare_results: list[object] = []
+        finalize_results: list[object] = []
+        barrier_calls = 0
+        operation_factory = SharedOperationMutexFactory()
+
+        def barrier(_install_root, **_kwargs):
+            nonlocal barrier_calls
+            barrier_calls += 1
+            if barrier_calls == 2:
+                second_barrier_entered.set()
+                if not release_prepare.wait(2):
+                    raise RuntimeError("test prepare release timed out")
+
+        def finalize(*_args, **_kwargs):
+            finalization_entered.set()
+            raise AssertionError("finalization entered while prepare owned operation")
+
+        def service():
+            return UpdateService(
+                self.install,
+                downloader=self.downloader,
+                verifier=self.verifier,
+                engine=self.engine,
+                controller=self.controller,
+                process=self.process,
+                registry=self.registry,
+                temp_root_factory=self._temp_root_factory,
+                operation_mutex_factory=operation_factory,
+            )
+
+        def run_prepare():
+            try:
+                prepare_results.append(service().prepare(
+                    "https://example.invalid/update.zip",
+                    self.TX,
+                    "2.0.76",
+                ))
+            except BaseException as error:
+                prepare_results.append(error)
+
+        with (
+            patch("update_service.require_no_pending_finalization", side_effect=barrier),
+            patch("update_service.stage_and_validate_archive", return_value=package),
+            patch("update_service.load_update_manifest", return_value=package.manifest),
+            patch("update_service.select_runner_source", return_value=self.install),
+            patch("update_service.finalize_update_status", side_effect=finalize),
+        ):
+            prepare_thread = threading.Thread(target=run_prepare)
+            prepare_thread.start()
+            self.assertTrue(second_barrier_entered.wait(2))
+            try:
+                service().finalize(self.TX)
+            except BaseException as error:
+                finalize_results.append(error)
+            release_prepare.set()
+            prepare_thread.join(2)
+
+        self.assertFalse(prepare_thread.is_alive())
+        self.assertEqual(
+            prepare_results,
+            [PreparedUpdate(self.TX, "2.0.76", "2.0.75-beta.1")],
+        )
+        self.assertEqual(len(finalize_results), 1)
+        self.assertIsInstance(finalize_results[0], UpdateServiceError)
+        self.assertEqual(
+            finalize_results[0].error_code,
+            "update_already_in_progress",
+        )
+        self.assertFalse(finalization_entered.is_set())
 
 
 class UpdateServiceActivationTests(UpdateServiceFixture):
@@ -1028,6 +1128,105 @@ class UpdateServiceActivationTests(UpdateServiceFixture):
             self.controller.wait_calls,
             [(self.TX, identity, 30.0)],
         )
+
+    def test_post_launch_readiness_failure_marks_activation_as_launched(self):
+        identity = InitiatingProcessIdentity(123, "win-create-time-456")
+        self.process.capture_current_identity.return_value = identity
+        self.controller.wait_until_ready = MagicMock(
+            side_effect=TimeoutError("SECRET READY TIMEOUT")
+        )
+        journal = SimpleNamespace(
+            transaction_id=self.TX,
+            phase=JournalPhase.PREPARED,
+            initiator=UpdateInitiator.BROWSER,
+            initiating_process=None,
+        )
+
+        with (
+            patch(
+                "update_service._load_prepared_browser_journal",
+                return_value=journal,
+            ),
+            patch("update_service.launch_complete_update"),
+        ):
+            with self.assertRaises(UpdateServiceError) as captured:
+                self.service().activate(self.TX)
+
+        self.assertEqual(captured.exception.error_code, "update_activation_failed")
+        self.assertTrue(captured.exception.activation_launched)
+        self.assertNotIn("SECRET", str(captured.exception))
+
+    def test_post_launch_operation_release_failure_stays_marked_launched(self):
+        identity = InitiatingProcessIdentity(123, "win-create-time-456")
+        self.process.capture_current_identity.return_value = identity
+        journal = SimpleNamespace(
+            transaction_id=self.TX,
+            phase=JournalPhase.PREPARED,
+            initiator=UpdateInitiator.BROWSER,
+            initiating_process=None,
+        )
+
+        class ReleaseFailureMutex:
+            held = False
+
+            def __enter__(self):
+                self.held = True
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                self.held = False
+                raise RuntimeError("SECRET OPERATION RELEASE")
+
+        with (
+            patch(
+                "update_service._load_prepared_browser_journal",
+                return_value=journal,
+            ),
+            patch("update_service.launch_complete_update"),
+        ):
+            with self.assertRaises(UpdateServiceError) as captured:
+                UpdateService(
+                    self.install,
+                    downloader=self.downloader,
+                    verifier=self.verifier,
+                    engine=self.engine,
+                    controller=self.controller,
+                    process=self.process,
+                    registry=self.registry,
+                    temp_root_factory=self._temp_root_factory,
+                    operation_mutex_factory=lambda _root: ReleaseFailureMutex(),
+                ).activate(self.TX)
+
+        self.assertEqual(captured.exception.error_code, "update_activation_failed")
+        self.assertTrue(captured.exception.activation_launched)
+        self.assertNotIn("SECRET", str(captured.exception))
+
+    def test_post_create_grouped_launch_failure_stays_marked_launched(self):
+        journal = SimpleNamespace(
+            transaction_id=self.TX,
+            phase=JournalPhase.PREPARED,
+            initiator=UpdateInitiator.BROWSER,
+            initiating_process=None,
+        )
+        failure = BaseExceptionGroup(
+            "SECRET GROUP",
+            [RuntimeError("SECRET CHILD")],
+        )
+        failure.process_launched = True
+
+        with (
+            patch(
+                "update_service._load_prepared_browser_journal",
+                return_value=journal,
+            ),
+            patch("update_service.launch_complete_update", side_effect=failure),
+        ):
+            with self.assertRaises(UpdateServiceError) as captured:
+                self.service().activate(self.TX)
+
+        self.assertEqual(captured.exception.error_code, "update_activation_failed")
+        self.assertTrue(captured.exception.activation_launched)
+        self.assertNotIn("SECRET", str(captured.exception))
 
     def test_activate_rejects_invalid_or_nonprepared_authority_safely(self):
         marker = "SECRET PREPARED PATH C:/private"
@@ -1255,7 +1454,7 @@ class RealPreparationIntegrationTests(unittest.TestCase):
         self.assertIsInstance(finalize_results[0], UpdateServiceError)
         self.assertEqual(
             finalize_results[0].error_code,
-            "update_not_terminal",
+            "update_already_in_progress",
         )
         transaction = self.install / "updates" / "transactions" / self.TX
         self.assertTrue((transaction / "journal.json").is_file())
@@ -1310,8 +1509,8 @@ class UpdateServiceFinalizationTests(UpdateServiceFixture):
         }
         expected = {
             "transaction_not_terminal": "update_not_terminal",
-            "finalization_ack_pending": "finalization_ack_pending",
-            "finalization_not_current": "finalization_not_current",
+            "finalization_ack_pending": "update_cleanup_failed",
+            "finalization_not_current": "update_cleanup_failed",
             **{code: "update_cleanup_failed" for code in cleanup_codes},
         }
         self.assertEqual(set(FinalizationError._ALLOWED), set(expected))
@@ -1329,8 +1528,8 @@ class UpdateServiceFinalizationTests(UpdateServiceFixture):
 
     def test_acknowledgment_error_mapping_and_false_result(self):
         cases = (
-            (FinalizationError("finalization_not_current"), "finalization_not_current"),
-            (FinalizationError("finalization_ack_pending"), "finalization_ack_pending"),
+            (FinalizationError("finalization_not_current"), "update_cleanup_failed"),
+            (FinalizationError("finalization_ack_pending"), "update_cleanup_failed"),
             (FinalizationError("finalization_cleanup_incomplete"), "update_cleanup_failed"),
             (RuntimeError("SECRET ACK PATH"), "update_cleanup_failed"),
         )
@@ -1476,7 +1675,7 @@ class StatefulUpdateServiceFinalizationTests(unittest.TestCase):
 
         self.assertEqual(
             captured.exception.error_code,
-            "finalization_ack_pending",
+            "update_cleanup_failed",
         )
         self.assertFalse(
             (fixture.paths.updates_root / "receipts" / f"{other}.json").exists()
@@ -1506,7 +1705,7 @@ class StatefulUpdateServiceFinalizationTests(unittest.TestCase):
             service.acknowledge(self.TX)
         self.assertEqual(
             captured.exception.error_code,
-            "finalization_not_current",
+            "update_cleanup_failed",
         )
 
     def test_rolled_back_receipt_is_preserved_through_service(self):
@@ -1612,7 +1811,7 @@ class StatefulUpdateServiceFinalizationTests(unittest.TestCase):
 
         self.assertEqual(
             captured.exception.error_code,
-            "finalization_ack_pending",
+            "update_cleanup_failed",
         )
         downloader.download.assert_not_called()
         acknowledge.assert_not_called()
@@ -1679,7 +1878,7 @@ class StatefulUpdateServiceFinalizationTests(unittest.TestCase):
         self.assertIsInstance(prepare_errors[0], UpdateServiceError)
         self.assertEqual(
             prepare_errors[0].error_code,
-            "finalization_ack_pending",
+            "update_already_in_progress",
         )
         downloader.download.assert_not_called()
         self.assertFalse(
@@ -1819,6 +2018,54 @@ class StartupRecoveryTests(unittest.TestCase):
             self.assertIs(_load_active_journal(self.install), journal)
         resolve.assert_called_once_with(self.install)
         read.assert_called_once_with(command.journal_path)
+
+    def test_matching_installer_settles_preserved_active_authority(self):
+        target_version = "2.0.76"
+        (self.install / "updates" / "active.json").unlink()
+        mutation = FakeMutationMutex()
+        with tempfile.TemporaryDirectory() as package_temp:
+            stage = RealPreparationIntegrationTests._make_stage(
+                Path(package_temp) / "target",
+                target_version,
+                b"new-host",
+            )
+            package = validate_staged_package(
+                stage,
+                expected_version=target_version,
+            )
+            UpdateEngine(
+                self.install,
+                mutex_factory=lambda _root: mutation,
+            ).create_prepared(
+                package,
+                self.TX,
+                expected_version=target_version,
+                prior_version=None,
+                initiator=UpdateInitiator.BROWSER,
+            )
+
+        paths = TransactionPaths.for_install(self.install, self.TX)
+        verifier = MagicMock()
+        verifier.verify.return_value = InstallationVerification(
+            mode="packaged",
+            integrity="verified",
+            host_version=target_version,
+            extension_version=target_version,
+        )
+        operation = FakeMutationMutex()
+
+        self.assertTrue(settle_installer_repair(
+            self.install,
+            verifier=verifier,
+            operation_mutex_factory=lambda _root: operation,
+            mutation_mutex_factory=lambda _root: mutation,
+        ))
+        settled = __import__("update_journal").read_journal(paths.journal)
+        self.assertEqual(settled.phase, JournalPhase.COMMITTED)
+        self.assertEqual(settled.initiator, UpdateInitiator.INSTALLER)
+        self.assertTrue(paths.active.is_file())
+        self.assertTrue(paths.transaction_root.is_dir())
+        self.assertEqual(launch_startup_recovery_if_needed(self.install), "continue")
 
 
 if __name__ == "__main__":

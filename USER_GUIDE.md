@@ -298,13 +298,24 @@ The extension checks for updates on startup. When a new version is available:
 
 1. A notification appears in the FAB and the Options page.
 2. Click **"Update Now"** to download and apply the update.
-3. The host will restart automatically after the update.
+3. Progress is saved while the UI closes, the Service Worker restarts, or the
+   Extension reloads.
+4. Dynamics Helper verifies the complete Host and Extension before and after
+   replacement. Ordinary failures automatically restore the previous complete
+   version.
+5. The Extension reloads only after the update commits or rollback completes.
 
-*Note: Antivirus software may temporarily block the update. If this happens, try again after a few minutes or check the logs.*
+If the installed Host and Extension do not match, guidance to run the matching
+full installer remains visible until the complete product is repaired. An
+extreme power interruption can also require that installer. The matching
+installer verifies the release before mutation, verifies the repaired product,
+and settles compatible preserved update evidence. Contradictory evidence stops
+the installer instead of reporting false success.
 
 ### Manual Update
 
-Re-run the Quick Install command or download the latest release from the Releases page.
+Re-run the Quick Install command or download and run the complete matching
+release from the Releases page. Do not mix individual Host/Extension files.
 
 ### Beta Channel
 
@@ -367,7 +378,11 @@ If the tool isn't working, follow these steps to collect information for the dev
   * Verify you ran `install.bat` as Administrator.
   * Verify your Extension ID is correct in the host manifest.
   * Restart your browser.
-* **Update fails silently**: Antivirus software may be locking the executable. Check the native_host.log for "PermissionError" entries. Try closing and reopening the browser, then update again.
+* **Update requires recovery / matching installer**: Automatic restart recovery
+  and rollback resume ordinary interruptions. If matching-installer guidance
+  persists, or diagnostics show `manual_recovery_required`, run the complete
+  installer for that release. Do not delete
+  `%LOCALAPPDATA%\DynamicsHelper\updates`; it contains recovery evidence.
 
 ### How to Collect Logs (Debug Info)
 

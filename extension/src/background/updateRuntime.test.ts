@@ -363,7 +363,12 @@ function runtimeDeps(overrides: Partial<UpdateRuntimeDeps> = {}): UpdateRuntimeD
     kickRecovery: vi.fn().mockResolvedValue(undefined),
     broadcast: vi.fn().mockResolvedValue(undefined),
     requestFreshCheck: vi.fn().mockResolvedValue(undefined),
-    getVerifiedVersion: vi.fn().mockResolvedValue('2.0.75-beta.1'),
+    freshWorkerVersion: '2.0.75-beta.1',
+    workerInstanceId: 'worker-instance-new',
+    getVerifiedProduct: vi.fn().mockResolvedValue({
+      version: '2.0.75-beta.1',
+      mode: 'packaged',
+    }),
     verifyInstalled: vi.fn().mockResolvedValue(true),
     ...overrides,
   }
@@ -448,13 +453,17 @@ describe('serialized update coordinator', () => {
   })
 
   it('uses the verified product version when accepting a candidate', async () => {
-    const getVerifiedVersion = vi.fn().mockResolvedValue(candidate.version)
-    const runtime = createUpdateRuntime(runtimeDeps({ getVerifiedVersion }))
+    seedStorage({ [UPDATE_STATE_KEY]: { kind: 'idle' } })
+    const getVerifiedProduct = vi.fn().mockResolvedValue({
+      version: candidate.version,
+      mode: 'packaged',
+    })
+    const runtime = createUpdateRuntime(runtimeDeps({ getVerifiedProduct }))
     await runtime.initialize({ resume: false })
 
     await runtime.acceptCandidate(candidate)
 
-    expect(getVerifiedVersion).toHaveBeenCalledTimes(1)
+    expect(getVerifiedProduct).toHaveBeenCalledTimes(1)
     expect(runtime.getState()).toEqual({ kind: 'idle' })
   })
 
@@ -472,13 +481,9 @@ describe('serialized update coordinator', () => {
     const runtime = createUpdateRuntime(runtimeDeps())
     const initializing = runtime.initialize({ resume: false })
     const authorization = runtime.ordinaryMainHostAllowed()
-    let settled = false
-    void authorization.then(() => { settled = true })
-    await Promise.resolve()
-    expect(settled).toBe(false)
+    await expect(authorization).resolves.toBe(false)
     await storage.resolve(undefined)
     await initializing
-    await expect(authorization).resolves.toBe(false)
 
     seedStorage({
       [UPDATE_STATE_KEY]: {
@@ -490,6 +495,38 @@ describe('serialized update coordinator', () => {
     const safe = createUpdateRuntime(runtimeDeps())
     await safe.initialize({ resume: false })
     await expect(safe.ordinaryMainHostAllowed()).resolves.toBe(true)
+  })
+
+  it('checks and starts an ordinary main-Host lease inside one serialized boundary', async () => {
+    seedStorage({ [UPDATE_STATE_KEY]: { kind: 'idle' } })
+    const runtime = createUpdateRuntime(runtimeDeps())
+    await runtime.initialize({ resume: false })
+    const response = Promise.resolve('pong')
+    const start = vi.fn(() => response)
+
+    await expect(runtime.beginOrdinaryMainHostRequest(start)).resolves.toEqual({
+      allowed: true,
+      response,
+    })
+    expect(start).toHaveBeenCalledTimes(1)
+
+    seedStorage({
+      [UPDATE_STATE_KEY]: {
+        kind: 'polling',
+        ...transaction,
+        lastStatus: null,
+        lastProgressAt: 1_000,
+        recoveryKick: 'unused',
+      },
+    })
+    const blocked = createUpdateRuntime(runtimeDeps())
+    await blocked.initialize({ resume: false })
+    const deniedStart = vi.fn(() => Promise.resolve('unsafe'))
+
+    await expect(blocked.beginOrdinaryMainHostRequest(deniedStart)).resolves.toEqual({
+      allowed: false,
+    })
+    expect(deniedStart).not.toHaveBeenCalled()
   })
 
   it('keeps ordinary main traffic blocked after hydration fails', async () => {
@@ -511,11 +548,11 @@ describe('serialized update coordinator', () => {
         recoveryKick: 'unused',
       },
     })
-    const getVerifiedVersion = vi.fn()
-    const runtime = createUpdateRuntime(runtimeDeps({ getVerifiedVersion }))
+    const getVerifiedProduct = vi.fn()
+    const runtime = createUpdateRuntime(runtimeDeps({ getVerifiedProduct }))
     await runtime.initialize({ resume: false })
     await runtime.acceptCandidate({ ...candidate, version: '2.0.77' })
-    expect(getVerifiedVersion).not.toHaveBeenCalled()
+    expect(getVerifiedProduct).not.toHaveBeenCalled()
   })
 
   it('removes legacy availability and requests a fresh check only after durable migration', async () => {
@@ -565,12 +602,153 @@ describe('serialized update coordinator', () => {
       pending_update: { version: '9.9.9', url: 'unsafe-old-url' },
     })
     const requestFreshCheck = vi.fn()
-    const runtime = createUpdateRuntime(runtimeDeps({ requestFreshCheck }))
+    const getVerifiedProduct = vi.fn()
+    const runtime = createUpdateRuntime(runtimeDeps({
+      requestFreshCheck,
+      getVerifiedProduct,
+    }))
 
     await runtime.initialize({ resume: false })
 
     expect(getStorageSnapshot().pending_update).toBeUndefined()
     expect(requestFreshCheck).not.toHaveBeenCalled()
+    expect(getVerifiedProduct).not.toHaveBeenCalled()
+  })
+
+  it('persists installer guidance when first-start product verification fails', async () => {
+    const runtime = createUpdateRuntime(runtimeDeps({
+      getVerifiedProduct: vi.fn().mockResolvedValue(null),
+    }))
+
+    await runtime.initialize({ resume: false })
+
+    expect(runtime.getState()).toEqual({
+      kind: 'recovery-required',
+      code: 'installation_integrity_failed',
+      action: 'recheck-installation',
+    })
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(runtime.getState())
+  })
+
+  it('clears only a transactionless installer marker after product repair', async () => {
+    const marker = {
+      kind: 'recovery-required' as const,
+      code: 'installation_integrity_failed' as const,
+      action: 'recheck-installation' as const,
+    }
+    seedStorage({ [UPDATE_STATE_KEY]: marker })
+    const requestFreshCheck = vi.fn().mockResolvedValue(undefined)
+    const runtime = createUpdateRuntime(runtimeDeps({ requestFreshCheck }))
+
+    await runtime.initialize({ resume: false })
+
+    expect(runtime.getState()).toEqual({ kind: 'idle' })
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual({ kind: 'idle' })
+    expect(requestFreshCheck).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears persisted availability after a matching manual installer update', async () => {
+    seedStorage({ [UPDATE_STATE_KEY]: { kind: 'available', update: candidate } })
+    const requestFreshCheck = vi.fn().mockResolvedValue(undefined)
+    const runtime = createUpdateRuntime(runtimeDeps({
+      requestFreshCheck,
+      getVerifiedProduct: vi.fn().mockResolvedValue({
+        version: candidate.version,
+        mode: 'packaged',
+      }),
+    }))
+
+    await runtime.initialize({ resume: false })
+
+    expect(runtime.getState()).toEqual({ kind: 'idle' })
+    expect(requestFreshCheck).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears only available state when a fresh check reports no update', async () => {
+    seedStorage({ [UPDATE_STATE_KEY]: { kind: 'available', update: candidate } })
+    const runtime = createUpdateRuntime(runtimeDeps())
+    await runtime.initialize({ resume: false })
+
+    await expect(runtime.clearAvailable()).resolves.toEqual({ kind: 'idle' })
+
+    seedStorage({
+      [UPDATE_STATE_KEY]: { kind: 'complete', update: candidate, outcome: 'committed' },
+    })
+    const complete = createUpdateRuntime(runtimeDeps())
+    await complete.initialize({ resume: false })
+    await expect(complete.clearAvailable()).resolves.toMatchObject({ kind: 'complete' })
+  })
+
+  it('clears stale completion after a different manual Extension version loads', async () => {
+    seedStorage({
+      [UPDATE_STATE_KEY]: { kind: 'complete', update: candidate, outcome: 'committed' },
+    })
+    const runtime = createUpdateRuntime(runtimeDeps({
+      freshWorkerVersion: '2.0.77',
+      getVerifiedProduct: vi.fn().mockResolvedValue({
+        version: '2.0.77',
+        mode: 'packaged',
+      }),
+    }))
+
+    await runtime.initialize({
+      resume: false,
+      priorWorkerVersion: candidate.version,
+    })
+
+    expect(runtime.getState()).toEqual({ kind: 'idle' })
+  })
+
+  it('preserves rolled-back completion when the same failed candidate returns', async () => {
+    seedStorage({
+      [UPDATE_STATE_KEY]: {
+        kind: 'complete',
+        update: candidate,
+        outcome: 'rolled-back',
+      },
+    })
+    const runtime = createUpdateRuntime(runtimeDeps())
+    await runtime.initialize({ resume: false })
+
+    await runtime.acceptCandidate(candidate)
+
+    expect(runtime.getState()).toEqual({
+      kind: 'complete',
+      update: candidate,
+      outcome: 'rolled-back',
+    })
+  })
+
+  it('retries a rolled-back target only after explicit user start', async () => {
+    seedStorage({
+      [UPDATE_STATE_KEY]: {
+        kind: 'complete',
+        update: candidate,
+        outcome: 'rolled-back',
+      },
+    })
+    const prepare = deferredPending('prepare-1')
+    const requestMain = vi.fn().mockReturnValueOnce(prepare.pending)
+    const runtime = createUpdateRuntime(runtimeDeps({ requestMain }))
+    await runtime.initialize({ resume: false })
+
+    const retrying = runtime.start()
+    await vi.waitFor(() => expect(requestMain).toHaveBeenCalledTimes(1))
+    expect(requestMain.mock.calls[0][0]).toEqual({
+      action: 'perform_update',
+      payload: {
+        url: candidate.url,
+        transactionId: TX,
+        targetVersion: candidate.version,
+      },
+    })
+    prepare.resolve({
+      requestId: 'prepare-1',
+      status: 'error',
+      error_code: 'update_prepare_failed',
+      error: 'The update could not be prepared. Retry or run the matching full installer.',
+    })
+    await retrying
   })
 
   it('persists preparing before the prepare RPC and keeps the same ID on explicit retry', async () => {
@@ -693,6 +871,27 @@ describe('serialized update coordinator', () => {
     expect(runtime.getState()).toEqual({ kind: 'available', update: candidate })
   })
 
+  it('times out a stuck prepare lease and releases the serialized queue', async () => {
+    vi.useFakeTimers()
+    seedStorage({ [UPDATE_STATE_KEY]: { kind: 'available', update: candidate } })
+    const stuck = deferredPending('prepare-stuck')
+    const runtime = createUpdateRuntime(runtimeDeps({
+      requestMain: vi.fn().mockReturnValueOnce(stuck.pending),
+      now: () => Date.now(),
+    }))
+    await runtime.initialize({ resume: false })
+
+    const starting = runtime.start()
+    await vi.advanceTimersByTimeAsync(120_001)
+    await expect(starting).resolves.toMatchObject({
+      kind: 'preparing',
+      errorCode: 'update_prepare_failed',
+    })
+    expect(stuck.pending.cancel).toHaveBeenCalledTimes(1)
+    await expect(runtime.ordinaryMainHostAllowed()).resolves.toBe(true)
+    vi.useRealTimers()
+  })
+
   it('handles only payload-free update UI messages', async () => {
     const runtime = createUpdateRuntime(runtimeDeps())
     await runtime.initialize({ resume: false })
@@ -709,6 +908,39 @@ describe('serialized update coordinator', () => {
 })
 
 describe('update coordinator restart and polling', () => {
+  it('completes hydration before waiting for background recovery', async () => {
+    seedStorage({
+      [UPDATE_STATE_KEY]: {
+        kind: 'polling',
+        ...transaction,
+        lastStatus: null,
+        lastProgressAt: 1_000,
+        recoveryKick: 'unused',
+      },
+    })
+    const status = deferredPending('status-1')
+    const runtime = createUpdateRuntime(runtimeDeps({
+      requestStatus: vi.fn().mockReturnValueOnce(status.pending),
+    }))
+
+    await expect(runtime.initialize({ resume: false })).resolves.toMatchObject({ kind: 'polling' })
+    void runtime.resume()
+    await expect(runtime.handleMessage({ type: 'DH_UPDATE_GET_STATE' })).resolves.toMatchObject({
+      handled: true,
+      state: { kind: 'polling' },
+    })
+    status.resolve({
+      requestId: 'status-1',
+      status: 'success',
+      data: {
+        transactionId: TX,
+        phase: 'waiting-for-host-exit',
+        targetVersion: candidate.version,
+        reasonCode: null,
+      },
+    })
+  })
+
   it('does not automatically retry a persisted preparing error', async () => {
     seedStorage({
       [UPDATE_STATE_KEY]: {
@@ -729,7 +961,7 @@ describe('update coordinator restart and polling', () => {
     })
   })
 
-  it('does not automatically retry a persisted activating error', async () => {
+  it('does not automatically retry a persisted activation error', async () => {
     seedStorage({
       [UPDATE_STATE_KEY]: {
         kind: 'activating',
@@ -746,7 +978,53 @@ describe('update coordinator restart and polling', () => {
 
     expect(requestMain).not.toHaveBeenCalled()
     expect(requestStatus).not.toHaveBeenCalled()
-    await expect(runtime.ordinaryMainHostAllowed()).resolves.toBe(false)
+    expect(runtime.getState()).toMatchObject({
+      kind: 'activating',
+      errorCode: 'update_activation_failed',
+    })
+    await expect(runtime.ordinaryMainHostAllowed()).resolves.toBe(true)
+  })
+
+  it('reconciles a lost activation response without waiting for user retry', async () => {
+    seedStorage({
+      [UPDATE_STATE_KEY]: { kind: 'preparing', ...transaction },
+    })
+    const prepare = deferredPending('prepare-1')
+    const activate = deferredPending('activate-1')
+    const status = deferredPending('status-1')
+    const requestMain = vi.fn()
+      .mockReturnValueOnce(prepare.pending)
+      .mockReturnValueOnce(activate.pending)
+    const requestStatus = vi.fn().mockReturnValueOnce(status.pending)
+    const runtime = createUpdateRuntime(runtimeDeps({ requestMain, requestStatus }))
+    await runtime.initialize({ resume: false })
+    const starting = runtime.start()
+    await vi.waitFor(() => expect(requestMain).toHaveBeenCalledTimes(1))
+    prepare.resolve({
+      requestId: 'prepare-1',
+      status: 'success',
+      data: {
+        state: 'update_prepared',
+        transactionId: TX,
+        targetVersion: candidate.version,
+        priorVersion: transaction.priorVersion,
+      },
+    })
+    await vi.waitFor(() => expect(requestMain).toHaveBeenCalledTimes(2))
+    activate.reject(new Error('response lost after activation'))
+    await vi.waitFor(() => expect(requestStatus).toHaveBeenCalledTimes(1))
+    status.resolve({
+      requestId: 'status-1',
+      status: 'success',
+      data: {
+        transactionId: TX,
+        phase: 'waiting-for-host-exit',
+        targetVersion: candidate.version,
+        reasonCode: null,
+      },
+    })
+
+    await expect(starting).resolves.toMatchObject({ kind: 'polling' })
   })
 
   it('persists a cleared preparing retry and rechecks the verified version before RPC', async () => {
@@ -760,12 +1038,15 @@ describe('update coordinator restart and polling', () => {
     const write = deferNextStorageSet(UPDATE_STATE_KEY)
     const prepare = deferredPending('prepare-1')
     const requestMain = vi.fn().mockReturnValueOnce(prepare.pending)
-    const getVerifiedVersion = vi.fn().mockResolvedValue(transaction.priorVersion)
-    const runtime = createUpdateRuntime(runtimeDeps({ requestMain, getVerifiedVersion }))
+    const getVerifiedProduct = vi.fn().mockResolvedValue({
+      version: transaction.priorVersion,
+      mode: 'packaged',
+    })
+    const runtime = createUpdateRuntime(runtimeDeps({ requestMain, getVerifiedProduct }))
     await runtime.initialize({ resume: false })
 
     const retrying = runtime.start()
-    await vi.waitFor(() => expect(getVerifiedVersion).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(getVerifiedProduct).toHaveBeenCalledTimes(1))
     expect(requestMain).not.toHaveBeenCalled()
     await write.resolve(undefined)
     await vi.waitFor(() => expect(requestMain).toHaveBeenCalledTimes(1))
@@ -782,6 +1063,35 @@ describe('update coordinator restart and polling', () => {
     await retrying
   })
 
+  it('preserves a preparing transaction with source-disabled guidance', async () => {
+    seedStorage({
+      [UPDATE_STATE_KEY]: {
+        kind: 'preparing',
+        ...transaction,
+        errorCode: 'update_prepare_failed',
+      },
+    })
+    const requestMain = vi.fn()
+    const runtime = createUpdateRuntime(runtimeDeps({
+      requestMain,
+      getVerifiedProduct: vi.fn().mockResolvedValue({
+        version: transaction.priorVersion,
+        mode: 'development',
+      }),
+    }))
+    await runtime.initialize({ resume: false })
+
+    await runtime.start()
+
+    expect(runtime.getState()).toEqual({
+      kind: 'preparing',
+      ...transaction,
+      errorCode: 'source_update_disabled',
+    })
+    expect(requestMain).not.toHaveBeenCalled()
+    await expect(runtime.ordinaryMainHostAllowed()).resolves.toBe(true)
+  })
+
   it('blocks a retry when the target is no longer newer than the verified product', async () => {
     seedStorage({
       [UPDATE_STATE_KEY]: {
@@ -793,7 +1103,10 @@ describe('update coordinator restart and polling', () => {
     const requestMain = vi.fn()
     const runtime = createUpdateRuntime(runtimeDeps({
       requestMain,
-      getVerifiedVersion: vi.fn().mockResolvedValue(candidate.version),
+      getVerifiedProduct: vi.fn().mockResolvedValue({
+        version: candidate.version,
+        mode: 'packaged',
+      }),
     }))
     await runtime.initialize({ resume: false })
 
@@ -857,6 +1170,71 @@ describe('update coordinator restart and polling', () => {
       },
     })
     await retrying
+  })
+
+  it('keeps a second prepared activation failure user-retryable without Host suppression', async () => {
+    seedStorage({
+      [UPDATE_STATE_KEY]: {
+        kind: 'activating',
+        ...transaction,
+        activationRetryUsed: true,
+        errorCode: 'update_activation_failed',
+      },
+    })
+    const status = deferredPending('status-1')
+    const requestStatus = vi.fn().mockReturnValueOnce(status.pending)
+    const runtime = createUpdateRuntime(runtimeDeps({ requestStatus }))
+    await runtime.initialize({ resume: false })
+    const retrying = runtime.start()
+    status.resolve({
+      requestId: 'status-1',
+      status: 'success',
+      data: {
+        transactionId: TX,
+        phase: 'prepared',
+        targetVersion: candidate.version,
+        reasonCode: null,
+      },
+    })
+
+    await expect(retrying).resolves.toEqual({
+      kind: 'activating',
+      ...transaction,
+      activationRetryUsed: true,
+      errorCode: 'update_activation_failed',
+    })
+    await expect(runtime.ordinaryMainHostAllowed()).resolves.toBe(true)
+    expect(chromeMockSpies.alarmsClear).toHaveBeenCalled()
+  })
+
+  it('surfaces an exact acknowledgment cleanup error for user retry', async () => {
+    const receipt = {
+      transactionId: TX,
+      outcome: 'committed' as const,
+      terminal_version: { fresh_install: false, version: candidate.version },
+      state: 'finalized-awaiting-ack' as const,
+    }
+    seedStorage({
+      [UPDATE_STATE_KEY]: { kind: 'ack-pending', ...transaction, receipt },
+    })
+    const acknowledge = deferredPending('ack-1')
+    const runtime = createUpdateRuntime(runtimeDeps({
+      requestMain: vi.fn().mockReturnValueOnce(acknowledge.pending),
+    }))
+    const initializing = runtime.initialize()
+    acknowledge.resolve({
+      requestId: 'ack-1',
+      status: 'error',
+      error_code: 'update_cleanup_failed',
+      error: 'The update finished but cleanup is incomplete. Retry cleanup.',
+    })
+    await initializing
+    await vi.waitFor(() => expect(runtime.getState()).toEqual({
+      kind: 'ack-pending',
+      ...transaction,
+      receipt,
+      errorCode: 'update_cleanup_failed',
+    }))
   })
 
   it('queries status before one activating retry after Worker restart', async () => {
@@ -1516,6 +1894,44 @@ describe('update coordinator post-reload finalization', () => {
     expect(chromeMockSpies.runtimeReload).toHaveBeenCalledTimes(1)
   })
 
+  it('does not finalize reload-pending again until a fresh runtime instance loads', async () => {
+    seedStorage({
+      [UPDATE_STATE_KEY]: {
+        kind: 'polling',
+        ...transaction,
+        lastStatus: null,
+        lastProgressAt: 1_000,
+        recoveryKick: 'unused',
+      },
+    })
+    const status = deferredPending('status-1')
+    const requestMain = vi.fn()
+    const runtime = createUpdateRuntime(runtimeDeps({
+      requestStatus: vi.fn().mockReturnValueOnce(status.pending),
+      requestMain,
+    }))
+    const initializing = runtime.initialize({
+      priorWorkerVersion: '2.0.75-beta.1',
+      priorWorkerInstance: 'worker-instance-new',
+    })
+    status.resolve({
+      requestId: 'status-1',
+      status: 'success',
+      data: {
+        transactionId: TX,
+        phase: 'committed',
+        targetVersion: candidate.version,
+        reasonCode: null,
+      },
+    })
+    await initializing
+
+    await runtime.resume()
+
+    expect(runtime.getState().kind).toBe('reload-pending')
+    expect(requestMain).not.toHaveBeenCalled()
+  })
+
   it('keeps reload-pending when the finalization response is lost and retries finalization directly', async () => {
     seedStorage({
       [UPDATE_STATE_KEY]: {
@@ -1591,6 +2007,7 @@ describe('update coordinator post-reload finalization', () => {
       kind: 'reload-pending',
       ...transaction,
       outcome: 'committed',
+      errorCode: 'update_cleanup_failed',
     })
     expect(requestStatus).not.toHaveBeenCalled()
   })

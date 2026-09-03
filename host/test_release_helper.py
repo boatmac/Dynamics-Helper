@@ -25,8 +25,10 @@ PLAN_C_EARLY_MODULES = (
     "update_journal",
     "update_mutex",
     "update_ownership",
+    "update_operation",
     "update_platform",
     "update_recovery",
+    "update_service",
     "update_status_host",
 )
 
@@ -285,9 +287,30 @@ class PlanCPackagingTests(unittest.TestCase):
             len(command) - 1,
         )
 
+    def test_matching_installer_replaces_the_complete_internal_runtime(self):
+        source = release_helper.INSTALL_SCRIPT.read_text(encoding="utf-8")
+        cleanup = 'Remove-Item "$DestDir\\_internal" -Recurse -Force'
+        copy_loop = "Get-ChildItem -Path $HostSrc -Recurse | ForEach-Object"
+        validate_source = 'foreach ($RequiredPath in @('
+        package_probe = '& "$PreflightRoot\\dh_native_host.exe" --update-probe $PackageManifest $PSScriptRoot'
+        stop_process = 'Stop-Process -Name "dh_native_host" -Force'
+        live_probe = '& $ExePath --update-probe $PackageManifest'
+        settle = '& $ExePath --settle-installer-repair'
+
+        self.assertIn(cleanup, source)
+        self.assertIn(validate_source, source)
+        self.assertIn(package_probe, source)
+        self.assertLess(source.index(package_probe), source.index(stop_process))
+        self.assertLess(source.index(package_probe), source.index(cleanup))
+        self.assertLess(source.index(cleanup), source.index(copy_loop))
+        self.assertIn(live_probe, source)
+        self.assertIn(settle, source)
+        self.assertLess(source.index(live_probe), source.index(settle))
+        self.assertLess(source.index(settle), source.index("Running registration command"))
+
     def test_build_host_invokes_exact_cli_command(self):
         with patch("release_helper.subprocess.run") as run:
-            run.return_value.stdout = "6.18.0\n"
+            run.return_value.stdout = "6.22.2\n"
             release_helper.build_host()
         self.assertEqual(
             run.call_args_list[0].args[0],
@@ -328,7 +351,7 @@ class PlanCPackagingTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 1)
         self.assertEqual(run.call_count, 1)
         printed.assert_any_call(
-            "ERROR: required PyInstaller 6.18.0 is unavailable."
+            "ERROR: required PyInstaller 6.22.2 is unavailable."
         )
 
     def test_no_plan_c_data_is_implicitly_bundled(self):

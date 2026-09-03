@@ -97,7 +97,7 @@ This file defines the operational rules, development workflows, and coding stand
     host/venv/Scripts/python.exe -c "import release_helper; release_helper.build_host()"
     ```
 
-  * The release helper requires exact PyInstaller `6.18.0` and invokes it only
+  * The release helper requires exact PyInstaller `6.22.2` and invokes it only
     as `host/venv/Scripts/python.exe -m PyInstaller` with the reviewed hidden
     imports. It never provisions pip/PyInstaller. Installing or upgrading the
     toolchain requires separate user approval.
@@ -290,9 +290,15 @@ This file defines the operational rules, development workflows, and coding stand
 
 ### 7. Self-Update Mechanism
 
-* **Updater:** `host/updater.py` handles downloading and applying updates from GitHub releases.
-* **--onedir Layout:** The release zip contains a `host/` folder with the exe, `_internal/` directory (Python runtime, DLLs), and config files. The updater copies all files to the install directory, protecting user files (`config.json`, `copilot-instructions.md`, log files) via `_USER_FILES` set.
-* **Locked File Handling:** When replacing `dh_native_host.exe`, the old file may be locked by the OS or antivirus. The updater renames it to `.exe.old` (or `.exe.old2`, `.exe.old3` as fallback). Other files (`_internal/`, `system_prompt.md`) are overwritten directly.
+* **Production updater:** `host/update_service.py` composes package validation,
+  transaction ownership, detached recovery, rollback, and finalization. The
+  historical `Updater.apply_update` path is not production reachable;
+  `host/updater.py` remains only for verified legacy `.old*` cleanup.
+* **--onedir Layout:** The release zip contains a complete `host/` tree (exe,
+  `_internal/`, prompts, and metadata) plus the complete Extension. Transactions
+  replace product-owned trees while preserving user-owned config, prompts, logs,
+  generated registration manifests, unknown top-level paths, and unrelated
+  `updates/**`.
 * **Do Not Break:** The `--register` CLI flag and the self-update flow are critical for production users. Test changes carefully.
 * **Plan A package boundary:** Every packaged regular file is represented once
   in `update-manifest.json` with one ownership class and a lowercase SHA-256;
@@ -304,17 +310,49 @@ This file defines the operational rules, development workflows, and coding stand
   and case-colliding paths, directory entries, links/reparse points, encrypted
   entries, unsupported types, and missing/extra/hash-mismatched files before
   accepting a stage.
-* **Capability timing:** Plan A advertises only `prompt-scope-v1`. Do not add
-  `transactional-update-v1` until the complete Plan D cutover and frozen gates
-  pass. `get_capabilities`/`verify_installation` are diagnostics in Plan A, not
-  protected-action enforcement.
-* **Dormant transactional routing:** `host/update_journal.py`,
-  `host/update_ownership.py`, `host/update_mutex.py`, and
-  `host/update_engine.py` implement the transaction engine, while Plan C's early
-  special modes expose detached recovery primitives. Ordinary update clicks,
-  `updater.py`, the Extension, and the installer do not route through them yet.
-  The legacy updater above remains the active production path until Plan D
-  completes the runtime cutover.
+* **Capability timing:** Plan A originally advertised only `prompt-scope-v1`.
+  The atomic Plan D cutover adds `transactional-update-v1`; candidate acceptance
+  and execution require that capability plus matching Host/Extension versions
+  and verified packaged integrity.
+* **Production coordination:** The Service Worker is the only update
+  coordinator. It owns strict parsing, `dh_update_state`, persistence-before-
+  effect ordering, the 30-second alarm, restart resume, terminal reload,
+  installation verification, receipt persistence, and acknowledgment. FAB and
+  Options only send payload-free `DH_UPDATE_GET_STATE` / `DH_UPDATE_START` and
+  consume `DH_UPDATE_STATE`; they never own update storage, Host update payloads,
+  or reload.
+* **Host action boundary:** Exactly `perform_update`, `activate_update`,
+  `finalize_update_status`, and `acknowledge_update_finalization` route to
+  `UpdateService` with strict request-correlated envelopes. Generic
+  `NATIVE_MSG` forwarding of these actions is denied.
+* **Operation serialization:** `update_operation.py` owns the distinct
+  cross-process `Local\DynamicsHelper.UpdateOperation.<hash>` mutex. Plan D
+  prepare/activate/finalize/ack hold it for the complete operation; lock order is
+  always operation mutex before the existing Plan B/C mutation mutex. Never use
+  a process-local lock or recursively reuse the mutation mutex.
+* **Candidate and suppression boundary:** Accept only a strictly newer normalized
+  release containing exactly one direct HTTPS ZIP. Once activation starts, use
+  only the detached status Host plus the one recovery kick; ordinary main-Host
+  Analyze/config/health traffic stays suppressed until a verified safe
+  disposition.
+* **Mixed-install boundary:** Capability, version, or integrity disagreement
+  persists transactionless matching-full-installer guidance. It clears only
+  after startup verifies the complete matching product. Transaction-backed
+  recovery evidence is never cleared by this shortcut.
+* **Matching installer repair:** `installer_core.ps1` removes the existing
+  `_internal` runtime tree before copying the packaged runtime, so stale files
+  cannot survive a full-installer repair. Preserve user-owned files and
+  `updates/**` evidence. Before mutation it probes a temporary combined product
+  plus the exact release inventory. After copy it probes the live product and
+  runs frozen-only `--settle-installer-repair`; compatible authority becomes the
+  matching target/prior terminal state, while contradiction fails without
+  deleting evidence.
+* **Main action liveness:** Prepare/activate/finalize/ack leases are bounded and
+  cancellable. Cleanup errors remain in `reload-pending` / `ack-pending` with an
+  `errorCode`, so retry repeats the same idempotent phase.
+* **Fresh-Worker finalization:** A per-Worker instance token prevents the Worker
+  that requested reload from finalizing its own `reload-pending` state. A newly
+  loaded Worker must perform terminal verification/finalization.
 * **Transaction authority:** IDs are lowercase 32-hex from exactly 16 random
   bytes. Stable authority is `updates/active.json` plus
   `updates/transactions/<id>/journal.json`; `TransactionPaths` intentionally
@@ -340,11 +378,12 @@ This file defines the operational rules, development workflows, and coding stand
   `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP`
   directories before process start. Automated tests never use the real install,
   registry, browser registration, updater network, or release publication.
-* **Dormant Plan C recovery:** `native_messaging.py`, `native_registration.py`,
+* **Active Plan C recovery:** `native_messaging.py`, `native_registration.py`,
   `update_platform.py`, `update_recovery.py`, `update_status_host.py`, and
-  `update_entrypoint.py` provide preflighted detached recovery primitives. They
-  do not route update clicks or advertise `transactional-update-v1`; the legacy
-  updater remains active until Plan D is complete.
+  `update_entrypoint.py` provide the detached runtime consumed by Plan D. Frozen
+  startup launches active recovery before normal initialization; unrecoverable
+  startup exits `30`, emits no stdout, and writes exactly
+  `manual_recovery_required\n` to stderr.
 * **Validate before construction:** A special invocation must validate its exact
   executable role, source/frozen bit, arity, full argv, identity text, fixed
   executable chain, and path authority before constructing any dependency,
@@ -379,6 +418,10 @@ This file defines the operational rules, development workflows, and coding stand
   registry, probe, clock, filesystem, and mutex adapters only. Do not run a real
   update/install, registry/AppData mutation, browser registration, PID wait,
   RunOnce action, publish, tag, or release outside the disposable-VM gate.
+* **Residual boundary:** Standalone bootstrap and per-write power-loss atomicity
+  remain deferred. Automatic rollback covers ordinary update failures, but an
+  extreme interruption may still require the matching full installer. Preserve
+  transaction backups and `updates/**` evidence; never advise deleting them.
 
 ### 8. Secret Field Persistence
 
@@ -505,7 +548,9 @@ This error means the Host process crashed during startup or failed to establish 
 
 * **Cause 1: Stdout Corruption**
   * **Reason:** Native Messaging relies on `stdout` for JSON communication. Any `print()` statement (from libraries or debug code) will corrupt the stream.
-  * **Fix:** `dh_native_host.py` has a protection block at the very top that redirects `sys.stdout` to `sys.stderr`. **DO NOT REMOVE IT.**
+  * **Fix:** After early dispatch/startup recovery, `dh_native_host.py` redirects
+    `sys.stdout` to `sys.stderr` before normal logging/config/SDK initialization.
+    **DO NOT REMOVE IT.**
 * **Cause 2: Manifest Encoding Bugs ("Jose")**
   * **Reason:** PowerShell's `Out-File` or `Set-Content` can introduce BOMs or incorrect encoding, causing Chrome to fail parsing the `manifest.json`.
   * **Fix (v2.0.39+):** The installer now delegates registration to the Python executable (`dh_native_host.exe --register`). This ensures strict UTF-8 (No BOM) generation.
@@ -515,10 +560,14 @@ This error means the Host process crashed during startup or failed to establish 
 * **Runtime Source:** The extension loads from `extension/dist` (dev) or `%LOCALAPPDATA%\DynamicsHelper\extension` (prod).
 * **Fix:** After building (`npm run build`), reload the extension in `chrome://extensions`. For production, run the installer or `release_helper.py`.
 
-### 3. Self-update fails silently
+### 3. Update requires recovery or a matching installer
 
-* **Cause:** Antivirus software (e.g., Windows Defender) may lock the `.exe` file, preventing rename/replace.
-* **Fix:** The updater (`host/updater.py`) falls back to `.exe.old2`, `.exe.old3` naming for the exe. Other host files (`_internal/`, `system_prompt.md`) are overwritten directly. Check `native_host.log` for "locked" or "PermissionError" entries.
+* **Automatic handling:** Durable `dh_update_state`, the detached recovery
+  runner, and complete rollback resume ordinary interrupted updates.
+* **Manual boundary:** Persistent matching-installer guidance or startup stderr
+  `manual_recovery_required` means automatic recovery cannot safely finish. Run
+  the complete installer for the matching release. Do not mix individual files
+  or delete `%LOCALAPPDATA%\DynamicsHelper\updates` evidence.
 
 ### 4. MCP server config still uses legacy `type: "local"` / `"remote"`
 
