@@ -1,296 +1,258 @@
-# Plan D VM Delivery Gate Design
+# Plan D Pragmatic Delivery Gate Design
 
 ## Status
 
-Approved design for the final delivery gate after Plan D Milestone 4 commit
-`81f7dc6`. This design does not authorize a public release, tag, push, real-user
-installation, or modification of an existing non-disposable installation.
+Approved scope reduction for the final delivery gate after Plan D Milestone 4
+commit `81f7dc6`. It supersedes the broader VM matrix originally proposed in this
+document and intentionally optimizes for the current single-user deployment.
+
+This design does not authorize a public release, tag, push, or modification of
+the current workstation before the disposable-VM checks pass.
 
 ## Goal
 
-Verify the reviewed Plan D implementation against exact private release
-artifacts before making the first cutover beta public. The gate must prove the
-legacy-to-cutover transition, transactional success, deterministic rollback,
-restart recovery, mixed-install handling, and preservation of recovery
-evidence.
+Establish enough practical confidence to move the sole current installation
+from `v2.0.75-beta.1` onto Plan D, then publish and consume the first
+transactional update, without building one-use fault-injection infrastructure.
 
-## Governing Principles
+## Risk Decision
 
-1. No unverified build is published to GitHub Releases.
-2. VM verification uses the exact candidate ZIP later published. Passing a
-   rebuild does not authorize publishing different bytes.
-3. Candidate discovery and update execution are separate contracts. Existing
-   automated tests cover GitHub response parsing, channel selection, strict
-   SemVer ordering, and direct HTTPS ZIP selection. The VM may inject a private
-   candidate to exercise the production transaction path without publishing it.
-4. A manually injected candidate bypasses only GitHub discovery. The Host and
-   Service Worker must still enforce package version, package hashes,
-   capabilities, installed-product integrity, transaction authority, terminal
-   verification, and finalization.
-5. Fault injection must not add a production environment-variable backdoor or
-   alter the release ZIP. A repository-only VM harness invokes production
-   engine code through existing dependency-injection seams.
-6. Every destructive browser or installer test runs only in a disposable
-   Windows VM restored from a named checkpoint.
+The production transaction engine, rollback boundaries, mixed-install handling,
+candidate validation, and restart state machine already have extensive automated
+coverage. Repeating every synthetic boundary through a new VM harness would add
+substantial code that has no product value after this release.
 
-## Artifacts And Versions
+The VM gate therefore verifies the highest-value integrated paths only:
 
-The gate uses two private builds derived from the same reviewed product code and
-VM harness commit. B additionally includes one traceable version-only commit:
+1. a complete Plan D installation;
+2. one uninterrupted transactional update;
+3. one interrupted transactional update and recovery;
+4. one matching-installer repair; and
+5. normal Analyze and Options behavior after each terminal product state.
+
+The gate does not claim VM coverage for every forward-copy fault, rollback
+failure, hostile archive, or legacy mixed-install direction. Those remain
+covered by existing automated tests. This is an explicit single-user risk
+acceptance, not evidence that those scenarios ran in a VM.
+
+## Versions And Artifacts
 
 | Artifact | Version | Role | Publication |
 |---|---|---|---|
-| A | `2.0.75-beta.2` | Complete installed Plan D baseline | Never published |
-| B | `2.0.76-beta.1` | Transaction target and release candidate | Published only after the gate passes |
+| A | `2.0.75-beta.2` | Private Plan D baseline installed by full installer | Never published |
+| B | `2.0.76-beta.1` | Transaction target and eventual public prerelease | Only after the gate passes |
 
-The historical legacy starting point is public release `v2.0.75-beta.1`.
+Both artifacts contain the same reviewed Plan D implementation. Their product
+versions differ so A can exercise the production updater against B.
 
-Artifact A is built in a clean temporary clone of the reviewed harness commit by
-changing only the version carriers in that disposable clone. The changes are
-never committed. The current branch then receives one reviewed version-only
-commit for B. Artifact B is built in a separate clean temporary clone of that
-exact B commit. The eventual B tag must resolve to that commit.
+A is built in a clean temporary clone by changing only the authoritative version
+carriers. Those A changes are not committed. B receives one reviewed
+version-only commit on the working branch and is built from a clean temporary
+clone of that exact commit. The eventual `v2.0.76-beta.1` tag must resolve to the
+B commit.
 
-The normal release helper is not used as an unreviewed convenience command
-because it changes versions, stages every change, commits, and tags before
-building. The implementation plan must provide explicit build commands or a
-purpose-built artifact builder that:
+The normal release-helper command is not used to prepare these private artifacts
+because it commits and tags before building. The implementation plan must use
+explicit isolated-clone build steps that do not commit, tag, push, publish,
+install, or register anything on the build workstation.
 
-- changes only the three authoritative version carriers when preparing A;
-- requires B's effective version to already match the clean B source commit;
-- builds the Extension and frozen Host with exact PyInstaller `6.22.2`;
-- creates the Plan A package metadata and deterministic ZIP;
-- writes SHA-256 and source commit records outside the ZIP;
-- refuses a dirty temporary clone; and
-- never commits, tags, pushes, publishes, installs, or registers anything.
-
-B is built exactly once for qualification. Its SHA-256 is the artifact identity
-used by every B scenario and by eventual publication. If B changes for any
-reason, all B scenarios restart with a new SHA-256.
-
-## Private Distribution
-
-A is transferred directly into the disposable VM and installed from its local
-ZIP. Only B is uploaded, as one blob, to a private test-only HTTPS container.
-Its test URL:
-
-- grants read-only access to one blob;
-- expires shortly after the planned VM session;
-- has a path ending in `.zip`;
-- has no fragment or user information; and
-- is never copied into source control, screenshots, or final reports.
-
-The legacy updater may log the complete URL, so the container contains no other
-data and the VM is treated as credential-bearing until destroyed. Revoke the
-SAS tokens and remove the blobs when verification finishes.
-
-## Verification Components
-
-### Artifact Builder
-
-The artifact builder creates A and B without Git operations or publication. It
-outputs an evidence record containing:
+For each artifact, record:
 
 - source commit;
 - effective Host and Extension version;
 - ZIP SHA-256;
-- PyInstaller version;
-- required hidden-import graph result; and
-- onedir inventory count.
+- exact PyInstaller version; and
+- build/test result.
 
-### Sandbox Fault Harness
+B is built once for qualification. Every B test and eventual publication must
+use that exact ZIP. Any B rebuild changes its qualification identity and requires
+rerunning the gate.
 
-`tools/plan_d_vm_gate.py` validates A and B, creates an isolated live product
-from A, and invokes the production `UpdateEngine` against B. It does not
-reimplement transaction logic.
+## Private Distribution
 
-The harness accepts a scenario name and an explicitly supplied sandbox root. It
-must reject:
+A is copied directly into the disposable VM and installed locally. B is uploaded
+as the sole object in a private test-only HTTPS container with a short-lived,
+read-only URL whose path ends in `.zip`.
 
-- a sandbox equal to or beneath the real `%LOCALAPPDATA%\DynamicsHelper`;
-- a non-empty sandbox it did not initialize;
-- packages whose declared and effective versions differ from the expected A/B
-  versions;
-- packages lacking `transactional-update-v1`; and
-- unverified package hashes or metadata links.
+The B URL must not appear in source control, screenshots, or the final report.
+The VM is treated as credential-bearing because logs may contain the URL. Revoke
+the URL and remove the private object when validation finishes.
 
-It uses `UpdateEngineHooks` to inject a one-shot failure at these production
-boundaries:
+Manual candidate injection bypasses only GitHub release discovery. The
+production Service Worker and Host must still validate strict version ordering,
+capabilities, current installation integrity, archive contents, package hashes,
+transaction authority, terminal product integrity, and finalization.
 
-- `install-host:dh_native_host.exe`;
-- `install-host:_internal`;
-- `install-extension`;
-- `install-metadata:release-integrity.json`;
-- `install-metadata:installed-product.json`; and
-- target `probe_installed_product`.
+## Existing Automated Evidence
 
-Each one-shot fault disables itself before rollback. A separate rollback-failure
-scenario injects a forward failure and one reverse-path failure to prove
-`RECOVERY_REQUIRED` evidence retention.
+Before VM work, rerun the exact committed B source tests and builds. The required
+automated evidence includes:
 
-The sandbox harness also verifies malformed, unsafe, wrong-version, and
-hash-mismatched B packages change no live byte.
+- the complete Host suite, including update journal, engine, rollback, recovery,
+  entrypoint, action, and installer-settlement tests;
+- the complete Extension suite, including candidate parsing, Service Worker
+  restart, polling, reload, finalization, mixed-install projections, and UI
+  ownership tests;
+- TypeScript compilation and the production Extension build;
+- exact PyInstaller `6.22.2` frozen Host build and staged-probe integration;
+- `git diff --check`; and
+- confirmation that `Updater.apply_update` is not production reachable after
+  Plan D cutover.
 
-### Browser Evidence Collector
+These tests, rather than new VM-only tools, remain the evidence for:
 
-A repository-only collector reads, but does not mutate, the disposable VM
-installation and writes a timestamped evidence directory. It records:
+- Host, `_internal`, Extension, metadata, and target-probe rollback boundaries;
+- rollback-failure evidence retention;
+- malformed, unsafe, wrong-version, and hash-mismatched archives;
+- stale, equal, and older candidates;
+- both legacy mixed-install directions; and
+- detailed Worker/Host/runner state-machine races.
 
-- A and B ZIP SHA-256 values;
-- effective Host and Extension versions;
-- `get_capabilities` and `verify_installation` responses;
-- sanitized `dh_update_state`;
-- active journal and any finalization cursor, receipt, or acknowledgment;
-- product hash inventories for Host, Extension, `_internal`, and metadata;
-- relevant process identities and Native Messaging registration targets;
-- a redacted log tail; and
-- the operator's scenario result.
+## Disposable VM Setup
 
-The collector must redact URLs, query strings, instruction contents, customer
-data, workspace paths, and other credentials or PII.
+Use a Windows 11 VM containing Chrome or Edge and the supported Copilot CLI. Do
+not use customer data or a real support case.
 
-### Mixed-State Constructor
-
-A repository-only PowerShell tool deterministically constructs each legacy
-mixed state from a restored `S1-legacy` checkpoint and the validated B package.
-It must refuse any root other than the VM's explicit test installation and must
-never run outside a disposable VM acknowledgment gate.
-
-- For **new Extension plus old Host**, it replaces only the installed Extension
-  with B's complete Extension and leaves the legacy Host unchanged.
-- For **old Extension plus new Host**, it replaces the complete Host onedir and
-  B package metadata while preserving the legacy Extension.
-
-The constructor records before/after hash inventories. It does not claim that
-the legacy updater deterministically produced the partial copy. The separate
-complete legacy-to-B scenario exercises the real legacy updater; these
-constructed states exercise the two exact cutover-startup results that Plan D
-must contain.
-
-## VM Checkpoints
-
-Use one disposable Windows 11 VM with Chrome or Edge, the supported Copilot CLI,
-and no real customer data. Create these checkpoints:
+Create two checkpoints:
 
 | Checkpoint | State |
 |---|---|
-| `S0-clean` | Clean VM with browser, Copilot CLI, and private-download prerequisites |
-| `S1-legacy` | Complete public `v2.0.75-beta.1` Host and Extension installation |
-| `S2-plan-d-a` | Complete private A installation with verified integrity and `transactional-update-v1` |
+| `S0-clean` | Clean VM with browser, Copilot CLI, and private-download access |
+| `S1-plan-d-a` | Complete A installation with verified Host/Extension version and integrity |
 
-Restore a checkpoint before every scenario. Do not reuse an installation after
-a failed or interrupted scenario.
+To create `S1-plan-d-a`:
 
-## Scenario Matrix
+1. extract the recorded A ZIP;
+2. run its complete `install.bat`;
+3. confirm Native Messaging is registered to the installed frozen Host;
+4. confirm Host and Extension both report `2.0.75-beta.2`;
+5. confirm `transactional-update-v1` is present;
+6. confirm installation integrity is verified;
+7. run one non-customer Analyze smoke case; and
+8. change and restore one harmless Options preference.
 
-### Legacy-To-Cutover Scenarios From `S1-legacy`
+Do not use source mode for any VM update scenario. Source mode intentionally
+returns `source_update_disabled`.
 
-1. **Complete first upgrade:** Seed the legacy `pending_update` record with B's
-   private URL and use the legacy UI to update. The old updater may show its
-   historical success message. On B startup, the complete product must verify as
-   B and enable Plan D.
-2. **New Extension plus old Host:** Use the mixed-state constructor to install
-   B's complete Extension while preserving the legacy Host. B's Service Worker
-   must persist matching-installer guidance, create no Plan D transaction,
-   execute no second update, and report no transactional success.
-3. **Old Extension plus new Host:** Use the mixed-state constructor to install
-   B's complete Host and package metadata while preserving the legacy Extension,
-   then issue the legacy URL-only `perform_update`. B Host must reject it with
-   fixed installation-integrity guidance and create no new transaction.
+## VM Scenario 1: Uninterrupted Transaction
 
-Both mixed states must be repaired by the exact B full installer. After repair,
-Host, Extension, capabilities, and package integrity must all agree on B without
-deleting unrelated user files or `updates/**` evidence.
+Restore `S1-plan-d-a`. Inject B as the exact `available` `dh_update_state`, reload
+the Service Worker, and confirm the hydrated candidate before starting the
+payload-free `DH_UPDATE_START` request.
 
-### Transactional Browser Scenarios From `S2-plan-d-a`
+Pass criteria:
 
-Inject B as an exact `available` `dh_update_state`, reload the Worker, confirm
-the hydrated state, then start with payload-free `DH_UPDATE_START`.
+- the transaction reaches `complete/committed`;
+- Host and Extension both report `2.0.76-beta.1`;
+- installation integrity is verified;
+- no transaction workspace remains after final acknowledgment;
+- Analyze succeeds with synthetic input; and
+- an Options preference can be changed and restored.
 
-Run these scenarios independently:
+Record the transaction ID, terminal state, effective versions, integrity result,
+and B ZIP SHA-256. Do not record the private URL.
 
-1. uninterrupted A-to-B commit;
-2. Service Worker termination during a nonterminal state;
-3. main Host termination around activation;
-4. detached runner termination followed by the alarm/recovery kick; and
-5. browser restart while durable update state is nonterminal.
+## VM Scenario 2: Interrupted Recovery
 
-Each restart scenario must resume the same transaction ID. It may commit B or
-roll back A according to the interruption point, but it must never leave a mixed
-product or claim success before terminal verification and finalization.
+Restore `S1-plan-d-a` and start the same A-to-B update with a fresh transaction
+ID. Once durable state becomes nonterminal, close the browser and terminate the
+main Host. Reopen the browser and Options page without manually editing
+`dh_update_state` or deleting `updates/**`.
 
-### Sandbox Fault Scenarios
+Pass criteria:
 
-Run each one-shot boundary listed above. Every ordinary forward fault must end
-at `ROLLED_BACK` with exact A product hashes. Run the rollback-failure scenario
-and require `RECOVERY_REQUIRED` with active authority, journal, backups, and
-matching-installer guidance intact.
+- recovery continues under the original transaction ID;
+- the final product is either complete B with `committed` or complete A with
+  `rolled-back`;
+- Host and Extension versions agree;
+- installation integrity is verified;
+- no failed update is presented as successful; and
+- Analyze and Options smoke checks pass in the terminal product.
 
-## Product Regression Checks
+This single interruption is the integrated restart smoke test. Detailed Worker,
+Host, runner, alarm, and finalization interruption permutations remain automated
+test responsibilities.
 
-After each complete B installation and each successful A rollback:
+## VM Scenario 3: Matching-Installer Repair
 
-- launch the browser against the production frozen Native Host;
-- run one non-customer Analyze smoke case;
-- read and update one harmless Options preference, then restore it;
-- verify Host/Extension versions and capabilities; and
-- verify installation integrity.
+Restore `S1-plan-d-a`, then run the complete B installer once to establish a
+known-good B installation. Add one harmless unexpected sentinel file beneath
+the installed `_internal` tree. Run the exact same B installer again.
 
-Source mode is not an acceptable substitute because it intentionally returns
-`source_update_disabled`.
+Pass criteria:
 
-## Acceptance Rules
+- the sentinel is removed because `_internal` is replaced as a complete tree;
+- Host and Extension both report B;
+- installation integrity is verified;
+- user-owned configuration and prompt files are preserved; and
+- Analyze and Options smoke checks pass.
 
-### Committed
+This scenario verifies the supported matching-installer recovery path without
+intentionally corrupting executable bytes or creating an unrecoverable mixed
+installation.
 
-- Durable UI state is `complete/committed`.
-- Host, Extension, `_internal`, metadata, and effective package version match B.
-- Final integrity verification succeeds.
-- Finalization evidence is acknowledged and terminal transaction workspace is
-  cleaned according to the production contract.
+## Current Workstation Migration
 
-### Rolled Back
+The current workstation is running `v2.0.75-beta.1`, whose update click still
+uses the historical updater. It must not be used as the first Plan D transaction
+test.
 
-- Durable UI state is `complete/rolled-back`.
-- Every product hash and effective version matches A.
-- No success is displayed for the failed update.
-- Final integrity verification succeeds.
+Only after all automated and VM checks above pass:
 
-### Recovery Required
+1. back up `%LOCALAPPDATA%\DynamicsHelper\config.json`, editable prompt files,
+   and any other user-owned data;
+2. close all browser windows;
+3. install the exact qualified private A ZIP with its complete installer;
+4. verify Host and Extension are both A, integrity is verified, and normal usage
+   works;
+5. obtain explicit approval to tag, push, and publish B;
+6. publish the exact qualified B ZIP without rebuilding it; and
+7. use Plan D on the workstation to update A to B.
 
-- Durable state exposes fixed recovery or matching-installer guidance.
-- Active authority, journal, applicable backups, and transaction evidence remain
-  available.
-- No success is displayed and no evidence directory is manually deleted.
+If the private A installation fails, stop and restore from backup or run the
+matching complete installer. Do not publish B to work around a failed A
+installation.
 
-### Mixed Legacy Transition
+## Minimal Evidence Record
 
-- No Plan D transaction is created.
-- No second update starts.
-- No transactional success is displayed.
-- The matching B installer repairs the product to one consistent B version.
+Maintain one concise Markdown checklist rather than a dedicated evidence
+collector. For each scenario record only:
+
+- date and VM checkpoint;
+- source commit and A/B ZIP SHA-256;
+- starting and terminal versions;
+- transaction ID when applicable;
+- terminal `dh_update_state` kind and outcome;
+- installation-integrity result;
+- Analyze/Options smoke result; and
+- pass/fail plus a short sanitized note.
+
+Screenshots are optional. Never include private URLs, query strings, customer
+content, prompt contents, access tokens, or full logs.
 
 ## Publication Gate
 
-Publication is allowed only when:
+B may be published only when:
 
-1. every required scenario has a result and sanitized evidence directory;
-2. A and B artifact SHA-256 values match the artifact-builder records;
-3. no B scenario used rebuilt or modified bytes;
-4. all committed and rolled-back outcomes pass final product verification;
-5. mixed and recovery-required outcomes preserved required evidence;
-6. the final report contains no URL credentials, PII, or customer data; and
+1. exact-commit automated tests and builds pass;
+2. all three VM scenarios pass;
+3. B's recorded SHA-256 matches the tested ZIP;
+4. the current workstation is safely migrated to private A and verified;
+5. the result log explicitly states that exhaustive VM fault and mixed-state
+   coverage was not performed;
+6. no credential or PII appears in the result log; and
 7. the user explicitly approves tag, push, and GitHub prerelease creation.
-
-Eventual publication uploads the already-qualified B ZIP. Rebuilding B after the
-gate invalidates qualification and requires rerunning the gate.
 
 ## Explicit Non-Goals
 
 - Publishing A.
-- Testing GitHub's uptime or Azure Blob availability.
-- Adding a configurable production update endpoint.
-- Adding production fault-injection environment variables.
-- Proving per-write power-loss atomicity, registry hive flush, standalone
-  bootstrap, or multi-profile registry quiescence.
-- Using real customer cases, credentials, or an existing workstation install.
+- Exercising the historical updater on the current workstation.
+- Building a VM-only artifact framework, fault harness, mixed-state constructor,
+  or evidence collector.
+- Repeating every automated rollback or restart permutation in a VM.
+- Claiming VM validation of either legacy mixed-install direction.
+- Adding a configurable production update endpoint or fault-injection backdoor.
+- Proving per-write power-loss atomicity, standalone bootstrap, registry hive
+  flush, or multi-profile registry quiescence.
+- Using customer data or an existing workstation installation for destructive
+  tests.
