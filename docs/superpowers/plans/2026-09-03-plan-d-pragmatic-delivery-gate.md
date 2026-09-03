@@ -681,7 +681,7 @@ log belongs in this file.
 Run:
 
 ```powershell
-$matches=Select-String -Path "docs/plan-d-pragmatic-cloud-pc-runbook.md","docs/plan-d-pragmatic-cloud-pc-results.md" -Pattern 'https://[^\s''"<>]*\?|(?:[?&](?:sig|se|sp|sv)=)[^\s''"<>]*'; if($matches){$matches;exit 1}
+if(Select-String -Path "docs/plan-d-pragmatic-cloud-pc-runbook.md","docs/plan-d-pragmatic-cloud-pc-results.md" -Pattern 'https://[^\s''"<>]*\?|(?:[?&](?:sig|se|sp|sv)=)[^\s''"<>]*' -Quiet){throw 'Sensitive URL pattern found'}
 ```
 
 Expected: no matches.
@@ -1299,7 +1299,7 @@ terminal outcome: Scenario 1 `complete/committed B`; Scenario 2
 `PASS`. Run:
 
 ```powershell
-$matches=Select-String -Path "docs/plan-d-pragmatic-cloud-pc-results.md" -Pattern 'https://.*\?|[?&](sig|se|sp|sv)='; if($matches){$matches;exit 1}
+if(Select-String -Path "docs/plan-d-pragmatic-cloud-pc-results.md" -Pattern 'https://.*\?|[?&](sig|se|sp|sv)=' -Quiet){throw 'Sensitive URL pattern found'}
 ```
 
 Expected: no URL with a query string or SAS parameter. Manually inspect the
