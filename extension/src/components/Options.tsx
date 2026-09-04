@@ -839,6 +839,9 @@ const OptionsInner: React.FC = () => {
     }, []);
     const [hostVersion, setHostVersion] = useState<string>("");
     const [updateState, setUpdateState] = useState<UpdateState>({ kind: 'idle' });
+    const completionTransactionId = updateState.kind === 'complete'
+        ? updateState.transactionId
+        : null;
     const updateVersion = updateState.kind === 'complete' && updateState.outcome === 'rolled-back'
         ? getExtensionVersion()
         : projectedUpdateVersion(updateState);
@@ -855,6 +858,16 @@ const OptionsInner: React.FC = () => {
     const updateCompletion = updateState.kind === 'complete'
         ? `${t(updateState.outcome === 'committed' ? 'updateComplete' : 'updateRolledBack')} ${t('version')} ${updateVersion}`
         : null;
+    useEffect(() => {
+        if (completionTransactionId === null) return;
+        const timeoutId = setTimeout(() => {
+            void chrome.runtime.sendMessage({
+                type: 'DH_UPDATE_ACK_COMPLETE',
+                transactionId: completionTransactionId,
+            }).catch(() => undefined);
+        }, 8000);
+        return () => clearTimeout(timeoutId);
+    }, [completionTransactionId]);
     const latestTranslationRef = useRef(t);
     latestTranslationRef.current = t;
     

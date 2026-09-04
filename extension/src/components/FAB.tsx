@@ -164,6 +164,9 @@ const FAB: React.FC = () => {
     const { t } = useTranslation();
     const latestTranslationRef = React.useRef(t);
     latestTranslationRef.current = t;
+    const { prefs } = usePrefs();
+    const latestPrefsRef = React.useRef(prefs);
+    latestPrefsRef.current = prefs;
     const [isOpen, setIsOpen] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
@@ -183,6 +186,9 @@ const FAB: React.FC = () => {
     // § 1. All error surfacing now flows through `setResultPopover` so the
     // user sees a persistent popover instead of a 4-second bubble flash.
     const [updateState, setUpdateState] = useState<UpdateState>({ kind: 'idle' });
+    const completionTransactionId = updateState.kind === 'complete'
+        ? updateState.transactionId
+        : null;
     const updateVersion = updateState.kind === 'complete' && updateState.outcome === 'rolled-back'
         ? getExtensionVersion()
         : projectedUpdateVersion(updateState);
@@ -202,6 +208,17 @@ const FAB: React.FC = () => {
         : updateVersion
             ? `${t('version')} ${updateVersion}`
             : t('updateRequiresAttention');
+
+    useEffect(() => {
+        if (completionTransactionId === null) return;
+        const timeoutId = setTimeout(() => {
+            void chrome.runtime.sendMessage({
+                type: 'DH_UPDATE_ACK_COMPLETE',
+                transactionId: completionTransactionId,
+            }).catch(() => undefined);
+        }, 8000);
+        return () => clearTimeout(timeoutId);
+    }, [completionTransactionId]);
 
     // Track whether the currently-displayed ResultPopover originated from an
     // analyze flow (vs a bookmark markdown). Only analyze popovers should
@@ -229,7 +246,54 @@ const FAB: React.FC = () => {
         text: string; 
         type: 'default' | 'success' | 'error';
     }>({ visible: false, text: '', type: 'default' });
-    const statusTimeoutRef = React.useRef<any>(null);
+    const statusBubbleRef = React.useRef(statusBubble);
+    statusBubbleRef.current = statusBubble;
+    const statusTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const statusCompletionTransactionIdRef = React.useRef<string | null>(null);
+
+    function hideStatusBubble(onlyType?: 'default' | 'success' | 'error'): void {
+        if (onlyType !== undefined && statusBubbleRef.current.type !== onlyType) return;
+        if (statusTimeoutRef.current !== null) {
+            clearTimeout(statusTimeoutRef.current);
+            statusTimeoutRef.current = null;
+        }
+        statusCompletionTransactionIdRef.current = null;
+        const next = { ...statusBubbleRef.current, visible: false };
+        statusBubbleRef.current = next;
+        setStatusBubble(next);
+    }
+
+    function showStatusBubble(
+        text: string,
+        type: 'default' | 'success' | 'error' = 'default',
+        autoHideDuration = 3000,
+        completionTransactionId: string | null = null,
+    ): void {
+        if (!latestPrefsRef.current.enableStatusBubble) return;
+
+        if (statusTimeoutRef.current !== null) {
+            clearTimeout(statusTimeoutRef.current);
+            statusTimeoutRef.current = null;
+        }
+        statusCompletionTransactionIdRef.current = completionTransactionId;
+        const next = { visible: true, text, type };
+        statusBubbleRef.current = next;
+        setStatusBubble(next);
+
+        if (autoHideDuration > 0) {
+            const timeoutId = setTimeout(() => {
+                if (statusTimeoutRef.current !== timeoutId) return;
+                statusTimeoutRef.current = null;
+                if (statusCompletionTransactionIdRef.current === completionTransactionId) {
+                    statusCompletionTransactionIdRef.current = null;
+                }
+                const hidden = { ...statusBubbleRef.current, visible: false };
+                statusBubbleRef.current = hidden;
+                setStatusBubble(hidden);
+            }, autoHideDuration);
+            statusTimeoutRef.current = timeoutId;
+        }
+    }
 
     // Analyze-flow bubble protection (fixes SAP/clipboard notifications
     // clobbering the "analyzing" or "Analysis Complete" bubble). The status
@@ -398,6 +462,11 @@ const FAB: React.FC = () => {
             coordinator.changeSignal.resolve();
             terminalRevalidationRef.current = null;
         }
+        if (statusTimeoutRef.current !== null) {
+            clearTimeout(statusTimeoutRef.current);
+            statusTimeoutRef.current = null;
+        }
+        statusCompletionTransactionIdRef.current = null;
     }, []);
 
     // The Service Worker owns update storage, Host actions, and reloads. FAB
@@ -408,6 +477,15 @@ const FAB: React.FC = () => {
         const applyProjection = (value: unknown, announce: boolean) => {
             const next = projectedUpdateState(value);
             if (!mounted || !next) return;
+            const nextCompletionTransactionId = next.kind === 'complete'
+                ? next.transactionId
+                : null;
+            if (
+                statusCompletionTransactionIdRef.current !== null
+                && statusCompletionTransactionIdRef.current !== nextCompletionTransactionId
+            ) {
+                hideStatusBubble();
+            }
             setUpdateState(next);
             if (!announce) return;
             if (next.kind === 'available') {
@@ -423,6 +501,7 @@ const FAB: React.FC = () => {
                     ),
                     next.outcome === 'committed' ? 'success' : 'error',
                     10000,
+                    next.transactionId,
                 );
             } else {
                 const errorCode = projectedUpdateError(next);
@@ -549,20 +628,6 @@ const FAB: React.FC = () => {
     }, []);
 
 
-    const showStatusBubble = (text: string, type: 'default' | 'success' | 'error' = 'default', autoHideDuration = 3000) => {
-        if (!latestPrefsRef.current.enableStatusBubble) return;
-
-        if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
-        
-        setStatusBubble({ visible: true, text, type });
-        
-        if (autoHideDuration > 0) {
-            statusTimeoutRef.current = setTimeout(() => {
-                setStatusBubble(prev => ({ ...prev, visible: false }));
-            }, autoHideDuration);
-        }
-    };
-
     // C2a+: surface an analyze failure as a persistent ResultPopover (the
     // prior pattern of an inline error string + 4-second bubble was invisible
     // during long analysis runs — user walks away, bubble auto-hides, no
@@ -586,10 +651,6 @@ const FAB: React.FC = () => {
         });
         showStatusBubble(t('analysisFailed'), 'error', 4000);
     };
-    
-    const { prefs } = usePrefs();
-    const latestPrefsRef = React.useRef(prefs);
-    latestPrefsRef.current = prefs;
     
     // UI States
     const [isContextExpanded, setIsContextExpanded] = useState(false);
@@ -620,7 +681,7 @@ const FAB: React.FC = () => {
                 && generation > scheduledAuto.context.accepted.generation
             )
         ) {
-            setStatusBubble(previous => ({ ...previous, visible: false }));
+            hideStatusBubble();
         }
         reconcileVisibleAnalyzingState();
         const completion = (async () => {
@@ -671,7 +732,7 @@ const FAB: React.FC = () => {
             setHydrationCaseNumber(caseNumber);
             if (identityChanged && wasInitialized) {
                 setResultPopover(previous => ({ ...previous, isOpen: false }));
-                setStatusBubble(previous => ({ ...previous, visible: false }));
+                hideStatusBubble();
                 setIsOpen(false);
             }
             reconcileVisibleAnalyzingState();
@@ -915,9 +976,7 @@ const FAB: React.FC = () => {
             if (!editableAnalyzeContextIsCurrent(context)) {
                 if (editableAnalyzeContextRef.current === context) {
                     setHasAutoAnalyzed(false);
-                    setStatusBubble(previous => previous.type === 'default'
-                        ? { ...previous, visible: false }
-                        : previous);
+                    hideStatusBubble('default');
                 }
                 return;
             }

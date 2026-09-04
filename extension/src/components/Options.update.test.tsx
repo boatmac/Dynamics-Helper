@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import {
@@ -41,6 +41,7 @@ const candidate = {
   isPrerelease: true,
 }
 const TX = '0123456789abcdef0123456789abcdef'
+const TX_B = 'fedcba9876543210fedcba9876543210'
 const transaction = {
   update: candidate,
   transactionId: TX,
@@ -59,6 +60,8 @@ async function resolveState(
 ) {
   await act(async () => {
     deferred.resolve({ handled: true, state: updateState })
+    await Promise.resolve()
+    await Promise.resolve()
   })
 }
 
@@ -68,10 +71,27 @@ function referencesPendingUpdate(keys: unknown): boolean {
     || typeof keys === 'object' && keys !== null && Object.hasOwn(keys, 'pending_update')
 }
 
+function referencesUpdateState(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && Object.hasOwn(value, 'dh_update_state')
+}
+
+function ackMessages() {
+  return getMessageLog().filter(entry => entry.action === 'DH_UPDATE_ACK_COMPLETE')
+}
+
+function completeState(transactionId = TX, outcome: 'committed' | 'rolled-back' = 'committed') {
+  return { kind: 'complete', update: candidate, transactionId, outcome } as const
+}
+
 describe('Options reliable update projection', () => {
   beforeEach(() => {
     resetChromeMock()
     installChromeMock()
+  })
+
+  afterEach(() => {
+    act(() => vi.clearAllTimers())
+    vi.useRealTimers()
   })
 
   it('hydrates from one payload-free DH_UPDATE_GET_STATE request', async () => {
@@ -92,12 +112,223 @@ describe('Options reliable update projection', () => {
   it.each([
     ['committed', 'Update completed successfully.', targetVersion],
     ['rolled-back', 'previous version was restored', transaction.priorVersion],
-  ] as const)('keeps a cold %s completion visible', async (outcome, expected, version) => {
+  ] as const)('renders a cold %s completion immediately', async (outcome, expected, version) => {
     const getState = deferNextResponse('DH_UPDATE_GET_STATE')
     renderOptions()
     await resolveState(getState, { kind: 'complete', update: candidate, transactionId: TX, outcome })
 
     const completion = await screen.findByText(new RegExp(expected, 'i'))
+    expect(completion).toHaveAttribute('role', 'status')
+    expect(completion).toHaveTextContent(version)
+  })
+
+  it('keeps completion visible through 7,999 ms and sends exactly one exact ACK at 8,000 ms', async () => {
+    vi.useFakeTimers()
+    const persisted = { kind: 'complete', transactionId: TX }
+    seedStorage({ dh_update_state: persisted })
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await resolveState(getState, completeState())
+
+    act(() => vi.advanceTimersByTime(7_999))
+    expect(screen.getByRole('status')).toHaveTextContent('Update completed successfully.')
+    expect(ackMessages()).toHaveLength(0)
+
+    act(() => vi.advanceTimersByTime(1))
+    const messages = ackMessages()
+    expect(messages).toHaveLength(1)
+    expect(messages[0].payload).toEqual({ type: 'DH_UPDATE_ACK_COMPLETE', transactionId: TX })
+    expect(Reflect.ownKeys(messages[0].payload as object)).toEqual(['type', 'transactionId'])
+    expect(chromeMockSpies.storageSet.mock.calls.some(call => referencesUpdateState(call[0]))).toBe(false)
+    expect(getStorageSnapshot().dh_update_state).toEqual(persisted)
+
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(ackMessages()).toHaveLength(1)
+  })
+
+  it('keeps the original ACK deadline across an equivalent same-ID rebroadcast', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await resolveState(getState, completeState())
+
+    act(() => vi.advanceTimersByTime(4_000))
+    act(() => emitRuntimeMessage({
+      type: 'DH_UPDATE_STATE',
+      state: completeState(TX, 'rolled-back'),
+    }))
+    act(() => vi.advanceTimersByTime(3_999))
+    expect(ackMessages()).toHaveLength(0)
+
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+    expect(ackMessages()[0].payload).toEqual({ type: 'DH_UPDATE_ACK_COMPLETE', transactionId: TX })
+  })
+
+  it('cancels ACK on unmount and requires a fresh 8 seconds after remount', async () => {
+    vi.useFakeTimers()
+    const firstGetState = deferNextResponse('DH_UPDATE_GET_STATE')
+    const first = renderOptions()
+    await resolveState(firstGetState, completeState())
+    act(() => vi.advanceTimersByTime(4_000))
+    first.unmount()
+    act(() => vi.advanceTimersByTime(10_000))
+    expect(ackMessages()).toHaveLength(0)
+
+    const secondGetState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await resolveState(secondGetState, completeState())
+    act(() => vi.advanceTimersByTime(7_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+  })
+
+  it.each(['departure', 'replacement'] as const)(
+    'cancels transaction A after state departure or replacement by transaction B (%s)',
+    async transition => {
+      vi.useFakeTimers()
+      const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+      renderOptions()
+      await resolveState(getState, completeState())
+      act(() => vi.advanceTimersByTime(4_000))
+
+      act(() => emitRuntimeMessage({
+        type: 'DH_UPDATE_STATE',
+        state: transition === 'departure'
+          ? { kind: 'available', update: candidate }
+          : completeState(TX_B),
+      }))
+      act(() => vi.advanceTimersByTime(4_000))
+      expect(ackMessages()).toHaveLength(0)
+
+      act(() => vi.advanceTimersByTime(4_000))
+      if (transition === 'departure') {
+        expect(ackMessages()).toHaveLength(0)
+      } else {
+        expect(ackMessages()).toHaveLength(1)
+        expect(ackMessages()[0].payload).toEqual({
+          type: 'DH_UPDATE_ACK_COMPLETE',
+          transactionId: TX_B,
+        })
+      }
+    },
+  )
+
+  it.each(['rejected', 'handled-false'] as const)(
+    'keeps completion visible after a rejected or handled-false ACK and retries only after remount (%s)',
+    async result => {
+      vi.useFakeTimers()
+      const firstGetState = deferNextResponse('DH_UPDATE_GET_STATE')
+      const firstAck = deferNextResponse('DH_UPDATE_ACK_COMPLETE')
+      const first = renderOptions()
+      await resolveState(firstGetState, completeState())
+
+      act(() => vi.advanceTimersByTime(8_000))
+      expect(ackMessages()).toHaveLength(1)
+      await act(async () => {
+        if (result === 'rejected') firstAck.reject(new Error('disconnected'))
+        else firstAck.resolve({ handled: false })
+      })
+      expect(screen.getByRole('status')).toHaveTextContent('Update completed successfully.')
+      act(() => vi.advanceTimersByTime(30_000))
+      expect(ackMessages()).toHaveLength(1)
+
+      first.unmount()
+      const secondGetState = deferNextResponse('DH_UPDATE_GET_STATE')
+      deferNextResponse('DH_UPDATE_ACK_COMPLETE')
+      renderOptions()
+      await resolveState(secondGetState, completeState())
+      act(() => vi.advanceTimersByTime(7_999))
+      expect(ackMessages()).toHaveLength(1)
+      act(() => vi.advanceTimersByTime(1))
+      expect(ackMessages()).toHaveLength(2)
+      expect(screen.getByRole('status')).toHaveTextContent('Update completed successfully.')
+    },
+  )
+
+  it('ignores a successful ACK response until an authoritative state broadcast', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    const ack = deferNextResponse('DH_UPDATE_ACK_COMPLETE')
+    renderOptions()
+    await resolveState(getState, completeState())
+
+    act(() => vi.advanceTimersByTime(8_000))
+    await act(async () => {
+      ack.resolve({ handled: true, state: { kind: 'idle' } })
+    })
+
+    expect(screen.getByRole('status')).toHaveTextContent('Update completed successfully.')
+  })
+
+  it('ignores a delayed ACK response after a newer authoritative state arrives', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    const ack = deferNextResponse('DH_UPDATE_ACK_COMPLETE')
+    renderOptions()
+    await resolveState(getState, completeState())
+    act(() => vi.advanceTimersByTime(8_000))
+
+    act(() => emitRuntimeMessage({
+      type: 'DH_UPDATE_STATE',
+      state: { kind: 'available', update: candidate },
+    }))
+    await act(async () => {
+      ack.resolve({ handled: true, state: { kind: 'idle' } })
+    })
+
+    expect(screen.getByRole('button', { name: /update now/i })).toBeEnabled()
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('hides committed completion only after an authoritative idle broadcast', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    deferNextResponse('DH_UPDATE_ACK_COMPLETE')
+    renderOptions()
+    await resolveState(getState, completeState())
+    act(() => vi.advanceTimersByTime(8_000))
+    expect(screen.getByRole('status')).toHaveTextContent('Update completed successfully.')
+
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: { kind: 'idle' } }))
+
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('button', { name: /update now|retry update/i })).toBeNull()
+  })
+
+  it('replaces rollback wording with an enabled ordinary available action after authoritative available broadcast', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await resolveState(getState, completeState(TX, 'rolled-back'))
+    expect(screen.getByRole('status')).toHaveTextContent('previous version was restored')
+
+    act(() => emitRuntimeMessage({
+      type: 'DH_UPDATE_STATE',
+      state: { kind: 'available', update: candidate },
+    }))
+
+    const update = screen.getByRole('button', { name: /update now/i })
+    expect(update).toBeEnabled()
+    expect(update).toHaveTextContent(targetVersion)
+    expect(screen.queryByText(/previous version was restored/i)).toBeNull()
+  })
+
+  it.each([
+    ['committed', 'Update completed successfully.', targetVersion],
+    ['rolled-back', 'previous version was restored', transaction.priorVersion],
+  ] as const)('renders a live %s completion immediately', async (outcome, expected, version) => {
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await resolveState(getState, { kind: 'idle' })
+
+    act(() => emitRuntimeMessage({
+      type: 'DH_UPDATE_STATE',
+      state: { kind: 'complete', update: candidate, transactionId: TX, outcome },
+    }))
+
+    const completion = screen.getByText(new RegExp(expected, 'i'))
     expect(completion).toHaveAttribute('role', 'status')
     expect(completion).toHaveTextContent(version)
   })
