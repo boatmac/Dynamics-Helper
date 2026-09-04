@@ -25,7 +25,7 @@ and ZIP SHA-256 values and all five rows below are exactly `PASS`. `PENDING` or
 | Extension full suite | PASS | `894/894` tests passed across `35` test files. |
 | Extension production build | PASS | The single accepted detached B build transformed `2228` modules; all `5` default-item checks and the copy check passed. |
 | Frozen Host build/probe | PASS | Exact PyInstaller `6.22.2`; frozen probe `1/1` with no skip; hidden-import graph `17/17`; onedir inventory `35` internal files and `10` directories. |
-| Static/reachability checks | PASS | Python compileall, TypeScript no-emit, PowerShell installer parse, and diff check passed; legacy updater reachability is limited to `host/updater.py` and legacy-specific tests. |
+| Static/reachability checks | PASS | Python compileall, TypeScript no-emit, PowerShell installer parse, and diff check passed; legacy apply-update reachability is limited to `host/updater.py` and legacy-specific tests; production `cleanup_old_version` remains intentionally reachable. |
 
 ## Cloud PC Scenarios
 
