@@ -410,8 +410,10 @@ production Native Messaging registration rooted at
 - [ ] **Step 3: Document exact DevTools update commands**
 
 State that these commands run in the installed A **Options page DevTools
-console**, where `window.prompt()` is available. Use a local variable for the
-secret URL and never print the complete state object:
+console**, where `window.prompt()` is available, only after the complete
+`plan-d-a` baseline has returned public `DH_UPDATE_GET_STATE` `idle`. Keep that
+Options page and console open. Use a local variable for the secret URL and never
+print the complete state object:
 
 ```javascript
 const privateBUrl = window.prompt('Paste the short-lived private B ZIP URL'); if (!privateBUrl) throw new Error('Private B URL is required')
@@ -421,15 +423,28 @@ const privateBUrl = window.prompt('Paste the short-lived private B ZIP URL'); if
 await chrome.storage.local.remove('pending_update'); await chrome.storage.local.set({dh_update_state:{kind:'available',update:{version:'2.0.76-beta.1',url:privateBUrl,isPrerelease:true}}}); const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,version:s?.update?.version,isPrerelease:s?.update?.isPrerelease,errorCode:s?.errorCode})
 ```
 
-```javascript
-chrome.runtime.reload()
-```
+Require the seed projection to be `available` at `2.0.76-beta.1`. Immediately
+open `edge://extensions` in another tab, open **Dynamics Helper**, open its
+**Service Worker** inspector, and use the **Application** pane's **Stop**
+control. The mandatory order is seed first, then Stop; never Stop before the
+seed. Do not use the Extension **Reload** control or **Unregister**.
 
-After reopening the Options page and its DevTools, document:
+Return to the same already-open Options page and DevTools console. Document that
+the following public request wakes a new normal Worker and verifies the hydrated
+candidate:
 
 ```javascript
 const r=await chrome.runtime.sendMessage({type:'DH_UPDATE_GET_STATE'}); ({handled:r?.handled,kind:r?.state?.kind,version:r?.state?.update?.version,errorCode:r?.state?.errorCode})
 ```
+
+Require `handled: true`, `kind: 'available'`, and version `2.0.76-beta.1`. If
+the result is `idle`, do not start: re-establish a fresh `plan-d-a`/`idle`
+baseline, prompt for and re-enter the SAS URL, seed again, and only then Stop
+the Worker. Explain that `chrome.runtime.reload()` is forbidden for private
+candidate acceptance because Extension reload triggers `onInstalled`, which
+sends `check_updates`, and a public `update_not_available` response clears the
+manual `available` state. Dynamic `import()`, debugger/minified aliases, and
+product backdoors are also forbidden; use only Edge's normal Worker Stop.
 
 Register a sanitized storage listener before starting so the transaction ID is
 captured without printing `update.url`:
@@ -442,15 +457,17 @@ globalThis.dhUpdateWatch=(changes,area)=>{const s=changes.dh_update_state?.newVa
 void chrome.runtime.sendMessage({type:'DH_UPDATE_START'}).then(r=>{const s=r?.state;console.log({handled:r?.handled,kind:s?.kind,transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode})}).catch(()=>console.error('Update start request disconnected'))
 ```
 
-After any reload, reopen Options DevTools and inspect only safe fields:
+After any transaction-driven terminal reload, reopen Options DevTools and
+inspect only safe fields:
 
 ```javascript
 const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode,version:s?.update?.version})
 ```
 
 Every safe `dh_update_state` projection in candidate seeding, baseline,
-`DH_UPDATE_GET_STATE`, storage watching, `DH_UPDATE_START`, reload, terminal
-verification, and Scenario 3 cleanup must include `errorCode`. It may include
+`DH_UPDATE_GET_STATE`, storage watching, `DH_UPDATE_START`, transaction-driven
+terminal reload, terminal verification, and Scenario 3 cleanup must include
+`errorCode`. It may include
 `hasUpdateUrl`, but must never print `update.url`, a complete state object, or a
 thrown message that could contain the URL. Require the operator to copy only
 reviewed safe fields into the ledger.
@@ -1210,10 +1227,19 @@ Update the ledger's A setup note without changing its artifact hash.
 
 - [ ] **Step 1: Run uninterrupted A-to-B**
 
-Start from verified `plan-d-a`. Follow the runbook's private candidate injection
-and payload-free start commands. Record the transaction ID before
-activation/reload removes transient state. Wait for `complete/committed`, verify
-exact B versions/integrity, and perform Analyze/Options smoke checks.
+Start from verified `plan-d-a` with public coordinator state exactly `idle`.
+Follow the runbook's private candidate sequence exactly: prompt and seed
+`available` in the open Options console, immediately Stop only the Service
+Worker from `edge://extensions` -> **Dynamics Helper** -> Service Worker
+**Application** pane, return to the same Options page, and send
+`DH_UPDATE_GET_STATE` to wake the normal Worker. Require the candidate to remain
+`available` before the payload-free start command. Do not use Extension Reload,
+Unregister, dynamic import, debugger/minified aliases, or a product backdoor.
+If the wake result is `idle`, do not start; re-establish fresh `plan-d-a`/`idle`,
+re-enter the SAS URL, seed first, and Stop second. Record the transaction ID
+before activation/transaction-driven reload removes transient state. Wait for
+`complete/committed`, verify exact B versions/integrity, and perform
+Analyze/Options smoke checks.
 
 If state becomes `recovery-required`, Host/Extension versions disagree, integrity
 fails, or UI reports success before terminal verification, mark FAIL and stop.
@@ -1225,9 +1251,14 @@ scenario.
 After Scenario 1, run the complete A installer and verify the full `plan-d-a`
 baseline contract. Start the mandatory timeline watcher, optionally start the
 process-start watcher when CIM event permission is available, and start the
-one-shot post-activation interrupter before a fresh A-to-B transaction. Access
-Denied/unavailable CIM events disable only the optional watcher; they do not
-replace or fail the mandatory polling witness. Accept the interruption only when
+one-shot post-activation interrupter before a fresh A-to-B transaction. Repeat
+the same private sequence from Step 1: prompt and seed first, Stop only the
+Service Worker second, then require public `DH_UPDATE_GET_STATE` to wake the
+normal Worker at `available` before sending `DH_UPDATE_START`. If it wakes at
+`idle`, re-establish the fresh idle baseline and re-enter the SAS URL; do not
+continue. Access Denied/unavailable CIM events disable only the optional
+watcher; they do not replace or fail the mandatory polling witness. Accept the
+interruption only when
 it reports `original-runner-killed` after proving strict same-transaction active
 and browser-owned A-to-B journal authority, armed RunOnce, and the sole exact
 recovery-path runner's canonical same-transaction/process-identity

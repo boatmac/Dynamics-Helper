@@ -201,6 +201,10 @@ const r=await chrome.runtime.sendMessage({type:'DH_UPDATE_GET_STATE'}); ({handle
 Require `handled: true` and `kind: 'idle'`. The safe local-state inspection must
 show no retained update URL.
 
+The guarded `chrome.runtime.reload()` above is permitted only after terminal
+`complete` cleanup. It is not a candidate restart and must never be used after
+private candidate seeding.
+
 Run the disk/process baseline check:
 
 ```powershell
@@ -223,6 +227,9 @@ file copies or delete `updates/**`.
 
 ## Controlled Candidate Start
 
+Do not begin until the complete `plan-d-a` baseline has just returned public
+`DH_UPDATE_GET_STATE` `idle`, with no active authority. Keep the installed A
+Options page and its DevTools console open throughout the candidate restart.
 These commands run only in the installed A **Options page DevTools console**,
 where `window.prompt()` is available. Keep the URL in a local variable, never
 print it, and never print a complete storage or response object.
@@ -237,19 +244,35 @@ Inject the reviewed B candidate and inspect only non-secret fields:
 await chrome.storage.local.remove('pending_update'); await chrome.storage.local.set({dh_update_state:{kind:'available',update:{version:'2.0.76-beta.1',url:privateBUrl,isPrerelease:true}}}); const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,version:s?.update?.version,isPrerelease:s?.update?.isPrerelease,errorCode:s?.errorCode})
 ```
 
-Require `available`, `2.0.76-beta.1`, and `true`, then reload the Extension:
+Require `available`, `2.0.76-beta.1`, and `true`. The exact next operation is a
+normal Service Worker stop: open `edge://extensions` in another tab, open
+**Dynamics Helper**, open its **Service Worker** inspector, then use the
+**Application** pane's **Stop** control for that Worker. Do not click the
+Extension **Reload** control and do not click **Unregister**. The order is
+mandatory: seed `available` first, then Stop. Never Stop before the seed.
 
-```javascript
-chrome.runtime.reload()
-```
-
-Reopen Options and its DevTools console, then verify the hydrated candidate:
+Return to the same already-open Options page and DevTools console. Send the
+public state request below; it wakes a new normal Worker and verifies its
+hydrated candidate:
 
 ```javascript
 const r=await chrome.runtime.sendMessage({type:'DH_UPDATE_GET_STATE'}); ({handled:r?.handled,kind:r?.state?.kind,version:r?.state?.update?.version,errorCode:r?.state?.errorCode})
 ```
 
 Require `handled: true`, `kind: 'available'`, and version `2.0.76-beta.1`.
+If it returns `idle`, do not start an update. Re-establish a fresh
+`plan-d-a`/`idle` baseline, prompt for and re-enter the SAS URL, seed
+`available` again, and only then Stop the Worker. Do not reuse the failed
+attempt as candidate acceptance.
+
+Never use `chrome.runtime.reload()` for this private candidate restart; its only
+runbook use is the guarded terminal-complete cleanup above. An Extension reload
+triggers `onInstalled`, which sends `check_updates`; a normal public
+`update_not_available` response clears the manually seeded `available` state to
+`idle`. Do not substitute dynamic `import()`, a debugger/minified alias, or a
+product backdoor. Edge's normal Service Worker **Stop** is the only
+candidate-restart procedure in this runbook.
+
 Register this sanitized listener before starting. It never prints `update.url`:
 
 ```javascript

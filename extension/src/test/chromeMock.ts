@@ -13,6 +13,8 @@ import { ownDataProperty } from '../utils/ownData'
 //   callbacks; when unused, storage retains its original immediate behavior.
 // - resolveNext / rejectNext fire pending deferrals in FIFO order per action.
 // - storage uses an in-memory Map; reset via resetChromeMock() in beforeEach.
+// - runtime.reload emits update onInstalled; stopping/reloading only a Worker is
+//   modeled by resetting modules without calling runtime.reload.
 
 export type DeferredResponse = {
   resolve: (value: unknown) => void
@@ -505,7 +507,9 @@ const connectNative = vi.fn((application: string) => {
   return queuedNativePorts.splice(index, 1)[0].port
 })
 
-const runtimeReload = vi.fn(() => undefined)
+const runtimeReload = vi.fn(() => {
+  emitInstalled('update' as chrome.runtime.OnInstalledReason)
+})
 
 const alarmsCreate = vi.fn((_name: string, _info: chrome.alarms.AlarmCreateInfo) => undefined)
 const alarmsClear = vi.fn((_name: string, callback?: (wasCleared: boolean) => void) => {

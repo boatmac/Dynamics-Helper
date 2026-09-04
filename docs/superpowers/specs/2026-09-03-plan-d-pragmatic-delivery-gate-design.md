@@ -155,9 +155,17 @@ returns `source_update_disabled`.
 
 ## Cloud PC Scenario 1: Uninterrupted Transaction
 
-Establish `plan-d-a`. Inject B as the exact `available` `dh_update_state`, reload
-the Service Worker, and confirm the hydrated candidate before starting the
-payload-free `DH_UPDATE_START` request.
+Establish `plan-d-a` at public coordinator state `idle`. In the open Options
+console, inject B as the exact `available` `dh_update_state`, then immediately
+stop only the Service Worker through Edge's normal Application-pane **Stop**
+control. Return to the same Options page and send `DH_UPDATE_GET_STATE` to wake
+a fresh normal Worker; require the hydrated candidate to remain `available`
+before starting the payload-free `DH_UPDATE_START` request. Seed must precede
+Stop. Extension Reload and Unregister are forbidden: reload triggers
+`onInstalled`, whose public check can return `update_not_available` and clear a
+manually injected private candidate. If the wake returns `idle`, re-establish a
+fresh idle baseline and re-enter the SAS URL. Dynamic import, debugger/minified
+aliases, and product backdoors are not substitutes for the normal Worker Stop.
 
 Pass criteria:
 

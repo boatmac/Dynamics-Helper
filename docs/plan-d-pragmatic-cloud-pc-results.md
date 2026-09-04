@@ -50,6 +50,12 @@ Scenario 1, no Task 7 scenario has run, and the three rows below remain
 | Smoke checks | PASS | The designated non-customer Analyze check passed without recording case content or identity. Options toggle persistence and restoration passed. |
 | Private B delivery | PASS | The private test-only container contained exactly one object. Remote length and MD5 matched, and an actual download through a short-lived read-only SAS transferred `15619973` bytes and produced SHA-256 `77fbace3562e9052378ce025dbc6e2994fcb13989a391a5996abbc7856f06b54`, matching ledger B. The SAS is short-lived and regenerated as needed; baseline readiness requires revalidation immediately before each transactional scenario. |
 
+Investigation note: preflight attempts observed that Extension reload triggered
+`onInstalled`; the normal update check cleared the manually seeded `available`
+state. No transaction was allocated, no download began, and this was not
+Scenario 1. The corrected procedure seeds first, then uses the normal Service
+Worker **Stop** control before a public state request wakes the new Worker.
+
 ## Cloud PC Scenarios
 
 Set `Result` to `PASS` only when every other field in that row is complete,

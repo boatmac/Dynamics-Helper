@@ -344,6 +344,72 @@ describe('Service Worker transactional update cutover', () => {
     await vi.waitFor(() => expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual({ kind: 'idle' }))
   })
 
+  it('preserves a private candidate across a normal worker restart without checking for updates', async () => {
+    seedStorage({
+      telemetryUserId: 'stable-test-user',
+      [UPDATE_STATE_KEY]: { kind: 'available', update: candidate },
+    })
+    const port = queueNativePort(MAIN_HOST)
+    const importing = import('./serviceWorker')
+
+    await vi.waitFor(() => expect(port.posted).toHaveLength(1))
+    expect(port.posted[0]).toMatchObject({ action: 'get_capabilities' })
+    emitFinal(port, port.posted[0], {
+      host_version: currentVersion,
+      capabilities: ['prompt-scope-v1', 'transactional-update-v1'],
+    })
+    await vi.waitFor(() => expect(port.posted).toHaveLength(2))
+    expect(port.posted[1]).toMatchObject({ action: 'verify_installation' })
+    emitFinal(port, port.posted[1], {
+      mode: 'packaged',
+      integrity: 'verified',
+      host_version: currentVersion,
+      extension_version: currentVersion,
+    })
+    const worker = await importing
+    await worker.updateRuntimeReady
+
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual({
+      kind: 'available',
+      update: candidate,
+    })
+    expect(port.posted).toHaveLength(2)
+  })
+
+  it('extension reload triggers onInstalled and a no-update response clears a private candidate', async () => {
+    seedStorage({
+      telemetryUserId: 'stable-test-user',
+      [UPDATE_STATE_KEY]: { kind: 'available', update: candidate },
+    })
+    const port = queueNativePort(MAIN_HOST)
+    const importing = import('./serviceWorker')
+
+    await vi.waitFor(() => expect(port.posted).toHaveLength(1))
+    emitFinal(port, port.posted[0], {
+      host_version: currentVersion,
+      capabilities: ['prompt-scope-v1', 'transactional-update-v1'],
+    })
+    await vi.waitFor(() => expect(port.posted).toHaveLength(2))
+    emitFinal(port, port.posted[1], {
+      mode: 'packaged',
+      integrity: 'verified',
+      host_version: currentVersion,
+      extension_version: currentVersion,
+    })
+    const worker = await importing
+    await worker.updateRuntimeReady
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toMatchObject({ kind: 'available' })
+
+    chrome.runtime.reload()
+
+    await vi.waitFor(() => expect(port.posted).toHaveLength(3))
+    expect(port.posted[2]).toMatchObject({ action: 'check_updates' })
+    emitFinal(port, port.posted[2], 'Update check initiated')
+    port.emitMessage({ action: 'update_not_available', payload: { version: currentVersion } })
+
+    await vi.waitFor(() => expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual({ kind: 'idle' }))
+  })
+
   it('requests a nonblocking update check on browser startup', async () => {
     const worker = await loadWorker()
     const port = queueNativePort(MAIN_HOST)
