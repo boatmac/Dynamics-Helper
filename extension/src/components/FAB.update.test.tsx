@@ -145,6 +145,12 @@ function completeState(transactionId = TX, outcome: 'committed' | 'rolled-back' 
   return { kind: 'complete', update: candidate, transactionId, outcome } as const
 }
 
+function deferredValue<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(done => { resolve = done })
+  return { promise, resolve }
+}
+
 function bubble(): HTMLElement {
   return document.querySelector('.dh-status-bubble') as HTMLElement
 }
@@ -325,6 +331,57 @@ describe('FAB reliable update projection', () => {
       }
     },
   )
+
+  it('replaces a live transaction A bubble and timers with fresh transaction B deadlines', async () => {
+    vi.useFakeTimers()
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    await renderFab()
+    await resolveState(getState, { kind: 'idle' })
+
+    act(() => emitRuntimeMessage({
+      type: 'DH_UPDATE_STATE',
+      state: completeState(TX, 'rolled-back'),
+    }))
+    const timerAIndex = timeoutSpy.mock.calls.findIndex(([, delay]) => delay === 10_000)
+    expect(timerAIndex).toBeGreaterThanOrEqual(0)
+    const callbackA = timeoutSpy.mock.calls[timerAIndex][0]
+    const timerA = timeoutSpy.mock.results[timerAIndex].value
+    expect(bubble()).toHaveTextContent('previous version was restored')
+    expect(bubble()).toHaveClass('visible', 'error')
+
+    act(() => vi.advanceTimersByTime(4_000))
+    act(() => emitRuntimeMessage({
+      type: 'DH_UPDATE_STATE',
+      state: completeState(TX_B),
+    }))
+
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(timerA)
+    expect(timeoutSpy.mock.calls.filter(([, delay]) => delay === 10_000)).toHaveLength(2)
+    expect(bubble()).toHaveTextContent('Update completed successfully.')
+    expect(bubble()).toHaveClass('visible', 'success')
+
+    act(() => {
+      ;(callbackA as () => void)()
+    })
+    expect(bubble()).toHaveTextContent('Update completed successfully.')
+    expect(bubble()).toHaveClass('visible', 'success')
+
+    act(() => vi.advanceTimersByTime(4_000))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(3_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+    expect(ackMessages()[0].payload).toEqual({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX_B,
+    })
+
+    timeoutSpy.mockRestore()
+    clearTimeoutSpy.mockRestore()
+  })
 
   it.each(['rejected', 'handled-false'] as const)(
     'keeps completion visible after a rejected or handled-false ACK and retries only after remount (%s)',
@@ -601,16 +658,47 @@ describe('FAB reliable update projection', () => {
     timeoutSpy.mockRestore()
   })
 
-  it('does not let a hidden completion callback affect later feedback', async () => {
+  it('clears a live completion through an identity-change hide without affecting later feedback', async () => {
     vi.useFakeTimers()
+    const initialScan = deferredValue<unknown>()
+    const changedScan = deferredValue<unknown>()
+    state.scanForErrors
+      .mockReset()
+      .mockImplementationOnce(() => initialScan.promise)
+      .mockImplementationOnce(() => changedScan.promise)
     const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
     const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
-    await renderLiveCompletion()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    await renderFab()
+    await act(async () => {
+      initialScan.resolve({
+        caseNumber: '1111111111111111',
+        ticketTitle: 'Case A',
+        errorText: 'Case A body',
+      })
+      for (let index = 0; index < 10; index += 1) await Promise.resolve()
+    })
+    await resolveState(getState, { kind: 'idle' })
+    act(() => emitRuntimeMessage({
+      type: 'DH_UPDATE_STATE',
+      state: completeState(),
+    }))
     const completionTimerIndex = timeoutSpy.mock.calls.findIndex(([, delay]) => delay === 10_000)
     const staleCallback = timeoutSpy.mock.calls[completionTimerIndex]?.[0]
     const completionTimer = timeoutSpy.mock.results[completionTimerIndex]?.value
     expect(staleCallback).toEqual(expect.any(Function))
-    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: { kind: 'idle' } }))
+
+    openFab()
+    await act(async () => {
+      changedScan.resolve({
+        caseNumber: '2222222222222222',
+        ticketTitle: 'Case B',
+        errorText: 'Case B body',
+      })
+      for (let index = 0; index < 10; index += 1) await Promise.resolve()
+    })
+
+    expect(state.scanForErrors).toHaveBeenCalledTimes(2)
     expect(bubble()).not.toHaveClass('visible')
     expect(clearTimeoutSpy).toHaveBeenCalledWith(completionTimer)
     act(() => window.dispatchEvent(new CustomEvent('dh-update-error', {
