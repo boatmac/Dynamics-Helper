@@ -151,7 +151,7 @@ function snapshotDataObject(value: unknown): Record<string, unknown> | null {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
     const descriptors = Object.getOwnPropertyDescriptors(value)
     if (Reflect.ownKeys(descriptors).some(key => typeof key !== 'string')) return null
-    const result: Record<string, unknown> = {}
+    const result: Record<string, unknown> = Object.create(null)
     for (const [key, descriptor] of Object.entries(descriptors)) {
       if (!descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) return null
       result[key] = descriptor.value

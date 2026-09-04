@@ -258,6 +258,22 @@ describe('update runtime strict parsers', () => {
     for (const value of parsed) expect(value).toBeNull()
   })
 
+  it('rejects a complete state with an own enumerable __proto__ data key', () => {
+    const complete = {
+      kind: 'complete',
+      update: candidate,
+      transactionId: TX,
+      outcome: 'committed',
+    }
+    Object.defineProperty(complete, '__proto__', {
+      enumerable: true,
+      value: { injected: true },
+    })
+
+    expect(Object.hasOwn(complete, '__proto__')).toBe(true)
+    expect(parseUpdateState(complete)).toBeNull()
+  })
+
   it('parses exact correlated Host action responses and fixed errors', () => {
     const prepare = {
       requestId: 'prepare-1',
@@ -1008,6 +1024,31 @@ describe('completion acknowledgment', () => {
     })).resolves.toEqual({ handled: true, state: complete })
     expect(accessorReads).toBe(0)
     expect(toString).not.toHaveBeenCalled()
+    expect(runtime.getState()).toEqual(complete)
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(complete)
+    expect(chromeMockSpies.storageSet).not.toHaveBeenCalled()
+    expect(broadcast).not.toHaveBeenCalled()
+  })
+
+  it('rejects a completion ACK with an own enumerable __proto__ data key without consuming state', async () => {
+    const complete = completeState()
+    seedStorage({ [UPDATE_STATE_KEY]: complete })
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const runtime = createUpdateRuntime(runtimeDeps({ broadcast }))
+    await runtime.initialize({ resume: false })
+    chromeMockSpies.storageSet.mockClear()
+    broadcast.mockClear()
+    const acknowledgment = {
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    }
+    Object.defineProperty(acknowledgment, '__proto__', {
+      enumerable: true,
+      value: { injected: true },
+    })
+
+    expect(Object.hasOwn(acknowledgment, '__proto__')).toBe(true)
+    await expect(runtime.handleMessage(acknowledgment)).resolves.toEqual({ handled: false })
     expect(runtime.getState()).toEqual(complete)
     expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(complete)
     expect(chromeMockSpies.storageSet).not.toHaveBeenCalled()
