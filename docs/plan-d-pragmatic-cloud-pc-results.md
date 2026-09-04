@@ -11,7 +11,7 @@ those boundaries.
 | Artifact | Version | Source commit | ZIP SHA-256 | Result |
 |---|---|---|---|---|
 | A | `2.0.74-beta.4` | `c77bd3a722259b098a8b8f4a4d1c941cc714e0cd` | `f605720d22fdc18be37673ac19b843d063e929a8a46f1132f54014f830aff6b5` | BUILT |
-| B | `2.0.76-beta.1` | Not recorded | Not recorded | PENDING |
+| B | `2.0.76-beta.1` | `5abe35ab2ab2262d5a7abdf1d21fefe81ebeacf0` | `77fbace3562e9052378ce025dbc6e2994fcb13989a391a5996abbc7856f06b54` | BUILT |
 
 ## Automated Gates
 
@@ -21,11 +21,11 @@ and ZIP SHA-256 values and all five rows below are exactly `PASS`. `PENDING` or
 
 | Gate | Result | Evidence |
 |---|---|---|
-| Host full suite | PENDING | Not run against B |
-| Extension full suite | PENDING | Not run against B |
-| Extension production build | PENDING | Not run against B |
-| Frozen Host build/probe | PENDING | Not run against B |
-| Static/reachability checks | PENDING | Not run against B |
+| Host full suite | PASS | `666` tests in five isolated partitions (`324+141+58+98+45`): `665` passed and the sole allowed environment-gated frozen selector skipped. |
+| Extension full suite | PASS | `894/894` tests passed across `35` test files. |
+| Extension production build | PASS | The single accepted detached B build transformed `2228` modules; all `5` default-item checks and the copy check passed. |
+| Frozen Host build/probe | PASS | Exact PyInstaller `6.22.2`; frozen probe `1/1` with no skip; hidden-import graph `17/17`; onedir inventory `35` internal files and `10` directories. |
+| Static/reachability checks | PASS | Python compileall, TypeScript no-emit, PowerShell installer parse, and diff check passed; legacy updater reachability is limited to `host/updater.py` and legacy-specific tests. |
 
 ## Cloud PC Scenarios
 
