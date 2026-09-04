@@ -315,12 +315,29 @@ This file defines the operational rules, development workflows, and coding stand
   and execution require that capability plus matching Host/Extension versions
   and verified packaged integrity.
 * **Production coordination:** The Service Worker is the only update
-  coordinator. It owns strict parsing, `dh_update_state`, persistence-before-
-  effect ordering, the 30-second alarm, restart resume, terminal reload,
-  installation verification, receipt persistence, and acknowledgment. FAB and
-  Options only send payload-free `DH_UPDATE_GET_STATE` / `DH_UPDATE_START` and
-  consume `DH_UPDATE_STATE`; they never own update storage, Host update payloads,
-  or reload.
+  coordinator, state/storage owner, and serialized transition owner. It owns
+  strict parsing, `dh_update_state`, persistence-before-effect ordering, the
+  30-second alarm, restart resume, terminal reload, installation verification,
+  receipt persistence, and acknowledgment. Every transition is persisted before
+  the in-memory projection changes or `DH_UPDATE_STATE` is broadcast. FAB and
+  Options only request/project state; they never own update storage, Host update
+  payloads, reload, or a completion transition.
+* **Completion identity and acknowledgment:** Every `complete` state requires its
+  originating `transactionId` as exact lowercase 32-hex. Completion consumption
+  accepts only the exact own-data-property message
+  `{type:'DH_UPDATE_ACK_COMPLETE',transactionId}`. Extra/missing/accessor/symbol
+  keys or malformed identity return `handled: false` without getter execution or
+  state effects. A matching committed ACK persists `idle` and removes the private
+  candidate URL; a matching rolled-back ACK persists `available` with the same
+  candidate so ordinary Retry remains. Wrong, stale, and duplicate ACKs are
+  idempotent no-ops.
+* **Completion UI authority:** FAB and Options render a terminal completion
+  immediately and send its identity only after eight seconds for which a view
+  remains mounted. Unmount/state/identity change cancels that view's timer; a
+  later mount gets a fresh interval. The UI neither writes update storage,
+  optimistically hides completion, nor applies the ACK response. Only the
+  Service Worker's persisted `DH_UPDATE_STATE` broadcast is live transition
+  authority, so duplicate-view races are safe.
 * **Host action boundary:** Exactly `perform_update`, `activate_update`,
   `finalize_update_status`, and `acknowledge_update_finalization` route to
   `UpdateService` with strict request-correlated envelopes. Generic

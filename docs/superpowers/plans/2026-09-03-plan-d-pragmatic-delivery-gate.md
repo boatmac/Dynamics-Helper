@@ -2,9 +2,33 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Qualify the current Plan D baseline and one immutable release candidate through automated gates and three pragmatic empty-cloud-PC scenarios, publish the exact qualified candidate, and make that cloud PC the primary environment while leaving the old beta1 workstation unchanged.
+**Historical goal:** Qualify one immutable candidate through automated gates and
+three pragmatic empty-cloud-PC scenarios. The beta1 publication portion is
+superseded; only a separately qualified and approved B2 may proceed to any later
+publication or environment handoff.
+
+**Superseding qualification note (2026-09-05):** The private
+`2.0.76-beta.1` transaction committed successfully, but that candidate is
+DISQUALIFIED because its completion notice replayed permanently. It remains
+unpublished historical evidence and must never be tagged or published. Formal
+qualification now runs B1 `2.0.76-beta.1` -> B2 `2.0.76-beta.2`; historical A
+`2.0.74-beta.4` is retained evidence only and is not rerun. Task 5 supplies the
+exact B2 artifact commands after its immutable build. Where this historical plan
+still names A/B or beta1 commands, this note and the committed runbook's B1/B2
+contract govern; do not execute obsolete candidate commands.
+
+The corrected completion acceptance requires the terminal banner and FAB bubble
+to remain visible before 8000 milliseconds, then disappear only after the
+Service Worker's authoritative ACK transition and stay absent across FAB/Options
+refresh. Committed state must become idle with no private URL; rolled-back state
+must become available with ordinary Retry. Qualification, tag/push/publication,
+and workload handoff each require separate explicit approval.
 
 **Architecture:** First remove test fixtures that incorrectly couple current-product tests to `2.0.74-beta.4`. Then add documentation-only operator artifacts: one exact cloud-PC runbook and one concise result ledger. Build A from the current committed `2.0.74-beta.4` product without rewriting its version, commit B (`2.0.76-beta.1`) on the product branch, build B exactly once from a clean detached worktree, and identify both ZIPs by SHA-256. No product fault hook, alternate update endpoint, cloud-PC harness, mixed-state constructor, evidence collector, public release, tag, or old-workstation install is added or performed without its explicit gate.
+
+The preceding architecture paragraph is historical provenance only. It does not
+authorize rebuilding A/B1 or using beta1 as the current candidate; B2 artifact
+construction and execution are delegated to Task 5.
 
 **Tech Stack:** Python 3.13, unittest, React 19, TypeScript 5.9, Vitest 3, Chrome/Edge MV3 DevTools, PowerShell 7, PyInstaller 6.22.2, Git worktrees, an effectively empty Windows cloud PC, private Azure Blob HTTPS URL.
 
@@ -18,7 +42,9 @@
 - Never run an installer, change Native Messaging registration, mutate `%LOCALAPPDATA%\DynamicsHelper`, terminate production processes, create a tag, push, or publish before its explicit manual gate. Cloud-PC installation steps are allowed only while that machine remains free of the migrated workload. The old workstation is read-only except for disabling its beta preference or extension after a separate confirmation.
 - Every Host process used by automated tests receives fresh existing `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP` directories.
 - Run long Host partitions and the Extension suite sequentially. Do not run `npm run test:run` concurrently with `npm run build`; the FAB page-identity tests have a five-second timing budget.
-- A is not republished. B may be published only as the exact qualified ZIP after explicit user approval.
+- A is not republished. B1 must not be published. B2 may be published only as
+  exact qualified bytes after separate explicit tag/push/publication approval;
+  qualification and workload handoff are separate approvals.
 
 ## File Structure
 
@@ -329,14 +355,17 @@ Open with this contract:
 - Do not install A or B on the old beta1 workstation.
 - Do not migrate the current workload to the cloud PC until all three scenarios
   pass.
-- A is current Plan D `2.0.74-beta.4`; B is candidate `2.0.76-beta.1`.
+- Historical A is `2.0.74-beta.4` and is not rerun; B1
+  `2.0.76-beta.1` is the installed baseline/rollback prior; B2
+  `2.0.76-beta.2` is the qualification target.
 - Keep **Receive beta updates** disabled on A so public `v2.0.75-beta.1`
   cannot replace the manually controlled B candidate.
 - Never paste the private B URL into this file, Git, screenshots, or results.
 - Use only the designated non-customer Dynamics test case for Analyze smoke;
   record PASS/FAIL only, never its case ID, content, report, or screenshots.
 - Never delete `%LOCALAPPDATA%\DynamicsHelper\updates` during recovery.
-- Never publish, tag, push, or rebuild B while qualification is active.
+- Historical instruction superseded: never publish B1; never publish, tag,
+  push, or rebuild B2 while qualification is active.
 - Do not perform any cloud-PC operation until A/B identities are complete and
   all five Automated Gates in the result ledger are `PASS`.
 - Stop immediately if the observed starting version, ZIP SHA-256, Native Host
@@ -685,8 +714,8 @@ Scenario 2's allowed A rollback.
 | Keep old beta1 workstation unchanged | PENDING |
 | Confirm displayed `v2.0.75-beta.1` on old workstation | PENDING |
 | Confirm selected beta-updates or Extension control is disabled | PENDING |
-| Explicit publish approval | PENDING |
-| Verify published B asset hash | PENDING |
+| Explicit B2 tag/push/publish approval | PENDING |
+| Verify published B2 asset hash | PENDING |
 | Migrate workload to qualified cloud PC | PENDING |
 
 No private URL, query string, customer content, prompt content, token, or full
@@ -1364,7 +1393,8 @@ Confirm the blob no longer exists:
 $exists=az storage blob exists --subscription $subscriptionId --account-name $accountName --container-name $containerName --name $blobName --auth-mode login --query exists --output tsv; if($exists -ne 'false'){throw 'Private B blob still exists'}
 ```
 
-Do not delete the local qualified B ZIP.
+Do not delete the historical private B1 ZIP; it is evidence, not a publishable
+candidate. Task 5 separately owns the immutable B2 artifact.
 
 ## Task 8: Freeze The Old Workstation And Approve Environment Handoff
 
@@ -1404,6 +1434,17 @@ git commit -m "docs(update): record environment handoff readiness"
 
 ## Task 9: Publication And Primary-Environment Handoff
 
+This historical beta1 publication task is superseded and must not be executed.
+Task 5 replaces it with exact B2 paths/hash/commands only after B2 qualification
+and fresh, separate publication approval. No command below authorizes publishing
+`2.0.76-beta.1`. Every remaining A/B scenario, artifact, upload, or handoff step
+below this point is preserved only as historical provenance and is non-executable
+until Task 5 replaces it with reviewed B1/B2 text.
+
+The remainder of Task 9 is therefore intentionally fail-closed. Ignore its
+historical prose and execute none of its fenced blocks, including staging or
+commit blocks; Task 5 supplies a complete replacement authority.
+
 **Files:**
 - Modify: `docs/plan-d-pragmatic-cloud-pc-results.md`
 - Modify: `releases/notes-prompt-scope-cleanup-draft.md`
@@ -1418,7 +1459,7 @@ Verify:
 - all ledger gates are PASS;
 - local B ZIP SHA-256 equals the qualified hash;
 - A is not republished as a release;
-- `v2.0.76-beta.1` does not already exist locally or remotely; and
+- B1 remains untagged/unpublished, and Task 5 has supplied the approved B2 tag;
 - release notes state the pragmatic cloud-PC scope and residual automated-only coverage.
 
 Do not run `release_helper.py`; it would rebuild and invalidate B's identity.
@@ -1452,14 +1493,14 @@ git add -- "releases/notes-prompt-scope-cleanup-draft.md"
 ```
 
 ```powershell
-git commit -m "docs(release): finalize v2.0.76-beta.1 notes"
+throw 'SUPERSEDED: Task 5 must provide the B2 release-notes commit step'
 ```
 
 - [ ] **Step 3: Ask for explicit tag/push/publish approval**
 
 Present the exact commit, B ZIP path/hash, release-note path, and proposed GitHub commands. Wait for explicit approval. This is mandatory even if the user approved every earlier task.
 
-- [ ] **Step 4: Tag and publish the already-qualified B bytes**
+- [ ] **Step 4: SUPERSEDED - do not tag or publish beta1**
 
 After approval only, let `$candidateCommit` be the exact commit recorded in the
 ledger. Load and verify it:
@@ -1471,19 +1512,19 @@ $candidateCommit=(Read-Host 'Paste the exact B candidate commit from the ledger'
 Run these independently:
 
 ```powershell
-git tag "v2.0.76-beta.1" $candidateCommit
+throw 'SUPERSEDED: beta1 is disqualified; Task 5 must provide an approved B2 tag command'
 ```
 
 ```powershell
-git push -u origin hardening/plan-d-runtime-installer
+throw 'SUPERSEDED: Task 5 must provide the separately approved B2 branch-push command'
 ```
 
 ```powershell
-git push origin "v2.0.76-beta.1"
+throw 'SUPERSEDED: never push a beta1 tag; Task 5 must provide the approved B2 command'
 ```
 
 ```powershell
-gh release create "v2.0.76-beta.1" "C:\Users\zhaobo\AppData\Local\Temp\opencode\plan-d-qualified-artifacts\DynamicsHelper_v2.0.76-beta.1.zip" --title "v2.0.76-beta.1" --notes-file "releases/notes-prompt-scope-cleanup-draft.md" --prerelease --verify-tag
+throw 'SUPERSEDED: beta1 is disqualified; Task 5 must provide an approved B2 publication command'
 ```
 
 Do not invoke any command that rebuilds B.
@@ -1493,13 +1534,13 @@ Do not invoke any command that rebuilds B.
 Download the published GitHub asset to a new temporary path:
 
 ```powershell
-$download="C:\Users\zhaobo\AppData\Local\Temp\opencode\plan-d-published-b";if(Test-Path -LiteralPath $download){throw "Published-asset verification directory already exists: $download"};New-Item -ItemType Directory -Path $download|Out-Null;gh release download "v2.0.76-beta.1" --pattern "DynamicsHelper_v2.0.76-beta.1.zip" --dir $download
+throw 'SUPERSEDED: do not download or verify a beta1 publication; Task 5 must provide the approved B2 command'
 ```
 
 Verify its SHA-256 equals the qualified B hash recorded in the ledger:
 
 ```powershell
-$qualifiedHash=(Read-Host 'Paste the qualified B SHA-256 from the ledger').Trim().ToLowerInvariant();$publishedHash=(Get-FileHash -Algorithm SHA256 -LiteralPath "C:\Users\zhaobo\AppData\Local\Temp\opencode\plan-d-published-b\DynamicsHelper_v2.0.76-beta.1.zip").Hash.ToLowerInvariant();if($qualifiedHash -notmatch '^[0-9a-f]{64}$' -or $publishedHash -cne $qualifiedHash){throw "Published B hash mismatch"};$publishedHash
+throw 'SUPERSEDED: beta1 is disqualified; Task 5 must provide approved B2 hash verification'
 ```
 
 Do not update or reinstall the cloud PC; it already runs the exact qualified B
@@ -1524,13 +1565,16 @@ git commit -m "docs(update): record first Plan D delivery"
 ```
 
 Do not claim the final delivery gate complete unless the published asset hash
-matches qualified B, the cloud PC remains healthy, the old workstation remains
+matches qualified B2, the cloud PC remains healthy, the old workstation remains
 frozen at beta1, and all evidence is sanitized.
 
 ## Plan Self-Review
 
-- **Spec coverage:** Tasks 3-5 establish immutable A/B artifacts and automated evidence; Tasks 6-7 cover the three approved cloud-PC scenarios; Task 8 freezes the old beta1 fallback; Task 9 publishes exact B bytes, verifies their public identity, and hands the workload to qualified B.
+- **Spec coverage:** Historical A/B1 evidence is retained; Task 5 establishes
+  immutable B2 identity and Task 5's revised B1/B2 runbook governs the three
+  approved cloud-PC scenarios and any later separately approved publication.
 - **Scope:** No production endpoint override, fault hook, cloud-PC harness, mixed-state constructor, or evidence collector is introduced.
 - **Safety:** Azure Storage mutation, cloud-PC installation, old-workstation preference/extension change, publication, and workload migration each have separate explicit approval gates.
-- **Artifact identity:** B is built once, identified by SHA-256, and never rebuilt between qualification and publication.
+- **Artifact identity:** B2 is built once, identified by SHA-256, and never
+  rebuilt between qualification and any separately approved publication.
 - **Residual risk:** Exhaustive cloud-PC fault and mixed-state coverage is explicitly excluded and remains backed by automated tests.

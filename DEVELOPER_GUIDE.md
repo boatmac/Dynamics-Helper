@@ -543,9 +543,48 @@ render its projection and never infer success from a Host response.
    Ordinary forward failures roll back the complete previous product.
 6. Only committed/rolled-back status permits Extension reload. The new Worker
    re-verifies terminal version/capability/integrity, persists the finalization
-   receipt, and acknowledges cleanup before reporting completion.
+   receipt, and acknowledges cleanup before reporting `complete` with the
+   originating lowercase 32-hex transaction ID.
 7. Mixed or incomplete installs persist matching-full-installer guidance until
    a later startup verifies the repaired complete product.
+
+### One-shot completion lifecycle
+
+`complete.transactionId` is required scalar identity, not optional metadata.
+Copy that exact lowercase 32-hex string into timer closures and ACK messages; do
+not retain a mutable state object as identity. Runtime parsing and the Worker
+route accept only exact own enumerable data properties
+`{type:'DH_UPDATE_ACK_COMPLETE',transactionId}`. Reject extra/missing/accessor/
+symbol keys, arrays, non-plain objects, uppercase IDs, and non-strings as
+`handled: false` without reading getters or coercing hostile values.
+
+The Service Worker is the sole update state/storage and serialized transition
+owner. A matching committed ACK persists `idle` (thereby removing the private
+candidate URL); a matching rolled-back ACK persists `available` with the same
+candidate so normal Retry allocates a new transaction. Persistence completes
+before memory and `DH_UPDATE_STATE` broadcast. Wrong, stale, duplicate, and late
+ACKs are no-ops, including an old timer racing a newer completion.
+
+FAB and Options render terminal completion immediately and start a timer only
+while mounted on the same transaction. Cancel it on unmount, identity change, or
+departure from `complete`; a later mount starts a fresh eight-second mounted-time
+interval. On expiry, send `DH_UPDATE_ACK_COMPLETE`, but neither optimistically
+hide nor apply its response. The authoritative broadcast is the sole live UI
+transition, which makes simultaneous FAB/Options timers safe: the first matching
+ACK wins and every duplicate observes non-`complete` state.
+
+The FAB live completion bubble carries that same scalar transaction identity.
+It normally closes on the authoritative eight-second transition. Its ten-second
+fallback is only for a missing authority signal, must verify the same identity,
+and must not close an unrelated analysis/bookmark/status bubble.
+
+Tests must cover exact complete parsing, hostile runtime objects without getter
+execution, persistence-before-broadcast, committed/rolled-back transitions,
+storage failure, stale/wrong/duplicate ACKs, mounted timer cancellation,
+cross-view races, authoritative-response separation, and FAB bubble binding and
+fallback. Use fake timers for UI timing. For every new invariant, temporarily
+break the corresponding implementation, prove the named test fails, restore the
+code, and rerun it; a passing-only test is not sufficient evidence.
 
 `installer_core.ps1` removes the old `_internal` tree before copying the
 packaged runtime. This exact-tree repair is required because installation

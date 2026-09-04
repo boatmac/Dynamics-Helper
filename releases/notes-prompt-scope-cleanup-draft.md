@@ -1,4 +1,8 @@
-# Prompt Scope Cleanup (Next Beta Draft)
+# Prompt Scope Cleanup (`2.0.76-beta.2` Qualification-Pending Draft)
+
+This is the corrected `2.0.76-beta.2` target. Artifact build, private cloud-PC
+qualification, tag, and publication are still pending; this draft does not claim
+a release.
 
 ## Deterministic instruction sources
 
@@ -82,6 +86,19 @@ finalization. The matching installer validates exact release inventory, probes
 the repaired live product, and settles compatible preserved transaction
 authority without deleting contradictory evidence.
 
+Terminal completion is now one-shot and transaction-bound. FAB and Options show
+the result immediately; whichever view remains mounted for 8 seconds first sends
+the strict identity acknowledgment. Only the Service Worker's persisted state
+broadcast removes it globally. Committed completion returns to idle without a
+private candidate URL; rolled-back completion returns to the ordinary Retry
+state. Closing all views early gives the next mount a fresh display interval,
+and the FAB live completion bubble follows the same transaction lifecycle.
+
+Private `2.0.76-beta.1` completed its update transaction, integrity checks,
+finalization ACK, Analyze, and Options checks successfully, but is DISQUALIFIED
+because its completion notice replayed permanently. It remains unpublished and
+is historical evidence only, not qualification for `2.0.76-beta.2`.
+
 ## Verification
 
 - Prompt-scope tenth-wave evidence: isolated Host **143/143 focused** and
@@ -116,6 +133,9 @@ authority without deleting contradictory evidence.
   exact PyInstaller **6.22.2**; the graph contains all **17/17** reviewed hidden
   imports, the onedir inventory is **35 internal files / 10 directories**, and
   the real frozen staged-probe integration passes **1/1**.
+- Implementer-reported one-shot development checks passed Extension
+  **951/951**, update-focused **181/181**, UI **55/55**, and TypeScript. B2
+  artifact and cloud-PC qualification remain pending.
 
 ## Upgrade notes
 

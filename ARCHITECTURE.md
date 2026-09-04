@@ -85,7 +85,14 @@ transaction with durable restart recovery and automatic rollback.
    coordinator to persist `reload-pending` and reload the Extension.
 7. **Finalize:** The new Worker verifies terminal version, capability, and
    integrity, obtains a receipt through `finalize_update_status`, persists it,
-   and calls `acknowledge_update_finalization` before reporting completion.
+   and calls `acknowledge_update_finalization` before reporting `complete` with
+   the originating lowercase 32-hex transaction ID.
+8. **Consume once:** A mounted FAB or Options view displays that terminal result
+   for eight seconds, then sends exact
+   `{type:'DH_UPDATE_ACK_COMPLETE',transactionId}`. The Worker serializes and
+   persists the matching transition before broadcasting it: committed becomes
+   `idle` with no candidate URL; rolled-back becomes `available` with the same
+   candidate and ordinary Retry.
 
 ### Key Files
 
@@ -258,6 +265,23 @@ The Service Worker exclusively owns `dh_update_state`. FAB and Options request
 the current projection with payload-free `DH_UPDATE_GET_STATE`, consume
 `DH_UPDATE_STATE`, and send payload-free `DH_UPDATE_START`; candidate URLs,
 transaction IDs, Host actions, update storage, and reload are not UI-owned.
+
+The Worker is also the sole serialized owner of terminal-notice consumption.
+Every `complete` projection carries the transaction's exact lowercase 32-hex
+`transactionId`. It accepts only exact own enumerable data properties
+`{type:'DH_UPDATE_ACK_COMPLETE',transactionId}`; hostile metadata, malformed
+identity, and stale/wrong/duplicate acknowledgments have no effect. The resulting
+state is durably stored before memory or broadcast changes, and only the
+authoritative `DH_UPDATE_STATE` broadcast changes live UI.
+
+FAB and Options display `complete` immediately. Whichever mounted view retains
+the same transaction for eight seconds first sends the global acknowledgment;
+closing it sooner cancels that timer and a later mount starts a fresh interval.
+Views do not optimistically hide or apply the ACK response, so concurrent timers
+race safely. The FAB's live completion bubble is bound to the same transaction:
+it normally disappears with the authoritative transition, while its ten-second
+fallback applies only when no authority arrives and never affects unrelated
+bubbles.
 
 Exactly four strict Host actions route to `UpdateService`: `perform_update`,
 `activate_update`, `finalize_update_status`, and

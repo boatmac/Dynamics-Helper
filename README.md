@@ -99,7 +99,10 @@ This pre-seeds the host config so future automatic update checks also consider B
 
 Update progress is durable across Service Worker and Extension restarts. A
 terminal update or rollback is re-verified and finalized before success is
-reported. Mixed or unrecoverable installations show persistent guidance to run
+reported. Its result is a one-shot notice: it remains visible for 8 mounted
+seconds, then disappears globally and stays gone; closing the view sooner gives
+the next view a fresh interval. A rollback then returns to the ordinary Retry
+action. Mixed or unrecoverable installations show persistent guidance to run
 the matching full installer. Standalone bootstrap and per-write power-loss
 guarantees remain deferred, so an extreme interruption may still require that
 installer.

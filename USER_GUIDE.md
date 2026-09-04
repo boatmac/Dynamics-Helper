@@ -304,6 +304,14 @@ The extension checks for updates on startup. When a new version is available:
    replacement. Ordinary failures automatically restore the previous complete
    version.
 5. The Extension reloads only after the update commits or rollback completes.
+6. The terminal result appears immediately in FAB and Options. After one view
+   remains open for 8 seconds, the result disappears globally and does not return
+   on refresh. Closing every view sooner pauses consumption; the next open view
+   receives a fresh 8-second display.
+
+After a committed update is acknowledged, the updater returns to idle and no
+private candidate address remains. After rollback, the terminal rollback notice
+disappears and the same candidate returns as the ordinary **Retry** action.
 
 If the installed Host and Extension do not match, guidance to run the matching
 full installer remains visible until the complete product is repaired. An
