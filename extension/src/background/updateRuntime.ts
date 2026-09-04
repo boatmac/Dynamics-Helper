@@ -67,7 +67,7 @@ export type UpdateState =
     } & UpdateTransaction)>
   | Readonly<({ kind: 'reload-pending'; outcome: 'committed' | 'rolled-back'; errorCode?: UpdateErrorCode } & UpdateTransaction)>
   | Readonly<({ kind: 'ack-pending'; receipt: FinalizationReceipt; errorCode?: UpdateErrorCode } & UpdateTransaction)>
-  | Readonly<{ kind: 'complete'; update: UpdateCandidate; outcome: 'committed' | 'rolled-back' }>
+  | Readonly<{ kind: 'complete'; update: UpdateCandidate; transactionId: string; outcome: 'committed' | 'rolled-back' }>
   | Readonly<{
       kind: 'recovery-required'
       code: UpdateErrorCode
@@ -403,14 +403,18 @@ export function parseUpdateState(value: unknown): UpdateState | null {
       : null
   }
   if (kind === 'available' || kind === 'complete') {
-    const keys = kind === 'available' ? ['kind', 'update'] : ['kind', 'update', 'outcome']
+    const keys = kind === 'available'
+      ? ['kind', 'update']
+      : ['kind', 'update', 'transactionId', 'outcome']
     const parsed = exactObject(snapshot, keys)
     if (!parsed) return null
     const update = parsePersistedCandidate(parsed.update)
     if (!update) return null
     if (kind === 'available') return Object.freeze({ kind, update })
+    const transactionId = parseTransactionId(parsed.transactionId)
+    if (!transactionId) return null
     if (parsed.outcome !== 'committed' && parsed.outcome !== 'rolled-back') return null
-    return Object.freeze({ kind, update, outcome: parsed.outcome })
+    return Object.freeze({ kind, update, transactionId, outcome: parsed.outcome })
   }
   if (kind === 'recovery-required') {
     const parsed = optionalExactObject(
@@ -956,6 +960,7 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
     const complete = await persist({
       kind: 'complete',
       update: transaction.update,
+      transactionId: transaction.transactionId,
       outcome: receipt.outcome,
     })
     await clearUpdateAlarm()
@@ -1675,6 +1680,21 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
       alarmRegistered = true
     },
     handleMessage: value => {
+      const acknowledgment = exactObject(value, ['type', 'transactionId'])
+      if (acknowledgment?.type === 'DH_UPDATE_ACK_COMPLETE') {
+        const transactionId = parseTransactionId(acknowledgment.transactionId)
+        if (!transactionId) {
+          return Promise.resolve(Object.freeze({ handled: false as const }))
+        }
+        return serialize(async () => {
+          if (state.kind === 'complete' && state.transactionId === transactionId) {
+            await persist(state.outcome === 'committed'
+              ? { kind: 'idle' }
+              : { kind: 'available', update: state.update })
+          }
+          return Object.freeze({ handled: true as const, state })
+        })
+      }
       const parsed = exactObject(value, ['type'])
       if (!parsed || typeof parsed.type !== 'string') {
         return Promise.resolve(Object.freeze({ handled: false as const }))

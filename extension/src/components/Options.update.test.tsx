@@ -40,9 +40,10 @@ const candidate = {
   url: `https://example.invalid/DynamicsHelper_v${targetVersion}.zip`,
   isPrerelease: true,
 }
+const TX = '0123456789abcdef0123456789abcdef'
 const transaction = {
   update: candidate,
-  transactionId: '0123456789abcdef0123456789abcdef',
+  transactionId: TX,
   targetVersion,
   priorVersion: '2.0.75-beta.1',
 }
@@ -94,7 +95,7 @@ describe('Options reliable update projection', () => {
   ] as const)('keeps a cold %s completion visible', async (outcome, expected, version) => {
     const getState = deferNextResponse('DH_UPDATE_GET_STATE')
     renderOptions()
-    await resolveState(getState, { kind: 'complete', update: candidate, outcome })
+    await resolveState(getState, { kind: 'complete', update: candidate, transactionId: TX, outcome })
 
     const completion = await screen.findByText(new RegExp(expected, 'i'))
     expect(completion).toHaveAttribute('role', 'status')
@@ -107,6 +108,7 @@ describe('Options reliable update projection', () => {
     await resolveState(getState, {
       kind: 'complete',
       update: candidate,
+      transactionId: TX,
       outcome: 'rolled-back',
     })
 

@@ -153,7 +153,7 @@ describe('update runtime strict parsers', () => {
       },
       { kind: 'reload-pending', ...transaction, outcome: 'committed' },
       { kind: 'ack-pending', ...transaction, receipt },
-      { kind: 'complete', update: candidate, outcome: 'rolled-back' },
+      { kind: 'complete', update: candidate, transactionId: TX, outcome: 'rolled-back' },
       {
         kind: 'recovery-required',
         code: 'manual_recovery_required',
@@ -209,6 +209,53 @@ describe('update runtime strict parsers', () => {
       accessorRecord({ kind: 'idle' }, 'kind'),
     ]
     for (const value of invalid) expect(parseUpdateState(value)).toBeNull()
+  })
+
+  it('rejects a complete state with missing, invalid, accessor, extra, or symbol identity metadata', () => {
+    const complete = {
+      kind: 'complete',
+      update: candidate,
+      transactionId: TX,
+      outcome: 'committed',
+    }
+    const accessor = {
+      kind: 'complete',
+      update: candidate,
+      outcome: 'committed',
+    }
+    let accessorReads = 0
+    Object.defineProperty(accessor, 'transactionId', {
+      enumerable: true,
+      get: () => {
+        accessorReads += 1
+        return TX
+      },
+    })
+    const nonEnumerable = {
+      kind: 'complete',
+      update: candidate,
+      outcome: 'committed',
+    }
+    Object.defineProperty(nonEnumerable, 'transactionId', {
+      enumerable: false,
+      value: TX,
+    })
+    const toString = vi.fn(() => TX)
+    const invalid = [
+      { kind: 'complete', update: candidate, outcome: 'committed' },
+      { ...complete, transactionId: TX.toUpperCase() },
+      { ...complete, transactionId: { toString } },
+      accessor,
+      nonEnumerable,
+      { ...complete, extra: true },
+      { ...complete, [Symbol('extra')]: true },
+    ]
+
+    expect(parseUpdateState(complete)).toEqual(complete)
+    const parsed = invalid.map(value => parseUpdateState(value))
+    expect(accessorReads).toBe(0)
+    expect(toString).not.toHaveBeenCalled()
+    for (const value of parsed) expect(value).toBeNull()
   })
 
   it('parses exact correlated Host action responses and fixed errors', () => {
@@ -372,6 +419,13 @@ function runtimeDeps(overrides: Partial<UpdateRuntimeDeps> = {}): UpdateRuntimeD
     verifyInstalled: vi.fn().mockResolvedValue(true),
     ...overrides,
   }
+}
+
+function completeState(
+  transactionId = TX,
+  outcome: 'committed' | 'rolled-back' = 'committed',
+): Extract<UpdateState, { kind: 'complete' }> {
+  return Object.freeze({ kind: 'complete', update: candidate, transactionId, outcome })
 }
 
 describe('status port sender', () => {
@@ -672,7 +726,7 @@ describe('serialized update coordinator', () => {
     await expect(runtime.clearAvailable()).resolves.toEqual({ kind: 'idle' })
 
     seedStorage({
-      [UPDATE_STATE_KEY]: { kind: 'complete', update: candidate, outcome: 'committed' },
+      [UPDATE_STATE_KEY]: { kind: 'complete', update: candidate, transactionId: TX, outcome: 'committed' },
     })
     const complete = createUpdateRuntime(runtimeDeps())
     await complete.initialize({ resume: false })
@@ -681,7 +735,7 @@ describe('serialized update coordinator', () => {
 
   it('clears stale completion after a different manual Extension version loads', async () => {
     seedStorage({
-      [UPDATE_STATE_KEY]: { kind: 'complete', update: candidate, outcome: 'committed' },
+      [UPDATE_STATE_KEY]: { kind: 'complete', update: candidate, transactionId: TX, outcome: 'committed' },
     })
     const runtime = createUpdateRuntime(runtimeDeps({
       freshWorkerVersion: '2.0.77',
@@ -704,6 +758,7 @@ describe('serialized update coordinator', () => {
       [UPDATE_STATE_KEY]: {
         kind: 'complete',
         update: candidate,
+        transactionId: TX,
         outcome: 'rolled-back',
       },
     })
@@ -715,6 +770,7 @@ describe('serialized update coordinator', () => {
     expect(runtime.getState()).toEqual({
       kind: 'complete',
       update: candidate,
+      transactionId: TX,
       outcome: 'rolled-back',
     })
   })
@@ -724,6 +780,7 @@ describe('serialized update coordinator', () => {
       [UPDATE_STATE_KEY]: {
         kind: 'complete',
         update: candidate,
+        transactionId: TX,
         outcome: 'rolled-back',
       },
     })
@@ -904,6 +961,289 @@ describe('serialized update coordinator', () => {
       payload: null,
     })).toEqual({ handled: false })
     expect(await runtime.handleMessage({ type: 'unknown' })).toEqual({ handled: false })
+  })
+})
+
+describe('completion acknowledgment', () => {
+  it('rejects malformed completion ACK metadata without consuming state', async () => {
+    const complete = completeState()
+    seedStorage({ [UPDATE_STATE_KEY]: complete })
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const runtime = createUpdateRuntime(runtimeDeps({ broadcast }))
+    await runtime.initialize({ resume: false })
+    chromeMockSpies.storageSet.mockClear()
+    broadcast.mockClear()
+
+    let accessorReads = 0
+    const accessor = { type: 'DH_UPDATE_ACK_COMPLETE' }
+    Object.defineProperty(accessor, 'transactionId', {
+      enumerable: true,
+      get: () => {
+        accessorReads += 1
+        return TX
+      },
+    })
+    const nonEnumerable = { type: 'DH_UPDATE_ACK_COMPLETE' }
+    Object.defineProperty(nonEnumerable, 'transactionId', {
+      enumerable: false,
+      value: TX,
+    })
+    const toString = vi.fn(() => TX)
+    const malformed = [
+      { type: 'DH_UPDATE_ACK_COMPLETE' },
+      { type: 'DH_UPDATE_ACK_COMPLETE', transactionId: TX.toUpperCase() },
+      { type: 'DH_UPDATE_ACK_COMPLETE', transactionId: { toString } },
+      accessor,
+      nonEnumerable,
+      { type: 'DH_UPDATE_ACK_COMPLETE', transactionId: TX, extra: true },
+      { type: 'DH_UPDATE_ACK_COMPLETE', transactionId: TX, [Symbol('extra')]: true },
+    ]
+
+    for (const value of malformed) {
+      await expect(runtime.handleMessage(value)).resolves.toEqual({ handled: false })
+    }
+    await expect(runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: '1'.repeat(32),
+    })).resolves.toEqual({ handled: true, state: complete })
+    expect(accessorReads).toBe(0)
+    expect(toString).not.toHaveBeenCalled()
+    expect(runtime.getState()).toEqual(complete)
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(complete)
+    expect(chromeMockSpies.storageSet).not.toHaveBeenCalled()
+    expect(broadcast).not.toHaveBeenCalled()
+  })
+
+  it('transitions a matching committed completion ACK to idle', async () => {
+    const complete = completeState()
+    seedStorage({ [UPDATE_STATE_KEY]: complete })
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const runtime = createUpdateRuntime(runtimeDeps({ broadcast }))
+    await runtime.initialize({ resume: false })
+    chromeMockSpies.storageSet.mockClear()
+    broadcast.mockClear()
+
+    await expect(runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })).resolves.toEqual({ handled: true, state: { kind: 'idle' } })
+
+    expect(runtime.getState()).toEqual({ kind: 'idle' })
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual({ kind: 'idle' })
+    expect(broadcast).toHaveBeenCalledOnce()
+    expect(broadcast).toHaveBeenCalledWith({ kind: 'idle' })
+  })
+
+  it('transitions a matching rolled-back completion ACK to available with the same candidate', async () => {
+    const complete = completeState(TX, 'rolled-back')
+    seedStorage({ [UPDATE_STATE_KEY]: complete })
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const runtime = createUpdateRuntime(runtimeDeps({ broadcast }))
+    await runtime.initialize({ resume: false })
+    chromeMockSpies.storageSet.mockClear()
+    broadcast.mockClear()
+    const available = { kind: 'available', update: candidate } as const
+
+    await expect(runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })).resolves.toEqual({ handled: true, state: available })
+
+    expect(runtime.getState()).toEqual(available)
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(available)
+    expect(broadcast).toHaveBeenCalledOnce()
+    expect(broadcast).toHaveBeenCalledWith(available)
+  })
+
+  it('waits for ACK persistence before changing memory or broadcasting', async () => {
+    const complete = completeState()
+    seedStorage({ [UPDATE_STATE_KEY]: complete })
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const runtime = createUpdateRuntime(runtimeDeps({ broadcast }))
+    await runtime.initialize({ resume: false })
+    const write = deferNextStorageSet(UPDATE_STATE_KEY)
+    const acknowledging = runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })
+    let queuedSettled = false
+    const queued = runtime.start().finally(() => {
+      queuedSettled = true
+    })
+
+    await vi.waitFor(() => expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(1))
+    await Promise.resolve()
+    expect(queuedSettled).toBe(false)
+    expect(runtime.getState()).toEqual(complete)
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(complete)
+    expect(broadcast).not.toHaveBeenCalled()
+
+    await write.resolve(undefined)
+    await expect(acknowledging).resolves.toEqual({ handled: true, state: { kind: 'idle' } })
+    await expect(queued).resolves.toEqual({ kind: 'idle' })
+    expect(runtime.getState()).toEqual({ kind: 'idle' })
+    expect(broadcast).toHaveBeenCalledOnce()
+  })
+
+  it('retains complete state when ACK persistence fails', async () => {
+    const complete = completeState()
+    seedStorage({ [UPDATE_STATE_KEY]: complete })
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const runtime = createUpdateRuntime(runtimeDeps({ broadcast }))
+    await runtime.initialize({ resume: false })
+    const write = deferNextStorageSet(UPDATE_STATE_KEY)
+    const acknowledging = runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })
+
+    await vi.waitFor(() => expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(1))
+    await write.reject(new Error('storage unavailable'))
+    await expect(acknowledging).rejects.toThrow('Update storage write failed.')
+    expect(runtime.getState()).toEqual(complete)
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(complete)
+    expect(broadcast).not.toHaveBeenCalled()
+  })
+
+  it('treats wrong stale and duplicate completion ACKs as idempotent no-ops', async () => {
+    const complete = completeState()
+    seedStorage({ [UPDATE_STATE_KEY]: complete })
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const runtime = createUpdateRuntime(runtimeDeps({ broadcast }))
+    await runtime.initialize({ resume: false })
+    chromeMockSpies.storageSet.mockClear()
+    broadcast.mockClear()
+
+    await expect(runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: '1'.repeat(32),
+    })).resolves.toEqual({ handled: true, state: complete })
+    await expect(runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })).resolves.toEqual({ handled: true, state: { kind: 'idle' } })
+    await expect(runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })).resolves.toEqual({ handled: true, state: { kind: 'idle' } })
+    await expect(runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: '1'.repeat(32),
+    })).resolves.toEqual({ handled: true, state: { kind: 'idle' } })
+
+    expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(1)
+    expect(broadcast).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let completion A acknowledgment consume current completion B', async () => {
+    const transactionB = '2'.repeat(32)
+    const completeB = completeState(transactionB)
+    seedStorage({ [UPDATE_STATE_KEY]: completeB })
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const runtime = createUpdateRuntime(runtimeDeps({ broadcast }))
+    await runtime.initialize({ resume: false })
+    chromeMockSpies.storageSet.mockClear()
+    broadcast.mockClear()
+
+    await expect(runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })).resolves.toEqual({ handled: true, state: completeB })
+
+    expect(runtime.getState()).toEqual(completeB)
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(completeB)
+    expect(chromeMockSpies.storageSet).not.toHaveBeenCalled()
+    expect(broadcast).not.toHaveBeenCalled()
+  })
+
+  it('hydrates an exact same-version completion for acknowledgment', async () => {
+    const complete = completeState()
+    seedStorage({ [UPDATE_STATE_KEY]: complete })
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const runtime = createUpdateRuntime(runtimeDeps({
+      broadcast,
+      freshWorkerVersion: candidate.version,
+      getVerifiedProduct: vi.fn().mockResolvedValue({
+        version: candidate.version,
+        mode: 'packaged',
+      }),
+    }))
+
+    await expect(runtime.initialize({
+      resume: false,
+      priorWorkerVersion: candidate.version,
+    })).resolves.toEqual(complete)
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(complete)
+    await expect(runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })).resolves.toEqual({ handled: true, state: { kind: 'idle' } })
+  })
+
+  it('uses NEW_TX for a rolled-back retry and ignores a late OLD_TX completion ACK', async () => {
+    const newTransactionId = '3'.repeat(32)
+    const oldComplete = completeState(TX, 'rolled-back')
+    seedStorage({ [UPDATE_STATE_KEY]: oldComplete })
+    const prepare = deferredPending('prepare-1')
+    const requestMain = vi.fn().mockReturnValueOnce(prepare.pending)
+    const createTransactionId = vi.fn(() => newTransactionId)
+    const runtime = createUpdateRuntime(runtimeDeps({ requestMain, createTransactionId }))
+    await runtime.initialize({ resume: false })
+
+    await expect(runtime.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })).resolves.toEqual({
+      handled: true,
+      state: { kind: 'available', update: candidate },
+    })
+    const starting = runtime.start()
+    await vi.waitFor(() => expect(requestMain).toHaveBeenCalledTimes(1))
+    expect(createTransactionId).toHaveBeenCalledTimes(1)
+    expect(runtime.getState()).toMatchObject({
+      kind: 'preparing',
+      transactionId: newTransactionId,
+    })
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toMatchObject({
+      kind: 'preparing',
+      transactionId: newTransactionId,
+    })
+    expect(requestMain).toHaveBeenCalledWith({
+      action: 'perform_update',
+      payload: {
+        url: candidate.url,
+        transactionId: newTransactionId,
+        targetVersion: candidate.version,
+      },
+    })
+    prepare.resolve({
+      requestId: 'prepare-1',
+      status: 'error',
+      error_code: 'update_prepare_failed',
+      error: 'The update could not be prepared. Retry or run the matching full installer.',
+    })
+    await starting
+
+    const newComplete = completeState(newTransactionId)
+    seedStorage({ [UPDATE_STATE_KEY]: newComplete })
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const rehydrated = createUpdateRuntime(runtimeDeps({ broadcast }))
+    await expect(rehydrated.initialize({ resume: false })).resolves.toEqual(newComplete)
+    chromeMockSpies.storageSet.mockClear()
+    broadcast.mockClear()
+
+    await expect(rehydrated.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })).resolves.toEqual({ handled: true, state: newComplete })
+    expect(chromeMockSpies.storageSet).not.toHaveBeenCalled()
+    expect(broadcast).not.toHaveBeenCalled()
+
+    await expect(rehydrated.handleMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: newTransactionId,
+    })).resolves.toEqual({ handled: true, state: { kind: 'idle' } })
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual({ kind: 'idle' })
   })
 })
 
@@ -1802,7 +2142,7 @@ describe('update coordinator post-reload finalization', () => {
     })
   })
 
-  it('persists receipt before acknowledgment and completes exactly once', async () => {
+  it('persists receipt before acknowledgment and completes once with the transaction identity', async () => {
     seedStorage({
       [UPDATE_STATE_KEY]: {
         kind: 'reload-pending',
@@ -1851,12 +2191,15 @@ describe('update coordinator post-reload finalization', () => {
     })
     await initializing
 
-    expect(runtime.getState()).toEqual({
+    const complete = {
       kind: 'complete',
       update: candidate,
+      transactionId: TX,
       outcome: 'committed',
-    })
-    expect(broadcast.mock.calls.filter(call => call[0].kind === 'complete')).toHaveLength(1)
+    } as const
+    expect(runtime.getState()).toEqual(complete)
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(complete)
+    expect(broadcast.mock.calls.filter(call => call[0].kind === 'complete')).toEqual([[complete]])
     expect(chromeMockSpies.alarmsClear).toHaveBeenCalledWith(
       UPDATE_ALARM_NAME,
       expect.any(Function),
@@ -2084,6 +2427,7 @@ describe('update coordinator post-reload finalization', () => {
     expect(runtime.getState()).toEqual({
       kind: 'complete',
       update: candidate,
+      transactionId: TX,
       outcome: 'rolled-back',
     })
   })
@@ -2140,6 +2484,7 @@ describe('update coordinator post-reload finalization', () => {
     expect(runtime.getState()).toEqual({
       kind: 'complete',
       update: candidate,
+      transactionId: TX,
       outcome: 'committed',
     })
   })
