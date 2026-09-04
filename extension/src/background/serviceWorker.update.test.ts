@@ -365,12 +365,75 @@ describe('Service Worker transactional update cutover', () => {
     await expect(dispatchRuntimeMessage({ type: { toString } })).resolves.toEqual({ handled: false })
     await expect(dispatchRuntimeMessage(proxy)).resolves.toEqual({ handled: false })
     await expect(dispatchRuntimeMessage({})).resolves.toBeUndefined()
+    await expect(dispatchRuntimeMessage(Object.create({ type: 'NATIVE_MSG' }))).resolves.toBeUndefined()
+    await expect(dispatchRuntimeMessage([])).resolves.toBeUndefined()
+    await expect(dispatchRuntimeMessage(undefined)).resolves.toBeUndefined()
+    await expect(dispatchRuntimeMessage(null)).resolves.toBeUndefined()
     await expect(dispatchRuntimeMessage(7)).resolves.toBeUndefined()
+    await expect(dispatchRuntimeMessage('NATIVE_MSG')).resolves.toBeUndefined()
     expect(getter).not.toHaveBeenCalled()
     expect(toString).not.toHaveBeenCalled()
     expect(descriptorLookup).toHaveBeenCalledOnce()
     expect(descriptorLookup.mock.calls[0]?.[1]).toBe('type')
     expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
+  })
+
+  it('ignores a revoked runtime message proxy without throwing or causing effects', async () => {
+    await loadWorker()
+    const baselines = {
+      storageSet: chromeMockSpies.storageSet.mock.calls.length,
+      runtimeSend: chromeMockSpies.runtimeSendMessage.mock.calls.length,
+      tabSend: chromeMockSpies.tabsSendMessage.mock.calls.length,
+      tabsQuery: chromeMockSpies.tabsQuery.mock.calls.length,
+    }
+    const { proxy, revoke } = Proxy.revocable({}, {})
+    revoke()
+
+    await expect(dispatchRuntimeMessage(proxy)).resolves.toBeUndefined()
+
+    expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
+    expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(baselines.storageSet)
+    expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledTimes(baselines.runtimeSend)
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledTimes(baselines.tabSend)
+    expect(chromeMockSpies.tabsQuery).toHaveBeenCalledTimes(baselines.tabsQuery)
+  })
+
+  it('leaves type ownership unproven when a runtime message descriptor trap throws', async () => {
+    await loadWorker()
+    const baselines = {
+      storageSet: chromeMockSpies.storageSet.mock.calls.length,
+      runtimeSend: chromeMockSpies.runtimeSendMessage.mock.calls.length,
+      tabSend: chromeMockSpies.tabsSendMessage.mock.calls.length,
+      tabsQuery: chromeMockSpies.tabsQuery.mock.calls.length,
+    }
+    const descriptorLookup = vi.fn((_target: object, _property: PropertyKey) => {
+      throw new Error('descriptor unavailable')
+    })
+    const get = vi.fn(() => { throw new Error('unexpected get trap') })
+    const getPrototypeOf = vi.fn(() => { throw new Error('unexpected prototype trap') })
+    const has = vi.fn(() => { throw new Error('unexpected has trap') })
+    const ownKeys = vi.fn(() => { throw new Error('unexpected ownKeys trap') })
+    const proxy = new Proxy({}, {
+      getOwnPropertyDescriptor: descriptorLookup,
+      get,
+      getPrototypeOf,
+      has,
+      ownKeys,
+    })
+
+    await expect(dispatchRuntimeMessage(proxy)).resolves.toBeUndefined()
+
+    expect(descriptorLookup).toHaveBeenCalledOnce()
+    expect(descriptorLookup.mock.calls[0]?.[1]).toBe('type')
+    expect(get).not.toHaveBeenCalled()
+    expect(getPrototypeOf).not.toHaveBeenCalled()
+    expect(has).not.toHaveBeenCalled()
+    expect(ownKeys).not.toHaveBeenCalled()
+    expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
+    expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(baselines.storageSet)
+    expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledTimes(baselines.runtimeSend)
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledTimes(baselines.tabSend)
+    expect(chromeMockSpies.tabsQuery).toHaveBeenCalledTimes(baselines.tabsQuery)
   })
 
   it('hydrates update state before forwarding an ordinary Native request', async () => {
