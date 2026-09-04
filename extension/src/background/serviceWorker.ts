@@ -517,11 +517,24 @@ export { createTransactionId }
 // Listen for messages from Content Script or Popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const type = ownDataProperty(message, 'type')
-    if (type.kind !== 'value' || typeof type.value !== 'string') return false
+    if (
+        type.kind === 'absent'
+        || typeof message !== 'object'
+        || message === null
+        || Array.isArray(message)
+    ) return false
+    if (type.kind !== 'value' || typeof type.value !== 'string') {
+        sendResponse({ handled: false })
+        return false
+    }
     const messageType = type.value
     const payload = ownDataProperty(message, 'payload')
     const messagePayload = payload.kind === 'value' ? payload.value : undefined
-    if (messageType === 'DH_UPDATE_START' || messageType === 'DH_UPDATE_GET_STATE') {
+    if (
+        messageType === 'DH_UPDATE_START'
+        || messageType === 'DH_UPDATE_GET_STATE'
+        || messageType === 'DH_UPDATE_ACK_COMPLETE'
+    ) {
         updateRuntimeReady
             .then(() => updateRuntime.handleMessage(message))
             .then(sendResponse)

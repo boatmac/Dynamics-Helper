@@ -29,6 +29,7 @@ const MAIN_HOST = 'com.dynamics.helper.native'
 const TX = '0123456789abcdef0123456789abcdef'
 const currentVersion = '2.0.75-beta.1'
 const targetVersion = '2.0.76-beta.1'
+const completionVersion = targetVersion
 const candidateWire = {
   version: `v${targetVersion}`,
   url: `https://example.invalid/DynamicsHelper_v${targetVersion}.zip`,
@@ -38,6 +39,12 @@ const candidate = {
   version: targetVersion,
   url: candidateWire.url,
   isPrerelease: true,
+}
+const committedCompletion = {
+  kind: 'complete' as const,
+  update: candidate,
+  transactionId: TX,
+  outcome: 'committed' as const,
 }
 
 beforeEach(() => {
@@ -65,7 +72,146 @@ function emitFinal(port: ReturnType<typeof queueNativePort>, request: any, data:
   })
 }
 
+async function loadWorkerWithCommittedCompletion() {
+  setManifestVersion(completionVersion)
+  setActiveTabs([{ id: 42 }, { id: 43 }])
+  seedStorage({
+    [UPDATE_STATE_KEY]: committedCompletion,
+    dh_update_worker_version: completionVersion,
+  })
+  const port = queueNativePort(MAIN_HOST)
+  const importing = import('./serviceWorker')
+
+  await vi.waitFor(() => expect(port.posted).toHaveLength(1))
+  expect(port.posted[0]).toMatchObject({ action: 'get_capabilities' })
+  emitFinal(port, port.posted[0], {
+    host_version: completionVersion,
+    capabilities: ['prompt-scope-v1', 'transactional-update-v1'],
+  })
+  await vi.waitFor(() => expect(port.posted).toHaveLength(2))
+  expect(port.posted[1]).toMatchObject({ action: 'verify_installation' })
+  emitFinal(port, port.posted[1], {
+    mode: 'packaged',
+    integrity: 'verified',
+    host_version: completionVersion,
+    extension_version: completionVersion,
+  })
+
+  const worker = await importing
+  await worker.updateRuntimeReady
+  return {
+    worker,
+    port,
+    baselines: {
+      storageSet: chromeMockSpies.storageSet.mock.calls.length,
+      runtimeSend: chromeMockSpies.runtimeSendMessage.mock.calls.length,
+      tabSend: chromeMockSpies.tabsSendMessage.mock.calls.length,
+      tabsQuery: chromeMockSpies.tabsQuery.mock.calls.length,
+    },
+  }
+}
+
 describe('Service Worker transactional update cutover', () => {
+  it('routes an exact DH_UPDATE_ACK_COMPLETE message to durable committed consumption', async () => {
+    const { port, baselines } = await loadWorkerWithCommittedCompletion()
+
+    await expect(dispatchRuntimeMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })).resolves.toEqual({ handled: true, state: { kind: 'idle' } })
+
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual({ kind: 'idle' })
+    expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(baselines.storageSet + 1)
+    expect(chromeMockSpies.storageSet.mock.calls[baselines.storageSet]?.[0]).toEqual({
+      [UPDATE_STATE_KEY]: { kind: 'idle' },
+    })
+    expect(port.posted).toHaveLength(2)
+  })
+
+  it('broadcasts persisted completion consumption to runtime and every tab', async () => {
+    const { baselines } = await loadWorkerWithCommittedCompletion()
+    const event = { type: 'DH_UPDATE_STATE', state: { kind: 'idle' } }
+    setActiveTabs([{ id: 42 }, {}, { id: 43 }])
+
+    await dispatchRuntimeMessage({
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    })
+
+    expect(chromeMockSpies.runtimeSendMessage.mock.calls.slice(baselines.runtimeSend)).toEqual([
+      [event],
+    ])
+    expect(chromeMockSpies.tabsSendMessage.mock.calls.slice(baselines.tabSend)).toEqual([
+      [42, event],
+      [43, event],
+    ])
+  })
+
+  it('leaves completion untouched for malformed completion ACK metadata', async () => {
+    const { worker, port, baselines } = await loadWorkerWithCommittedCompletion()
+    const getter = vi.fn(() => TX)
+    const accessor = { type: 'DH_UPDATE_ACK_COMPLETE' }
+    Object.defineProperty(accessor, 'transactionId', { enumerable: true, get: getter })
+    const nonEnumerable = { type: 'DH_UPDATE_ACK_COMPLETE' }
+    Object.defineProperty(nonEnumerable, 'transactionId', {
+      enumerable: false,
+      value: TX,
+    })
+    const toString = vi.fn(() => TX)
+    const protoKey = {
+      type: 'DH_UPDATE_ACK_COMPLETE',
+      transactionId: TX,
+    }
+    Object.defineProperty(protoKey, '__proto__', {
+      enumerable: true,
+      value: { injected: true },
+    })
+    const malformed: unknown[] = [
+      { type: 'DH_UPDATE_ACK_COMPLETE' },
+      { type: 'DH_UPDATE_ACK_COMPLETE', transactionId: TX.toUpperCase() },
+      { type: 'DH_UPDATE_ACK_COMPLETE', transactionId: { toString } },
+      nonEnumerable,
+      { type: 'DH_UPDATE_ACK_COMPLETE', transactionId: TX, extra: true },
+      { type: 'DH_UPDATE_ACK_COMPLETE', transactionId: TX, [Symbol('extra')]: true },
+      accessor,
+      protoKey,
+    ]
+
+    for (const value of malformed) {
+      await expect(dispatchRuntimeMessage(value)).resolves.toEqual({ handled: false })
+    }
+
+    expect(getter).not.toHaveBeenCalled()
+    expect(toString).not.toHaveBeenCalled()
+    expect(worker.updateRuntime.getState()).toEqual(committedCompletion)
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(committedCompletion)
+    expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(baselines.storageSet)
+    expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledTimes(baselines.runtimeSend)
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledTimes(baselines.tabSend)
+    expect(chromeMockSpies.tabsQuery).toHaveBeenCalledTimes(baselines.tabsQuery)
+    expect(port.posted).toHaveLength(2)
+  })
+
+  it('rejects nested completion ACK spoofing through NATIVE_MSG without Host forwarding', async () => {
+    const { worker, port, baselines } = await loadWorkerWithCommittedCompletion()
+
+    await expect(dispatchRuntimeMessage({
+      type: 'NATIVE_MSG',
+      payload: { type: 'DH_UPDATE_ACK_COMPLETE', transactionId: TX },
+    })).resolves.toEqual({
+      status: 'error',
+      error: 'Invalid Extension Native message metadata.',
+      error_code: 'invalid_native_message_metadata',
+    })
+
+    expect(worker.updateRuntime.getState()).toEqual(committedCompletion)
+    expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual(committedCompletion)
+    expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(baselines.storageSet)
+    expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledTimes(baselines.runtimeSend)
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledTimes(baselines.tabSend)
+    expect(port.posted).toHaveLength(2)
+  })
+
   it('returns raw correlated Native handles and keeps progress pending', async () => {
     const worker = await loadWorker()
     const port = queueNativePort(MAIN_HOST)
@@ -193,14 +339,37 @@ describe('Service Worker transactional update cutover', () => {
     await expect(current.response).resolves.toMatchObject({ data: 'pong' })
   })
 
-  it('ignores accessor-backed runtime messages without invoking them', async () => {
+  it('returns handled false for invalid outer completion ACK metadata without invoking getters', async () => {
     await loadWorker()
-    const getter = vi.fn(() => 'NATIVE_MSG')
+    const getter = vi.fn(() => 'DH_UPDATE_ACK_COMPLETE')
     const message = {}
     Object.defineProperty(message, 'type', { enumerable: true, get: getter })
+    const listener = chromeMockSpies.runtimeOnMessageAddListener.mock.calls.at(-1)?.[0]
+    const sendResponse = vi.fn()
+    const toString = vi.fn(() => 'DH_UPDATE_ACK_COMPLETE')
+    const descriptorLookup = vi.fn((_target: object, _property: PropertyKey) => ({
+      configurable: true,
+      enumerable: true,
+      get: getter,
+    }))
+    const proxy = new Proxy({}, {
+      getOwnPropertyDescriptor: descriptorLookup,
+      get: () => { throw new Error('unexpected get trap') },
+      getPrototypeOf: () => { throw new Error('unexpected prototype trap') },
+      has: () => { throw new Error('unexpected has trap') },
+      ownKeys: () => { throw new Error('unexpected ownKeys trap') },
+    })
 
-    await expect(dispatchRuntimeMessage(message)).resolves.toBeUndefined()
+    expect(listener?.(message, {} as chrome.runtime.MessageSender, sendResponse)).toBe(false)
+    expect(sendResponse).toHaveBeenCalledWith({ handled: false })
+    await expect(dispatchRuntimeMessage({ type: { toString } })).resolves.toEqual({ handled: false })
+    await expect(dispatchRuntimeMessage(proxy)).resolves.toEqual({ handled: false })
+    await expect(dispatchRuntimeMessage({})).resolves.toBeUndefined()
+    await expect(dispatchRuntimeMessage(7)).resolves.toBeUndefined()
     expect(getter).not.toHaveBeenCalled()
+    expect(toString).not.toHaveBeenCalled()
+    expect(descriptorLookup).toHaveBeenCalledOnce()
+    expect(descriptorLookup.mock.calls[0]?.[1]).toBe('type')
     expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
   })
 
