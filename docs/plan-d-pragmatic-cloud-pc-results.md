@@ -29,21 +29,26 @@ and ZIP SHA-256 values and all five rows below are exactly `PASS`. `PENDING` or
 
 ## Cloud PC Baseline
 
-Task 6 is `PASS/READY` as of `2026-09-04 UTC`. This establishes the
-`plan-d-a` baseline only; it is not Scenario 1 and does not change the three
-`PENDING` scenario rows below.
+Task 6 baseline and preconditions are `PASS` as of `2026-09-04 UTC`. The private
+URL is time-limited and must be revalidated immediately before each
+transactional scenario. This establishes the `plan-d-a` baseline only; it is not
+Scenario 1, no Task 7 scenario has run, and the three rows below remain
+`PENDING`.
 
 | Check | Result | Sanitized evidence |
 |---|---|---|
-| Qualification and transfer | PASS | The entry gate passed. A and B were copied through local-disk redirection to the confirmed effectively empty cloud PC; both local hashes matched the Artifact Identity ledger exactly. |
+| Qualification entry | PASS | The entry gate passed. |
+| Azure authorization | PASS | AzureCloud was selected. The user selected an existing Storage account and explicitly authorized creating a new test-only private container in it, uploading B, and generating a short-lived SAS. No cloud target or user names or IDs are recorded. |
+| Cloud PC authorization and transfer | PASS | The user confirmed that the cloud PC was effectively empty and explicitly authorized copying A/B, running the A/B installers as required by the runbook, changing Native Messaging registration, and terminating test update runner/Host processes. A and B were copied through local-disk redirection; both local hashes matched the Artifact Identity ledger exactly. This authorization did not execute a Task 7 scenario. |
 | Empty-machine marker | PASS | The exact cloud-PC marker check passed. |
 | Prerequisites | PASS | Edge was present; Chrome was not installed and was not required. Copilot CLI stable `1.0.82` was installed with WinGet and OAuth-authenticated to the intended account. |
 | A install and registration | PASS | The installer reported `SUCCESS: Installation Complete!` under the target LocalAppData and registration succeeded. Disk and Edge Native Messaging registration passed; Host and Extension were both `2.0.74-beta.4`. |
+| A zero executor | PASS | Fresh evidence reported `ActiveAuthority: false`, `RunnerCount: 0`, `FinalizationCursor: false`, and `RunOnceArmed: false`. |
 | Options and capabilities | PASS | The Options screenshot confirmed beta updates OFF. `get_capabilities` reported Host `2.0.74-beta.4` with `transactional-update-v1: true`. |
 | Installed integrity | PASS | `verify_installation` reported packaged and verified, with Extension `2.0.74-beta.4`. |
 | Coordinator state | PASS | Public and stored coordinator state were both `idle`, `hasUpdateUrl` was false, and no active update authority existed. |
 | Smoke checks | PASS | The designated non-customer Analyze check passed without recording case content or identity. Options toggle persistence and restoration passed. |
-| Private B delivery | PASS | B was uploaded to test-only private storage; remote length and MD5 matched. A four-hour read-only SAS was generated, and its HEAD check returned `200` with matching length. |
+| Private B delivery | PASS | The private test-only container contained exactly one object. Remote length and MD5 matched, and an actual download through a short-lived read-only SAS transferred `15619973` bytes and produced SHA-256 `77fbace3562e9052378ce025dbc6e2994fcb13989a391a5996abbc7856f06b54`, matching ledger B. The SAS is short-lived and regenerated as needed; baseline readiness requires revalidation immediately before each transactional scenario. |
 
 ## Cloud PC Scenarios
 
