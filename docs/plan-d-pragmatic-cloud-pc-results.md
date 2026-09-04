@@ -27,6 +27,24 @@ and ZIP SHA-256 values and all five rows below are exactly `PASS`. `PENDING` or
 | Frozen Host build/probe | PASS | Exact PyInstaller `6.22.2`; frozen probe `1/1` with no skip; hidden-import graph `17/17`; onedir inventory `35` internal files and `10` directories. |
 | Static/reachability checks | PASS | Python compileall, TypeScript no-emit, PowerShell installer parse, and diff check passed; legacy apply-update reachability is limited to `host/updater.py` and legacy-specific tests; production `cleanup_old_version` remains intentionally reachable. |
 
+## Cloud PC Baseline
+
+Task 6 is `PASS/READY` as of `2026-09-04 UTC`. This establishes the
+`plan-d-a` baseline only; it is not Scenario 1 and does not change the three
+`PENDING` scenario rows below.
+
+| Check | Result | Sanitized evidence |
+|---|---|---|
+| Qualification and transfer | PASS | The entry gate passed. A and B were copied through local-disk redirection to the confirmed effectively empty cloud PC; both local hashes matched the Artifact Identity ledger exactly. |
+| Empty-machine marker | PASS | The exact cloud-PC marker check passed. |
+| Prerequisites | PASS | Edge was present; Chrome was not installed and was not required. Copilot CLI stable `1.0.82` was installed with WinGet and OAuth-authenticated to the intended account. |
+| A install and registration | PASS | The installer reported `SUCCESS: Installation Complete!` under the target LocalAppData and registration succeeded. Disk and Edge Native Messaging registration passed; Host and Extension were both `2.0.74-beta.4`. |
+| Options and capabilities | PASS | The Options screenshot confirmed beta updates OFF. `get_capabilities` reported Host `2.0.74-beta.4` with `transactional-update-v1: true`. |
+| Installed integrity | PASS | `verify_installation` reported packaged and verified, with Extension `2.0.74-beta.4`. |
+| Coordinator state | PASS | Public and stored coordinator state were both `idle`, `hasUpdateUrl` was false, and no active update authority existed. |
+| Smoke checks | PASS | The designated non-customer Analyze check passed without recording case content or identity. Options toggle persistence and restoration passed. |
+| Private B delivery | PASS | B was uploaded to test-only private storage; remote length and MD5 matched. A four-hour read-only SAS was generated, and its HEAD check returned `200` with matching length. |
+
 ## Cloud PC Scenarios
 
 Set `Result` to `PASS` only when every other field in that row is complete,
