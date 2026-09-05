@@ -114,7 +114,11 @@ is historical evidence only, not qualification for `2.0.76-beta.2`.
 - Plan A/B regressions passed **134/134**; full Extension remained **340/340**;
   isolated compile/static/scope gates and restored break-and-fail mutations
   passed.
-- Disposable-VM recovery smoke remains required before release and was not run.
+- The approved pragmatic B2 cloud-PC gate replaces the broader disposable-VM
+  claim. It requires uninterrupted B1-to-B2 update, exact original-runner
+  interruption with same-transaction recovery, and matching-installer repair on
+  an effectively empty cloud PC. All three scenarios remain pending until
+  separately authorized execution; this draft does not claim they passed.
 - Finalization durability now covers every reserved/receipt/receipt-ready/ack/
   cursor-removal crash boundary, ordinary fault replay, receipt-scratch cleanup,
   lexical reparse rejection, exact entry-type errors, and serialized concurrent

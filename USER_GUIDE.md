@@ -220,7 +220,7 @@ Important behavior:
     * You can **edit the context** directly in the textarea — your edits are preserved even if the page changes in the background.
     * Click the **refresh icon** to re-scrape the page (this will replace your edits with fresh data).
 4. **Analyze:** Click the **Analyze** button.
-    * The tool will send the context to the local AI Agent.
+    * The Native Host applies local pattern redaction, then sends the resulting context to cloud-hosted GitHub Copilot.
     * **Wait:** Deep analysis can take **2-5 minutes** if the agent needs to search logs or run database queries.
 5. **View Results:**
     * The analysis summary will appear inline in the floating panel.
@@ -236,6 +236,11 @@ In the extension settings, you can enable automatic analysis:
 
 * **Always:** The tool automatically analyzes when you navigate to a new case.
 * **Initial Pending:** The tool only auto-analyzes cases in "Initial Pending" status.
+
+Auto-Analyze sends the freshly scraped Case Context after local pattern
+redaction, without pausing for manual review or edits. If you need to inspect or
+remove content before it is sent to GitHub Copilot, keep Auto-Analyze disabled,
+open Case Context, edit it, and click **Analyze** manually.
 
 ### Session Persistence (Copilot CLI Integration)
 
