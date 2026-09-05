@@ -1,14 +1,14 @@
 # Dynamics Helper
 
-A productivity tool for Technical Support Engineers (TSEs) to analyze support tickets directly from the browser using local AI.
+A productivity tool for Technical Support Engineers (TSEs) to analyze support tickets from the browser using GitHub Copilot through a local Native Host.
 
 ## Features
 
 * **AI-Powered Analysis:** Uses GitHub Copilot SDK to analyze error logs, ticket descriptions, and telemetry.
 * **Native Host Integration:** Securely communicates with a local Python backend via Chrome Native Messaging.
-* **Privacy Focused:** PII is scrubbed locally before sending to the AI. No raw customer data leaves your machine.
+* **Privacy Focused:** Selected PII patterns are redacted locally before sanitized content is sent to GitHub Copilot. Review and edit Case Context before Analyze.
 * **Fluent UI Support:** Automatically scrapes error context from Microsoft Dynamics 365 and Azure Portal.
-* **Session Persistence:** Continue investigations in the Copilot CLI with `/resume` — conversation history and tool state are preserved.
+* **Session Persistence:** Continue investigations with the root-bound Copilot CLI command written into each report; conversation history and tool state are preserved.
 * **Reliable Self-Updating:** One-click transactional updates verify the whole
   Host/Extension product, survive restarts, and automatically roll back ordinary
   failures.
@@ -36,7 +36,7 @@ To install the latest **Beta** (pre-release) build instead of stable, run:
 & ([scriptblock]::Create((irm https://aka.ms/mcdyhelper))) -Beta
 ```
 
-This pre-seeds the host config so future automatic update checks also consider Beta releases. You can change your mind any time from the Options page (toggle **Receive beta updates**, then click Save Changes).
+This pre-seeds the host config so future automatic update checks also consider Beta releases. You can change your mind any time from the Options page; **Receive beta updates** saves automatically.
 
 ### Manual Install
 
@@ -90,10 +90,10 @@ This pre-seeds the host config so future automatic update checks also consider B
 
 1. Open a support ticket in Dynamics 365 or Azure Portal.
 2. Click the **DH** Floating Action Button (FAB) in the bottom right.
-3. Review and optionally edit the scraped Case Context.
+3. Review the scraped Case Context and remove anything you do not want sent.
 4. Click **Analyze** to get an AI-generated Root Cause Analysis.
 5. The result is saved as a Markdown report and displayed in a popover.
-6. Continue the investigation in the Copilot CLI: `copilot /resume {session_id}` (the session ID is shown in the report).
+6. Continue with the report command: `copilot -C '<root>' --resume=<uuid>`, or `copilot --resume=<uuid>` when no Root is configured.
 
 ## Reliable Updates
 
@@ -111,6 +111,6 @@ installer.
 
 * **Frontend:** React 19, Vite, TypeScript, Tailwind CSS.
 * **Backend:** Python 3.x, Native Messaging API, asyncio, PyInstaller.
-* **Telemetry:** Azure Application Insights (anonymous, optional).
+* **Telemetry:** Azure Application Insights receives operational events, not Case Context or prompt content.
 
 See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for internal architecture details, and [AGENTS.md](AGENTS.md) for AI agent coding standards.

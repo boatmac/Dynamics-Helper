@@ -19,7 +19,7 @@
 - Never publish, tag, push, or rebuild B2 while qualification is active. B1 is
   disqualified and must never be published.
 - Do not perform any cloud-PC operation until B1/B2 identities are complete and
-  all five Automated Gates in the result ledger are `PASS`.
+  all five **Current B2 Automated Gates** in the result ledger are `PASS`.
 - Stop immediately if the observed starting version, ZIP SHA-256, Native Host
   registration target, or transaction ID differs from the result ledger.
 
@@ -45,7 +45,9 @@ content, access token, screenshot, or full log. For Analyze, record only
 Task 4 changes documentation only. Task 5 fills the exact B2 artifact path,
 commit, and hash, independently reviews this runbook, obtains the required
 approval, and only then may execute any cloud-PC, DevTools, storage, process,
-installer, or private-distribution step.
+installer, or private-distribution step. That authorization must explicitly
+include temporarily enabling **Status bubble** for each update scenario and
+restoring its captured prior value afterward.
 
 B2 must be the sole object in a private test-only HTTPS container. Use one
 short-lived, read-only URL whose path ends in `.zip`. Treat the cloud PC as
@@ -55,7 +57,7 @@ credential-bearing while that URL is active.
 
 Before connecting to or changing the cloud PC, run this read-only check from the
 product worktree. It requires complete B1/B2 source-commit and ZIP identities and
-all five Automated Gates to be exact current-B2 `PASS`. Artifact result and gate
+all five **Current B2 Automated Gates** to be exact `PASS`. Artifact result and gate
 evidence must be non-empty; `PENDING`, `Not recorded`, and `Not run` fail closed
 wherever they occur in those fields.
 
@@ -107,7 +109,8 @@ with the ledger. Stop if a ledger identity is missing or either value differs.
 
 The B2 path and hash remain placeholders until Task 5 builds the artifact and
 independently reviews this runbook before execution. Do not replace either ZIP
-after hashing. B2 is qualified once; rebuilding it invalidates all B2 evidence.
+after hashing. B2 is built once; only those immutable bytes may later be
+qualified, and rebuilding invalidates all B2 evidence.
 
 ## One-Time Private B1 Completion Cleanup
 
@@ -272,16 +275,40 @@ mechanisms in this runbook.
 Run the disk/process baseline check:
 
 ```powershell
-$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';[pscustomobject]@{ActiveAuthority=(Test-Path -LiteralPath (Join-Path $root 'updates\active.json'));RunnerCount=@(Get-Process -Name dh_update_runner -ErrorAction SilentlyContinue).Count;FinalizationCursor=(Test-Path -LiteralPath (Join-Path $root 'updates\finalization-cursor.json'));RunOnceArmed=[bool](Get-ItemProperty -LiteralPath 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce' -Name 'DynamicsHelperUpdateRecovery' -ErrorAction SilentlyContinue).DynamicsHelperUpdateRecovery}|ConvertTo-Json -Compress
+$ErrorActionPreference='Stop';$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$updates=Join-Path $root 'updates';foreach($path in @($root,$updates)){if(-not(Test-Path -LiteralPath $path -PathType Container -ErrorAction Stop)){throw 'Installed/update root is missing or not a directory'};$item=Get-Item -LiteralPath $path -Force -ErrorAction Stop;if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Installed/update root is a reparse point'}};$counts=[ordered]@{};foreach($name in @('transactions','receipts')){$path=Join-Path $updates $name;if(Test-Path -LiteralPath $path -ErrorAction Stop){$item=Get-Item -LiteralPath $path -Force -ErrorAction Stop;if(-not $item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)){throw "$name namespace is not a plain directory"};$entries=@([IO.Directory]::EnumerateFileSystemEntries($path));$counts[$name]=$entries.Count}else{$counts[$name]=0}};foreach($name in @('active.json','finalization-cursor.json','.finalization-cursor.json.tmp','.finalization-ack.json.tmp')){if(Test-Path -LiteralPath (Join-Path $updates $name) -ErrorAction Stop){throw "Baseline update residue exists: $name"}};$ackPath=Join-Path $updates 'finalization-ack.json';$ackPresent=Test-Path -LiteralPath $ackPath -ErrorAction Stop;if($ackPresent){if(-not(Test-Path -LiteralPath $ackPath -PathType Leaf -ErrorAction Stop)){throw 'Baseline finalization ACK is not a file'};$ackItem=Get-Item -LiteralPath $ackPath -Force -ErrorAction Stop;if(($ackItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Baseline finalization ACK is a reparse point'}};if($counts.transactions -ne 0 -or $counts.receipts -ne 0){throw 'Baseline transaction or receipt workspace residue exists'};$runnerCount=@(Get-CimInstance Win32_Process -Filter "Name='dh_update_runner.exe'" -ErrorAction Stop).Count;$statusHostCount=@(Get-CimInstance Win32_Process -Filter "Name='dh_update_status_host.exe'" -ErrorAction Stop).Count;$runOncePath='Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce';$runOnceArmed=$false;try{if(Test-Path -LiteralPath $runOncePath -ErrorAction Stop){$runOnceProperties=Get-ItemProperty -LiteralPath $runOncePath -ErrorAction Stop;$runOnceArmed=($runOnceProperties.PSObject.Properties.Name -contains 'DynamicsHelperUpdateRecovery')}}catch{throw 'RunOnce registry baseline check failed'};$statusName='com.dynamics.helper.update_status';$statusRegistered=$false;foreach($statusPath in @("Registry::HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\$statusName","Registry::HKEY_CURRENT_USER\Software\Microsoft\Edge\NativeMessagingHosts\$statusName")){try{if(Test-Path -LiteralPath $statusPath -ErrorAction Stop){$statusRegistered=$true}}catch{throw 'Status Host registry baseline check failed'}};if($runnerCount -ne 0 -or $statusHostCount -ne 0 -or $runOnceArmed -or $statusRegistered){throw 'Baseline process or registry residue exists'};[pscustomobject]@{ActiveAuthority=$false;TransactionEntryCount=$counts.transactions;ReceiptEntryCount=$counts.receipts;FinalizationCursor=$false;FinalizationScratch=$false;FinalizationAckPresent=$ackPresent;RunnerCount=$runnerCount;StatusHostProcessCount=$statusHostCount;RunOnceArmed=$runOnceArmed;StatusHostRegistered=$statusRegistered;NamespacesPlain=$true}|ConvertTo-Json -Compress
 ```
 
-Require `ActiveAuthority`, `FinalizationCursor`, and `RunOnceArmed` to be
-`false`, and `RunnerCount` to be `0`. Finally, run Analyze only against the
+Require both namespace counts and both process counts to be `0`; all residue,
+RunOnce, and status-registration fields must be `false`; and
+`NamespacesPlain:true`. `FinalizationAckPresent` may be either Boolean value: a
+present fixed `finalization-ack.json` must be a plain regular file but may
+legitimately describe the last acknowledged transaction and is not content-
+matched at this generic baseline. Empty or malformed registry values still count as residue because
+existence, not truthiness, is authoritative. Any filesystem, process-query, or
+registry read error fails closed. Finally, run Analyze only against the
 designated non-customer test case and change then restore one harmless Options
 preference.
 Record only PASS/FAIL for each check. The baseline is valid only after all
 version, registration, capability, integrity, coordinator, disk/process,
 Analyze, and Options checks pass.
+
+### Status Bubble Qualification Precondition
+
+For Scenarios 1 and 2, capture the effective prior **Status bubble** preference
+before candidate seeding. In Options DevTools, inspect only this Boolean:
+
+```javascript
+const {dh_prefs:p}=await chrome.storage.local.get('dh_prefs'); ({enableStatusBubble:p?.enableStatusBubble!==false})
+```
+
+Record only `true` or `false` in transient operator notes, never the full prefs
+object. If it is `false`, use the Options checkbox to enable **Status bubble**
+and wait for its automatic persistence; rerun the Boolean projection and require
+`true`. This temporary preference mutation and its restoration require the
+separate Task 5 cloud-PC authorization. After terminal verification, restore the
+captured value through the same checkbox, rerun the projection, and require the
+exact original Boolean. Do not seed or start a scenario unless status bubbles
+are enabled.
 
 If `plan-d-b1` cannot be established safely, preserve all update evidence. Run
 the exact B2 complete installer first to settle the target; if that fails, run
@@ -363,36 +390,62 @@ full log.
 
 At terminal `complete`, run the installed-version command, capabilities check,
 integrity check, safe after-reload state projection (including `errorCode`), and
-disk/process baseline check again. Require Host and
+the outcome-bound terminal guard below. Require Host and
 Extension to agree with the terminal outcome: B2 `2.0.76-beta.2` for
 `committed`, or B1 `2.0.76-beta.1` for `rolled-back`. Integrity must be
-`packaged/verified`, `updates\active.json` and the finalization cursor must be
-absent, no runner may remain, and RunOnce must be unarmed.
+`packaged/verified`.
 
-Keep a FAB-bearing page and Options open for the completion lifecycle check.
-Before 8000 milliseconds of mounted time, require the Options terminal banner
-and FAB completion bubble to remain visible. After the first matching
-`DH_UPDATE_ACK_COMPLETE` is durably applied and its authoritative
-`DH_UPDATE_STATE` broadcast arrives, require both to disappear globally. Refresh
-FAB and Options and require the terminal result to remain absent. Do not infer
-the transition from the ACK response and do not edit storage.
+### Completion Lifecycle Evidence
+
+Status bubbles must already be enabled. Keep the same FAB-bearing page and
+Options view mounted from the first terminal display. Capture these exact safe
+checkpoints without printing prefs, state objects, or URLs:
+
+1. At first terminal render, record only the transaction ID, outcome, and a
+   monotonic start time.
+2. Through **7,999 ms** of mounted time, require both the Options terminal banner
+   and FAB completion bubble to remain visible. Closing either view invalidates
+   that timing attempt because a later mount receives a fresh interval.
+3. At or after **8,000 ms**, require the first matching
+   `DH_UPDATE_ACK_COMPLETE` to be durably applied and its authoritative
+   `DH_UPDATE_STATE` broadcast to arrive before either terminal UI disappears.
+   Do not infer authority from the ACK response.
+4. Refresh the ordinary FAB page and Options page, not the Extension, and require
+   the terminal banner/bubble to remain absent.
+
+After the authoritative transition and again after both refreshes, use this safe
+projection. It reports URL presence only:
+
+```javascript
+const r=await chrome.runtime.sendMessage({type:'DH_UPDATE_GET_STATE'});const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state');({handled:r?.handled,publicKind:r?.state?.kind,publicVersion:r?.state?.update?.version,publicHasUpdateUrl:typeof r?.state?.update?.url==='string',storedKind:s?.kind??'absent',storedVersion:s?.update?.version,storedHasUpdateUrl:typeof s?.update?.url==='string'})
+```
 
 For committed completion, the public state must be `idle` with no retained
-candidate URL. For rolled-back completion, it must be `available` for exact B2,
+candidate URL, and stored state must be `idle` or absent with no URL. For
+rolled-back completion, public and stored state must be `available` for exact B2
 with the ordinary **Retry** action and no replayed rollback notice. Multiple
-views may race; duplicate ACKs must not change the authoritative result.
+views may race; duplicate ACKs must not change the authoritative result. Record
+the completed checkpoint summary in the ledger's **Completion lifecycle** field,
+including `status bubble enabled`, `visible through 7,999 ms`, `authoritative
+transition at/after 8,000 ms`, `absent after FAB/Options refresh`, the final safe
+state, and `preference restored`. Then restore and verify the captured prior
+Status bubble preference.
 
 After final acknowledgment, verify that the captured transaction workspace is
 gone:
 
 ```powershell
-$tx = Read-Host 'Paste the captured 32-hex transaction ID';if($tx -cnotmatch '^[0-9a-f]{32}$'){throw 'Invalid transaction ID'};$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';[pscustomobject]@{ActiveAuthority=(Test-Path -LiteralPath (Join-Path $root 'updates\active.json'));TransactionWorkspacePresent=(Test-Path -LiteralPath (Join-Path $root "updates\transactions\$tx"));FinalizationCursor=(Test-Path -LiteralPath (Join-Path $root 'updates\finalization-cursor.json'))}|ConvertTo-Json -Compress
+$ErrorActionPreference='Stop';$tx=(Read-Host 'Paste the captured lowercase 32-hex transaction ID').Trim();$expectedOutcome=(Read-Host 'Expected outcome: committed or rolled-back').Trim();$expectedVersion=(Read-Host 'Expected terminal version').Trim();if($tx -cnotmatch '^[0-9a-f]{32}$'){throw 'Invalid transaction ID'};if(-not(($expectedOutcome -ceq 'committed' -and $expectedVersion -ceq '2.0.76-beta.2') -or ($expectedOutcome -ceq 'rolled-back' -and $expectedVersion -ceq '2.0.76-beta.1'))){throw 'Outcome and terminal version are not an accepted B1/B2 pair'};$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$updates=Join-Path $root 'updates';foreach($path in @($root,$updates)){if(-not(Test-Path -LiteralPath $path -PathType Container -ErrorAction Stop)){throw 'Installed/update root is missing or not a directory'};$item=Get-Item -LiteralPath $path -Force -ErrorAction Stop;if(($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Installed/update root is a reparse point'}};$ackPath=Join-Path $updates 'finalization-ack.json';if(-not(Test-Path -LiteralPath $ackPath -PathType Leaf -ErrorAction Stop)){throw 'Finalization ACK is missing or not a file'};$ackItem=Get-Item -LiteralPath $ackPath -Force -ErrorAction Stop;if(($ackItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'Finalization ACK is a reparse point'};$expectedAckBytes=[Text.UTF8Encoding]::new($false).GetBytes('{"outcome":"'+$expectedOutcome+'","state":"finalized-awaiting-ack","terminal_version":{"fresh_install":false,"version":"'+$expectedVersion+'"},"transactionId":"'+$tx+'"}' + "`n");$actualAckBytes=[IO.File]::ReadAllBytes($ackPath);if($actualAckBytes.Length -ne $expectedAckBytes.Length -or -not [System.Linq.Enumerable]::SequenceEqual[byte]($actualAckBytes,$expectedAckBytes)){throw 'Finalization ACK bytes do not match transaction, outcome, and terminal version'};$transactions=Join-Path $updates 'transactions';if(Test-Path -LiteralPath $transactions -ErrorAction Stop){$transactionItem=Get-Item -LiteralPath $transactions -Force -ErrorAction Stop;if(-not $transactionItem.PSIsContainer -or (($transactionItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)){throw 'Transactions namespace is not a plain directory'}};foreach($path in @((Join-Path $transactions $tx),(Join-Path $transactions "$tx.preparing"),(Join-Path $updates 'active.json'),(Join-Path $updates 'finalization-cursor.json'),(Join-Path $updates '.finalization-cursor.json.tmp'),(Join-Path $updates '.finalization-ack.json.tmp'))){if(Test-Path -LiteralPath $path -ErrorAction Stop){throw 'Transaction authority, workspace, cursor, or scratch residue remains'}};$receipts=Join-Path $updates 'receipts';$receiptCount=0;if(Test-Path -LiteralPath $receipts -ErrorAction Stop){$receiptItem=Get-Item -LiteralPath $receipts -Force -ErrorAction Stop;if(-not $receiptItem.PSIsContainer -or (($receiptItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)){throw 'Receipts namespace is not a plain directory'};$receiptEntries=@([IO.Directory]::EnumerateFileSystemEntries($receipts));$receiptCount=$receiptEntries.Count;if($receiptCount -ne 0){throw 'Receipt or receipt-scratch residue remains'}};$runnerCount=@(Get-CimInstance Win32_Process -Filter "Name='dh_update_runner.exe'" -ErrorAction Stop).Count;$statusHostCount=@(Get-CimInstance Win32_Process -Filter "Name='dh_update_status_host.exe'" -ErrorAction Stop).Count;$runOncePath='Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce';$runOnceArmed=$false;try{if(Test-Path -LiteralPath $runOncePath -ErrorAction Stop){$runOnceProperties=Get-ItemProperty -LiteralPath $runOncePath -ErrorAction Stop;$runOnceArmed=($runOnceProperties.PSObject.Properties.Name -contains 'DynamicsHelperUpdateRecovery')}}catch{throw 'RunOnce registry terminal check failed'};$statusName='com.dynamics.helper.update_status';$statusRegistered=$false;foreach($statusPath in @("Registry::HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\$statusName","Registry::HKEY_CURRENT_USER\Software\Microsoft\Edge\NativeMessagingHosts\$statusName")){try{if(Test-Path -LiteralPath $statusPath -ErrorAction Stop){$statusRegistered=$true}}catch{throw 'Status Host registry terminal check failed'}};if($runnerCount -ne 0 -or $statusHostCount -ne 0 -or $runOnceArmed -or $statusRegistered){throw 'Terminal process or registry residue remains'};[pscustomobject]@{TransactionId=$tx;Outcome=$expectedOutcome;TerminalVersion=$expectedVersion;FinalizationAckMatches=$true;ActiveAbsent=$true;WorkspaceAbsent=$true;PreparingWorkspaceAbsent=$true;CursorAndScratchAbsent=$true;ReceiptEntryCount=$receiptCount;RunnerCount=$runnerCount;StatusHostProcessCount=$statusHostCount;RunOnceArmed=$runOnceArmed;StatusHostRegistered=$statusRegistered}|ConvertTo-Json -Compress
 ```
 
-Require all three values to be `false`. Run the designated Analyze smoke and
+Require the ACK to match and every `*Absent` field to be `true`; all counts must
+be `0`; RunOnce/status registration must be `false`. The accepted outcome/version
+pairs are committed B2 and rolled-back B1 only. Any path type, reparse point,
+filesystem enumeration, process query, or registry read error fails closed. Do
+not delete transaction evidence manually. Run the designated Analyze smoke and
 change then restore one harmless Options preference in the terminal product;
-record PASS/FAIL only. Do not accept a displayed success when versions or
-integrity disagree.
+record PASS/FAIL only. Do not accept displayed success when versions, integrity,
+ACK bytes, or lifecycle evidence disagree.
 
 After the safe terminal fields have been recorded, remove the listener if its
 DevTools context still exists:
@@ -410,16 +463,18 @@ remove the private object; do not record either value or associated logs.
 ## Scenario 1: Uninterrupted B1 To B2
 
 1. Re-establish and verify `plan-d-b1` with the complete B1 installer.
-2. Inject B2 and register the sanitized listener using **Controlled Candidate
+2. Complete **Status Bubble Qualification Precondition**, capturing the prior
+   value and requiring the effective value to be `true`.
+3. Inject B2 and register the sanitized listener using **Controlled Candidate
    Start**.
-3. Start the update and do not close the browser, stop a process, click Retry,
+4. Start the update and do not close the browser, stop a process, click Retry,
    edit storage, or run an installer while it progresses.
-4. Require terminal `complete/committed`, B2 Host and Extension versions,
+5. Require terminal `complete/committed`, B2 Host and Extension versions,
    verified integrity, absent active authority/workspace/finalization cursor,
    zero runners, unarmed RunOnce, and the complete one-shot UI/state checks in
    **Terminal Verification And Cleanup**.
-5. Run the designated Analyze and Options checks and record only their
-   PASS/FAIL results.
+6. Restore and verify the captured Status bubble preference, then run the
+   designated Analyze and Options checks and record only their PASS/FAIL results.
 
 Any other terminal outcome fails this uninterrupted scenario. Preserve evidence
 and follow the matching-installer recovery order before trying to re-establish
@@ -427,11 +482,13 @@ B1.
 
 ## Scenario 2: Interrupted Recovery
 
-Re-establish and verify `plan-d-b1` with the complete B1 installer. Use three
-PowerShell 7 windows for the timeline watcher, optional process-start watcher,
-and one-shot interrupter. Watcher output is observational only; the one-shot
-interrupter, zero-executor checkpoint, and recovery witness are the acceptance
-evidence.
+Re-establish and verify `plan-d-b1` with the complete B1 installer. Complete
+**Status Bubble Qualification Precondition**, capturing the prior value and
+requiring the effective value to be `true`. Use three PowerShell 7 windows for
+the timeline watcher, optional process-start watcher, and one-shot interrupter.
+Watcher output is observational only; the one-shot interrupter, zero-executor
+checkpoint, and recovery witness are the acceptance evidence. Terminal
+verification restores and verifies the captured preference.
 
 ### Read-Only Watchers
 
@@ -473,9 +530,24 @@ a missed interruption.
 The accepted runner must be the sole exact recovery executable running the
 canonical `--complete-update` command for the same browser-owned B1-to-B2
 transaction and initiating-process identity, with `--recover-active` excluded.
-RunOnce must already be armed. The command captures the transaction and runner
-PID, kills only that PID, waits for exit, and revalidates the same nonterminal
-post-activation authority.
+RunOnce must already be armed. Task 5's replacement must open the RunOnce key
+with terminating errors, find `DynamicsHelperUpdateRecovery` by case-insensitive
+value-name equality, and require exactly one match. It must read that value
+without expanding environment variables, require registry kind
+`REG_EXPAND_SZ` (`ExpandString`), and require exact content
+`"%LOCALAPPDATA%\DynamicsHelper\updates\recovery\dh_update_runner.exe" --recover-active`.
+Use `GetValueKind` and `GetValue` with
+`DoNotExpandEnvironmentNames`; ordinary `Get-ItemProperty` expansion is not
+acceptable evidence.
+Truthiness or non-empty text is not evidence; any name/type/value/read mismatch
+fails before process control. The command then captures the transaction and
+runner PID, kills only that PID, waits for exit, and revalidates the same
+nonterminal post-activation authority.
+
+Every later checkpoint that requires RunOnce to remain present, including the
+zero-executor checkpoint and recovery witness, must repeat this exact
+case-insensitive name, `REG_EXPAND_SZ`, unexpanded command, and fail-closed read
+validation. It may not substitute truthiness or a non-empty-value check.
 
 ```powershell
 throw 'TASK 5 MUST REPLACE THIS HISTORICAL A/B INTERRUPTION TEMPLATE BEFORE EXECUTION';$expectedMarkerBytes=[Text.UTF8Encoding]::new($false).GetBytes('PLAN_D_EFFECTIVELY_EMPTY_CLOUD_PC_V1');$marker='C:\DH-CloudPC\PLAN_D_EMPTY_CLOUD_PC.marker';if(-not(Test-Path -LiteralPath $marker -PathType Leaf)){throw 'Empty-cloud-PC marker is missing or invalid'};$actualMarkerBytes=[IO.File]::ReadAllBytes($marker);if($actualMarkerBytes.Length -ne $expectedMarkerBytes.Length -or -not [System.Linq.Enumerable]::SequenceEqual[byte]($actualMarkerBytes,$expectedMarkerBytes)){throw 'Empty-cloud-PC marker is missing or invalid'};$ErrorActionPreference='Stop';Remove-Variable -Scope Global -Name DhExpectedTransactionId,DhKilledRunnerPid,DhRecoveryRunnerPid,DhKilledAtUtc -ErrorAction SilentlyContinue;$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$active=Join-Path $root 'updates\active.json';$runnerPath=[IO.Path]::GetFullPath((Join-Path $root 'updates\recovery\dh_update_runner.exe'));$runOnceKey='Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce';$post=@('waiting-for-host-exit','host-backed-up','host-installed','extension-backed-up','extension-installed','metadata-installed','probing','rolling-back');$terminal=@('committed','rolled-back','recovery-required');if(Test-Path -LiteralPath $active){throw 'Baseline invalid: active.json already exists'};if(@(Get-CimInstance Win32_Process -Filter "Name='dh_update_runner.exe'" -ErrorAction Stop).Count){throw 'Baseline invalid: update runner already exists'};$authoritySeen=$false;$interrupted=$false;$deadline=[DateTime]::UtcNow.AddMinutes(10);while([DateTime]::UtcNow -lt $deadline){if(-not(Test-Path -LiteralPath $active)){if($authoritySeen){throw 'Active authority disappeared before interruption'};Start-Sleep -Milliseconds 25;continue};$authoritySeen=$true;try{$a=[IO.File]::ReadAllText($active)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable active authority'};if(($a.transaction_id -isnot [string]) -or ($a.transaction_id -cnotmatch '^[0-9a-f]{32}$')){throw 'Active transaction ID is not lowercase 32-hex'};$tx=$a.transaction_id;$expectedJournal="transactions/$tx/journal.json";if(($a.journal_path -isnot [string]) -or ($a.journal_path -cne $expectedJournal)){throw 'Active journal authority mismatch'};$journalPath=Join-Path $root "updates\transactions\$tx\journal.json";try{$j=[IO.File]::ReadAllText($journalPath)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable transaction journal'};if(($j.transaction_id -isnot [string]) -or ($j.transaction_id -cne $tx) -or ($j.initiator -isnot [string]) -or ($j.initiator -cne 'browser') -or ($j.prior_version -isnot [string]) -or ($j.prior_version -cne '2.0.74-beta.4') -or ($j.target_version -isnot [string]) -or ($j.target_version -cne '2.0.76-beta.1') -or ($j.phase -isnot [string])){throw 'Transaction journal authority mismatch'};$phase=$j.phase;if($phase -ceq 'prepared'){Start-Sleep -Milliseconds 25;continue};if($terminal -ccontains $phase){throw "Interruption missed: transaction reached terminal phase $phase"};if($post -cnotcontains $phase){throw "Unexpected nonterminal journal phase: $phase"};$ip=$j.initiating_process;if(($null -eq $ip) -or ($ip.pid -isnot [long]) -or ($ip.pid -le 0) -or ($ip.creation_token -isnot [string]) -or ($ip.creation_token -cnotmatch '^win-create-time-[1-9][0-9]*$')){throw 'Post-activation initiating process is missing or invalid'};try{$runOnce=[string](Get-ItemPropertyValue -LiteralPath $runOnceKey -Name 'DynamicsHelperUpdateRecovery' -ErrorAction Stop)}catch{throw 'RunOnce recovery is not armed before interruption'};if([string]::IsNullOrWhiteSpace($runOnce)){throw 'RunOnce recovery is not armed before interruption'};$allRunners=@(Get-CimInstance Win32_Process -Filter "Name='dh_update_runner.exe'" -ErrorAction Stop);if($allRunners.Count -ne 1){throw "Expected exactly one update runner; found $($allRunners.Count)"};$runner=$allRunners[0];$cmd=[string]$runner.CommandLine;$completePattern='(?i)^\s*(?:"[^"]+"|\S+)\s+--complete-update\s+'+[regex]::Escape($tx)+'\s+'+[regex]::Escape([string]$ip.pid)+'\s+'+[regex]::Escape($ip.creation_token)+'\s*$';$recoverPattern='(?i)(?:^|\s)--recover-active(?:\s|$)';if(-not [string]::Equals([string]$runner.ExecutablePath,$runnerPath,[StringComparison]::OrdinalIgnoreCase)){throw 'Original runner executable path mismatch'};if([string]::IsNullOrWhiteSpace($cmd) -or ($cmd -notmatch $completePattern) -or ($cmd -match $recoverPattern)){throw 'Original runner invocation is not the expected complete-update command'};$global:DhExpectedTransactionId=$tx;$global:DhKilledRunnerPid=[int]$runner.ProcessId;$phaseAtKill=$phase;$runnerProcess=Get-Process -Id $global:DhKilledRunnerPid -ErrorAction Stop;try{Stop-Process -Id $global:DhKilledRunnerPid -Force -ErrorAction Stop;if(-not $runnerProcess.WaitForExit(10000)){throw 'Killed runner did not exit within ten seconds'}}finally{$runnerProcess.Dispose()};$global:DhKilledAtUtc=[DateTime]::UtcNow;if(-not(Test-Path -LiteralPath $active)){throw 'Active authority disappeared after runner exit'};try{$a2=[IO.File]::ReadAllText($active)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable active authority after runner exit'};if(($a2.transaction_id -isnot [string]) -or ($a2.transaction_id -cne $global:DhExpectedTransactionId) -or ($a2.journal_path -isnot [string]) -or ($a2.journal_path -cne "transactions/$($global:DhExpectedTransactionId)/journal.json")){throw 'Active authority changed after runner exit'};try{$j2=[IO.File]::ReadAllText($journalPath)|ConvertFrom-Json -ErrorAction Stop}catch{throw 'Malformed or unreadable transaction journal after runner exit'};$ip2=$j2.initiating_process;if(($j2.transaction_id -isnot [string]) -or ($j2.transaction_id -cne $global:DhExpectedTransactionId) -or ($j2.initiator -isnot [string]) -or ($j2.initiator -cne 'browser') -or ($j2.prior_version -isnot [string]) -or ($j2.prior_version -cne '2.0.74-beta.4') -or ($j2.target_version -isnot [string]) -or ($j2.target_version -cne '2.0.76-beta.1') -or ($null -eq $ip2) -or ($ip2.pid -isnot [long]) -or ($ip2.pid -ne $ip.pid) -or ($ip2.creation_token -isnot [string]) -or ($ip2.creation_token -cne $ip.creation_token) -or ($j2.phase -isnot [string]) -or ($post -cnotcontains $j2.phase)){throw 'Journal is not the same post-activation nonterminal transaction after runner exit'};[pscustomobject]@{Event='original-runner-killed';TransactionId=$global:DhExpectedTransactionId;PhaseAtKill=$phaseAtKill;PhaseAfterKill=$j2.phase;RunnerPid=$global:DhKilledRunnerPid;RunOnceArmedBeforeKill=$true}|ConvertTo-Json -Compress;$interrupted=$true;break};if(-not $interrupted){throw 'Interrupter timed out after ten minutes without a valid post-activation runner'}
@@ -630,6 +702,10 @@ mounted eight-second ACK, authoritative disappearance, and refresh checks from
 `hasUpdateUrl: false`, no `errorCode`, and `kind` either `idle` or absent. The
 safe `DH_UPDATE_GET_STATE` projection must report `handled: true`, `kind: 'idle'`,
 and no `errorCode`. Any other state fails the scenario without manual cleanup.
+If no terminal completion notice is produced, record exactly
+`N/A - no terminal completion notice` in the ledger's **Completion lifecycle**
+field; do not use N/A for an update scenario or for a repair that did produce
+`complete`.
 
 Scenario 3 passes only as `installer-repaired B2`, with the sentinel removed,
 the full B2 product verified, identical user-owned file set and bytes, safe idle

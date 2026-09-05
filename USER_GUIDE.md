@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Dynamics Helper is a browser extension designed to assist Technical Support Engineers. It acts as a bridge between your browser (Edge/Chrome) and a powerful local AI Agent (GitHub Copilot), allowing you to analyze support cases, error logs, and telemetry securely and efficiently.
+Dynamics Helper is a browser extension for Technical Support Engineers. It bridges your browser (Edge/Chrome) to GitHub Copilot through a local Native Host for support-case analysis.
 
 ## Prerequisites
 
@@ -358,13 +358,17 @@ The tool includes a built-in "PII Scrubber" that attempts to remove the followin
 * **IPv4 Addresses**: Replaced with `[REDACTED_IP]`
 * **US Phone Numbers**: Replaced with `[REDACTED_PHONE]`
 
-*Note: GUID/UUID redaction is currently disabled to allow the AI to query specific resources (Subscription IDs, etc.). While the scrubber is robust, no regex is perfect. Always review the `native_host.log` if you are concerned about what was sent.*
+*Redaction is pattern-limited, and GUID/UUID values are intentionally preserved
+for technical investigation. Before clicking **Analyze**, review and edit the
+Case Context to remove anything you do not want sent. The operational
+`native_host.log` is not a record of prompt or case content and cannot replace
+this pre-send review.*
 
 ### Telemetry
 
-* The extension collects **anonymous usage telemetry** (event counts, error rates) via Azure Application Insights.
-* A stable anonymous UUID is generated locally — **no personal identity information** is collected.
-* Telemetry helps improve the tool but contains no case data or PII.
+* The extension sends operational telemetry such as event counts and error classifications through Azure Application Insights, not Case Context or prompt content.
+* A locally generated random UUID correlates events without using your name or account identity.
+* Telemetry is used to improve reliability; review Case Context separately before Analyze because telemetry controls do not change what an analysis sends.
 
 ### Auditing
 

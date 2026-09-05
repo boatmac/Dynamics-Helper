@@ -15,16 +15,13 @@ those boundaries.
 | B2 | `2.0.76-beta.2` | PENDING | PENDING | PENDING |
 
 Artifact A remains historical evidence exactly as recorded. B1 remains exact
-technical build/transaction evidence but is disqualified. Task 5 replaces only
-B2 placeholders after its immutable build.
+technical build/transaction evidence but is disqualified. Task 5 replaces the
+B2 artifact and current-gate placeholders after its immutable build and fresh
+verification.
 
-## Automated Gates
+## Historical B1 Automated Gate Evidence
 
-Beta2 cloud-PC qualification is blocked until the B1 and B2 artifact rows have
-complete source commits and ZIP SHA-256 values and all five rows below are exact
-current B2 evidence with result `PASS`. `PENDING` or `Not recorded` fails the
-runbook entry gate. Existing rows are retained historical pre-B2 evidence until
-Task 5 refreshes them.
+These rows are immutable B1 history and cannot satisfy the B2 entry gate.
 
 | Gate | Result | Evidence |
 |---|---|---|
@@ -36,8 +33,21 @@ Task 5 refreshes them.
 
 One-shot implementation development evidence reported by the implementers is
 Extension `951/951`, update focused `181/181`, UI `55/55`, and TypeScript pass.
-This is not a built B2
-artifact identity and does not qualify or publish beta2.
+This is not a built B2 artifact identity and does not qualify or publish beta2.
+
+## Current B2 Automated Gates
+
+Beta2 cloud-PC work is blocked until B2 has a complete immutable artifact
+identity and all five rows below are exact `PASS` with fresh evidence. `PENDING`,
+`Not recorded`, or empty evidence fails the runbook entry gate.
+
+| Gate | Result | Evidence |
+|---|---|---|
+| Host full suite | PENDING | PENDING |
+| Extension full suite | PENDING | PENDING |
+| Extension production build | PENDING | PENDING |
+| Frozen Host build/probe | PENDING | PENDING |
+| Static/reachability checks | PENDING | PENDING |
 
 ## Historical Cloud PC Baseline Evidence
 
@@ -81,9 +91,10 @@ notice was permanent.
 
 ## Cloud PC Scenarios
 
-Set `Result` to `PASS` only when every other field in that row is complete,
-`Analyze` and `Options` are each `PASS`, and the terminal state is one of these
-exact outcomes. A row containing `PENDING` or `Not recorded` cannot be `PASS`.
+Set `Result` to `PASS` only when every other field, including **Completion
+lifecycle**, is complete, `Analyze` and `Options` are each `PASS`, and the
+terminal state is one of these exact outcomes. A row containing `PENDING` or
+`Not recorded` cannot be `PASS`.
 
 - Uninterrupted B1 to B2: `complete/committed B2`, followed by the one-shot
   authoritative ACK transition to `idle` with no candidate URL.
@@ -95,14 +106,22 @@ exact outcomes. A row containing `PENDING` or `Not recorded` cannot be `PASS`.
 `Versions/integrity` must record matching Host/Extension `2.0.76-beta.2` and
 verified integrity for B2, or matching `2.0.76-beta.1` and verified integrity for
 Scenario 2's allowed B1 rollback. Completion acceptance also requires the result
-to remain visible before 8 seconds, disappear after the authoritative ACK
-broadcast, and remain absent across FAB and Options refresh.
+to run with status bubbles enabled; the terminal banner and FAB completion bubble
+must remain visible through 7,999 ms of mounted time, transition only through the
+authoritative ACK/broadcast at or after 8,000 ms, and remain absent after both FAB
+and Options refresh. Committed final public/stored state is `idle` with no URL;
+rolled-back final state is B2 `available` with ordinary Retry and no rollback
+replay.
 
-| Scenario | Baseline | Transaction ID | Terminal state | Versions/integrity | Analyze | Options | Result |
-|---|---|---|---|---|---|---|---|
-| Uninterrupted B1 to B2 | `plan-d-b1` | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
-| Interrupted recovery | `plan-d-b1` | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
-| Matching-installer repair | `plan-d-b1` | N/A | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
+Matching-installer repair may record `N/A - no terminal completion notice` only
+when it produces no terminal completion state; all other lifecycle fields remain
+mandatory.
+
+| Scenario | Baseline | Transaction ID | Terminal state | Versions/integrity | Completion lifecycle | Analyze | Options | Result |
+|---|---|---|---|---|---|---|---|---|
+| Uninterrupted B1 to B2 | `plan-d-b1` | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
+| Interrupted recovery | `plan-d-b1` | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
+| Matching-installer repair | `plan-d-b1` | N/A | Not recorded | Not recorded | PENDING | Not recorded | Not recorded | PENDING |
 
 ## Environment Handoff
 

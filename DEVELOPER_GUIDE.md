@@ -555,8 +555,10 @@ Copy that exact lowercase 32-hex string into timer closures and ACK messages; do
 not retain a mutable state object as identity. Runtime parsing and the Worker
 route accept only exact own enumerable data properties
 `{type:'DH_UPDATE_ACK_COMPLETE',transactionId}`. Reject extra/missing/accessor/
-symbol keys, arrays, non-plain objects, uppercase IDs, and non-strings as
-`handled: false` without reading getters or coercing hostile values.
+symbol keys, arrays, uppercase IDs, and non-strings as `handled: false`. Parsing
+uses one descriptor snapshot and requires exactly the own enumerable data keys;
+prototype identity is not a criterion. Getters are not read and hostile values
+are not coerced.
 
 The Service Worker is the sole update state/storage and serialized transition
 owner. A matching committed ACK persists `idle` (thereby removing the private
