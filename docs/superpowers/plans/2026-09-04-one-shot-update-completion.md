@@ -1438,9 +1438,13 @@ order without substituting Extension Reload for Worker Stop:
    safe storage/process watchers are active. Require `complete/committed`,
    matching beta2 Host/Extension, `packaged/verified`, no active/workspace/
    cursor/receipt/RunOnce residue, and matching finalization acknowledgment.
-5. Verify both terminal banner and FAB completion bubble remain before 8,000 ms,
-   disappear only after the authoritative global ACK broadcast, remain absent
-   across FAB and Options refresh, and leave `idle` with `hasUpdateUrl:false`.
+5. Require the fresh B2 automated FAB/Options gate to prove exact 7,999/8,000 ms
+   timing. On the cloud PC, observe both real terminal UIs appear after reload
+   and disappear globally without storage editing/manual ACK or use of the ACK
+   response as authority. Verify the authoritative committed state is `idle`
+   with `hasUpdateUrl:false` and completion remains absent across FAB/Options
+   refresh. Cloud timing is an approximate integration observation, not a second
+   exact-millisecond proof.
 6. Run Analyze and Options smoke checks and record only PASS/FAIL.
 
 Use the updated runbook's exact ledger parser on the cloud PC rather than manual
