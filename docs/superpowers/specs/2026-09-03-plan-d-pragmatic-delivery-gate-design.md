@@ -201,9 +201,11 @@ Pass criteria:
 - Host and Extension both report `2.0.76-beta.2`;
 - installation integrity is verified;
 - no transaction workspace remains after final acknowledgment;
-- the terminal banner and FAB bubble are visible before eight mounted seconds,
-  then disappear only after the authoritative acknowledgment broadcast and stay
-  absent across both view refreshes;
+- fresh automated FAB/Options tests prove exact 7,999/8,000-ms timing; on the
+  cloud PC the real terminal banner and FAB bubble appear after reload, then
+  disappear globally without manual intervention and stay absent across both
+  view refreshes. Cloud timing is approximate integration evidence, not a second
+  exact-millisecond proof;
 - committed public state is `idle` with no candidate URL;
 - Analyze succeeds with synthetic input; and
 - an Options preference can be changed and restored.
@@ -312,9 +314,11 @@ B2 may be considered qualified only when:
 5. the result log explicitly states that exhaustive cloud-PC fault and mixed-state
    coverage was not performed;
 6. no credential or PII appears in the result log; and
-7. terminal banner and FAB bubble remain visible before 8000 ms, disappear after
-   the authoritative ACK broadcast, and remain absent across FAB/Options
-   refresh; committed public state is idle/no URL and rollback becomes Retry.
+7. fresh automated tests prove exact 7,999/8,000-ms behavior; cloud-PC integration
+   shows the real terminal banner and FAB bubble appear after reload, disappear
+   globally without manual intervention, and remain absent across FAB/Options
+   refresh. Committed public state is idle/no URL and rollback becomes Retry;
+   cloud timing is approximate rather than independent exact-millisecond proof.
 
 Qualification approval does not authorize publication. After qualification,
 the user must separately approve tag, push, and GitHub prerelease creation.

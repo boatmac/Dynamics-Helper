@@ -965,58 +965,15 @@ Add one narrowly scoped pre-beta2 exception for the cloud PC's already-persisted
 unpublished beta1 old-shape completion. Before deleting it, require matching
 beta1 Host/Extension versions, `packaged/verified`, and absence of active
 authority, transaction workspace, finalization cursor/receipt, runner, and
-RunOnce/status-Host registration. Document this read-only PowerShell guard for
-later Task 5 execution. It requires the canonical finalization acknowledgment
-bytes for the known committed beta1 transaction and prints no URL:
-
-```powershell
-$ErrorActionPreference='Stop';$expectedTx='b1c2ad5ad2c4aeb59765302402450840';$expectedVersion='2.0.76-beta.1';$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$updates=Join-Path $root 'updates';$installed=Join-Path $root 'installed-product.json';$extensionManifest=Join-Path $root 'extension\manifest.json';$ackPath=Join-Path $updates 'finalization-ack.json';foreach($path in @($installed,$extensionManifest,$ackPath)){if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw "Required terminal file is missing: $([IO.Path]::GetFileName($path))"}};$product=[IO.File]::ReadAllText($installed)|ConvertFrom-Json -ErrorAction Stop;$manifest=[IO.File]::ReadAllText($extensionManifest)|ConvertFrom-Json -ErrorAction Stop;$extensionVersion=if($manifest.version_name){[string]$manifest.version_name}else{[string]$manifest.version};if(([string]$product.package_version -cne $expectedVersion) -or ($extensionVersion -cne $expectedVersion) -or ([string]$manifest.version -cne '2.0.76')){throw 'Installed disk versions are not exact private beta1'};$expectedAckBytes=[Text.UTF8Encoding]::new($false).GetBytes('{"outcome":"committed","state":"finalized-awaiting-ack","terminal_version":{"fresh_install":false,"version":"'+$expectedVersion+'"},"transactionId":"'+$expectedTx+'"}' + "`n");$actualAckBytes=[IO.File]::ReadAllBytes($ackPath);if($actualAckBytes.Length -ne $expectedAckBytes.Length -or -not [System.Linq.Enumerable]::SequenceEqual[byte]($actualAckBytes,$expectedAckBytes)){throw 'Finalization acknowledgment does not exactly match beta1 transaction/outcome/version'};$receipts=Join-Path $updates 'receipts';$receiptCount=if(Test-Path -LiteralPath $receipts -PathType Container){@([IO.Directory]::EnumerateFileSystemEntries($receipts)).Count}else{0};$runnerCount=@(Get-Process -Name dh_update_runner -ErrorAction SilentlyContinue).Count;$runOncePath='Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce';$runOnce=if(Test-Path -LiteralPath $runOncePath){(Get-ItemProperty -LiteralPath $runOncePath -ErrorAction Stop).PSObject.Properties.Name -contains 'DynamicsHelperUpdateRecovery'}else{$false};$chromeStatus=Test-Path -LiteralPath 'Registry::HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\com.dynamics.helper.update_status';$edgeStatus=Test-Path -LiteralPath 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Edge\NativeMessagingHosts\com.dynamics.helper.update_status';$checks=[ordered]@{HostDiskVersion=[string]$product.package_version;ExtensionDiskVersion=$extensionVersion;FinalizationAckMatches=$true;AckTransactionId=$expectedTx;AckOutcome='committed';ActiveAuthorityAbsent=-not(Test-Path -LiteralPath (Join-Path $updates 'active.json'));TransactionWorkspaceAbsent=-not(Test-Path -LiteralPath (Join-Path $updates "transactions\$expectedTx"));PreparingWorkspaceAbsent=-not(Test-Path -LiteralPath (Join-Path $updates "transactions\$expectedTx.preparing"));FinalizationCursorAbsent=-not(Test-Path -LiteralPath (Join-Path $updates 'finalization-cursor.json'));ReceiptCount=$receiptCount;RunnerCount=$runnerCount;RunOnceArmed=$runOnce;ChromeStatusHostRegistered=$chromeStatus;EdgeStatusHostRegistered=$edgeStatus};if(-not $checks.ActiveAuthorityAbsent -or -not $checks.TransactionWorkspaceAbsent -or -not $checks.PreparingWorkspaceAbsent -or -not $checks.FinalizationCursorAbsent -or $checks.ReceiptCount -ne 0 -or $checks.RunnerCount -ne 0 -or $checks.RunOnceArmed -or $checks.ChromeStatusHostRegistered -or $checks.EdgeStatusHostRegistered){throw 'Terminal beta1 prerequisite failed; preserve all evidence'};[pscustomobject]$checks|ConvertTo-Json -Compress
-```
-
-Document these expected results: exact beta1 disk versions and ACK fields; every
-`*Absent` is `true`; both counts are `0`; RunOnce/status-Host flags are `false`.
-Then document the additional path/scratch/process guard:
-
-```powershell
-$ErrorActionPreference='Stop';$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$updates=Join-Path $root 'updates';$marker='C:\DH-CloudPC\PLAN_D_EMPTY_CLOUD_PC.marker';$expectedMarkerBytes=[Text.UTF8Encoding]::new($false).GetBytes('PLAN_D_EFFECTIVELY_EMPTY_CLOUD_PC_V1');if(-not(Test-Path -LiteralPath $marker -PathType Leaf)){throw 'Empty-cloud-PC marker is missing'};$actualMarkerBytes=[IO.File]::ReadAllBytes($marker);if($actualMarkerBytes.Length -ne $expectedMarkerBytes.Length -or -not [System.Linq.Enumerable]::SequenceEqual[byte]($actualMarkerBytes,$expectedMarkerBytes)){throw 'Empty-cloud-PC marker is invalid'};foreach($path in @($root,$updates)){if(-not(Test-Path -LiteralPath $path -PathType Container) -or ((Get-Item -LiteralPath $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Installed/update root is missing or unsafe'}};foreach($path in @((Join-Path $root 'installed-product.json'),(Join-Path $root 'extension\manifest.json'),(Join-Path $updates 'finalization-ack.json'))){if(-not(Test-Path -LiteralPath $path -PathType Leaf) -or ((Get-Item -LiteralPath $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Required terminal file is missing or unsafe'}};$scratch=@((Join-Path $updates '.finalization-cursor.json.tmp'),(Join-Path $updates '.finalization-ack.json.tmp'),(Join-Path $updates 'receipts\.b1c2ad5ad2c4aeb59765302402450840.json.tmp'));$statusCount=@(Get-Process -Name dh_update_status_host -ErrorAction SilentlyContinue).Count;if($scratch|Where-Object{Test-Path -LiteralPath $_}){throw 'Finalization scratch evidence remains'};if($statusCount -ne 0){throw 'Status Host process remains'};[pscustomobject]@{MarkerMatches=$true;PlainRoots=$true;PlainTerminalFiles=$true;FinalizationScratchAbsent=$true;StatusHostProcessCount=$statusCount}|ConvertTo-Json -Compress
-```
-
-```powershell
-$ErrorActionPreference='Stop';$updates=Join-Path $env:LOCALAPPDATA 'DynamicsHelper\updates';$counts=[ordered]@{};foreach($name in @('transactions','receipts')){$path=Join-Path $updates $name;if(Test-Path -LiteralPath $path){$item=Get-Item -LiteralPath $path -Force -ErrorAction Stop;if(-not $item.PSIsContainer -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)){throw "$name namespace is not a plain directory"};$entries=@([IO.Directory]::EnumerateFileSystemEntries($path));if($entries.Count -ne 0){throw "$name namespace is not empty; preserve evidence"};$counts[$name]=$entries.Count}else{$counts[$name]=0}};foreach($name in @('active.json','finalization-cursor.json','.finalization-cursor.json.tmp','.finalization-ack.json.tmp')){if(Test-Path -LiteralPath (Join-Path $updates $name)){throw "Unexpected update residue: $name"}};[pscustomobject]@{TransactionEntryCount=$counts.transactions;ReceiptEntryCount=$counts.receipts;KnownNamespacesPlainOrAbsent=$true}|ConvertTo-Json -Compress
-```
-
-Document that all booleans must be `true` and status-Host process count `0`.
-Both namespace counts must be `0` and `KnownNamespacesPlainOrAbsent` must be
-`true`; a file, reparse point, or any unknown entry fails closed.
-With no update, installer, storage, or process action between checks, the later
-authorized operator runs this one-line command in the installed beta1 Options
-DevTools console. It revalidates runtime product
-identity and accepts only exact keys `{kind,update,outcome}`, committed beta1,
-and a strict HTTPS ZIP candidate without printing its URL:
-
-```javascript
-await (async()=>{const expectedVersion='2.0.76-beta.1';const fail=label=>{throw new Error('Old-shape cleanup guard failed: '+label)};const exact=(value,keys,label)=>{try{if(typeof value!=='object'||value===null||Array.isArray(value)||Object.getPrototypeOf(value)!==Object.prototype)throw 0;const descriptors=Object.getOwnPropertyDescriptors(value);if(Reflect.ownKeys(descriptors).length!==keys.length||keys.some(key=>{const descriptor=descriptors[key];return !descriptor||descriptor.enumerable!==true||!Object.hasOwn(descriptor,'value')}))throw 0;return Object.fromEntries(keys.map(key=>[key,descriptors[key].value]))}catch{fail(label)}};const manifest=chrome.runtime.getManifest();const extensionVersion=manifest.version_name||manifest.version;if(extensionVersion!==expectedVersion)fail('loaded Extension is not exact private beta1');let capabilityRaw,verificationRaw;try{capabilityRaw=await chrome.runtime.sendMessage({type:'NATIVE_MSG',payload:{action:'get_capabilities'}});verificationRaw=await chrome.runtime.sendMessage({type:'NATIVE_MSG',payload:{action:'verify_installation'}})}catch{fail('runtime Host checks unavailable')}const capabilityEnvelope=exact(capabilityRaw,['status','data'],'capability envelope');const capabilities=exact(capabilityEnvelope.data,['host_version','capabilities'],'capability data');if(capabilityEnvelope.status!=='success'||capabilities.host_version!==expectedVersion||!Array.isArray(capabilities.capabilities)||capabilities.capabilities.length!==2||capabilities.capabilities[0]!=='prompt-scope-v1'||capabilities.capabilities[1]!=='transactional-update-v1')fail('runtime Host identity/capabilities');const verificationEnvelope=exact(verificationRaw,['status','data'],'verification envelope');const verification=exact(verificationEnvelope.data,['mode','integrity','host_version','extension_version'],'verification data');if(verificationEnvelope.status!=='success'||verification.mode!=='packaged'||verification.integrity!=='verified'||verification.host_version!==expectedVersion||verification.extension_version!==expectedVersion)fail('packaged integrity/version');let bag;try{bag=await chrome.storage.local.get(['dh_update_state','pending_update'])}catch{fail('storage read')}const selected=exact(bag,['dh_update_state'],'selected storage keys');const state=exact(selected.dh_update_state,['kind','update','outcome'],'old complete keys');const update=exact(state.update,['version','url','isPrerelease'],'candidate keys');if(state.kind!=='complete'||state.outcome!=='committed'||update.version!==expectedVersion||update.isPrerelease!==true||typeof update.url!=='string'||Object.hasOwn(state,'transactionId'))fail('old complete identity');let parsedUrl;try{parsedUrl=new URL(update.url)}catch{fail('candidate URL shape')}if(parsedUrl.protocol!=='https:'||parsedUrl.username!==''||parsedUrl.password!==''||parsedUrl.hash!==''||!parsedUrl.pathname.toLowerCase().endsWith('.zip'))fail('candidate URL shape');try{await chrome.storage.local.remove('dh_update_state')}catch{fail('storage removal')}let after;try{after=await chrome.storage.local.get(['dh_update_state','pending_update'])}catch{fail('post-removal read')}exact(after,[],'post-removal absence');return {guard:'PASS',removedKey:'dh_update_state',kind:state.kind,stateKeys:Object.keys(state).sort(),candidateKeys:Object.keys(update).sort(),hasOwnTransactionId:false,outcome:state.outcome,version:update.version,isPrerelease:update.isPrerelease,hasUpdateUrl:true,hostVersion:capabilities.host_version,extensionVersion,integrity:'packaged/verified'}})()
-```
-
-Document the expected `guard:'PASS'`, exact beta1 versions, committed outcome,
-no own transaction ID, and `integrity:'packaged/verified'`. The later authorized
-operator uses normal Service Worker **Stop**, not Extension Reload or Unregister,
-then returns to Options and runs:
-
-```javascript
-await (async()=>{const raw=await chrome.runtime.sendMessage({type:'DH_UPDATE_GET_STATE'});if(raw?.handled!==true||raw?.state?.kind!=='idle'||Reflect.ownKeys(raw.state).length!==1)throw new Error('Fresh Worker is not idle');const stored=await chrome.storage.local.get(['dh_update_state','pending_update']);if(Object.hasOwn(stored,'pending_update'))throw new Error('Legacy pending state remains');if(Object.hasOwn(stored,'dh_update_state')&&(stored.dh_update_state?.kind!=='idle'||Reflect.ownKeys(stored.dh_update_state).length!==1))throw new Error('Stored coordinator state is not idle');return {handled:true,kind:'idle',storedKind:Object.hasOwn(stored,'dh_update_state')?'idle':'absent',hasUpdateUrl:false}})()
-```
-
-Expected: handled `idle`, stored `idle` or absent, and `hasUpdateUrl:false`.
-Label this as test-environment cleanup of an unpublished private state, never a
-product migration or compatibility path. Any failed predicate means stop and
-preserve evidence. The fixed ACK slot is only the last acknowledgment, so this
-procedure must happen before any beta2 transaction.
-
-Add a `## One-Time Private B1 Completion Cleanup` section to the runbook and put
-the three commands plus their expected outputs there. Task 5 executes only that
-committed runbook section; this plan records the required content for review but
-is not a second execution authority.
+RunOnce/status-Host registration. The sole executable authority is the committed
+runbook section `## One-Time Private B1 Completion Cleanup`; this plan does not
+duplicate its commands. Task 5 must independently review that section after B2
+identity is filled, then execute it only under the explicit cloud-PC storage/
+Worker authorization. It requires exact known B1 finalization evidence, strict
+old-shape candidate validation, zero recovery residue, removal of only
+`dh_update_state`, normal Worker Stop/Options wake, and final idle/no-URL state.
+Any mismatch preserves evidence. This is unpublished-test-state cleanup, never a
+product migration or compatibility path.
 
 - [ ] **Step 4: Verify, independently review, and commit docs**
 
@@ -1411,9 +1368,10 @@ Present and separately authorize: copy beta1/beta2 artifacts into
 from the fixed candidate-evidence commit; verify both copied hashes; run the
 read-only beta1 terminal guard; delete only the exact
 old-shape beta1 `dh_update_state`; Stop/wake the Service Worker; seed beta2
-candidate storage; and run the uninterrupted normal Update action. This approval
-does not authorize installers, process termination, interruption, or sentinel
-mutation.
+candidate storage; capture the prior Status bubble Boolean, enable it if needed,
+run the uninterrupted normal Update action, then restore and verify the exact
+prior Boolean after lifecycle and smoke checks. This approval does not authorize
+installers, process termination, interruption, or sentinel mutation.
 
 - [ ] **Step 8: Run uninterrupted beta1 to beta2**
 
@@ -1428,24 +1386,29 @@ order without substituting Extension Reload for Worker Stop:
 2. Record beta1's historical safe terminal fields, perform the one-time guarded
    old-shape completion cleanup from Task 4, Stop the Worker, wake it through
    Options, and require `idle` with no retained candidate URL.
-3. Copy beta2 to `C:\DH-CloudPC`, hash it locally, and require exact equality to
+3. Capture the effective Status bubble Boolean. Enable it through Options and
+   verify `true` before candidate seeding, retaining the original Boolean for
+   later restoration.
+4. Copy beta2 to `C:\DH-CloudPC`, hash it locally, and require exact equality to
    the committed ledger `$qualifiedHash`; re-download through the SAS immediately
    before seeding and require the same hash. Use the separately authorized fresh
    private single-Blob container/SAS from Step 6, seed beta2 `available`
    without printing the URL, Stop the Worker, wake it through Options, and
    require `DH_UPDATE_GET_STATE` to return that candidate.
-4. Run uninterrupted beta1 → beta2 through the normal Update action while the
+5. Run uninterrupted beta1 → beta2 through the normal Update action while the
    safe storage/process watchers are active. Require `complete/committed`,
    matching beta2 Host/Extension, `packaged/verified`, no active/workspace/
    cursor/receipt/RunOnce residue, and matching finalization acknowledgment.
-5. Require the fresh B2 automated FAB/Options gate to prove exact 7,999/8,000 ms
+6. Require the fresh B2 automated FAB/Options gate to prove exact 7,999/8,000 ms
    timing. On the cloud PC, observe both real terminal UIs appear after reload
    and disappear globally without storage editing/manual ACK or use of the ACK
    response as authority. Verify the authoritative committed state is `idle`
    with `hasUpdateUrl:false` and completion remains absent across FAB/Options
    refresh. Cloud timing is an approximate integration observation, not a second
    exact-millisecond proof.
-6. Run Analyze and Options smoke checks and record only PASS/FAIL.
+7. Run Analyze and Options smoke checks. Restore Status bubble to the captured
+   prior Boolean through Options, reread and require the exact original value,
+   then record only sanitized PASS/FAIL and `preference restored`.
 
 Use the updated runbook's exact ledger parser on the cloud PC rather than manual
 hash transcription. It must extract one B2 row from the committed ledger copy,
