@@ -332,70 +332,6 @@ checks, restore the captured value through the same checkbox, rerun the
 projection, and require the exact original Boolean before recording the ledger
 result. Do not seed or start a scenario unless status bubbles are enabled.
 
-### Completion Lifecycle Observers
-
-Arm both observers before candidate seeding. They retain only transaction ID,
-outcome, state kind, Boolean visibility, and `performance.now()` timestamps.
-They never retain or print a URL, full runtime message/state, preference object,
-case data, prompt, or DOM text.
-
-In the installed B1 **Options page DevTools console**, arm the Options observer.
-Its selector is product-owned and unique: the completion-only
-`div[role="status"]` with the current emerald completion classes.
-
-```javascript
-(()=>{if(globalThis.dhOptionsCompletionObserver)throw new Error('Options completion observer already armed');const selector='div[role="status"].bg-emerald-50.border-emerald-200';const visible=()=>document.querySelector(selector)?.isConnected===true;const state={transactionId:null,outcome:null,completeAt:null,visibleAt:null,nearDeadlineAt:null,nearDeadlineVisible:null,authorityAt:null,authorityKind:null,visibleImmediatelyBeforeAuthority:null,hiddenAt:null,failure:null};const project=message=>{try{if(typeof message!=='object'||message===null||Array.isArray(message))return null;const md=Object.getOwnPropertyDescriptors(message);if(!md.type||!Object.hasOwn(md.type,'value')||md.type.value!=='DH_UPDATE_STATE'||!md.state||!Object.hasOwn(md.state,'value'))return null;const raw=md.state.value;if(typeof raw!=='object'||raw===null||Array.isArray(raw))return null;const sd=Object.getOwnPropertyDescriptors(raw);if(!sd.kind||!Object.hasOwn(sd.kind,'value')||typeof sd.kind.value!=='string')return null;const result={kind:sd.kind.value,transactionId:null,outcome:null};if(result.kind==='complete'){if(!sd.transactionId||!Object.hasOwn(sd.transactionId,'value')||typeof sd.transactionId.value!=='string'||!/^[0-9a-f]{32}$/.test(sd.transactionId.value)||!sd.outcome||!Object.hasOwn(sd.outcome,'value')||!['committed','rolled-back'].includes(sd.outcome.value))return null;result.transactionId=sd.transactionId.value;result.outcome=sd.outcome.value}return result}catch{return null}};const noteVisibility=()=>{const at=performance.now(),shown=visible();if(shown&&state.completeAt!==null&&state.visibleAt===null)state.visibleAt=at;if(!shown&&state.authorityAt!==null&&state.hiddenAt===null)state.hiddenAt=at};const onMessage=message=>{const next=project(message);if(!next)return;const at=performance.now();if(next.kind==='complete'){if(state.completeAt!==null&&state.transactionId!==next.transactionId){state.failure='completion identity changed';return}if(state.completeAt===null){state.transactionId=next.transactionId;state.outcome=next.outcome;state.completeAt=at;setTimeout(()=>{if(state.authorityAt===null){state.nearDeadlineAt=performance.now();state.nearDeadlineVisible=visible();if(!state.nearDeadlineVisible)state.failure='Options completion hidden before authority'}},7900);queueMicrotask(noteVisibility)}return}if(state.completeAt!==null&&state.authorityAt===null){state.visibleImmediatelyBeforeAuthority=visible();state.authorityAt=at;state.authorityKind=next.kind;if(!state.visibleImmediatelyBeforeAuthority)state.failure='Options completion not visible immediately before authority';queueMicrotask(noteVisibility)}};const mutations=new MutationObserver(noteVisibility);mutations.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','hidden','style']});chrome.runtime.onMessage.addListener(onMessage);const report=()=>{noteVisibility();if(state.failure)throw new Error(state.failure);for(const key of ['transactionId','outcome','completeAt','visibleAt','authorityAt','authorityKind','hiddenAt'])if(state[key]===null)throw new Error('Options lifecycle evidence incomplete: '+key);if(state.visibleImmediatelyBeforeAuthority!==true||state.hiddenAt<state.authorityAt)throw new Error('Options lifecycle ordering invalid');if(state.nearDeadlineAt!==null&&(state.nearDeadlineAt-state.completeAt<7900||state.nearDeadlineVisible!==true))throw new Error('Options near-deadline evidence invalid');const expectedKind=state.outcome==='committed'?'idle':'available';if(state.authorityKind!==expectedKind)throw new Error('Options authoritative terminal kind mismatch');return {transactionId:state.transactionId,outcome:state.outcome,completeVisible:true,visibleStartDelayMs:Math.round(state.visibleAt-state.completeAt),nearDeadlineSampleElapsedMs:state.nearDeadlineAt===null?null:Math.round(state.nearDeadlineAt-state.completeAt),nearDeadlineVisible:state.nearDeadlineVisible,authorityElapsedMs:Math.round(state.authorityAt-state.completeAt),visibleImmediatelyBeforeAuthority:true,authorityKind:state.authorityKind,hideAfterAuthorityMs:Math.round(state.hiddenAt-state.authorityAt)}};const stop=()=>{chrome.runtime.onMessage.removeListener(onMessage);mutations.disconnect();delete globalThis.dhOptionsCompletionObserver};globalThis.dhOptionsCompletionObserver={report,stop};return {armed:true,selector}})()
-```
-
-Require only `{armed:true}` plus the documented selector. In the FAB-bearing
-page DevTools, select the **Dynamics Helper content-script execution context**,
-not the page's main world, and arm the FAB observer. It reads only the open
-product shadow root and recognizes the exact current English/Chinese update
-completion strings without printing them.
-
-```javascript
-(()=>{if(globalThis.dhFabCompletionObserver)throw new Error('FAB completion observer already armed');const host=document.getElementById('dh-extension-root'),root=host?.shadowRoot;if(!root)throw new Error('Dynamics Helper shadow root is unavailable');const completionText=new Set(['Update completed successfully.','更新已成功完成。','The update could not be completed and the previous version was restored.','更新未能完成，已恢复上一版本。']);const visible=()=>{const node=root.querySelector('.dh-status-bubble.visible.success, .dh-status-bubble.visible.error');return node?.isConnected===true&&completionText.has((node.textContent??'').trim())};const state={transactionId:null,outcome:null,completeAt:null,visibleAt:null,nearDeadlineAt:null,nearDeadlineVisible:null,authorityAt:null,authorityKind:null,visibleImmediatelyBeforeAuthority:null,hiddenAt:null,failure:null};const project=message=>{try{if(typeof message!=='object'||message===null||Array.isArray(message))return null;const md=Object.getOwnPropertyDescriptors(message);if(!md.type||!Object.hasOwn(md.type,'value')||md.type.value!=='DH_UPDATE_STATE'||!md.state||!Object.hasOwn(md.state,'value'))return null;const raw=md.state.value;if(typeof raw!=='object'||raw===null||Array.isArray(raw))return null;const sd=Object.getOwnPropertyDescriptors(raw);if(!sd.kind||!Object.hasOwn(sd.kind,'value')||typeof sd.kind.value!=='string')return null;const result={kind:sd.kind.value,transactionId:null,outcome:null};if(result.kind==='complete'){if(!sd.transactionId||!Object.hasOwn(sd.transactionId,'value')||typeof sd.transactionId.value!=='string'||!/^[0-9a-f]{32}$/.test(sd.transactionId.value)||!sd.outcome||!Object.hasOwn(sd.outcome,'value')||!['committed','rolled-back'].includes(sd.outcome.value))return null;result.transactionId=sd.transactionId.value;result.outcome=sd.outcome.value}return result}catch{return null}};const noteVisibility=()=>{const at=performance.now(),shown=visible();if(shown&&state.completeAt!==null&&state.visibleAt===null)state.visibleAt=at;if(!shown&&state.authorityAt!==null&&state.hiddenAt===null)state.hiddenAt=at};const onMessage=message=>{const next=project(message);if(!next)return;const at=performance.now();if(next.kind==='complete'){if(state.completeAt!==null&&state.transactionId!==next.transactionId){state.failure='completion identity changed';return}if(state.completeAt===null){state.transactionId=next.transactionId;state.outcome=next.outcome;state.completeAt=at;setTimeout(()=>{if(state.authorityAt===null){state.nearDeadlineAt=performance.now();state.nearDeadlineVisible=visible();if(!state.nearDeadlineVisible)state.failure='FAB completion hidden before authority'}},7900);queueMicrotask(noteVisibility)}return}if(state.completeAt!==null&&state.authorityAt===null){state.visibleImmediatelyBeforeAuthority=visible();state.authorityAt=at;state.authorityKind=next.kind;if(!state.visibleImmediatelyBeforeAuthority)state.failure='FAB completion not visible immediately before authority';queueMicrotask(noteVisibility)}};const mutations=new MutationObserver(noteVisibility);mutations.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['class','hidden','style']});chrome.runtime.onMessage.addListener(onMessage);const report=()=>{noteVisibility();if(state.failure)throw new Error(state.failure);for(const key of ['transactionId','outcome','completeAt','visibleAt','authorityAt','authorityKind','hiddenAt'])if(state[key]===null)throw new Error('FAB lifecycle evidence incomplete: '+key);if(state.visibleImmediatelyBeforeAuthority!==true||state.hiddenAt<state.authorityAt)throw new Error('FAB lifecycle ordering invalid');if(state.nearDeadlineAt!==null&&(state.nearDeadlineAt-state.completeAt<7900||state.nearDeadlineVisible!==true))throw new Error('FAB near-deadline evidence invalid');const expectedKind=state.outcome==='committed'?'idle':'available';if(state.authorityKind!==expectedKind)throw new Error('FAB authoritative terminal kind mismatch');return {transactionId:state.transactionId,outcome:state.outcome,completeVisible:true,visibleStartDelayMs:Math.round(state.visibleAt-state.completeAt),nearDeadlineSampleElapsedMs:state.nearDeadlineAt===null?null:Math.round(state.nearDeadlineAt-state.completeAt),nearDeadlineVisible:state.nearDeadlineVisible,authorityElapsedMs:Math.round(state.authorityAt-state.completeAt),visibleImmediatelyBeforeAuthority:true,authorityKind:state.authorityKind,hideAfterAuthorityMs:Math.round(state.hiddenAt-state.authorityAt)}};const stop=()=>{chrome.runtime.onMessage.removeListener(onMessage);mutations.disconnect();delete globalThis.dhFabCompletionObserver};globalThis.dhFabCompletionObserver={report,stop};return {armed:true,shadowRoot:true}})()
-```
-
-Require `{armed:true,shadowRoot:true}`. A 7,900 ms sample is a deliberately early
-diagnostic, not fabricated 7,999 ms proof; timer scheduling may delay it. Run
-both observers' `report()` methods only after both UIs hide:
-
-```javascript
-const optionsLifecycle=globalThis.dhOptionsCompletionObserver.report();optionsLifecycle
-```
-
-```javascript
-JSON.stringify(globalThis.dhFabCompletionObserver.report())
-```
-
-Both reports must
-have the same transaction/outcome, must show completion visible immediately
-before authority and hidden afterward, and at least one report (the earliest
-complete observer) must have `authorityElapsedMs >= 8000`. A later-delivered view
-may legitimately be hidden by the global winner before its own 8-second timer.
-Missing visibility, timing, authority, or hide evidence makes `report()` throw;
-an earliest-observer authority below 8,000 ms fails qualification.
-
-Paste only the FAB report's safe JSON string into this Options-console
-cross-view verifier. It fails instead of inferring missing or inconsistent
-evidence:
-
-```javascript
-(()=>{const own=globalThis.dhOptionsCompletionObserver.report();const text=window.prompt('Paste the safe FAB lifecycle report JSON');let peer;try{peer=JSON.parse(text??'')}catch{throw new Error('FAB lifecycle report is not valid JSON')}for(const value of [own,peer]){if(typeof value!=='object'||value===null||typeof value.transactionId!=='string'||!/^[0-9a-f]{32}$/.test(value.transactionId)||!['committed','rolled-back'].includes(value.outcome)||typeof value.authorityElapsedMs!=='number'||value.visibleImmediatelyBeforeAuthority!==true||typeof value.hideAfterAuthorityMs!=='number'||value.hideAfterAuthorityMs<0)throw new Error('Lifecycle report is incomplete')}if(own.transactionId!==peer.transactionId||own.outcome!==peer.outcome||own.authorityKind!==peer.authorityKind)throw new Error('Cross-view lifecycle identity mismatch');const earliestElapsed=Math.max(own.authorityElapsedMs,peer.authorityElapsedMs);if(earliestElapsed<8000)throw new Error('Authoritative departure occurred before 8000ms');return {transactionId:own.transactionId,outcome:own.outcome,authorityKind:own.authorityKind,earliestAuthorityElapsedMs:earliestElapsed,bothVisibleImmediatelyBeforeAuthority:true,bothHiddenAfterAuthority:true}})()
-```
-
-After both reports and the cross-view verifier pass, stop each primary observer
-in its own original context before refreshing either view:
-
-```javascript
-globalThis.dhOptionsCompletionObserver.stop()
-```
-
-```javascript
-globalThis.dhFabCompletionObserver.stop()
-```
-
 If `plan-d-b1` cannot be established safely, preserve all update evidence. Run
 the exact B2 complete installer first to settle the target; if that fails, run
 the exact B1 complete installer to settle the prior version. Rebuild the still
@@ -450,7 +386,10 @@ triggers `onInstalled`, which sends `check_updates`; a normal public
 product backdoor. Edge's normal Service Worker **Stop** is the only
 candidate-restart procedure in this runbook.
 
-Register this sanitized listener before starting. It never prints `update.url`:
+Register this sanitized pre-reload listener before starting. It never prints
+`update.url`. The required Extension reload destroys this context, so it is only
+for capturing pre-reload transaction progress/identity and is not terminal
+lifecycle evidence:
 
 ```javascript
 globalThis.dhUpdateWatch=(changes,area)=>{const s=changes.dh_update_state?.newValue;if(area==='local'&&s)console.log({kind:s.kind,transactionId:s.transactionId,targetVersion:s.targetVersion,outcome:s.outcome,code:s.code,errorCode:s.errorCode})}; chrome.storage.onChanged.addListener(globalThis.dhUpdateWatch)
@@ -462,7 +401,8 @@ Start through the payload-free production coordinator request:
 void chrome.runtime.sendMessage({type:'DH_UPDATE_START'}).then(r=>{const s=r?.state;console.log({handled:r?.handled,kind:s?.kind,transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode})}).catch(()=>console.error('Update start request disconnected'))
 ```
 
-After any reload, reopen Options DevTools and inspect only safe fields:
+After any reload, assume the pre-reload listener is gone. Reopen Options DevTools
+and inspect only safe fields:
 
 ```javascript
 const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode,version:s?.update?.version})
@@ -483,63 +423,50 @@ Extension to agree with the terminal outcome: B2 `2.0.76-beta.2` for
 
 ### Completion Lifecycle Evidence
 
-Status bubbles must already be enabled. Keep the same FAB-bearing page and
-Options view mounted from the first terminal display. Capture these exact safe
-checkpoints without printing prefs, state objects, or URLs:
+Completion timing has two separate evidence sources. Do not merge or overstate
+them.
 
-1. At first terminal render, record only the transaction ID, outcome, and a
-   monotonic start time.
-2. Before **8,000 ms** of mounted time, require both the Options terminal banner
-   and FAB completion bubble to remain visible while no authoritative departure
-   has occurred. The observers sample near 7,900 ms and also synchronously at
-   departure; they do not fabricate an exact 7,999 ms sample. Closing either view
-   invalidates that timing attempt because a later mount receives a fresh
-   interval.
-3. At or after **8,000 ms**, require the first matching
-   `DH_UPDATE_ACK_COMPLETE` to be durably applied and its authoritative
-   `DH_UPDATE_STATE` broadcast to arrive before either terminal UI disappears.
-   Use the earliest observer's complete timestamp for this threshold; a later
-   observer may receive the same global departure before its own local timer.
-   Do not infer authority from the ACK response.
-4. Run both primary reports and the cross-view verifier, stop both primary
-   observers in their original contexts, then refresh the ordinary FAB page and
-   Options page, not the Extension. Require the terminal banner/bubble to remain
-   absent through the fresh observers below.
+**Automated exact-timing evidence:** Before any cloud-PC scenario can pass, the
+fresh B2 Extension automated gate must pass the FAB and Options tests that prove
+no ACK at 7,999 ms, one exact same-transaction ACK at 8,000 ms, timer stability
+under identity/state changes, no optimistic hide, no use of the ACK response as
+live authority, and transition only from the authoritative broadcast. Task 5
+records the actual B2 test counts in the ledger; this runbook does not hard-code
+them as final artifact evidence.
 
-After the authoritative transition and before stopping the primary observers,
-use this safe projection. Repeat it after both refreshes in the new contexts. It
-reports URL presence only:
+**Cloud-PC integration evidence:** The required Extension reload destroys every
+pre-reload Options/content-script context, so no pre-reload listener or timer is
+cloud timing evidence. After reload, reopen Options and a FAB-bearing page. With
+Status bubble already enabled, visually confirm that the real terminal Options
+banner and FAB completion bubble both appear. Do not edit `dh_update_state`, send
+`DH_UPDATE_ACK_COMPLETE`, invoke acknowledgment manually, or use any ACK promise
+response. Without manual intervention, confirm that both terminal UIs disappear
+globally after approximately the expected eight-second display interval. This is
+an integration observation, not an independent exact-millisecond measurement.
+
+After both terminal UIs disappear, use this safe projection in Options. Repeat
+it after refreshing the ordinary FAB page and after refreshing Options. It
+reports URL presence only and never prints a full state or URL:
 
 ```javascript
 const r=await chrome.runtime.sendMessage({type:'DH_UPDATE_GET_STATE'});const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state');({handled:r?.handled,publicKind:r?.state?.kind,publicVersion:r?.state?.update?.version,publicHasUpdateUrl:typeof r?.state?.update?.url==='string',storedKind:s?.kind??'absent',storedVersion:s?.update?.version,storedHasUpdateUrl:typeof s?.update?.url==='string'})
 ```
 
-After refreshing each ordinary view, arm this fresh one-second non-replay
-observer in that view's same execution context. It records only safe state kind
-and whether a product-owned completion element appears:
-
-```javascript
-await new Promise((resolve,reject)=>{const isFab=document.getElementById('dh-extension-root')?.shadowRoot!=null;const root=isFab?document.getElementById('dh-extension-root').shadowRoot:document;const completionText=new Set(['Update completed successfully.','更新已成功完成。','The update could not be completed and the previous version was restored.','更新未能完成，已恢复上一版本。']);const visible=()=>{if(!isFab)return document.querySelector('div[role="status"].bg-emerald-50.border-emerald-200')?.isConnected===true;const node=root.querySelector('.dh-status-bubble.visible.success, .dh-status-bubble.visible.error');return node?.isConnected===true&&completionText.has((node.textContent??'').trim())};let replay=false;const observer=new MutationObserver(()=>{if(visible())replay=true});observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['class','hidden','style']});const onMessage=message=>{try{const md=Object.getOwnPropertyDescriptors(message);if(md.type&&Object.hasOwn(md.type,'value')&&md.type.value==='DH_UPDATE_STATE'&&md.state&&Object.hasOwn(md.state,'value')){const sd=Object.getOwnPropertyDescriptors(md.state.value);if(sd.kind&&Object.hasOwn(sd.kind,'value')&&sd.kind.value==='complete')replay=true}}catch{replay=true}};chrome.runtime.onMessage.addListener(onMessage);chrome.runtime.sendMessage({type:'DH_UPDATE_GET_STATE'}).then(response=>setTimeout(()=>{chrome.runtime.onMessage.removeListener(onMessage);observer.disconnect();if(replay||visible())reject(new Error('Terminal completion replayed after refresh'));else resolve({view:isFab?'fab':'options',completionReplay:false,publicKind:response?.state?.kind})},1000),()=>{chrome.runtime.onMessage.removeListener(onMessage);observer.disconnect();reject(new Error('Public state request failed after refresh'))})})
-```
-
-Require `completionReplay:false` once for FAB and once for Options. For committed
-completion both `publicKind` values must be `idle`; for rollback both must be
-`available`. This observer never treats an ACK promise response as transition
-authority; it only rejects a replayed live `complete` broadcast or completion
-DOM.
-
 For committed completion, the public state must be `idle` with no retained
 candidate URL, and stored state must be `idle` or absent with no URL. For
 rolled-back completion, public and stored state must be `available` for exact B2
-with the ordinary **Retry** action and no replayed rollback notice. Multiple
-views may race; duplicate ACKs must not change the authoritative result. Do not
-record the ledger field yet. First finish terminal residue verification and the
-Analyze/Options smoke checks, then restore and verify the captured prior Status
-bubble preference. Only afterward record the completed checkpoint summary in the
-ledger's **Completion lifecycle** field: `status bubble enabled`, `visible before
-8,000 ms and immediately before authority`, `authoritative transition at/after
-8,000 ms`, `absent after FAB/Options refresh`, the final safe state, and
-`preference restored`.
+with the ordinary **Retry** action and no replayed rollback notice. After each
+FAB and Options refresh, visually confirm that the terminal banner/bubble does
+not reappear; rollback may continue to show ordinary Retry. Record PASS/FAIL
+only, with no screenshot, log, customer data, case identity, or prompt content.
+
+A scenario cannot pass unless both the fresh automated exact-timing gate and
+these real cloud integration checks pass. Do not record the ledger field yet.
+First finish terminal residue verification and the Analyze/Options smoke checks,
+then restore the captured prior Status bubble value through the normal Options
+UI and rerun the Boolean projection in **Status Bubble Qualification
+Precondition**. Only after it exactly matches the captured Boolean may the
+ledger's **Completion lifecycle** field say `preference restored`.
 
 After final acknowledgment, verify that the captured transaction workspace is
 gone and the entire transactions/receipts namespaces are empty. In the command,
@@ -569,8 +496,9 @@ preference as specified above; record results only afterward. Do not accept
 displayed success when versions, integrity,
 ACK bytes, or lifecycle evidence disagree.
 
-After the safe terminal fields have been recorded, remove the listener if its
-DevTools context still exists:
+The pre-reload listener normally no longer exists after Extension reload. Remove
+it only if its old DevTools context still exists; absence is expected and is not
+terminal evidence:
 
 ```javascript
 if(globalThis.dhUpdateWatch){chrome.storage.onChanged.removeListener(globalThis.dhUpdateWatch);delete globalThis.dhUpdateWatch}

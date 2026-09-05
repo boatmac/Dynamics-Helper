@@ -105,13 +105,20 @@ terminal state is one of these exact outcomes. A row containing `PENDING` or
 
 `Versions/integrity` must record matching Host/Extension `2.0.76-beta.2` and
 verified integrity for B2, or matching `2.0.76-beta.1` and verified integrity for
-Scenario 2's allowed B1 rollback. Completion acceptance also requires the result
-to run with status bubbles enabled; the terminal banner and FAB completion bubble
-must remain visible through 7,999 ms of mounted time, transition only through the
-authoritative ACK/broadcast at or after 8,000 ms, and remain absent after both FAB
-and Options refresh. Committed final public/stored state is `idle` with no URL;
-rolled-back final state is B2 `available` with ordinary Retry and no rollback
-replay.
+Scenario 2's allowed B1 rollback. **Completion lifecycle** must record all of:
+fresh B2 automated exact-timing gate `PASS`; Status bubble enabled before the
+scenario; real terminal Options banner and FAB completion bubble appeared after
+reload; both disappeared globally without storage editing, manual acknowledgment,
+or use of an ACK response as authority; committed final public/stored state was
+`idle` with no URL, or rolled-back final state was B2 `available` with ordinary
+Retry; neither completion nor rollback notice replayed after FAB and Options
+refresh; and the exact prior Status bubble Boolean was restored and reread before
+recording `preference restored`. The cloud-PC observation may note an approximate
+expected display duration but is not exact millisecond evidence.
+
+A scenario cannot be `PASS` unless both the automated exact-timing gate and the
+real cloud integration lifecycle checks pass. Task 5 records actual fresh B2
+test counts; no current count is final artifact evidence yet.
 
 Matching-installer repair may record `N/A - no terminal completion notice` only
 when it produces no terminal completion state; all other lifecycle fields remain
