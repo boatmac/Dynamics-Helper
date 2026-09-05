@@ -152,7 +152,9 @@ transactional scenario.
 To establish or re-establish `plan-d-b1`:
 
 1. extract the recorded B1 ZIP;
-2. run its complete `install.bat`;
+2. use the runbook's guarded direct `installer_core.ps1` command, preserving the
+   exact empty-cloud-PC marker, browser/Host/runner process, local artifact path,
+   and installer success-marker guards; do not invoke `install.bat`;
 3. confirm Native Messaging is registered to the installed frozen Host;
 4. confirm Host and Extension both report `2.0.76-beta.1`;
 5. confirm `transactional-update-v1` is present;
