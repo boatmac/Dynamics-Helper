@@ -2,6 +2,12 @@
 
 **Status:** Approved in-session on 2026-09-01
 
+> Product scope remains accepted. The implementation and examples below describe
+> the original cutover; completion identity/visible acknowledgment were amended
+> by `2026-09-05-visible-update-completion-design.md`. Current delivery failed
+> B2 cloud qualification; this design does not authorize continued execution.
+> Read `docs/session-handoff-2026-07-15.md` for current status and authorization.
+
 ## Goal
 
 Keep one-click automatic updates while eliminating false success, unsafe ZIP

@@ -1,6 +1,6 @@
 # Prefs State Management Refactor Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution note:** No workflow plugin is required. Execute only currently authorized scope in bounded steps, with observable progress and scope-appropriate verification. Historical checkboxes do not authorize work; read `AGENTS.md` and the current handoff first.
 
 **Goal:** Centralize prefs type, defaults, and read-side bridge into `extension/src/utils/prefs.ts`, eliminate FAB's hardcoded prefs default dictionary, and document the new convention in DEVELOPER_GUIDE.md.
 

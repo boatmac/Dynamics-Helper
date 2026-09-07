@@ -1,5 +1,11 @@
 # Plan D Execution Refresh Design
 
+> **Historical Plan D architecture:** The September 1 reliable-auto-update
+> design supersedes this execution model, including its C-D0/registration and
+> exact-blob workflow requirements. Retain prerequisite provenance, not an active
+> task list. This notice does not authorize changing branch/PR topology or remove
+> implemented recovery guarantees. Current entry: `docs/session-handoff-2026-07-15.md`.
+
 ## Purpose
 
 Refresh the approved Plan D runtime/installer plan against the reviewed A/B/C/E

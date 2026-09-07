@@ -1,6 +1,9 @@
 # Plan D Reliable Auto-Update Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical implementation plan:** Production cutover was implemented;
+> subsequent B2 cloud qualification failed. Do not resume from old checkboxes.
+> Current entry: `docs/session-handoff-2026-07-15.md`. No skill/plugin is required;
+> the retained commands and old local paths are historical, not startup actions.
 
 **Goal:** Replace the false-success legacy updater with a validated, complete Host/Extension update that automatically rolls back ordinary failures and resumes after process restarts.
 

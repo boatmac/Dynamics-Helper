@@ -2,6 +2,49 @@
 
 This file defines the operational rules, development workflows, and coding standards for AI agents working on the "Dynamics Helper" project.
 
+## Development Entry And Execution Rules
+
+- Read `docs/session-handoff-2026-07-15.md` first for the current branch, product
+  state, authorization boundary, and next action. The latest user decision is to
+  remain in the local development checkout until a bounded milestone is complete.
+  Cloud PC transfer is deferred and is not the next action.
+- Product development is paused during handoff. Commands below are reference,
+  not instructions to install dependencies, test, build, register, or release
+  automatically. Verify the checkout before acting; installed product state is
+  separate from Git state and does not migrate with the repository.
+- User instructions override workflow templates. No coding-agent plugin or skill
+  is required to work on this project. In historical plans, Superpowers/OpenCode
+  tool names and unchecked boxes are not current execution requirements.
+- The user explicitly applied the global OpenCode Superpowers removal decision
+  to this project on 2026-09-07. Do not reload it, repeat its uninstall, change
+  other tools' skills, or install replacements. Restart OpenCode with a new
+  session to discard already injected instructions; see the recovery entry.
+- Keep one bounded task active. Do not turn a finding into a new requirement or
+  architecture project without user approval. Preserve complete working units;
+  an acceptable limitation is not permission to leave a half-applied feature.
+- At most three review rounds, then report unresolved findings and stop. Do not
+  silently restart the count with another reviewer, subtask, or exception loop.
+- Estimate long commands, but duration over five minutes is not an additional
+  approval gate for already authorized work. Record PID/start time, log path,
+  expected output, timeout, and a means to inspect/cancel owned work before launch.
+  Do not delegate long work to tools that cannot expose intermediate progress.
+- Full suites must report cumulative `N/total`; give the active test and elapsed
+  time for long cases. If progress stops, inspect the owned process/log rather
+  than waiting silently or restarting the entire suite. Report interruptions and
+  surviving processes; a stored task status is not proof of a live process.
+- Use focused tests for behavior edits. Run full suites at agreed milestones or
+  when the changed scope justifies them, not after every review comment. Pure
+  documentation cleanup uses diff/link/state checks, not product tests/builds.
+- Distinguish user quotations/approvals from assistant promises, subagent
+  instructions, and synthetic/compact summaries. Prior approvals are scoped;
+  commit, push, tag, publication, cloud/product/security mutations and dependency
+  installation need applicable explicit authorization.
+- Before compaction or stopping, update the authorized recovery entry with the
+  exact pause point. After compaction or a new session, reread it; never resume
+  product work from a summary or old plan alone.
+- Reply in the user's language. User-facing shell commands must be independently
+  copyable in fenced blocks, one physical line per command or explicit continuation.
+
 ## 1. Project Overview & Architecture
 
 **Dynamics Helper** is a Chrome extension that integrates with a Python Native Host (`dh_native_host.exe`) to interface with the GitHub Copilot SDK.
@@ -487,7 +530,10 @@ To ensure long-term maintainability and consistency, a task is only considered "
 
 1. **Code Functional:** The feature or bug fix is implemented and verified.
 2. **No "Split Brain":** Changes to the Host architecture are compatible with both **Dev Mode** (Python script) and **Prod Mode** (Compiled Exe).
-3. **Tests Pass:** All existing tests pass (`python -m unittest discover host` and `npm run build`).
+3. **Verification Matches Scope:** Behavior changes require relevant tests;
+   milestone/release verification includes the agreed full Host/Extension suites
+   and build. Documentation-only work requires static document checks, not a
+   full product run. State exact code/artifact identity and any skipped checks.
 4. **Documentation Updated:**
     * If the **Architecture** changed (e.g., Registry keys, Manifest logic), update `ARCHITECTURE.md`.
     * If the **User Workflow** changed (e.g., new installation step, new UI feature), update `USER_GUIDE.md`.
@@ -503,6 +549,10 @@ To ensure long-term maintainability and consistency, a task is only considered "
 ### Automation Script (`release_helper.py`)
 
 This script automates version bumping, git operations, building, and publishing.
+
+Its main entry point also commits/tags and cleans release outputs. Do not use it
+for a local-only build or handoff cleanup. The examples below require a separately
+approved release operation; historical plans do not supply that authorization.
 
 * **Stable Release:**
 
@@ -557,8 +607,8 @@ To prevent environment corruption, use `dev_switch.py` to toggle between testing
 **Testing Cycle:**
 
 1. Work in **Dev** mode.
-2. Build release (`python release_helper.py 2.x.x`).
-3. Run installer (`releases/DynamicsHelper_v2.x.x/install.bat`).
+2. Build only through the separately approved build/release entry point.
+3. Install only through the separately approved complete-installer procedure.
 4. Switch to **Prod** mode -> Test in Browser.
 5. Switch back to **Dev** mode.
 

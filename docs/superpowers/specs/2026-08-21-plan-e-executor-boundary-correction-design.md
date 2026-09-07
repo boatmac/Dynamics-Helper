@@ -1,5 +1,10 @@
 # Plan E Executor Boundary Correction Design
 
+> **Historical evidence-executor design:** Task 9 orchestration was superseded
+> by `2026-08-24-plan-e-task-9-evidence-correction-design.md`; the abandoned
+> executor is not a dependency or a pending implementation. Preserve product
+> contracts outside that superseded scope. Start at `docs/session-handoff-2026-07-15.md`.
+
 **Status:** Accepted
 **Date:** 2026-08-21
 **Authorized during:** Plan E Task 9 execution recovery

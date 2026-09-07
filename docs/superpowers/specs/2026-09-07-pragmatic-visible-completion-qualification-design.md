@@ -1,5 +1,14 @@
 # Pragmatic Visible Completion Qualification Design
 
+> **Current status:** Accepted qualification criteria, not an active plan. The
+> B2 build/gates below described as pending are historical: local checks later
+> passed and the normal cloud update failed under Defender. Remaining scenarios
+> were not run. See `docs/plan-d-pragmatic-cloud-pc-results.md` and start at
+> `docs/session-handoff-2026-07-15.md`. Local diagnosis and the offline attribution
+> check are complete, not B2 delivery; no evidence-backed code fix was identified.
+> Product work remains paused and Cloud PC transfer is deferred. New work requires
+> separate approval. Retained future-tense language grants no execution permission.
+
 ## Scope And Authority
 
 The user approved the checklist-based approach on 2026-09-07: one common

@@ -1,17 +1,30 @@
 # Plan D Pragmatic Cloud PC Results
 
+Current development entry: [handoff](session-handoff-2026-07-15.md). This is an
+evidence ledger, not a command queue. Product development and further cloud
+qualification remain paused. The bounded local diagnosis and offline attribution
+check are complete, but retained evidence does not support a specific code fix.
+Cloud PC transfer is deferred. Diagnosis completion is not B2 product delivery;
+new evidence collection or implementation requires separate approval.
+
 ## Scope
 
 This is a single-user pragmatic gate. Exhaustive cloud-PC fault injection and both
 legacy mixed-install directions were not run; existing automated tests cover
 those boundaries.
 
-NOT EXECUTION READY; historical evidence and source tests do not satisfy current
-B2 artifact gates or authorize operations. This ledger aligns only with the
+NOT EXECUTION READY; the five current B2 local artifact gates remain PASS, but cloud
+Scenario 1 is FAIL (Defender quarantine). B1 integrity and the reported rollback
+ACK match; active/cursor and transaction/receipt contents are absent. Remaining
+process, registration, and strict terminal checks have not been completed.
+Scenarios 2/3 are not run and remain PENDING; cloud update operations must stop.
+Obsolete executable runbook blocks are retained in Git history, not current
+instructions. Local PASS does not establish runtime safety. Historical
+evidence and source tests alone do not authorize operations. This ledger aligns with the
 approved [qualification design](superpowers/specs/2026-09-07-pragmatic-visible-completion-qualification-design.md)
 and reviewed [documentation plan](superpowers/plans/2026-09-07-pragmatic-visible-completion-qualification.md).
-Use the [runbook](plan-d-pragmatic-cloud-pc-runbook.md) for current criteria and
-remaining safety barriers, not as execution permission.
+Use the [paused qualification boundary](plan-d-pragmatic-cloud-pc-runbook.md)
+for retained criteria, not as execution permission.
 
 ## Artifact Identity
 
@@ -19,15 +32,18 @@ remaining safety barriers, not as execution permission.
 |---|---|---|---|---|
 | A | `2.0.74-beta.4` | `c77bd3a722259b098a8b8f4a4d1c941cc714e0cd` | `f605720d22fdc18be37673ac19b843d063e929a8a46f1132f54014f830aff6b5` | BUILT |
 | B1 (historical, disqualified) | `2.0.76-beta.1` | `5abe35ab2ab2262d5a7abdf1d21fefe81ebeacf0` | `77fbace3562e9052378ce025dbc6e2994fcb13989a391a5996abbc7856f06b54` | BUILT |
-| B2 (local candidate) | `2.0.76-beta.2` | PENDING: `cf016b7` base plus uncommitted version changes | `33958f963de94fc223cacf7bce313d74d3f29e5b7f0845168b0eb552fd2a5614` | BUILT LOCALLY; cloud qualification PENDING |
+| B2 (local candidate) | `2.0.76-beta.2` | `6413dbad9bd258bb04cf313610d602b68424e091` | `33958f963de94fc223cacf7bce313d74d3f29e5b7f0845168b0eb552fd2a5614` | BUILT LOCALLY; Scenario 1 FAIL: Defender quarantine; B1 rollback reported and integrity verified, full settlement checks incomplete |
 
 Artifact A remains historical evidence exactly as recorded. B1 remains exact
-technical build/transaction evidence but is disqualified. Only a separately
-approved immutable B2 build and fresh artifact verification may replace the B2
-artifact and current-gate placeholders. The local build below is not yet bound
-to an immutable source commit and does not unlock the cloud entry gate.
+technical build/transaction evidence but is disqualified. The existing B2 ZIP is
+bound to the committed packaging inputs as recorded below, not rebuilt after
+commit. Its hash is unchanged; this binding does not unlock the runbook barriers.
 
 ## Local B2 Build Verification
+
+The following is the historical build-time record; its uncommitted-source and
+pending-binding descriptions are retained as history, superseded only by the
+binding and distribution follow-up below.
 
 On 2026-09-07 the user authorized the beta2 version change, local packaging, and
 frozen Host verification only. No commit, tag, upload, installation, publication,
@@ -60,6 +76,27 @@ or workstation change was performed.
   The combined artifact entry gate and cloud scenarios remain pending; local
   checks are not an installation, upload, or cloud verification claim.
 
+## B2 Binding And Private Distribution Follow-Up
+
+On 2026-09-07, `git rev-parse 6413dba` resolved the B2 source commit to
+`6413dbad9bd258bb04cf313610d602b68424e091`. The existing ZIP's packaging inputs
+match this commit. This is a source binding of the already-built artifact, not a
+claim that the ZIP was rebuilt after the commit. ZIP bytes, size, and SHA-256
+remain unchanged.
+
+Private upload completed; anonymous access was denied, and the downloaded ZIP's
+SHA-256 matched the B2 artifact identity above. No resource identifiers, private
+URLs, or SAS credentials are recorded. This is private-delivery evidence, not
+cloud installation or qualification evidence.
+
+The user connected the cloud PC and authorized the normal uninterrupted
+B1-to-B2 scenario through user-mediated cloud execution. The subsequent
+user-reported screenshot evidence records Scenario 1 FAIL below; Scenarios 2/3
+have not run and remain PENDING. This authorization does not
+authorize interruption or matching-installer repair. The run occurred while the
+then-current runbook still contained six blocking placeholders; no replacement
+of all those barriers was recorded. Do not claim full runbook conformance.
+
 ## Historical B1 Automated Gate Evidence
 
 These rows are immutable B1 history and cannot satisfy the B2 entry gate.
@@ -82,7 +119,8 @@ Source implementation ends at cf016b7: Extension 997 passed; focused tests 227
 passed; TypeScript and local Extension build passed; isolated Host suite 666
 total, 665 passed and one environment-gated frozen-runtime skip. The skip is not
 PASS. Full-suite React act warnings and the stale Browserslist notice remain
-disclosed. These are source-only results, not evidence for an unbuilt B2 ZIP.
+disclosed. These results belong to that source checkpoint; later B2 artifact
+verification is recorded separately above.
 
 ## Guard Preparation Evidence
 
@@ -92,22 +130,23 @@ rerun during this documentation sync:
 - Per-attempt B1 rollback cleanup: prepared; isolated PS 54 passed and JS 75
   passed; independent review passed. The earlier 18 deferred-case RED checks were
   resolved by the 30-second deadline fix. Code: runbook
-  [Per-Attempt B1 Rollback Cleanup Contract](plan-d-pragmatic-cloud-pc-runbook.md#per-attempt-b1-rollback-cleanup-contract),
+  historical runbook at commit `6413dba`, Per-Attempt B1 Rollback Cleanup Contract,
   `DH-B1-ROLLBACK:PS` / `DH-B1-ROLLBACK:JS` BEGIN/END markers.
 - Scenario 3 path/user-file/sentinel guards: prepared; 27 mock tests passed;
   independent static review APPROVED. Code: runbook
-  [Scenario 3](plan-d-pragmatic-cloud-pc-runbook.md#scenario-3-matching-installer-repair),
+  historical runbook at commit `6413dba`, Scenario 3,
   `DH-S3:HELPERS`, `CAPTURE`, `CREATE`, `ABSENCE`, `COMPARE` BEGIN/END markers.
 
 Both test sets exist only as Temp files, not repeatable repository tests or CI
 gates; code-location markers are not a test harness. Real Windows PowerShell 5.1,
 reparse/ACL behavior, and OS Known Folder queries remain unverified. Quiescence
 is a procedural TOCTOU constraint, not atomic filesystem/browser storage safety.
-Real cleanup/repair and all three qualification scenarios remain PENDING.
+Real cleanup/repair remains PENDING. Scenario 1 subsequently failed as recorded
+below; Scenarios 2/3 have not run and remain PENDING.
 
-NOT EXECUTION READY. Six blocking throws remain: Qualification Entry Gate,
-B2 Artifact-Hash Placeholder, Complete B2 Installer Placeholder, One-Shot
-Original-Runner Interruption, Zero-Executor Checkpoint, Recovery-Runner Witness.
+NOT EXECUTION READY. Historical entry, artifact, installer, interruption,
+zero-executor and recovery-witness placeholders were never a runnable procedure.
+The current runbook no longer presents those blocks as steps to complete.
 B1/B2 versions, immutable source/ZIP identities, installed frozen Host, and fresh
 B2 artifact gates remain required. Every artifact, distribution, process,
 browser-cleanup, and installer mutation still requires independent explicit
@@ -115,23 +154,25 @@ authorization; preparation review does not grant it or operational closure.
 
 ## Current B2 Automated Gates
 
-Beta2 cloud-PC work is blocked until B2 has a complete immutable artifact
-identity and all five rows below are exact `PASS` with fresh evidence. `PENDING`,
-`Not recorded`, or empty evidence fails the runbook entry gate.
+The committed B2 input binding and all five fresh local gates are now recorded.
+Evidence below is the completed B2 verification recorded above, not a rerun during
+this ledger update. All five local gates remain PASS, but do not establish runtime
+safety or establish cloud qualification.
+Scenario 1 is FAIL; Scenarios 2/3 have not run and remain PENDING.
 
 | Gate | Result | Evidence |
 |---|---|---|
-| Host full suite | PENDING | PENDING |
-| Extension full suite | PENDING | PENDING |
-| Extension production build | PENDING | PENDING |
-| Frozen Host build/probe | PENDING | PENDING |
-| Static/reachability checks | PENDING | PENDING |
+| Host full suite | PASS | Fresh isolated B2 suite: `666/666` passed, no skips, with the built frozen runtime enabled. Duplicate-ZIP-entry fixture warning disclosed above. |
+| Extension full suite | PASS | Fresh B2 suite: `997/997` passed; React act warnings disclosed above. |
+| Extension production build | PASS | B2 production build passed, including all `5` default-item tests and source/dist byte identity; stale BrowsersList warning disclosed above. |
+| Frozen Host build/probe | PASS | Exact PyInstaller `6.22.2` onedir build; frozen integration `1/1` passed, no skip. Final real ZIP validation: `57` files / `56` manifest hash entries; real frozen `--update-probe` exited `0` with matching B2 versions/capabilities, unchanged product hashes, and empty isolated profiles. `tzdata` warning disclosed above. |
+| Static/reachability checks | PASS | Fresh B2 Python compileall, TypeScript no-emit, parser-only installer checks, diff checks, and legacy-update reachability checks passed. |
 
 ## Historical Cloud PC Baseline Evidence
 
 The A baseline and preconditions passed on `2026-09-04 UTC`. They remain
 historical evidence only and are not rerun for beta2. They do not qualify B1 or
-B2, and every formal beta2 scenario below remains `PENDING`.
+B2. Current beta2 scenario results are recorded separately below.
 
 | Check | Result | Sanitized evidence |
 |---|---|---|
@@ -168,6 +209,9 @@ candidate alone is disqualified for publication because the browser completion
 notice was permanent.
 
 ## Cloud PC Scenarios
+
+The criteria below are retained for interpreting past results, not an instruction
+to start or finish scenarios during handoff. No pending row is an automatic task.
 
 Set `Result` to `PASS` only when every other field, including **Completion
 lifecycle**, is complete, `Analyze` and `Options` are each `PASS`, and the
@@ -228,11 +272,105 @@ settlement success after FAIL does not reopen qualification.
 
 | Scenario | Baseline | Transaction ID | Terminal state | Versions/integrity | Completion lifecycle | Analyze | Options | Result |
 |---|---|---|---|---|---|---|---|---|
-| Uninterrupted B1 to B2 | `plan-d-b1` | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
-| Interrupted recovery | `plan-d-b1` | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | PENDING |
-| Matching-installer repair | `plan-d-b1` | N/A | Not recorded | Not recorded | PENDING | Not recorded | Not recorded | PENDING |
+| Uninterrupted B1 to B2 | `plan-d-b1` | `ed2ff2cbbb31e571d69fc361d83777e2` | rolled-back B1; active/cursor absent, transaction/receipt counts zero; full settlement unverified | Both B1, packaged/verified | B2 lifecycle not reached; old B1 rollback notice remains | Not recorded | Post-rollback integrity RPC passed; Options persistence smoke not recorded | FAIL: Defender quarantine |
+| Interrupted recovery | `plan-d-b1` | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | Not recorded | PENDING: not run |
+| Matching-installer repair | `plan-d-b1` | N/A | Not recorded | Not recorded | PENDING | Not recorded | Not recorded | PENDING: not run |
+
+### Scenario 1 Screenshot Evidence And Stop
+
+On 2026-09-07 the user reported screenshots from the normal B1-to-B2 run.
+This is a sanitized summary of that report, not an independent machine inspection
+or a full-log capture:
+
+- Defender reported behavior detection `Behavior:Win32/Persistence.A!ml`,
+  status `Quarantined`, severity `Severe`.
+- Reported affected items include the main `dh_native_host.exe`, the runner and
+  status-host executables under `updates/recovery`, and the `RunOnce` recovery
+  key. Account-specific paths, account identifiers, SIDs, and full registry
+  paths are intentionally omitted.
+- Console progression was `preparing -> activating -> polling`, followed by
+  native-host-exited / host-not-found errors. Options still displayed B1 and
+  `Updating`; this UI display does not prove a safe installed B1 baseline.
+- Transaction ID subsequently supplied as text from the finalization ACK:
+  `ed2ff2cbbb31e571d69fc361d83777e2`; outcome `rolled-back`, terminal version B1.
+  Active and cursor absent; transaction and receipt entry counts both zero.
+
+Additional user-supplied sanitized Defender events (local time, 2026-09-07):
+- `17:55:31`: event `1116`, records `6524` (`Unknown`), `6525` (status host),
+  `6526` (runner), detection source `System`; earliest visible evidence, not root cause.
+- `17:55:37/44/50`: `cmd`, event `1116`, `Realtime`.
+- `17:55:50`: runner, event `1116`, `System`.
+- `17:55:52`: event `1117`, runner record `6532` and `cmd` record `6534`;
+  quarantine result `0` (success).
+- `17:57:00`: `cmd`, event `1116`, record `6541`.
+- `17:57:17`: `cmd`, event `1117`, record `6545`, quarantine `0x80508023`; cause unexplained.
+These confirm runtime behavior detection, not a download/hash error; `cmd` is not a proven root cause.
+The local executable was reported `NotSigned`; RunOnce/detached source behavior is compatible
+with the evidence, but neither signing status nor source compatibility proves a false-positive trigger.
+
+Defender comparison supplied by the user (China Standard Time):
+
+- The retained log begins 2026-06-10. The 2026-09-04 17:00-19:00 window has
+  no 1116/1117 events; the historical successful-update report was at 18:21:46.
+- Engine `1.1.26080.3` and platform `4.18.26080.3` are unchanged across both
+  windows. September 4 security intelligence was `1.459.28.0`.
+- September 7 intelligence updates: 06:38:56 to `1.459.84.0`, 09:47:58 to
+  `1.459.86.0`, 13:47:58 to `1.459.90.0`, and 17:47:57 to `1.459.91.0`.
+- At 17:55:30, events 2010 / records 6522-6523 report cloud protection
+  intelligence `1.459.91.1`; earlier shown entries report `0.0.0.0`.
+  First displayed detections follow at 17:55:31. The cloud version field alone
+  does not establish cloud protection enablement or a particular rule verdict.
+- Four configuration-change events occur shortly before the September 4
+  success, and two at September 7 17:32:50 precede detection. Only their counts
+  and timestamps were collected; policy/allow/exclusion equivalence is unknown.
+- Static A/B1 archive comparison found 691/692 PYZ payloads identical; the sole
+  differing module is the product version constant. Other observed differences
+  are PE timestamps/checksum and standard-library archive order, not new updater
+  code. Binary identities nevertheless differ.
+- Detection-side changes are now an evidence-backed hypothesis, not a proven
+  sole cause or confirmed false positive. No protection downgrade or new update
+  experiment was performed to test that hypothesis.
+
+The six pre-upgrade configuration events were subsequently inspected locally
+from a user-exported private XML file. All concern
+`UX Configuration\ToastOrSsoTrigger`: records 6353-6354 change `1 -> 0`,
+6355-6356 change `0 -> 1` on September 4; records 6512-6513 change `0 -> 1`
+on September 7. None of these six names is a protection, exclusion, or allowed
+threat setting. Their internal UX semantics are not established; numeric 0/1
+must not be interpreted as protection disabled/enabled. The earlier sanitized
+script returned unclassified because this leaf name was not on its allowlist.
+This resolves those six events, not all policy history or the precise detector
+verdict. No raw XML, private paths, or settings values beyond these flags are
+included in the repository.
+
+Scenario 1 remains **FAIL: Defender quarantine**, not inconclusive. Subsequently,
+the user allowed the detection and the Extension restarted. Browser state then
+reported `complete/rolled-back`; Options displayed restored B1. A fresh runtime
+`verify_installation` response reported `packaged/verified`, with Host and
+Extension both `2.0.76-beta.1`. This confirms installed B1 integrity, not complete
+transaction settlement: the subsequently reported ACK fields match rollback B1,
+but canonical ACK bytes, remaining process/registration/path residue checks,
+and durable idle/no URL remain unverified. Defender's screenshot used persistent
+allow wording; the user subsequently described the action as one-time and not
+removable. No result was returned for the final requested current-preference
+check. Current allow/override state is UNKNOWN, not inferred from either report.
+This record confirms neither a false positive nor a virus diagnosis.
+
+Stop cloud operations and do not start a new transaction or Scenarios 2/3.
+Preserve Defender evidence, transaction journals, backups, `updates/**`,
+finalization evidence, and browser state. Repair or product settlement requires
+independent explicit approval and guarded execution; this ledger authorizes no
+restore, allowlisting, security-control change, cleanup, or installer operation.
+Any later settlement does not downgrade this FAIL or reopen qualification.
+Distribution cleanup completed separately: ownership and identity checks passed,
+only this run's private container was deleted, and its former download returned
+404. No shared keys or unrelated resources were changed. Product settlement and
+Defender allow-record removal remain unverified.
 
 ## Scenario 2 Allocated Attempts
+
+Historical qualification rules; no Scenario 2 attempt has been run. This is not
+an active three-attempt allowance for the failed normal-update trial.
 
 Append only actually allocated transactions, at most three. Apply the runbook
 disposition table and aggregate BLOCKED rules verbatim; FAIL stops and takes
@@ -253,7 +391,10 @@ if all three are exactly that disposition; otherwise use
 
 ## Private Distribution Closure
 
-Status: PENDING; no operational closure claimed.
+Distribution status: COMPLETE for this trial. Ownership checks passed; the
+run-owned private container was deleted and the former URL returned 404.
+Product settlement remains INCOMPLETE/UNVERIFIED as described above. Distribution
+closure does not establish complete product recovery or successful qualification.
 
 On PASS, FAIL, abort, or BLOCKED, record eventual outcome, ownership-check result,
 run-owned access revocation, private object/container cleanup as applicable, and

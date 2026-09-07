@@ -1,6 +1,10 @@
 # Visible Update Completion Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical implementation plan:** Tasks 1-6 were implemented and verified
+> through `cf016b7`; this is not a new work queue. Unchecked boxes and commands
+> below describe the old execution sequence. No skill/plugin is required.
+> Start at `docs/session-handoff-2026-07-15.md`. Current user execution limits
+> supersede the old unbounded review/full-suite instructions in this record.
 
 **Goal:** Acknowledge an update completion only after one real foreground completion surface has remained continuously visible for eight seconds.
 

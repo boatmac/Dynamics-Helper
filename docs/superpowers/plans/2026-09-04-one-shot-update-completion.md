@@ -1,12 +1,17 @@
 # One-Shot Update Completion Implementation Plan
 
+> **Historical, superseded execution record:** September 5 replaced mounted-time
+> behavior and implementation. Subsequent qualification is paused after B2's
+> failed cloud trial. Read `docs/session-handoff-2026-07-15.md`; do not execute
+> this file or interpret old approval/next-step statements as current authority.
+
 > **Current amendment authority (2026-09-05):** Product implementation is
 > governed by `docs/superpowers/plans/2026-09-05-visible-update-completion.md`.
 > Destructive qualification remains deferred. A smaller post-implementation
 > qualification design/plan must be written after product implementation and
 > independent review, pending separate user approval.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Historical workflow references do not require any skill or coding-agent tool.
 
 **Goal:** Consume each terminal update notice once after eight seconds of mounted UI time while preserving Service Worker storage ownership and rolled-back retry behavior.
 

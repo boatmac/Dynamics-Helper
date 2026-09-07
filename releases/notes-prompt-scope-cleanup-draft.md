@@ -1,8 +1,9 @@
 # Prompt Scope Cleanup (`2.0.76-beta.2` Qualification-Pending Draft)
 
-This is the corrected `2.0.76-beta.2` target. Artifact build, private cloud-PC
-qualification, tag, and publication are still pending; this draft does not claim
-a release.
+This is an unpublished `2.0.76-beta.2` candidate. Local artifact checks passed,
+but the normal cloud update failed under Defender and rolled back to B1. Further
+qualification and publication are paused. Start development handoff at
+`docs/session-handoff-2026-07-15.md`; this draft is not release authorization.
 
 ## Deterministic instruction sources
 
@@ -91,17 +92,20 @@ continuous visible seconds. A foreground Options status, an open FAB terminal
 banner, or the exact transaction-bound FAB completion bubble can acknowledge it;
 background tabs, a closed FAB red dot, and unrelated bubbles cannot. Visibility
 loss starts the interval over, and an ACK transport failure gets no same-epoch
-retry. Beta2 artifact creation and destructive cloud-PC qualification remain
-deferred. A smaller post-implementation qualification design/plan must be written
-after product implementation and independent review, pending separate user
-approval.
+retry. B2 was built and the qualification design/documentation was completed.
+Its normal cloud trial failed; the remaining scenarios were not run. There is
+no new implementation or qualification task implied by these release notes.
 
 Private `2.0.76-beta.1` completed its update transaction, integrity checks,
 finalization ACK, Analyze, and Options checks successfully, but is DISQUALIFIED
 because its completion notice replayed permanently. It remains unpublished and
 is historical evidence only, not qualification for `2.0.76-beta.2`.
 
-## Verification
+## Historical Verification
+
+The counts below belong to successive historical source boundaries; they are
+not instructions to repeat tests or a cumulative total. Current B2 evidence and
+its failed cloud result are in `docs/plan-d-pragmatic-cloud-pc-results.md`.
 
 - Prompt-scope tenth-wave evidence: isolated Host **143/143 focused** and
   **207/207 full**; Extension **210/210 focused** and **340/340 full**; production
@@ -119,8 +123,8 @@ is historical evidence only, not qualification for `2.0.76-beta.2`.
 - The approved pragmatic B2 cloud-PC gate replaces the broader disposable-VM
   claim. It requires uninterrupted B1-to-B2 update, exact original-runner
   interruption with same-transaction recovery, and matching-installer repair on
-  an effectively empty cloud PC. All three scenarios remain pending until
-  separately authorized execution; this draft does not claim they passed.
+  an effectively empty cloud PC. The normal scenario subsequently failed;
+  interruption and repair scenarios were not run. None is claimed as passed.
 - Finalization durability now covers every reserved/receipt/receipt-ready/ack/
   cursor-removal crash boundary, ordinary fault replay, receipt-scratch cleanup,
   lexical reparse rejection, exact entry-type errors, and serialized concurrent
@@ -141,7 +145,8 @@ is historical evidence only, not qualification for `2.0.76-beta.2`.
   the real frozen staged-probe integration passes **1/1**.
 - Implementer-reported one-shot development checks passed Extension
   **951/951**, update-focused **181/181**, UI **55/55**, and TypeScript. B2
-  artifact and cloud-PC qualification remain pending.
+  artifact verification was subsequently recorded separately; cloud qualification
+  failed and does not follow from those development checks.
 
 ## Upgrade notes
 

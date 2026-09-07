@@ -1,5 +1,12 @@
 # Plan D Direct Installer Bootstrap Design
 
+> **Historical, not an active implementation requirement:** The September 1
+> reliable-auto-update design explicitly deferred the independent bootstrap,
+> quarantine automation and registration-transaction architecture developed here.
+> Earlier approval/status wording below does not authorize reviving it. Product
+> archive/integrity requirements remain in their implemented contracts. Start at
+> `docs/session-handoff-2026-07-15.md`, not this document's execution gates.
+
 **Status:** Content approved in-session; commit-specific user review remains
 required. Product implementation, toolchain provisioning, installation, tagging,
 and publication remain unauthorized.

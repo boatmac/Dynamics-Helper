@@ -1,5 +1,9 @@
 # Plan D Pragmatic Delivery Gate Historical Record
 
+> **Current status:** This entire file, including its old "Current Boundary",
+> is historical. B2 was later built and its cloud trial failed. No further
+> qualification is authorized here. Read `docs/session-handoff-2026-07-15.md`.
+
 > **Current amendment authority (2026-09-05):** Product implementation is
 > governed by `docs/superpowers/plans/2026-09-05-visible-update-completion.md`.
 > Destructive qualification remains deferred. A smaller post-implementation
