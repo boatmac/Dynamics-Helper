@@ -567,26 +567,36 @@ candidate so normal Retry allocates a new transaction. Persistence completes
 before memory and `DH_UPDATE_STATE` broadcast. Wrong, stale, duplicate, and late
 ACKs are no-ops, including an old timer racing a newer completion.
 
-FAB and Options render terminal completion immediately and start a timer only
-while mounted on the same transaction. Cancel it on unmount, identity change, or
-departure from `complete`; a later mount starts a fresh eight-second mounted-time
-interval. On expiry, send `DH_UPDATE_ACK_COMPLETE`, but neither optimistically
-hide nor apply its response. The authoritative broadcast is the sole live UI
-transition, which makes simultaneous FAB/Options timers safe: the first matching
-ACK wins and every duplicate observes non-`complete` state.
+FAB and Options call the shared `useVisibleCompletionAck` hook with the current
+transaction ID and one aggregate surface-visible Boolean. The hook combines
+that with `document.visibilityState === 'visible'`. FAB's Boolean is true only
+for an open terminal menu or an actually visible bubble bound to that exact
+transaction; the red dot and generic bubbles do not count. Options' Boolean is
+true while its `complete` status is rendered. Acknowledgment requires eight
+continuous visible seconds.
 
-The FAB live completion bubble carries that same scalar transaction identity.
-It normally closes on the authoritative eight-second transition. Its ten-second
-fallback is only for a missing authority signal, must verify the same identity,
-and must not close an unrelated analysis/bookmark/status bubble.
+One visibility epoch is a maximal continuous interval in which the aggregate
+predicate remains true. A true-to-false transition cancels the timeout and
+discards elapsed time; a later false-to-true transition starts a fresh 8,000 ms.
+Equivalent same-ID state and menu/bubble hand-offs that leave the aggregate true
+retain the original deadline. The document listener synchronously increments a
+generation and clears its timer before scheduling React state; transaction and
+surface changes invalidate in a layout effect. The callback rechecks timer,
+generation, transaction, surface, cached document visibility, and live document
+visibility before sending.
 
-Tests must cover exact complete parsing, hostile runtime objects without getter
-execution, persistence-before-broadcast, committed/rolled-back transitions,
-storage failure, stale/wrong/duplicate ACKs, mounted timer cancellation,
-cross-view races, authoritative-response separation, and FAB bubble binding and
-fallback. Use fake timers for UI timing. For every new invariant, temporarily
-break the corresponding implementation, prove the named test fails, restore the
-code, and rerun it; a passing-only test is not sufficient evidence.
+Mark an epoch attempted before transport. Synchronous throw, Promise rejection,
+and `{handled:false}` are contained and do not retry in place; only a later
+visibility epoch may retry. Ignore every ACK response. The Service Worker's
+persisted `DH_UPDATE_STATE` broadcast is the only live transition authority.
+The completion bubble's ten-second fallback remains wall-clock based; it is not
+reset by ACK failure and does not become visible-time accounting.
+
+Tests use fake timers plus a configurable `document.visibilityState` descriptor,
+restore or delete the original descriptor exactly, cover React StrictMode and
+same-state `visibilitychange`, and manually invoke stale callbacks after hide,
+replacement, and departure. Every new invariant requires one externally
+observable break-and-fail mutation.
 
 `installer_core.ps1` removes the old `_internal` tree before copying the
 packaged runtime. This exact-tree repair is required because installation

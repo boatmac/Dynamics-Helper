@@ -86,13 +86,15 @@ finalization. The matching installer validates exact release inventory, probes
 the repaired live product, and settles compatible preserved transaction
 authority without deleting contradictory evidence.
 
-Terminal completion is now one-shot and transaction-bound. FAB and Options show
-the result immediately; whichever view remains mounted for 8 seconds first sends
-the strict identity acknowledgment. Only the Service Worker's persisted state
-broadcast removes it globally. Committed completion returns to idle without a
-private candidate URL; rolled-back completion returns to the ordinary Retry
-state. Closing all views early gives the next mount a fresh display interval,
-and the FAB live completion bubble follows the same transaction lifecycle.
+Terminal completion is transaction-bound and consumed only after eight
+continuous visible seconds. A foreground Options status, an open FAB terminal
+banner, or the exact transaction-bound FAB completion bubble can acknowledge it;
+background tabs, a closed FAB red dot, and unrelated bubbles cannot. Visibility
+loss starts the interval over, and an ACK transport failure gets no same-epoch
+retry. Beta2 artifact creation and destructive cloud-PC qualification remain
+deferred. A smaller post-implementation qualification design/plan must be written
+after product implementation and independent review, pending separate user
+approval.
 
 Private `2.0.76-beta.1` completed its update transaction, integrity checks,
 finalization ACK, Analyze, and Options checks successfully, but is DISQUALIFIED

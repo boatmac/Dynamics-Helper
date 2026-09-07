@@ -309,14 +309,22 @@ The extension checks for updates on startup. When a new version is available:
    replacement. Ordinary failures automatically restore the previous complete
    version.
 5. The Extension reloads only after the update commits or rollback completes.
-6. The terminal result appears immediately in FAB and Options. After one view
-   remains open for 8 seconds, the result disappears globally and does not return
-   on refresh. Closing every view sooner pauses consumption; the next open view
-   receives a fresh 8-second display.
+6. The terminal result is acknowledged only after eight continuous visible
+   seconds in a foreground document: an open FAB menu showing its terminal
+   banner, a visible Status bubble bound to that completion transaction, or the
+   visible Options completion status. Hiding the document or closing the last
+   qualifying surface discards elapsed time; showing a qualifying surface again
+   starts a full new interval. Hidden time never counts. The closed-FAB red dot
+   and unrelated bubbles do not count, and Dynamics Helper never forces Status
+   bubble on to acknowledge an update.
 
-After a committed update is acknowledged, the updater returns to idle and no
-private candidate address remains. After rollback, the terminal rollback notice
-disappears and the same candidate returns as the ordinary **Retry** action.
+If acknowledgment fails, the notice remains until an authoritative Service
+Worker update-state broadcast changes it. There is no same-epoch ACK retry;
+hide/show or close/reopen the last qualifying surface to start a fresh interval.
+After a committed update is acknowledged, the updater returns to idle with no
+private candidate address. After rollback, acknowledgment restores the same
+candidate as the ordinary **Retry** action only in versions supporting this
+completion protocol. Older B1 is not qualified for this rollback/Retry behavior.
 
 If the installed Host and Extension do not match, guidance to run the matching
 full installer remains visible until the complete product is repaired. An

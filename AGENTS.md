@@ -331,13 +331,18 @@ This file defines the operational rules, development workflows, and coding stand
   candidate URL; a matching rolled-back ACK persists `available` with the same
   candidate so ordinary Retry remains. Wrong, stale, and duplicate ACKs are
   idempotent no-ops.
-* **Completion UI authority:** FAB and Options render a terminal completion
-  immediately and send its identity only after eight seconds for which a view
-  remains mounted. Unmount/state/identity change cancels that view's timer; a
-  later mount gets a fresh interval. The UI neither writes update storage,
-  optimistically hides completion, nor applies the ACK response. Only the
-  Service Worker's persisted `DH_UPDATE_STATE` broadcast is live transition
-  authority, so duplicate-view races are safe.
+* **Completion UI authority:** FAB and Options render terminal completion
+  immediately, but acknowledge only after eight continuous visible seconds in a
+  foreground document. FAB eligibility is the open terminal banner OR an
+  actually visible Status bubble bound to the current completion transaction;
+  the closed red dot and unrelated bubbles never count. Options eligibility is
+  its rendered `complete` status while the document is visible. Hiding the
+  document or the last qualifying surface ends the epoch and discards elapsed
+  time; an aggregate-visible menu/bubble hand-off and equivalent same-ID state
+  do not restart it. Each epoch attempts one exact ACK; transport failure may
+  retry only after a later fresh epoch. The UI never owns update storage,
+  optimistically hides completion, or applies the ACK response. Only the Service
+  Worker's persisted `DH_UPDATE_STATE` broadcast is live authority.
 * **Host action boundary:** Exactly `perform_update`, `activate_update`,
   `finalize_update_status`, and `acknowledge_update_finalization` route to
   `UpdateService` with strict request-correlated envelopes. Generic

@@ -1,5 +1,11 @@
 # Plan D Pragmatic Delivery Gate Historical Record
 
+> **Current amendment authority (2026-09-05):** Product implementation is
+> governed by `docs/superpowers/plans/2026-09-05-visible-update-completion.md`.
+> Destructive qualification remains deferred. A smaller post-implementation
+> qualification design/plan must be written after product implementation and
+> independent review, pending separate user approval.
+
 ## Status
 
 This file is a non-executable archive of the original Plan D pragmatic delivery
@@ -7,11 +13,12 @@ plan. Tasks 1-4 were completed historically. Tasks 5-9 were attempted only far
 enough to build and privately exercise B1, then retired. No text in this file is
 current execution authority.
 
-Current authority is Task 5 of
-`docs/superpowers/plans/2026-09-04-one-shot-update-completion.md` together with
-the committed, independently reviewed
-`docs/plan-d-pragmatic-cloud-pc-runbook.md`, after B2 identity and every pending
-template are filled and reviewed.
+Current product implementation authority is
+`docs/superpowers/plans/2026-09-05-visible-update-completion.md`.
+Destructive qualification is not authorized by this historical record. It needs
+a smaller post-implementation qualification design/plan, pending separate user
+approval. Only after approval may that future work update and commit the runbook
+before any qualification run.
 
 ## Historical Tasks 1-4
 

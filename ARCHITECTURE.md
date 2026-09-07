@@ -87,12 +87,14 @@ transaction with durable restart recovery and automatic rollback.
    integrity, obtains a receipt through `finalize_update_status`, persists it,
    and calls `acknowledge_update_finalization` before reporting `complete` with
    the originating lowercase 32-hex transaction ID.
-8. **Consume once:** A mounted FAB or Options view displays that terminal result
-   for eight seconds, then sends exact
-   `{type:'DH_UPDATE_ACK_COMPLETE',transactionId}`. The Worker serializes and
-   persists the matching transition before broadcasting it: committed becomes
-   `idle` with no candidate URL; rolled-back becomes `available` with the same
-   candidate and ordinary Retry.
+8. **Consume once:** A foreground FAB or Options completion surface must remain
+   visible for eight continuous seconds before sending exact
+   `{type:'DH_UPDATE_ACK_COMPLETE',transactionId}`. Hidden/closed time is
+   discarded. The Worker serializes and persists the matching transition before
+    broadcasting it: committed becomes `idle` with no candidate URL; rolled-back
+    becomes `available` with the same candidate and ordinary Retry in versions
+    supporting this completion protocol. Older B1 is not qualified for this
+    rollback/Retry behavior.
 
 ### Key Files
 
@@ -109,6 +111,8 @@ transaction with durable restart recovery and automatic rollback.
   mutation mutex.
 * **`host/update_recovery.py`, `update_status_host.py`, and
   `update_entrypoint.py`**: Detached recovery, status, and early startup modes.
+* **`extension/src/hooks/useVisibleCompletionAck.ts`**: Shared visible-epoch,
+  timer, and ACK-transport boundary used by FAB and Options.
 * **`FAB.tsx` / `Options.tsx`**: Projection-only UI clients.
 
 ### Release Integrity Metadata (Plan A)
@@ -274,14 +278,16 @@ identity, and stale/wrong/duplicate acknowledgments have no effect. The resultin
 state is durably stored before memory or broadcast changes, and only the
 authoritative `DH_UPDATE_STATE` broadcast changes live UI.
 
-FAB and Options display `complete` immediately. Whichever mounted view retains
-the same transaction for eight seconds first sends the global acknowledgment;
-closing it sooner cancels that timer and a later mount starts a fresh interval.
-Views do not optimistically hide or apply the ACK response, so concurrent timers
-race safely. The FAB's live completion bubble is bound to the same transaction:
-it normally disappears with the authoritative transition, while its ten-second
-fallback applies only when no authority arrives and never affects unrelated
-bubbles.
+FAB and Options display `complete` immediately. `useVisibleCompletionAck` treats
+one transaction's maximal continuous aggregate-visible interval as an epoch.
+FAB supplies open terminal menu OR exact transaction-bound visible completion
+bubble; Options supplies rendered completion, and both also require a visible
+document. A false transition discards elapsed time, while equivalent state and
+an aggregate-visible hand-off retain the deadline. Each epoch attempts once;
+failure may retry only after a later false-to-true transition. Views ignore ACK
+responses, so only the authoritative `DH_UPDATE_STATE` broadcast changes UI and
+simultaneous visible winners remain idempotent. The FAB bubble's ten-second
+fallback remains wall-clock based and never affects unrelated bubbles.
 
 Exactly four strict Host actions route to `UpdateService`: `perform_update`,
 `activate_update`, `finalize_update_status`, and

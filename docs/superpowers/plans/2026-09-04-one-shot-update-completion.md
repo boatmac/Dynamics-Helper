@@ -1,5 +1,11 @@
 # One-Shot Update Completion Implementation Plan
 
+> **Current amendment authority (2026-09-05):** Product implementation is
+> governed by `docs/superpowers/plans/2026-09-05-visible-update-completion.md`.
+> Destructive qualification remains deferred. A smaller post-implementation
+> qualification design/plan must be written after product implementation and
+> independent review, pending separate user approval.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Consume each terminal update notice once after eight seconds of mounted UI time while preserving Service Worker storage ownership and rolled-back retry behavior.
@@ -1012,6 +1018,14 @@ git commit -m "docs(update): define one-shot completion lifecycle"
 ```
 
 ### Task 5: Prepare And Qualify `2.0.76-beta.2`
+
+> **Superseded Scenario 2 procedure:** Do not execute this historical Task 5.
+> Its Scenario 2 state machine must be redesigned after visible-completion
+> product implementation and independent review are complete. A smaller
+> post-implementation qualification design/plan is pending separate user approval;
+> only after approval may that future work update and commit
+> `docs/plan-d-pragmatic-cloud-pc-runbook.md`. Versioning, artifact creation,
+> installation, and qualification still require their own approval.
 
 **Files:**
 - Modify: `extension/package.json`

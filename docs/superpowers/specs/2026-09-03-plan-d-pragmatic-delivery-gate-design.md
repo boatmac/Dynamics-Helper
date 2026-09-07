@@ -1,5 +1,11 @@
 # Plan D Pragmatic Delivery Gate Design
 
+> **Amended by (2026-09-05):**
+> [Visible Update Completion Design](2026-09-05-visible-update-completion-design.md).
+> That amendment replaces mounted-time acknowledgment with eight continuous
+> visible seconds and makes committed-B2 recovery the only Scenario 2 PASS.
+> Conflicting behavior or qualification text below is historical context.
+
 ## Status
 
 Approved scope reduction for the final delivery gate after Plan D Milestone 4

@@ -99,13 +99,16 @@ This pre-seeds the host config so future automatic update checks also consider B
 
 Update progress is durable across Service Worker and Extension restarts. A
 terminal update or rollback is re-verified and finalized before success is
-reported. Its result is a one-shot notice: it remains visible for 8 mounted
-seconds, then disappears globally and stays gone; closing the view sooner gives
-the next view a fresh interval. A rollback then returns to the ordinary Retry
-action. Mixed or unrecoverable installations show persistent guidance to run
-the matching full installer. Standalone bootstrap and per-write power-loss
-guarantees remain deferred, so an extreme interruption may still require that
-installer.
+reported. Its result is consumed only after eight continuous visible seconds in
+an open FAB terminal menu, its exact transaction-bound completion Status bubble,
+or foreground Options. Switching tabs or closing the only qualifying surface
+starts the full interval over; the closed-FAB red dot and unrelated messages do
+not count, and Status bubble is never forced on. A rollback then returns to the
+ordinary Retry action only in versions supporting this completion protocol;
+older B1 is not qualified for this rollback/Retry behavior. Mixed or unrecoverable
+installations show persistent guidance to run the matching full installer.
+Standalone bootstrap and per-write power-loss guarantees remain deferred, so an
+extreme interruption may still require that installer.
 
 ## Development
 
