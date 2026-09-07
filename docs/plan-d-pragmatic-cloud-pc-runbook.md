@@ -2,6 +2,9 @@
 
 ## Safety Contract
 
+- NOT EXECUTION READY: all operational steps and fences below are retained for
+  future review, not execution. Remaining execution barriers stay BLOCKED; documentation
+  approval does not unlock any mutation or override a blocking `throw`.
 - Run installer/process/registry steps only on the effectively empty cloud PC.
 - Do not install A, B1, or B2 on the old beta1 workstation.
 - Do not migrate the current workload to the cloud PC until all three scenarios
@@ -42,12 +45,26 @@ notes. Do not record a URL, query string, customer data, case identity, prompt
 content, access token, screenshot, or full log. For Analyze, record only
 `PASS` or `FAIL`.
 
-Task 4 changes documentation only. Task 5 fills the exact B2 artifact path,
-commit, and hash, independently reviews this runbook, obtains the required
-approval, and only then may execute any cloud-PC, DevTools, storage, process,
-installer, or private-distribution step. That authorization must explicitly
-include temporarily enabling **Status bubble** for each update scenario and
-restoring its captured prior value afterward.
+Authority for this documentation alignment is the approved
+[qualification design](superpowers/specs/2026-09-07-pragmatic-visible-completion-qualification-design.md)
+and its reviewed [documentation plan](superpowers/plans/2026-09-07-pragmatic-visible-completion-qualification.md).
+Product semantics and the full terminal residue allowlist remain governed by
+[Visible Update Completion](superpowers/specs/2026-09-05-visible-update-completion-design.md#cross-version-rollback-qualification).
+
+NOT EXECUTION READY. This document aligns qualification rules only. B2 identity
+and five current artifact gates remain PENDING. Every future artifact,
+distribution, process, browser-cleanup, and installer mutation boundary requires
+its own explicit approval and reviewed concrete guards. Historical `Task 5`
+labels in retained text/throws confer no authority; the abandoned draft is not
+authority either. Do not execute incomplete operational steps or their fences.
+
+The two narrow guards are prepared, isolated checks passed, and independent
+review passed; see the ledger's [Guard Preparation Evidence](plan-d-pragmatic-cloud-pc-results.md#guard-preparation-evidence).
+This does not clear the six retained blocking throws: Qualification Entry Gate,
+B2 Artifact-Hash Placeholder, Complete B2 Installer Placeholder, One-Shot
+Original-Runner Interruption, Zero-Executor Checkpoint, and Recovery-Runner
+Witness. Exact B1/B2 version/source/ZIP identity and installed frozen Host
+requirements remain unchanged; neither guard review nor source tests qualify B2.
 
 B2 must be the sole object in a private test-only HTTPS container. Use one
 short-lived, read-only URL whose path ends in `.zip`. Treat the cloud PC as
@@ -62,14 +79,15 @@ evidence must be non-empty; `PENDING`, `Not recorded`, and `Not run` fail closed
 wherever they occur in those fields.
 
 The fenced command immediately below is historical A/B form and is deliberately
-fail-closed against the revised ledger. Do not execute it. Task 5 replaces that
-whole command with the exact reviewed B1/B2 entry gate after B2 identity exists.
+fail-closed against the revised ledger. Do not execute it. A separately approved
+readiness change must replace the whole command with the exact reviewed B1/B2
+entry gate after B2 identity exists; this documentation change leaves it blocked.
 
 ```powershell
 throw 'HISTORICAL A/B ENTRY GATE: Task 5 must replace this block with the reviewed B1/B2 gate before execution'
 ```
 
-Task 5 must replace the B2 source/hash placeholders and refresh all five gate
+Future artifact verification must replace the B2 source/hash placeholders and refresh all five gate
 rows with exact B2 evidence before this entry gate can pass. Also inspect those
 two ledger sections manually. Do not proceed if either
 artifact identity is incomplete, an Artifact Result is empty or placeholder, an
@@ -107,8 +125,8 @@ with the ledger. Stop if a ledger identity is missing or either value differs.
 throw 'TASK 5 MUST REPLACE THE B2 ARTIFACT-HASH PLACEHOLDER BEFORE EXECUTION'
 ```
 
-The B2 path and hash remain placeholders until Task 5 builds the artifact and
-independently reviews this runbook before execution. Do not replace either ZIP
+The B2 path and hash remain placeholders until a separately approved build and
+independent operational review. Do not replace either ZIP
 after hashing. B2 is built once; only those immutable bytes may later be
 qualified, and rebuilding invalidates all B2 evidence.
 
@@ -175,6 +193,13 @@ every B2 transaction.
 
 ## Installer Commands
 
+Before any cross-scenario baseline installer, the previous transaction must
+already be safely settled and browser state must be durable idle with no URL,
+regardless of its disposition. An installer does not clear Chrome storage. If
+this cannot be proved, stop; any necessary recovery installer is a separate,
+explicitly approved settlement operation, not a next-scenario baseline. A failed
+qualification stays stopped even if later settlement succeeds.
+
 Before every B1 or B2 installer invocation, close all Chrome and Edge windows and
 run this guard. It must produce no error. Then run the DH-process guard; the
 direct installer commands repeat both checks in one fail-closed process snapshot.
@@ -191,16 +216,16 @@ compatibility stop path from selecting any process by name.
 $expectedMarkerBytes=[Text.UTF8Encoding]::new($false).GetBytes('PLAN_D_EFFECTIVELY_EMPTY_CLOUD_PC_V1');$marker='C:\DH-CloudPC\PLAN_D_EMPTY_CLOUD_PC.marker';if(-not(Test-Path -LiteralPath $marker -PathType Leaf -ErrorAction Stop)){throw 'Empty-cloud-PC marker is missing or invalid'};$actualMarkerBytes=[IO.File]::ReadAllBytes($marker);if($actualMarkerBytes.Length -ne $expectedMarkerBytes.Length -or -not [System.Linq.Enumerable]::SequenceEqual[byte]($actualMarkerBytes,$expectedMarkerBytes)){throw 'Empty-cloud-PC marker is missing or invalid'};$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$expectedHost=[IO.Path]::GetFullPath((Join-Path $root 'dh_native_host.exe'));$expectedRunner=[IO.Path]::GetFullPath((Join-Path $root 'updates\recovery\dh_update_runner.exe'));$expectedStatus=[IO.Path]::GetFullPath((Join-Path $root 'updates\recovery\dh_update_status_host.exe'));$all=@(Get-CimInstance Win32_Process -ErrorAction Stop);$hosts=@($all|Where-Object{$_.Name -ieq 'dh_native_host.exe'});$runners=@($all|Where-Object{$_.Name -ieq 'dh_update_runner.exe'});$statusHosts=@($all|Where-Object{$_.Name -ieq 'dh_update_status_host.exe'});if(@($hosts|Where-Object{-not [string]::Equals([string]$_.ExecutablePath,$expectedHost,[StringComparison]::OrdinalIgnoreCase)}).Count -or @($runners|Where-Object{-not [string]::Equals([string]$_.ExecutablePath,$expectedRunner,[StringComparison]::OrdinalIgnoreCase)}).Count -or @($statusHosts|Where-Object{-not [string]::Equals([string]$_.ExecutablePath,$expectedStatus,[StringComparison]::OrdinalIgnoreCase)}).Count){throw 'Unexpected matching-name DH process path; do not invoke the installer'};if($hosts.Count -or $runners.Count -or $statusHosts.Count){throw 'Main Host, update runner, or status Host is still active; do not invoke the installer'}
 ```
 
-Extract B1 into a fresh local directory and invoke its complete installer. Task
-5 independently reviews the exact command before execution:
+Extract B1 into a fresh local directory and invoke its complete installer only
+after separate approval and independent review of the exact command:
 
 ```powershell
 $ErrorActionPreference='Stop';$expectedMarkerBytes=[Text.UTF8Encoding]::new($false).GetBytes('PLAN_D_EFFECTIVELY_EMPTY_CLOUD_PC_V1');$marker='C:\DH-CloudPC\PLAN_D_EMPTY_CLOUD_PC.marker';if(-not(Test-Path -LiteralPath $marker -PathType Leaf -ErrorAction Stop)){throw 'Empty-cloud-PC marker is missing or invalid'};$actualMarkerBytes=[IO.File]::ReadAllBytes($marker);if($actualMarkerBytes.Length -ne $expectedMarkerBytes.Length -or -not [System.Linq.Enumerable]::SequenceEqual[byte]($actualMarkerBytes,$expectedMarkerBytes)){throw 'Empty-cloud-PC marker is missing or invalid'};$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$all=@(Get-CimInstance Win32_Process -ErrorAction Stop);$browsers=@($all|Where-Object{$_.Name -in @('chrome.exe','msedge.exe')});$expectedHost=[IO.Path]::GetFullPath((Join-Path $root 'dh_native_host.exe'));$hosts=@($all|Where-Object{$_.Name -ieq 'dh_native_host.exe'});$expectedRunner=[IO.Path]::GetFullPath((Join-Path $root 'updates\recovery\dh_update_runner.exe'));$runners=@($all|Where-Object{$_.Name -ieq 'dh_update_runner.exe'});$expectedStatus=[IO.Path]::GetFullPath((Join-Path $root 'updates\recovery\dh_update_status_host.exe'));$statusHosts=@($all|Where-Object{$_.Name -ieq 'dh_update_status_host.exe'});if(@($hosts|Where-Object{-not [string]::Equals([string]$_.ExecutablePath,$expectedHost,[StringComparison]::OrdinalIgnoreCase)}).Count -or @($runners|Where-Object{-not [string]::Equals([string]$_.ExecutablePath,$expectedRunner,[StringComparison]::OrdinalIgnoreCase)}).Count -or @($statusHosts|Where-Object{-not [string]::Equals([string]$_.ExecutablePath,$expectedStatus,[StringComparison]::OrdinalIgnoreCase)}).Count){throw 'Unexpected matching-name DH process path; do not invoke the installer'};if($browsers.Count -or $hosts.Count -or $runners.Count -or $statusHosts.Count){throw 'Browser, main Host, update runner, or status Host is active; do not invoke the installer'};$zip='C:\DH-CloudPC\DynamicsHelper_v2.0.76-beta.1.zip';$extract='C:\DH-CloudPC\B1-extracted';$expectedMarker=if(Test-Path -LiteralPath "$root\manifest.json" -PathType Leaf -ErrorAction Stop){'SUCCESS: Update Complete!'}else{'SUCCESS: Installation Complete!'};if(Test-Path -LiteralPath $extract -ErrorAction Stop){Remove-Item -LiteralPath $extract -Recurse -Force -ErrorAction Stop};Expand-Archive -LiteralPath $zip -DestinationPath $extract -ErrorAction Stop;$installer=Join-Path $extract 'installer_core.ps1';if(-not(Test-Path -LiteralPath $installer -PathType Leaf -ErrorAction Stop)){throw 'B1 installer_core.ps1 is missing'};$installOutput=@();& pwsh -NoProfile -ExecutionPolicy Bypass -File $installer 2>&1|Tee-Object -Variable installOutput;$installExit=$LASTEXITCODE;if($installExit -ne 0){throw "B1 installer failed with exit code $installExit"};$plainOutput=@($installOutput|ForEach-Object{([string]$_) -replace '\x1b\[[0-?]*[ -/]*[@-~]',''});if($plainOutput -cnotcontains $expectedMarker){throw "B1 installer success marker missing: $expectedMarker"}
 ```
 
 Extract B2 into a fresh local directory when Scenario 3 or matching-installer
-recovery calls for B2. This block is a pending Task 5 placeholder and is
-independently non-executable until Task 5 replaces and reviews the complete
+recovery calls for B2. This block is a pending placeholder and is
+independently non-executable until a future readiness change replaces and reviews the complete
 block after B2 exists:
 
 ```powershell
@@ -215,9 +240,27 @@ native exit code `0` and the exact marker selected before invocation:
 missing marker throws. Never invoke `install.bat`, and never copy installer
 stdout into the ledger.
 
+## Common Qualification Checklist
+
+| Gate | Required evidence before proceeding |
+| --- | --- |
+| Authorization | Explicit approval for each next artifact, distribution, or cloud mutation boundary; approved design/docs plan is not execution approval |
+| Artifact | Immutable B1/B2 source, version, and ZIP SHA-256 identities; exact verified complete locally copied packages only |
+| B2 automated gates | Current Host full suite, Extension full suite, Extension production build, Frozen Host build/probe, Static/reachability checks, all exactly PASS |
+| Environment | Disposable non-customer cloud PC, installed frozen Host, local complete installers, public beta discovery disabled; historical A evidence only and old PC unchanged |
+| Baseline | Safely settled previous transaction and durable browser idle/no URL before each complete B1 baseline installer; exact historical initial cleanup and per-attempt rollback cleanup are separate guards |
+| Product | Matching Host/Extension versions, registration, capabilities, packaged/verified integrity, exact terminal evidence and full allowed residue checks |
+| Functionality | Non-customer Analyze and harmless Options persistence/restore smoke checks; record PASS/FAIL only |
+| Completion | Shared visible observation order for committed B2, normal UI ACK, global disappearance, refreshed non-replay, durable public/stored idle/no URL |
+| Closure | Record disposition and ownership-checked private distribution cleanup separately from product settlement on every outcome |
+
+All nine gates apply with the scenario differences below. Passing qualification
+does not authorize publication or workload migration.
+
 ## Establish `plan-d-b1`
 
-Run the complete B1 installer before each scenario, including Scenario 3. Then
+Only after previous-transaction safe settlement and durable browser idle/no URL,
+run the complete B1 installer before each scenario, including Scenario 3. Then
 restart the browser, open the installed Dynamics Helper Options page, and keep
 **Receive beta updates** disabled.
 
@@ -268,8 +311,10 @@ Inspect only safe local-state fields after the browser reload:
 const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,hasUpdateUrl:typeof s?.update?.url==='string',transactionId:s?.transactionId,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode})
 ```
 
-Before beta2 qualification, the only permitted old-shape B1 terminal cleanup is
-the exact guarded procedure in **One-Time Private B1 Completion Cleanup**. Never
+Before the first beta2 transaction, the initial committed B1 cleanup requires
+the exact guard in **One-Time Private B1 Completion Cleanup**. A later rolled-back
+attempt requires **Per-Attempt B1 Rollback Cleanup Contract**, currently BLOCKED;
+never reuse or parameter-swap the historical committed-B1 guard. Never
 clear a beta2 `complete`, or any `preparing`, `activating`, `polling`,
 `reload-pending`, `ack-pending`, or `recovery-required` state manually. Reopen
 Options and query the coordinator through its public message:
@@ -314,29 +359,22 @@ Record only PASS/FAIL for each check. The baseline is valid only after all
 version, registration, capability, integrity, coordinator, disk/process,
 Analyze, and Options checks pass.
 
-### Status Bubble Qualification Precondition
+### Visible Completion Observation Order
 
-For Scenarios 1 and 2, capture the effective prior **Status bubble** preference
-before candidate seeding. In Options DevTools, inspect only this Boolean:
+After B2 reload, first observe the terminal FAB menu, close it before eight
+visible seconds, then foreground Options for approximately eight continuous
+visible seconds as the intended winning surface. Follow **Completion Lifecycle
+Evidence** for global disappearance, refresh/non-replay, and read-only idle/no-URL
+verification before any Options-based terminal inspection or smoke checks.
+Do not require a cold-start bubble or enable, snapshot, restore, or reread the
+Status bubble preference. Keep other qualifying surfaces from winning; a closed
+red dot is not observation. ACK is UI-only, never manual or response-authoritative.
 
-```javascript
-const {dh_prefs:p}=await chrome.storage.local.get('dh_prefs'); ({enableStatusBubble:p?.enableStatusBubble!==false})
-```
-
-Record only `true` or `false` in transient operator notes, never the full prefs
-object. If it is `false`, use the Options checkbox to enable **Status bubble**
-and wait for its automatic persistence; rerun the Boolean projection and require
-`true`. This temporary preference mutation and its restoration require the
-separate Task 5 cloud-PC authorization. After terminal lifecycle and smoke
-checks, restore the captured value through the same checkbox, rerun the
-projection, and require the exact original Boolean before recording the ledger
-result. Do not seed or start a scenario unless status bubbles are enabled.
-
-If `plan-d-b1` cannot be established safely, preserve all update evidence. Run
-the exact B2 complete installer first to settle the target; if that fails, run
-the exact B1 complete installer to settle the prior version. Rebuild the still
-empty cloud PC only if both matching complete installers fail. Do not improvise
-file copies or delete `updates/**`.
+If `plan-d-b1` cannot be established safely, stop and preserve all update
+evidence. Matching-installer settlement requires separate approval and reviewed
+terminal/browser-state guards; it is not automatic rebaseline or another
+qualification start. Failed settlement never permits a new start. Do not
+improvise file copies, rebuild the cloud PC, or delete `updates/**`.
 
 ## Controlled Candidate Start
 
@@ -401,8 +439,11 @@ Start through the payload-free production coordinator request:
 void chrome.runtime.sendMessage({type:'DH_UPDATE_START'}).then(r=>{const s=r?.state;console.log({handled:r?.handled,kind:s?.kind,transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode})}).catch(()=>console.error('Update start request disconnected'))
 ```
 
-After any reload, assume the pre-reload listener is gone. Reopen Options DevTools
-and inspect only safe fields:
+Capture the durably exposed transaction identity before reload. After start,
+leave Options non-foreground before B2 terminal display; do not keep it foreground
+through completion. After B2 reload, perform **Visible Completion Observation
+Order** before reopening Options DevTools for terminal inspection. Assume the
+pre-reload listener is gone and inspect only safe fields:
 
 ```javascript
 const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode,version:s?.update?.version})
@@ -414,9 +455,13 @@ full log.
 
 ## Terminal Verification And Cleanup
 
-At terminal `complete`, run the installed-version command, capabilities check,
-integrity check, safe after-reload state projection (including `errorCode`), and
-the outcome-bound terminal guard below. Require Host and
+At B2 terminal `complete`, perform **Visible Completion Observation Order** first.
+Use the transaction identity captured before reload and read-only disk evidence
+without foregrounding Options prematurely. Only after that sequence run the
+installed-version command, Options capabilities/integrity checks, safe
+after-reload projection (including `errorCode`), and outcome-bound terminal guard.
+For a B1 rollback, use version-specific settlement below, not B2 ACK semantics.
+Require Host and
 Extension to agree with the terminal outcome: B2 `2.0.76-beta.2` for
 `committed`, or B1 `2.0.76-beta.1` for `rolled-back`. Integrity must be
 `packaged/verified`.
@@ -430,19 +475,30 @@ them.
 fresh B2 Extension automated gate must pass the FAB and Options tests that prove
 no ACK at 7,999 ms, one exact same-transaction ACK at 8,000 ms, timer stability
 under identity/state changes, no optimistic hide, no use of the ACK response as
-live authority, and transition only from the authoritative broadcast. Task 5
-records the actual B2 test counts in the ledger; this runbook does not hard-code
+live authority, and transition only from the authoritative broadcast. Visibility
+epoch resets, stale callbacks, transport failures, StrictMode cleanup, duplicate
+ACKs, and new-protocol rollback-to-Retry remain automated evidence, not a new
+cloud timing framework. Future artifact verification records actual B2 test
+counts in the ledger; this runbook does not hard-code
 them as final artifact evidence.
 
-**Cloud-PC integration evidence:** The required Extension reload destroys every
-pre-reload Options/content-script context, so no pre-reload listener or timer is
-cloud timing evidence. After reload, reopen Options and a FAB-bearing page. With
-Status bubble already enabled, visually confirm that the real terminal Options
-banner and FAB completion bubble both appear. Do not edit `dh_update_state`, send
-`DH_UPDATE_ACK_COMPLETE`, invoke acknowledgment manually, or use any ACK promise
-response. Without manual intervention, confirm that both terminal UIs disappear
-globally after approximately the expected eight-second display interval. This is
-an integration observation, not an independent exact-millisecond measurement.
+**Cloud-PC integration evidence:** After B2 reloads, first open the FAB menu and
+observe its terminal banner. Close the menu before it completes eight visible
+seconds, then foreground Options for approximately eight continuous visible
+seconds. Options is the intended winning surface. Return to FAB to verify global
+disappearance; refresh FAB and Options and use the reviewed read-only projection
+to verify non-replay, durable public/stored idle, and no candidate URL.
+
+Do not open or foreground Options for terminal inspection, capabilities,
+integrity, or smoke checks before this observation sequence: it can consume
+completion first. Keep other qualifying surfaces from winning. If the intended
+winning surface was missed, record that fact; never invent timing evidence or
+seed fake completion. A closed red dot is not observation. Never send a manual
+completion ACK or treat its response as live authority.
+
+The reload destroys pre-reload contexts; neither their listeners nor timers are
+cloud timing evidence. This is approximate integration observation, not an
+independent exact-millisecond measurement. Do not edit B2 `dh_update_state`.
 
 After both terminal UIs disappear, use this safe projection in Options. Repeat
 it after refreshing the ordinary FAB page and after refreshing Options. It
@@ -453,26 +509,24 @@ const r=await chrome.runtime.sendMessage({type:'DH_UPDATE_GET_STATE'});const {dh
 ```
 
 For committed completion, the public state must be `idle` with no retained
-candidate URL, and stored state must be `idle` or absent with no URL. For
-rolled-back completion, public and stored state must be `available` for exact B2
-with the ordinary **Retry** action and no replayed rollback notice. After each
-FAB and Options refresh, visually confirm that the terminal banner/bubble does
-not reappear; rollback may continue to show ordinary Retry. Record PASS/FAIL
+candidate URL, and stored state must be `idle` or absent with no URL. After each
+FAB and Options refresh, visually confirm that completion does not reappear.
+A safe B1 rollback cannot prove this lifecycle: B1 lacks the new ACK protocol.
+It is never B2 one-shot/rollback PASS evidence and need not become new-protocol
+Retry; use the blocked per-attempt cleanup contract before any remaining attempt.
+Record PASS/FAIL
 only, with no screenshot, log, customer data, case identity, or prompt content.
 
 A scenario cannot pass unless both the fresh automated exact-timing gate and
 these real cloud integration checks pass. Do not record the ledger field yet.
-First finish terminal residue verification and the Analyze/Options smoke checks,
-then restore the captured prior Status bubble value through the normal Options
-UI and rerun the Boolean projection in **Status Bubble Qualification
-Precondition**. Only after it exactly matches the captured Boolean may the
-ledger's **Completion lifecycle** field say `preference restored`.
+First finish terminal residue verification and the Analyze/Options smoke checks.
+The unrelated harmless Options persistence/restore smoke check remains required.
 
 After final acknowledgment, verify that the captured transaction workspace is
 gone and the entire transactions/receipts namespaces are empty. In the command,
 `$transactionEntries` is populated by
 `[IO.Directory]::EnumerateFileSystemEntries($transactions)` whenever the
-namespace exists; Task 5 must retain the explicit `Count -eq 0` acceptance check
+namespace exists; future review must retain the explicit `Count -eq 0` acceptance check
 when it performs its final independent runbook review. The captured transaction
 and `<transaction>.preparing` path checks are additional assertions, not a
 substitute for full enumeration:
@@ -491,8 +545,7 @@ be `0`; RunOnce/status registration must be `false`. The accepted outcome/versio
 pairs are committed B2 and rolled-back B1 only. Any path type, reparse point,
 filesystem enumeration, process query, or registry read error fails closed. Do
 not delete transaction evidence manually. Run the designated Analyze and Options
-smoke checks in the terminal product, then restore and verify the Status bubble
-preference as specified above; record results only afterward. Do not accept
+smoke checks in the terminal product; record results only afterward. Do not accept
 displayed success when versions, integrity,
 ACK bytes, or lifecycle evidence disagree.
 
@@ -504,43 +557,52 @@ terminal evidence:
 if(globalThis.dhUpdateWatch){chrome.storage.onChanged.removeListener(globalThis.dhUpdateWatch);delete globalThis.dhUpdateWatch}
 ```
 
-Before the next scenario, re-establish `plan-d-b1` with the full B1 installer.
+Before any next-scenario baseline installer, the previous transaction must
+already be safely settled and browser state must be durable idle with no URL,
+regardless of disposition. An installer does not clear Chrome storage. If this
+cannot be proved, stop; any recovery installer is a separate, explicitly approved
+settlement operation, not a next-scenario baseline. After FAIL, qualification
+remains stopped even if settlement succeeds; failed settlement permits no new
+qualification start. Only a permitted transition may re-establish `plan-d-b1`.
 Never manually clear a beta2 terminal or nonterminal state. Never delete
 transaction files, journals, backups, RunOnce, or any other recovery state
-manually. At the end of qualification, revoke the short-lived private access and
-remove the private object; do not record either value or associated logs.
+manually. Apply **Private Distribution Closure** separately on every outcome.
 
 ## Scenario 1: Uninterrupted B1 To B2
 
-1. Re-establish and verify `plan-d-b1` with the complete B1 installer.
-2. Complete **Status Bubble Qualification Precondition**, capturing the prior
-   value and requiring the effective value to be `true`.
+1. Before the baseline installer, require previous-transaction safe settlement
+   and durable browser idle/no URL regardless of disposition. Otherwise stop;
+   recovery installation needs separate approval and guards, not a scenario reset.
+   Then re-establish and verify `plan-d-b1` with the complete B1 installer.
+2. Apply the **Common Qualification Checklist** and prepare the FAB-first
+   **Visible Completion Observation Order**, without changing bubble preferences.
 3. Inject B2 and register the sanitized listener using **Controlled Candidate
    Start**.
 4. Start the update and do not close the browser, stop a process, click Retry,
    edit storage, or run an installer while it progresses.
 5. Require terminal `complete/committed`, B2 Host and Extension versions,
-   verified integrity, absent active authority/workspace/finalization cursor,
-   zero runners, unarmed RunOnce, and the complete one-shot UI/state checks in
+   verified integrity, matching finalization ACK, the full allowed terminal
+   residue checks, and the complete visible UI/state checks in
    **Terminal Verification And Cleanup**.
-6. Run the designated Analyze and Options checks, then restore and verify the
-   captured Status bubble preference. Only afterward record their PASS/FAIL and
-   completed lifecycle results.
+6. After the visible sequence, run the designated Analyze and Options checks.
+   Only afterward record their PASS/FAIL and completed lifecycle results.
 
 Any other terminal outcome fails this uninterrupted scenario. Preserve evidence
-and follow the matching-installer recovery order before trying to re-establish
-B1.
+and stop qualification; settlement is separately approved and guarded, never
+permission for another qualification start. Apply private distribution closure.
 
 ## Scenario 2: Interrupted Recovery
 
-Re-establish and verify `plan-d-b1` with the complete B1 installer. Complete
-**Status Bubble Qualification Precondition**, capturing the prior value and
-requiring the effective value to be `true`. Use three PowerShell 7 windows for
+First require previous-transaction safe settlement and durable browser idle/no
+URL before the baseline installer, regardless of disposition. Otherwise stop;
+any recovery installer is separately approved guarded settlement, not a scenario
+reset. Then re-establish and verify `plan-d-b1` with the complete B1 installer
+and apply the common checklist. Use three PowerShell 7 windows for
 the timeline watcher, optional process-start watcher, and one-shot interrupter.
 Watcher output is observational only; the one-shot interrupter, zero-executor
-checkpoint, and recovery witness are the acceptance evidence. After terminal
-lifecycle and smoke checks, restore and verify the captured preference before
-recording the lifecycle result.
+checkpoint, and recovery witness are the acceptance evidence. For committed B2,
+perform the FAB-first visible sequence before Options terminal inspection/smoke.
+Record lifecycle evidence without changing the Status bubble preference.
 
 ### Read-Only Watchers
 
@@ -631,7 +693,8 @@ This is independently non-executable until Task 5 replaces and reviews the
 complete block. It does not rely on predecessor globals being absent or valid.
 The replacement first emits `recovery-witness-armed`, waits at most five
 minutes, and applies the exact RunOnce contract above. Only after its armed event
-may the operator reopen the same browser profile and Options page. Do not edit
+may the operator reopen the same browser profile. Keep Options non-foreground
+before B2 terminal display and follow the FAB-first visible sequence. Do not edit
 storage, delete `updates/**`, send a manual ping, or start an installer.
 
 The command accepts exactly one runner at the exact recovery path whose command
@@ -644,28 +707,46 @@ command line.
 throw 'TASK 5 MUST REPLACE THE COMPLETE RECOVERY-RUNNER WITNESS BEFORE EXECUTION'
 ```
 
-Only after `recovery-runner-witnessed` may the attempt continue to terminal
-verification. Failure to capture that event fails the recovery-proof attempt.
-The accepted terminal is complete B2 with `committed` or complete B1 with
-`rolled-back`, always under the captured transaction, with matching Host and
-Extension versions and verified integrity. Require the one-shot completion
-checks in **Terminal Verification And Cleanup**; a rolled-back result must become
-ordinary B2 Retry. A failed update must never be recorded as successful. Run the
-terminal Analyze and Options smoke checks.
+`recovery-runner-witnessed` is mandatory PASS evidence. If it is missed, still
+verify the captured transaction's safe terminal disposition without inventing a
+witness. Only committed B2 with all three witnesses and every common B2 gate can
+PASS. Safe verified B1 rollback is inconclusive, not one-shot rollback evidence;
+B1 lacks the new ACK protocol. For B2, finish the shared visible sequence before
+Options-dependent checks and require terminal integrity, residue, and smoke PASS.
+Apply the following table with FAIL precedence over any missing witness.
 
 ### Retry Rules
 
-Read `errorCode` only from the safe projections above and use it with `kind` to
-select the following action; never inspect or print the full state object.
+Read `errorCode` only from the safe projections above, never a full state object.
+While `activating`, `polling`, `reload-pending`, or `ack-pending` has no error,
+wait for normal status/recovery; do not click Retry or start another transaction.
+Errors never authorize an automatic rerun or unreviewed cleanup.
 
-| State | Action |
-|---|---|
-| `activating` or `polling`, no `errorCode` | Wait for status polling and recovery kick. |
-| `reload-pending` or `ack-pending`, no `errorCode` | Wait; do not click Retry. |
-| `reload-pending` or `ack-pending` with `errorCode` | Click Retry cleanup once. |
-| `activating` with `errorCode` and journal post-`prepared` | Click Retry once; it must query status before activation. |
-| `preparing` with `errorCode` or journal still `prepared` | This is not durable-recovery evidence; re-establish B1 and rerun. |
-| `recovery-required` | Gate failure; preserve evidence and use matching installer recovery. |
+| Allocated transaction outcome | Disposition |
+| --- | --- |
+| Exact original-runner interruption, zero-executor proof, recovery witness, committed B2, every B2 gate passing | PASS; stop attempts |
+| Safe verified B1 rollback with all three witnesses | SAFE_ROLLBACK_INCONCLUSIVE; guarded cleanup before any remaining attempt |
+| Safe verified B1/B2 terminal with any witness missing, and no failed required gate | INTERRUPTION_EVIDENCE_INCONCLUSIVE; version-specific settlement before any remaining attempt |
+| Preparing/activating error, post-allocation abort, recovery-required, mixed/integrity/residue failure, or B2 lifecycle/smoke failure | FAIL; stop qualification, no next transaction; separately approved guarded settlement only |
+
+Count an attempt when DH_UPDATE_START allocates and durably exposes its
+transaction identity. Every allocated transaction counts, including aborts. Fix
+pre-allocation setup failures before start; they do not count. At most three
+allocated transactions, never a fourth. Every mutation still needs its own approval.
+
+After three inconclusive attempts, use `BLOCKED: SAFE_ROLLBACK_INCONCLUSIVE` only
+if all three dispositions exactly match; otherwise use
+`BLOCKED: INTERRUPTION_EVIDENCE_INCONCLUSIVE`. FAIL always takes precedence,
+stops qualification immediately, and cannot be relabeled inconclusive.
+
+A safe committed B2 with missing witnesses must complete normal visible UI ACK
+and reach durable public/stored idle/no URL before any B1 reinstall. A failed
+lifecycle is FAIL, never an inconclusive retry opportunity. For safe B1 rollback,
+the per-attempt guard below is mandatory and prepared/reviewed, but not authorized
+or verified in the real environment. Before any
+remaining attempt or scenario reset, previous-transaction safe settlement and
+durable browser idle/no URL are unconditional, regardless of disposition. If
+settlement fails or cannot be proved, no qualification start is permitted.
 
 The proof commands validate `active.json` path/transaction authority before
 using its journal; require browser initiator, prior `2.0.76-beta.1`, target
@@ -680,56 +761,434 @@ witness. They never print a complete command line, URL, prompt content, or local
 storage object, and never write a journal, storage record, RunOnce value, or
 `updates/**` file.
 
-## Scenario 3: Matching-Installer Repair
+### Per-Attempt B1 Rollback Cleanup Contract
 
-1. Re-establish and verify `plan-d-b1` with the complete B1 installer.
-2. Before the first B2 installation, run the next command in a dedicated
-   PowerShell window and keep that window open through the second B2 installation.
-   It stores only the SHA-256 of each currently existing user-owned file in an
-   in-memory map; it prints only the count and never writes hashes to disk or the
-   ledger.
+GUARD PREPARED; ISOLATED CHECKS PASSED; INDEPENDENT REVIEW PASSED;
+NOT EXECUTION READY. Reported evidence: PS 54 passed, JS 75 passed; the earlier
+18 deferred-case RED checks were resolved by the 30-second deadline fix.
+Code locations are the `DH-B1-ROLLBACK:PS` and `DH-B1-ROLLBACK:JS` BEGIN/END
+markers below. Tests remain Temp files, not repeatable repository tests or a CI
+gate. Real Windows PowerShell 5.1, reparse/ACL behavior, and the OS Known Folder
+query remain unverified. The short quiescent interval is a procedural TOCTOU
+constraint, not atomicity. All six blocking throws and separate operation
+approvals remain; real cleanup is PENDING. Any failure preserves evidence and
+blocks baseline/retry; settlement never converts FAIL into permission to retry.
+
+Private setup for a future approved attempt: retain the allocated `capturedTx`
+and its committed private B2 candidate URL together outside Git/logs. In PS,
+`$capturedTx` must be that exact captured string, not a value read from the ACK.
+In the post-rollback B1 Options console, bind `capturedTx` to the same capture and
+`privateB2Url` to that originally committed URL, not the current storage value.
+Re-establish these from the private attempt record after reload; no guessed
+identity, trimmed input, or replacement URL. HTTPS syntax cannot prove private
+ownership: the reviewed distribution identity/ZIP hash must already match.
+Immediately before each PS guard obtain the OS Known Folder without creating it
+(isolated tests inject this value instead of invoking the OS):
 
 ```powershell
-$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$global:DhUserOwnedBefore=@{};foreach($name in @('config.json','copilot-instructions.md','user_prompt.md')){$path=Join-Path $root $name;if(Test-Path -LiteralPath $path -PathType Leaf){$global:DhUserOwnedBefore[$name]=(Get-FileHash -Algorithm SHA256 -LiteralPath $path -ErrorAction Stop).Hash.ToLowerInvariant()}elseif(Test-Path -LiteralPath $path){throw 'User-owned path is not a regular file'}};[pscustomobject]@{Event='user-owned-baseline-captured';FileCount=$global:DhUserOwnedBefore.Count}|ConvertTo-Json -Compress
+$DhB1KnownLocalAppData = [Environment]::GetFolderPath('LocalApplicationData', 'DoNotVerify')
 ```
 
+<!-- DH-B1-ROLLBACK:PS:BEGIN -->
+```powershell
+& {
+    $ErrorActionPreference = 'Stop'
+    function Get-DhB1Entry($Path) {
+        try { Get-Item -LiteralPath $Path -Force -ErrorAction Stop }
+        catch [System.Management.Automation.ItemNotFoundException] { return $null }
+    }
+    function Assert-DhB1Path($Path, [bool]$Directory) {
+        $item = Get-DhB1Entry $Path
+        if ($null -eq $item -or $item.PSIsContainer -ne $Directory -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            -not [string]::Equals($item.FullName, $Path, [StringComparison]::OrdinalIgnoreCase)) { throw 'unsafe path' }
+    }
+    try {
+        if ($capturedTx -isnot [string] -or $capturedTx -cnotmatch '\A[0-9a-f]{32}\z') { throw 'invalid capture' }
+        $local = $env:LOCALAPPDATA
+        $known = $DhB1KnownLocalAppData
+        foreach ($value in @($local, $known)) {
+            if ($value -isnot [string] -or $value -cnotmatch '\A[A-Za-z]:\\' -or
+                $value -cne [IO.Path]::GetFullPath($value) -or $value.EndsWith('\')) { throw 'invalid root' }
+            foreach ($part in $value.Substring(3).Split('\')) {
+                if (-not $part -or $part.EndsWith('.') -or $part.EndsWith(' ') -or $part.Contains(':')) { throw 'invalid root' }
+            }
+        }
+        if (-not [string]::Equals($local, $known, [StringComparison]::OrdinalIgnoreCase)) { throw 'wrong root' }
+        $root = [IO.Path]::Combine($known, 'DynamicsHelper')
+        $updates = [IO.Path]::Combine($root, 'updates')
+        for ($path = $updates; $path; $path = [IO.Path]::GetDirectoryName($path)) { Assert-DhB1Path $path $true }
+        Assert-DhB1Path "$root\extension" $true
+        foreach ($path in @("$root\installed-product.json", "$root\extension\manifest.json", "$updates\finalization-ack.json")) {
+            Assert-DhB1Path $path $false
+        }
+        $product = [IO.File]::ReadAllText("$root\installed-product.json") | ConvertFrom-Json -ErrorAction Stop
+        $manifest = [IO.File]::ReadAllText("$root\extension\manifest.json") | ConvertFrom-Json -ErrorAction Stop
+        if ($product.package_version -cne '2.0.76-beta.1' -or $manifest.version_name -cne '2.0.76-beta.1' -or $manifest.version -cne '2.0.76') { throw 'wrong disk version' }
+        $expected = [Text.UTF8Encoding]::new($false).GetBytes('{"outcome":"rolled-back","state":"finalized-awaiting-ack","terminal_version":{"fresh_install":false,"version":"2.0.76-beta.1"},"transactionId":"'+$capturedTx+'"}'+"`n")
+        $actual = [IO.File]::ReadAllBytes("$updates\finalization-ack.json")
+        if ($actual.Length -ne $expected.Length -or -not [System.Linq.Enumerable]::SequenceEqual[byte]($actual, $expected)) { throw 'wrong ACK bytes' }
+        foreach ($name in @('active.json','finalization-cursor.json','.finalization-cursor.json.tmp','.finalization-ack.json.tmp')) {
+            if ($null -ne (Get-DhB1Entry "$updates\$name")) { throw 'terminal residue' }
+        }
+        foreach ($name in @('transactions','receipts')) {
+            $path = "$updates\$name"
+            if ($null -ne (Get-DhB1Entry $path)) {
+                Assert-DhB1Path $path $true
+                if (@([IO.Directory]::EnumerateFileSystemEntries($path)).Count -ne 0) { throw 'namespace not empty' }
+            }
+        }
+        $runOnce = Get-DhB1Entry 'Registry::HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce'
+        if ($null -ne $runOnce -and @($runOnce.GetValueNames() | Where-Object { $_ -ieq 'DynamicsHelperUpdateRecovery' }).Count -ne 0) { throw 'RunOnce exists' }
+        foreach ($vendor in @('Google\Chrome','Microsoft\Edge')) {
+            if ($null -ne (Get-DhB1Entry "Registry::HKEY_CURRENT_USER\Software\$vendor\NativeMessagingHosts\com.dynamics.helper.update_status")) { throw 'status registration exists' }
+        }
+        $all = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        foreach ($name in @('dh_native_host.exe','dh_update_runner.exe','dh_update_status_host.exe')) {
+            $expectedPath = if ($name -eq 'dh_native_host.exe') { "$root\$name" } else { "$updates\recovery\$name" }
+            $matches = @($all | Where-Object { $_.Name -ieq $name })
+            foreach ($process in $matches) {
+                if (-not [string]::Equals($process.ExecutablePath, $expectedPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'foreign or unknown process path' }
+            }
+            if ($name -ne 'dh_native_host.exe' -and $matches.Count -ne 0) { throw 'executor remains' }
+        }
+        [pscustomobject]@{ guard='PASS'; transactionId=$capturedTx; outcome='rolled-back'; version='2.0.76-beta.1' }
+    } catch { throw 'DH_B1_ROLLBACK_PS_GUARD_FAILED' }
+}
+```
+<!-- DH-B1-ROLLBACK:PS:END -->
+
+Require this invocation's PASS and exact captured ID, not a cached Boolean or
+the generic terminal guard. PS and JS cannot be atomic: execute PS then the whole
+JS fence consecutively in the same short quiescent interval, with no other
+mutation, installer/update, writer/path replacement, or Worker lifecycle action.
+Any context, transaction, or Worker change/uncertainty invalidates both checks:
+stop and revalidate private capture plus the entire PS/JS sequence. There is no
+nonce or persisted permission token. Do not display exceptions, `$Error`, URLs,
+storage/response objects, or private setup values; only fixed codes/projections.
+JS freezes the capture/URL at entry and has one non-renewable 30-second deadline.
+PS completion to JS entry must still be consecutive and fresh; this deadline is
+not evidence of PS freshness or an unchanged Worker. On STOP, abandon the pending
+evaluation/context; never change bindings to resume it or retry automatically.
+
+<!-- DH-B1-ROLLBACK:JS:BEGIN -->
+```javascript
+await (async () => {
+  const fail = () => { throw new Error('DH_B1_ROLLBACK_JS_GUARD_FAILED'); };
+  const tx = capturedTx, candidateUrl = privateB2Url, deadline = Date.now() + 30000;
+  const check = () => {
+    if (Date.now() >= deadline || capturedTx !== tx || privateB2Url !== candidateUrl) fail();
+  };
+  const exact = (value, keys, array = false) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value) !== array || Object.getPrototypeOf(value) !== (array ? Array.prototype : Object.prototype)) fail();
+    const d = Object.getOwnPropertyDescriptors(value);
+    if (Reflect.ownKeys(d).length !== keys.length || keys.some(k => !Object.hasOwn(d, k) || !Object.hasOwn(d[k], 'value') || d[k].enumerable !== (k !== 'length'))) fail();
+    return Object.fromEntries(keys.map(k => [k, d[k].value]));
+  };
+  const call = async fn => {
+    check();
+    let timer;
+    try {
+      const value = await new Promise((resolve, reject) => {
+        const bad = () => reject(new Error('DH_B1_ROLLBACK_JS_GUARD_FAILED'));
+        timer = setTimeout(bad, Math.max(0, deadline - Date.now()));
+        try { fn(value => { try { check(); if (chrome.runtime.lastError) fail(); resolve(value); } catch { bad(); } }); }
+        catch { bad(); }
+      });
+      check();
+      return value;
+    } finally { clearTimeout(timer); }
+  };
+  try {
+    if (typeof tx !== 'string' || !/^[0-9a-f]{32}$/.test(tx) || tx.length !== 32) fail();
+    if (typeof candidateUrl !== 'string' || !/^https:\/\/[^/?#@]+\//.test(candidateUrl) || /[\s\\#]/.test(candidateUrl)) fail();
+    const url = new URL(candidateUrl);
+    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.hash || !url.pathname.endsWith('.zip')) fail();
+    const manifest = chrome.runtime.getManifest();
+    const md = Object.getOwnPropertyDescriptors(manifest);
+    if (md.version?.value !== '2.0.76' || md.version_name?.value !== '2.0.76-beta.1') fail();
+    const cap = exact(await call(cb => chrome.runtime.sendMessage({type:'NATIVE_MSG',payload:{action:'get_capabilities'}}, cb)), ['status','data']);
+    check();
+    const data = exact(cap.data, ['host_version','capabilities']);
+    const capabilities = exact(data.capabilities, ['0','1','length'], true);
+    if (cap.status !== 'success' || data.host_version !== '2.0.76-beta.1' || capabilities.length !== 2 || capabilities[0] !== 'prompt-scope-v1' || capabilities[1] !== 'transactional-update-v1') fail();
+    const v = exact(await call(cb => chrome.runtime.sendMessage({type:'NATIVE_MSG',payload:{action:'verify_installation'}}, cb)), ['status','data']);
+    check();
+    const verified = exact(v.data, ['mode','integrity','host_version','extension_version']);
+    if (v.status !== 'success' || verified.mode !== 'packaged' || verified.integrity !== 'verified' || verified.host_version !== '2.0.76-beta.1' || verified.extension_version !== '2.0.76-beta.1') fail();
+    const stored = exact(await call(cb => chrome.storage.local.get(['dh_update_state','pending_update'], cb)), ['dh_update_state']);
+    check();
+    const state = exact(stored.dh_update_state, ['kind','update','outcome']);
+    const update = exact(state.update, ['version','url','isPrerelease']);
+    if (state.kind !== 'complete' || state.outcome !== 'rolled-back' || update.version !== '2.0.76-beta.2' || update.isPrerelease !== true || update.url !== candidateUrl) fail();
+    check();
+    await call(cb => chrome.storage.local.remove('dh_update_state', cb));
+    check();
+    return {guard:'PASS',transactionId:tx,outcome:'rolled-back',version:'2.0.76-beta.1',integrity:'packaged/verified'};
+  } catch { fail(); }
+})()
+```
+<!-- DH-B1-ROLLBACK:JS:END -->
+
+Only a successful remove permits the existing normal Service Worker **Stop** /
+Options wake sequence and exact idle inspection in **One-Time Private B1
+Completion Cleanup** (the fence beginning `const raw=await ...DH_UPDATE_GET_STATE`).
+Reuse only that post-remove inspection, never its historical PS/cleanup guard.
+Require public idle, stored idle or absent, no `pending_update`, and no URL before
+any separately permitted baseline. No manual ACK, Reload, Unregister, bulk clear,
+or recovery-file deletion. Failed remove means STOP, not a success/retry claim.
+Timeout/callback errors cannot cancel a remove already submitted to Chrome or
+prove it had zero effects. Mock failed-remove zero effects are not real storage
+atomicity evidence; preserve uncertainty and STOP for independent inspection.
+The historical committed-B1 guard remains unchanged and cannot be parameter-swapped
+for this rolled-back attempt; neither guard substitutes for the other.
+
+## Scenario 3: Matching-Installer Repair
+
+GUARD PREPARED; ISOLATED CHECKS PASSED; INDEPENDENT STATIC REVIEW APPROVED.
+Reported evidence: 27 mock tests passed. Code locations are the `DH-S3:HELPERS`,
+`DH-S3:CAPTURE`, `DH-S3:CREATE`, `DH-S3:ABSENCE`, and `DH-S3:COMPARE` BEGIN/END
+markers below. Tests remain Temp files, not repeatable repository tests or a CI
+gate. Real Windows PowerShell 5.1, reparse/ACL behavior, and the OS Known Folder
+query remain unverified; real repair is PENDING, not qualification PASS.
+The global NOT EXECUTION READY status, all six blocking throws, existing
+installer blocks, settlement gates, and separate operation approval remain
+unchanged. Do not execute this scenario on a real installation. This banner
+applies to every environment, helper, capture, sentinel, comparison, and cleanup
+fence below; no assertion or local test result makes them execution-ready.
+
+The fixed sentinel is `_internal/dh-cloud-pc-sentinel.txt`: require safe plain
+parents and confirmed prior absence, never overwrite an existing entry. Validate
+protected `config.json`, `copilot-instructions.md`, and `user_prompt.md`, including
+absence, before and after repair; reject unsafe roots/files and unreadable paths.
+Fingerprints stay private and in memory only. Guard preparation review passed;
+real-environment verification and separate operation approval remain future
+readiness gates. These are point-in-time
+path checks, not handle-relative race-proof filesystem operations: require no
+concurrent writer/path replacement during each guarded step. A race, failure, or
+uncertain state stops the scenario; do not retry creation, delete residue, or
+continue with an old baseline. Never display `$Error`, caught exceptions, paths,
+snapshot objects, hashes, or contents; only fixed failure codes and counts are
+safe to record. A failed write may leave a sentinel; preserve it for review.
+
+In the dedicated window, a future approved execution would first capture the OS
+Known Folder value without creating it, then load the three helpers. Never
+override this value with a guessed path or an operator assertion. Isolated tests
+inject this environment value and `LOCALAPPDATA` with disposable fixture paths
+BEFORE loading the exact helper/snippet fences; they do not execute this OS lookup.
+
+```powershell
+$DhS3KnownLocalAppData = [Environment]::GetFolderPath('LocalApplicationData', 'DoNotVerify')
+```
+
+<!-- DH-S3:HELPERS:BEGIN -->
+```powershell
+function Get-DhS3Entry {
+    param([string]$Path)
+    try {
+        Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    } catch [System.Management.Automation.ItemNotFoundException] {
+        # Only a definite missing entry is absence; permission/I/O errors stop.
+        return $null
+    } catch {
+        throw 'DH_S3_PATH_UNREADABLE'
+    }
+}
+
+function Get-DhS3Root {
+    param([switch]$Internal)
+    try {
+        $local = $env:LOCALAPPDATA
+        $known = $DhS3KnownLocalAppData
+        foreach ($value in @($local, $known)) {
+            if ([string]::IsNullOrWhiteSpace($value) -or $value -cnotmatch '^[A-Za-z]:\\') {
+                throw 'invalid'
+            }
+            if ($value -cne [IO.Path]::GetFullPath($value) -or $value.EndsWith('\')) {
+                throw 'invalid'
+            }
+            foreach ($part in $value.Substring(3).Split('\')) {
+                if (-not $part -or $part.EndsWith('.') -or $part.EndsWith(' ') -or $part.Contains(':')) {
+                    throw 'invalid'
+                }
+            }
+        }
+        if (-not [string]::Equals($local, $known, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'invalid'
+        }
+        $root = [IO.Path]::Combine($known, 'DynamicsHelper')
+        $target = if ($Internal) { [IO.Path]::Combine($root, '_internal') } else { $root }
+        $chain = [Collections.Generic.List[string]]::new()
+        for ($path = $target; $path; $path = [IO.Path]::GetDirectoryName($path)) {
+            $chain.Insert(0, $path)
+        }
+    } catch {
+        throw 'DH_S3_ROOT_INVALID'
+    }
+    # Check from drive root downward, before any child lookup can follow a link.
+    foreach ($path in $chain) {
+        $item = Get-DhS3Entry -Path $path
+        if ($null -eq $item) { throw 'DH_S3_PARENT_MISSING' }
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'DH_S3_PARENT_UNSAFE'
+        }
+        if (-not [string]::Equals($item.FullName, $path, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'DH_S3_PARENT_UNSAFE'
+        }
+    }
+    return $root
+}
+
+function Get-DhS3Snapshot {
+    $root = Get-DhS3Root
+    $files = @{}
+    foreach ($name in @('config.json', 'copilot-instructions.md', 'user_prompt.md')) {
+        $path = [IO.Path]::Combine($root, $name)
+        $item = Get-DhS3Entry -Path $path
+        $hash = $null
+        if ($null -ne $item) {
+            if ($item -isnot [IO.FileInfo] -or $item.PSIsContainer -or `
+                ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Device)) -or `
+                -not [string]::Equals($item.FullName, $path, [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'DH_S3_FILE_UNSAFE'
+            }
+            try {
+                $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $path -ErrorAction Stop).Hash
+                if ($hash -notmatch '^[A-Fa-f0-9]{64}$') { throw 'invalid' }
+            } catch {
+                throw 'DH_S3_HASH_UNREADABLE'
+            }
+        }
+        $files[$name] = $hash
+    }
+    # Exactly three root-only keys; null explicitly records absence.
+    return @{ Root = $root; Files = $files }
+}
+```
+<!-- DH-S3:HELPERS:END -->
+
+1. Before the baseline installer, require previous-transaction safe settlement
+   and durable browser idle/no URL regardless of disposition. Otherwise stop;
+   a recovery installer is separately approved guarded settlement, not a scenario
+   reset. Then re-establish and verify `plan-d-b1` with the complete B1 installer.
+2. Before the first B2 installation, run the next command in a dedicated
+   PowerShell window and keep that window open through the second B2 installation.
+   It stores presence and SHA-256 for exactly the three protected root filenames
+   in memory, bound to the verified root. It clears any stale snapshot first and
+   publishes the complete local result only after every check/read succeeds.
+   A capture failure leaves no usable baseline and forbids continuing. Output
+   contains only the event and present-file count, never hashes or paths.
+
+<!-- DH-S3:CAPTURE:BEGIN -->
+```powershell
+$global:DhUserOwnedBefore = $null
+& {
+    $snapshot = Get-DhS3Snapshot
+    $count = @($snapshot.Files.Values | Where-Object { $null -ne $_ }).Count
+    $global:DhUserOwnedBefore = $snapshot
+    [pscustomobject]@{ Event = 'user-owned-baseline-captured'; FileCount = $count } | ConvertTo-Json -Compress
+}
+```
+<!-- DH-S3:CAPTURE:END -->
+
 3. Close all browser windows, run both installer guards, and use the complete B2
-   installer command to establish known-good B2.
-4. Restart the browser and require B2 versions, capability, verified integrity,
-   Analyze PASS, and Options PASS.
+   installer command to establish known-good B2; require exit `0` and
+   `SUCCESS: Update Complete!`.
+4. Restart the browser on a FAB-bearing page first. If terminal completion
+   exists, finish **Visible Completion Observation Order** before any Options
+   inspection/smoke. Then require B2 versions, capability, verified integrity,
+   Analyze PASS, Options PASS, and durable public/stored idle/no URL.
 5. Close all browser windows and create this harmless unexpected sentinel under
    the installed `_internal` tree. Require `True`:
 
+<!-- DH-S3:CREATE:BEGIN -->
 ```powershell
-$sentinel="$env:LOCALAPPDATA\DynamicsHelper\_internal\dh-cloud-pc-sentinel.txt"; [System.IO.File]::WriteAllText($sentinel,'remove me'); Test-Path -LiteralPath $sentinel
+& {
+    $root = Get-DhS3Root -Internal
+    $sentinel = [IO.Path]::Combine($root, '_internal', 'dh-cloud-pc-sentinel.txt')
+    if ($null -ne (Get-DhS3Entry -Path $sentinel)) { throw 'DH_S3_SENTINEL_EXISTS' }
+    try {
+        $stream = [IO.File]::Open($sentinel, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try {
+            $bytes = [Text.Encoding]::ASCII.GetBytes('remove me')
+            $stream.Write($bytes, 0, $bytes.Length)
+        } finally {
+            $stream.Dispose()
+        }
+    } catch {
+        throw 'DH_S3_SENTINEL_CREATE_FAILED'
+    }
+    $null = Get-DhS3Root -Internal
+    $item = Get-DhS3Entry -Path $sentinel
+    if ($item -isnot [IO.FileInfo] -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'DH_S3_SENTINEL_UNSAFE'
+    }
+    $true
+}
 ```
+<!-- DH-S3:CREATE:END -->
 
 6. Run both installer guards, then run the exact same complete B2 installer
    command again and require exit `0` plus `SUCCESS: Update Complete!`.
-7. Verify sentinel removal. Require `False`:
+7. Revalidate the complete parent chain, including an existing plain `_internal`,
+   then verify definite sentinel absence. Require `False`; a missing/unsafe parent
+   or unreadable entry is failure, not evidence of removal:
 
+<!-- DH-S3:ABSENCE:BEGIN -->
 ```powershell
-Test-Path -LiteralPath "$env:LOCALAPPDATA\DynamicsHelper\_internal\dh-cloud-pc-sentinel.txt"
+& {
+    $root = Get-DhS3Root -Internal
+    $sentinel = [IO.Path]::Combine($root, '_internal', 'dh-cloud-pc-sentinel.txt')
+    if ($null -ne (Get-DhS3Entry -Path $sentinel)) { throw 'DH_S3_SENTINEL_REMAINS' }
+    $false
+}
 ```
+<!-- DH-S3:ABSENCE:END -->
 
 8. In the same PowerShell window that captured the map, strictly compare the
    post-repair set and hashes. Any added, removed, or changed user-owned file
-   fails. The command prints only the count:
+   fails. Repeat safe-parent and sentinel-absence checks in this comparison so
+   skipping step 7 cannot produce preservation evidence. Use the same captured
+   snapshot, never recapture after repair. Output contains only event and count:
 
+<!-- DH-S3:COMPARE:BEGIN -->
 ```powershell
-if($global:DhUserOwnedBefore -isnot [hashtable]){throw 'Missing in-memory user-owned baseline'};$root=Join-Path $env:LOCALAPPDATA 'DynamicsHelper';$after=@{};foreach($name in @('config.json','copilot-instructions.md','user_prompt.md')){$path=Join-Path $root $name;if(Test-Path -LiteralPath $path -PathType Leaf){$after[$name]=(Get-FileHash -Algorithm SHA256 -LiteralPath $path -ErrorAction Stop).Hash.ToLowerInvariant()}elseif(Test-Path -LiteralPath $path){throw 'User-owned path is not a regular file'}};$beforeNames=@($global:DhUserOwnedBefore.Keys|Sort-Object);$afterNames=@($after.Keys|Sort-Object);if(($beforeNames -join "`n") -cne ($afterNames -join "`n")){throw 'User-owned file set changed during matching-installer repair'};foreach($name in $beforeNames){if($after[$name] -cne $global:DhUserOwnedBefore[$name]){throw 'User-owned file bytes changed during matching-installer repair'}};[pscustomobject]@{Event='user-owned-files-preserved';FileCount=$after.Count}|ConvertTo-Json -Compress
+& {
+    $before = $global:DhUserOwnedBefore
+    if ($before -isnot [hashtable] -or $before.Files -isnot [hashtable] -or $before.Files.Count -ne 3) {
+        throw 'DH_S3_BASELINE_MISSING'
+    }
+    $root = Get-DhS3Root -Internal
+    if (-not [string]::Equals($root, $before.Root, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'DH_S3_BASELINE_ROOT_CHANGED'
+    }
+    $sentinel = [IO.Path]::Combine($root, '_internal', 'dh-cloud-pc-sentinel.txt')
+    if ($null -ne (Get-DhS3Entry -Path $sentinel)) { throw 'DH_S3_SENTINEL_REMAINS' }
+    $after = Get-DhS3Snapshot
+    foreach ($name in @('config.json', 'copilot-instructions.md', 'user_prompt.md')) {
+        if (-not $before.Files.ContainsKey($name)) { throw 'DH_S3_BASELINE_MISSING' }
+        if (($null -eq $before.Files[$name]) -ne ($null -eq $after.Files[$name])) {
+            throw 'DH_S3_FILE_SET_CHANGED'
+        }
+        if ($before.Files[$name] -cne $after.Files[$name]) { throw 'DH_S3_FILE_BYTES_CHANGED' }
+    }
+    $count = @($after.Files.Values | Where-Object { $null -ne $_ }).Count
+    [pscustomobject]@{ Event = 'user-owned-files-preserved'; FileCount = $count } | ConvertTo-Json -Compress
+}
 ```
+<!-- DH-S3:COMPARE:END -->
 
-9. Restart the browser and require B2 Host/Extension versions, packaged verified
-   integrity, Analyze PASS, and Options PASS. Inspect only this safe storage
-   projection:
+9. Restart the browser on a FAB-bearing page first. If completion exists, perform
+   **Visible Completion Observation Order** before Options inspection/smoke.
+   Then require B2 Host/Extension versions, packaged verified integrity, Analyze
+   PASS, and Options PASS. Inspect only this safe storage projection:
 
 ```javascript
 const {dh_update_state:s}=await chrome.storage.local.get('dh_update_state'); ({kind:s?.kind,hasUpdateUrl:typeof s?.update?.url==='string',transactionId:s?.transactionId,targetVersion:s?.targetVersion,outcome:s?.outcome,code:s?.code,errorCode:s?.errorCode})
 ```
 
 Do not clear `complete` manually. If present, require the B2 terminal display,
-mounted eight-second ACK, authoritative disappearance, and refresh checks from
+foreground continuous-visible eight-second UI ACK, authoritative disappearance,
+and refresh checks from
 **Terminal Verification And Cleanup**. The safe local projection must then show
 `hasUpdateUrl: false`, no `errorCode`, and `kind` either `idle` or absent. The
 safe `DH_UPDATE_GET_STATE` projection must report `handled: true`, `kind: 'idle'`,
@@ -749,7 +1208,25 @@ mixed installation. Remove the in-memory map only after recording the result:
 Remove-Variable -Scope Global -Name DhUserOwnedBefore -ErrorAction SilentlyContinue
 ```
 
+## Private Distribution Closure
+
+On PASS, FAIL, abort, or BLOCKED, the distributing operator must verify privately
+recorded ownership before revoking this run's access and removing only its
+private object/container as applicable. Never delete shared resources or revoke
+unrelated access. Cleanup failure or uncertain ownership means cleanup BLOCKED
+and no operational closure; do not broaden retries. Distribution cleanup is
+separate from product settlement and must preserve journals, backups,
+finalization evidence, and browser state.
+
+Record ownership privately at creation, never in the ledger. Record only
+sanitized ownership-check, run-owned access-revocation, object/container cleanup,
+and separate product-settlement results. Recovery installer or guarded browser
+cleanup still needs separate approval; distribution cleanup never permits it.
+
 ## Environment Handoff
+
+Future handoff only, outside this documentation task and not an instruction to
+operate now. No release or migration is automatic, even after qualification PASS.
 
 The old `v2.0.75-beta.1` workstation remains unchanged as the fallback. It is
 not a Plan D test environment: do not click Update there and do not install A,
