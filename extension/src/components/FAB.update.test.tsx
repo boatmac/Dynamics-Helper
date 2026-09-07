@@ -92,6 +92,25 @@ const candidate = {
 }
 const TX = '0123456789abcdef0123456789abcdef'
 const TX_B = 'fedcba9876543210fedcba9876543210'
+const realSetTimeout = globalThis.setTimeout
+const realClearTimeout = globalThis.clearTimeout
+let visibility: DocumentVisibilityState
+let originalHiddenDescriptor: PropertyDescriptor | undefined
+let originalVisibilityDescriptor: PropertyDescriptor | undefined
+
+function setFabDocumentVisibility(next: DocumentVisibilityState): void {
+  visibility = next
+  act(() => document.dispatchEvent(new Event('visibilitychange')))
+}
+
+function restoreDocumentDescriptor(
+  key: 'hidden' | 'visibilityState',
+  descriptor: PropertyDescriptor | undefined,
+): void {
+  if (descriptor) Object.defineProperty(document, key, descriptor)
+  else delete (document as unknown as Record<string, unknown>)[key]
+}
+
 const transaction = {
   update: candidate,
   transactionId: TX,
@@ -107,8 +126,10 @@ async function renderFab() {
         <FAB />
       </PrefsLanguageProvider>,
     )
-    for (let index = 0; index < 10; index += 1) await Promise.resolve()
   })
+  await vi.waitFor(() => expect(
+    getMessageLog().some(entry => entry.action === 'DH_UPDATE_GET_STATE'),
+  ).toBe(true))
   return view
 }
 
@@ -122,8 +143,7 @@ async function resolveState(
 ) {
   await act(async () => {
     deferred.resolve({ handled: true, state: updateState })
-    await Promise.resolve()
-    await Promise.resolve()
+    await deferred.promise
   })
 }
 
@@ -172,12 +192,13 @@ async function replaceWithPersistentProgress(text: string): Promise<void> {
   deferNextResponse('analyze_error')
   openFab()
   await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: /^analyze$/i })).toBeEnabled())
   })
   fireEvent.click(screen.getByRole('button', { name: /^analyze$/i }))
   await act(async () => {
-    await Promise.resolve()
+    await vi.waitFor(() => expect(
+      getMessageLog().filter(entry => entry.action === 'analyze_error'),
+    ).toHaveLength(1))
   })
   const analyze = getMessageLog().find(entry => entry.action === 'analyze_error')
   const requestId = (analyze?.payload as {
@@ -198,11 +219,28 @@ describe('FAB reliable update projection', () => {
     state.prefs.autoAnalyzeMode = 'disabled'
     state.trackEvent.mockReset()
     state.scanForErrors.mockReset().mockImplementation(() => new Promise(() => {}))
+    visibility = 'visible'
+    originalHiddenDescriptor = Object.getOwnPropertyDescriptor(document, 'hidden')
+    originalVisibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      get: () => visibility === 'hidden',
+    })
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    })
   })
 
   afterEach(() => {
     act(() => vi.clearAllTimers())
     vi.useRealTimers()
+    restoreDocumentDescriptor('hidden', originalHiddenDescriptor)
+    restoreDocumentDescriptor('visibilityState', originalVisibilityDescriptor)
+    vi.restoreAllMocks()
+    // Timer spies can restore a prior test's fake functions after useRealTimers.
+    globalThis.setTimeout = realSetTimeout
+    globalThis.clearTimeout = realClearTimeout
   })
 
   it('hydrates from one payload-free DH_UPDATE_GET_STATE request', async () => {
@@ -237,7 +275,199 @@ describe('FAB reliable update projection', () => {
     expect(completion).toHaveTextContent(version)
   })
 
-  it('keeps completion visible through 7,999 ms and sends exactly one exact ACK at 8,000 ms', async () => {
+  it('does not ACK a cold completion while only the closed-FAB red dot is visible', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    await renderFab()
+    await resolveState(getState, completeState())
+    const button = document.querySelector('.dh-btn') as HTMLButtonElement
+    const redDot = Array.from(button.querySelectorAll('span')).find(
+      element => ['#ef4444', 'rgb(239, 68, 68)'].includes((element as HTMLElement).style.backgroundColor.toLowerCase()),
+    )
+    expect(redDot).toBeDefined()
+    expect(screen.queryByRole('button', { name: /update completed successfully/i })).toBeNull()
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(ackMessages()).toHaveLength(0)
+  })
+
+  it('starts a full epoch only when the cold-completion menu opens', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    await renderFab()
+    await resolveState(getState, completeState())
+    act(() => vi.advanceTimersByTime(20_000))
+    openFab()
+    act(() => vi.advanceTimersByTime(7_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+  })
+
+  it('cancels a menu epoch when the menu closes without a bound bubble', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    await renderFab()
+    await resolveState(getState, completeState())
+    openFab()
+    act(() => vi.advanceTimersByTime(4_000))
+    openFab()
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(ackMessages()).toHaveLength(0)
+  })
+
+  it('does not ACK a live completion with Status bubble disabled and the menu closed', async () => {
+    vi.useFakeTimers()
+    state.prefs.enableStatusBubble = false
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    await renderFab()
+    await resolveState(getState, { kind: 'idle' })
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: completeState() }))
+    expect(bubble()).not.toHaveClass('visible')
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(ackMessages()).toHaveLength(0)
+  })
+
+  it('ACKs an exact transaction-bound completion bubble while the menu is closed', async () => {
+    vi.useFakeTimers()
+    deferNextResponse('DH_UPDATE_ACK_COMPLETE')
+    await renderLiveCompletion()
+    expect(bubble()).toHaveClass('visible')
+    act(() => vi.advanceTimersByTime(7_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+  })
+
+  it('keeps one deadline across a bound-bubble-to-menu hand-off', async () => {
+    vi.useFakeTimers()
+    await renderLiveCompletion()
+    act(() => vi.advanceTimersByTime(4_000))
+    expect(bubble()).toHaveClass('visible')
+    openFab()
+    act(() => window.dispatchEvent(new CustomEvent('dh-update-error', {
+      detail: { error: 'UNRELATED UPDATE FEEDBACK' },
+    })))
+    act(() => vi.advanceTimersByTime(3_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+  })
+
+  it('keeps one deadline across a menu-to-bound-bubble hand-off', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    await renderFab()
+    await resolveState(getState, completeState())
+    openFab()
+    act(() => vi.advanceTimersByTime(4_000))
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: completeState() }))
+    expect(bubble()).toHaveClass('visible')
+    openFab()
+    act(() => vi.advanceTimersByTime(3_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+  })
+
+  it('keeps an already-visible bound bubble eligible after the preference is disabled', async () => {
+    vi.useFakeTimers()
+    const view = await renderLiveCompletion()
+    act(() => vi.advanceTimersByTime(4_000))
+    state.prefs.enableStatusBubble = false
+    act(() => {
+      view.rerender(<PrefsLanguageProvider language="en"><FAB /></PrefsLanguageProvider>)
+    })
+    act(() => vi.advanceTimersByTime(3_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+  })
+
+  it('does not restart the epoch when a bound bubble appears while the menu stays open', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    await renderFab()
+    await resolveState(getState, completeState())
+    openFab()
+    act(() => vi.advanceTimersByTime(4_000))
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: completeState() }))
+    act(() => vi.advanceTimersByTime(3_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+  })
+
+  it('removes bubble eligibility when unrelated feedback replaces it', async () => {
+    vi.useFakeTimers()
+    await renderLiveCompletion()
+    act(() => vi.advanceTimersByTime(4_000))
+    act(() => window.dispatchEvent(new CustomEvent('dh-update-error', {
+      detail: { error: 'UNRELATED UPDATE FEEDBACK' },
+    })))
+    expect(bubble()).toHaveTextContent('UNRELATED UPDATE FEEDBACK')
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(ackMessages()).toHaveLength(0)
+  })
+
+  it('does not treat a generic visible status bubble as a completion surface', async () => {
+    vi.useFakeTimers()
+    state.prefs.enableStatusBubble = true
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    await renderFab()
+    await resolveState(getState, completeState())
+    act(() => window.dispatchEvent(new CustomEvent('dh-update-error', {
+      detail: { error: 'GENERIC UPDATE FEEDBACK' },
+    })))
+    expect(bubble()).toHaveClass('visible')
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(ackMessages()).toHaveLength(0)
+  })
+
+  it('requires a fresh full interval after the FAB document hides and returns', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    await renderFab()
+    await resolveState(getState, completeState())
+    openFab()
+    act(() => vi.advanceTimersByTime(4_000))
+    setFabDocumentVisibility('hidden')
+    act(() => vi.advanceTimersByTime(20_000))
+    setFabDocumentVisibility('visible')
+    act(() => vi.advanceTimersByTime(7_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+  })
+
+  it('cancels every visible epoch on authoritative departure', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    await renderFab()
+    await resolveState(getState, completeState())
+    openFab()
+    act(() => vi.advanceTimersByTime(4_000))
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: { kind: 'idle' } }))
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(ackMessages()).toHaveLength(0)
+  })
+
+  it('lets a failed-ACK bubble expire and retries only after a fresh menu epoch', async () => {
+    vi.useFakeTimers()
+    const firstAck = deferNextResponse('DH_UPDATE_ACK_COMPLETE')
+    await renderLiveCompletion()
+    act(() => vi.advanceTimersByTime(8_000))
+    await act(async () => { firstAck.reject(new Error('disconnected')) })
+    act(() => vi.advanceTimersByTime(2_000))
+    expect(bubble()).not.toHaveClass('visible')
+    deferNextResponse('DH_UPDATE_ACK_COMPLETE')
+    openFab()
+    act(() => vi.advanceTimersByTime(7_999))
+    expect(ackMessages()).toHaveLength(1)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(2)
+  })
+
+  it('keeps a visible menu completion through 7,999 ms and sends one exact ACK at 8,000 ms', async () => {
     vi.useFakeTimers()
     const persisted = { kind: 'complete', transactionId: TX }
     seedStorage({ dh_update_state: persisted })
@@ -262,7 +492,7 @@ describe('FAB reliable update projection', () => {
     expect(ackMessages()).toHaveLength(1)
   })
 
-  it('keeps the original ACK deadline across an equivalent same-ID rebroadcast', async () => {
+  it('keeps the original visible-epoch deadline across an equivalent same-ID rebroadcast', async () => {
     vi.useFakeTimers()
     const getState = deferNextResponse('DH_UPDATE_GET_STATE')
     await renderFab()
@@ -287,6 +517,7 @@ describe('FAB reliable update projection', () => {
     const firstGetState = deferNextResponse('DH_UPDATE_GET_STATE')
     const first = await renderFab()
     await resolveState(firstGetState, completeState())
+    openFab()
     act(() => vi.advanceTimersByTime(4_000))
     first.unmount()
     act(() => vi.advanceTimersByTime(10_000))
@@ -295,6 +526,7 @@ describe('FAB reliable update projection', () => {
     const secondGetState = deferNextResponse('DH_UPDATE_GET_STATE')
     await renderFab()
     await resolveState(secondGetState, completeState())
+    openFab()
     act(() => vi.advanceTimersByTime(7_999))
     expect(ackMessages()).toHaveLength(0)
     act(() => vi.advanceTimersByTime(1))
@@ -308,6 +540,7 @@ describe('FAB reliable update projection', () => {
       const getState = deferNextResponse('DH_UPDATE_GET_STATE')
       await renderFab()
       await resolveState(getState, completeState())
+      openFab()
       act(() => vi.advanceTimersByTime(4_000))
 
       act(() => emitRuntimeMessage({
@@ -378,18 +611,15 @@ describe('FAB reliable update projection', () => {
       type: 'DH_UPDATE_ACK_COMPLETE',
       transactionId: TX_B,
     })
-
-    timeoutSpy.mockRestore()
-    clearTimeoutSpy.mockRestore()
   })
 
   it.each(['rejected', 'handled-false'] as const)(
-    'keeps completion visible after a rejected or handled-false ACK and retries only after remount (%s)',
+    'keeps completion visible after a failed ACK and retries only after a fresh visibility epoch (%s)',
     async result => {
       vi.useFakeTimers()
       const firstGetState = deferNextResponse('DH_UPDATE_GET_STATE')
       const firstAck = deferNextResponse('DH_UPDATE_ACK_COMPLETE')
-      const first = await renderFab()
+      await renderFab()
       await resolveState(firstGetState, completeState())
       openFab()
 
@@ -403,12 +633,9 @@ describe('FAB reliable update projection', () => {
       act(() => vi.advanceTimersByTime(30_000))
       expect(ackMessages()).toHaveLength(1)
 
-      first.unmount()
-      const secondGetState = deferNextResponse('DH_UPDATE_GET_STATE')
-      deferNextResponse('DH_UPDATE_ACK_COMPLETE')
-      await renderFab()
-      await resolveState(secondGetState, completeState())
       openFab()
+      openFab()
+      deferNextResponse('DH_UPDATE_ACK_COMPLETE')
       act(() => vi.advanceTimersByTime(7_999))
       expect(ackMessages()).toHaveLength(1)
       act(() => vi.advanceTimersByTime(1))
@@ -545,6 +772,7 @@ describe('FAB reliable update projection', () => {
 
     await renderFab()
     await resolveState(fabGetState, completeState())
+    openFab()
     act(() => vi.advanceTimersByTime(4_000))
     render(<Options />)
     await resolveState(optionsGetState, completeState())
@@ -557,6 +785,29 @@ describe('FAB reliable update projection', () => {
     })
     act(() => vi.advanceTimersByTime(30_000))
 
+    expect(ackMessages()).toHaveLength(1)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('lets visible Options win while a cold FAB remains closed', async () => {
+    vi.useFakeTimers()
+    const fabGetState = deferNextResponse('DH_UPDATE_GET_STATE')
+    const optionsGetState = deferNextResponse('DH_UPDATE_GET_STATE')
+    deferNextResponse('get_config')
+    await renderFab()
+    await resolveState(fabGetState, completeState())
+    expect(screen.queryByRole('button', { name: /update completed successfully/i })).toBeNull()
+    act(() => vi.advanceTimersByTime(4_000))
+    render(<Options />)
+    await resolveState(optionsGetState, completeState())
+    act(() => vi.advanceTimersByTime(4_000))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(3_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: { kind: 'idle' } }))
+    act(() => vi.advanceTimersByTime(30_000))
     expect(ackMessages()).toHaveLength(1)
     expect(screen.queryByRole('status')).toBeNull()
   })
@@ -630,8 +881,6 @@ describe('FAB reliable update projection', () => {
 
     expect(bubble()).toHaveTextContent('REPLACEMENT FEEDBACK')
     expect(bubble()).toHaveClass('visible')
-    timeoutSpy.mockRestore()
-    clearTimeoutSpy.mockRestore()
   })
 
   it('ignores a captured stale completion callback after a persistent progress bubble replaces it', async () => {
@@ -655,7 +904,6 @@ describe('FAB reliable update projection', () => {
 
     expect(bubble()).toHaveTextContent('PERSISTENT PROGRESS')
     expect(bubble()).toHaveClass('visible')
-    timeoutSpy.mockRestore()
   })
 
   it('clears a live completion through an identity-change hide without affecting later feedback', async () => {
@@ -676,7 +924,7 @@ describe('FAB reliable update projection', () => {
         ticketTitle: 'Case A',
         errorText: 'Case A body',
       })
-      for (let index = 0; index < 10; index += 1) await Promise.resolve()
+      await initialScan.promise
     })
     await resolveState(getState, { kind: 'idle' })
     act(() => emitRuntimeMessage({
@@ -695,7 +943,7 @@ describe('FAB reliable update projection', () => {
         ticketTitle: 'Case B',
         errorText: 'Case B body',
       })
-      for (let index = 0; index < 10; index += 1) await Promise.resolve()
+      await changedScan.promise
     })
 
     expect(state.scanForErrors).toHaveBeenCalledTimes(2)
@@ -711,8 +959,6 @@ describe('FAB reliable update projection', () => {
 
     expect(bubble()).toHaveTextContent('LATER FEEDBACK')
     expect(bubble()).toHaveClass('visible')
-    timeoutSpy.mockRestore()
-    clearTimeoutSpy.mockRestore()
   })
 
   it('clears the completion bubble timer on unmount', async () => {
@@ -727,8 +973,6 @@ describe('FAB reliable update projection', () => {
     view.unmount()
 
     expect(clearTimeoutSpy).toHaveBeenCalledWith(completionTimer)
-    timeoutSpy.mockRestore()
-    clearTimeoutSpy.mockRestore()
   })
 
   it.each([

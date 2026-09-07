@@ -6,6 +6,7 @@ import { usePrefs } from '../utils/prefs';
 import { trackEvent, hashCaseId } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { useAnalysisHydration } from '../hooks/useAnalysisHydration';
+import { useVisibleCompletionAck } from '../hooks/useVisibleCompletionAck';
 import type {
     AnalysisPersistenceWarning,
     LastAnalysisIdentity,
@@ -209,17 +210,6 @@ const FAB: React.FC = () => {
             ? `${t('version')} ${updateVersion}`
             : t('updateRequiresAttention');
 
-    useEffect(() => {
-        if (completionTransactionId === null) return;
-        const timeoutId = setTimeout(() => {
-            void chrome.runtime.sendMessage({
-                type: 'DH_UPDATE_ACK_COMPLETE',
-                transactionId: completionTransactionId,
-            }).catch(() => undefined);
-        }, 8000);
-        return () => clearTimeout(timeoutId);
-    }, [completionTransactionId]);
-
     // Track whether the currently-displayed ResultPopover originated from an
     // analyze flow (vs a bookmark markdown). Only analyze popovers should
     // call markSeen() on close — bookmark popovers have no persisted state.
@@ -247,9 +237,19 @@ const FAB: React.FC = () => {
         type: 'default' | 'success' | 'error';
     }>({ visible: false, text: '', type: 'default' });
     const statusBubbleRef = React.useRef(statusBubble);
-    statusBubbleRef.current = statusBubble;
     const statusTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const statusCompletionTransactionIdRef = React.useRef<string | null>(null);
+
+    const completionBubbleVisible = completionTransactionId !== null
+        && statusBubble.visible
+        && statusCompletionTransactionIdRef.current === completionTransactionId;
+    const completionSurfaceVisible = completionTransactionId !== null
+        && (isOpen || completionBubbleVisible);
+
+    useVisibleCompletionAck({
+        transactionId: completionTransactionId,
+        surfaceVisible: completionSurfaceVisible,
+    });
 
     function hideStatusBubble(onlyType?: 'default' | 'success' | 'error'): void {
         if (onlyType !== undefined && statusBubbleRef.current.type !== onlyType) return;
