@@ -42,6 +42,23 @@ const candidate = {
 }
 const TX = '0123456789abcdef0123456789abcdef'
 const TX_B = 'fedcba9876543210fedcba9876543210'
+let visibility: DocumentVisibilityState
+let originalHiddenDescriptor: PropertyDescriptor | undefined
+let originalVisibilityDescriptor: PropertyDescriptor | undefined
+
+function setOptionsDocumentVisibility(next: DocumentVisibilityState): void {
+  visibility = next
+  act(() => document.dispatchEvent(new Event('visibilitychange')))
+}
+
+function restoreDocumentDescriptor(
+  key: 'hidden' | 'visibilityState',
+  descriptor: PropertyDescriptor | undefined,
+): void {
+  if (descriptor) Object.defineProperty(document, key, descriptor)
+  else delete (document as unknown as Record<string, unknown>)[key]
+}
+
 const transaction = {
   update: candidate,
   transactionId: TX,
@@ -60,8 +77,7 @@ async function resolveState(
 ) {
   await act(async () => {
     deferred.resolve({ handled: true, state: updateState })
-    await Promise.resolve()
-    await Promise.resolve()
+    await deferred.promise
   })
 }
 
@@ -87,11 +103,25 @@ describe('Options reliable update projection', () => {
   beforeEach(() => {
     resetChromeMock()
     installChromeMock()
+    visibility = 'visible'
+    originalHiddenDescriptor = Object.getOwnPropertyDescriptor(document, 'hidden')
+    originalVisibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      get: () => visibility === 'hidden',
+    })
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    })
   })
 
   afterEach(() => {
     act(() => vi.clearAllTimers())
     vi.useRealTimers()
+    restoreDocumentDescriptor('hidden', originalHiddenDescriptor)
+    restoreDocumentDescriptor('visibilityState', originalVisibilityDescriptor)
+    vi.restoreAllMocks()
   })
 
   it('hydrates from one payload-free DH_UPDATE_GET_STATE request', async () => {
@@ -122,7 +152,55 @@ describe('Options reliable update projection', () => {
     expect(completion).toHaveTextContent(version)
   })
 
-  it('keeps completion visible through 7,999 ms and sends exactly one exact ACK at 8,000 ms', async () => {
+  it('does not ACK complete while the Options document is hidden', async () => {
+    vi.useFakeTimers()
+    visibility = 'hidden'
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await resolveState(getState, completeState())
+    expect(screen.getByRole('status')).toHaveTextContent('Update completed successfully.')
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(ackMessages()).toHaveLength(0)
+  })
+
+  it('starts one full ACK interval for foreground complete Options', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await resolveState(getState, completeState())
+    act(() => vi.advanceTimersByTime(7_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+  })
+
+  it('requires a fresh interval after Options foreground-background-foreground', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await resolveState(getState, completeState())
+    act(() => vi.advanceTimersByTime(4_000))
+    setOptionsDocumentVisibility('hidden')
+    act(() => vi.advanceTimersByTime(20_000))
+    setOptionsDocumentVisibility('visible')
+    act(() => vi.advanceTimersByTime(7_999))
+    expect(ackMessages()).toHaveLength(0)
+    act(() => vi.advanceTimersByTime(1))
+    expect(ackMessages()).toHaveLength(1)
+  })
+
+  it('cancels the foreground Options epoch on authoritative departure', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await resolveState(getState, completeState())
+    act(() => vi.advanceTimersByTime(4_000))
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: { kind: 'idle' } }))
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(ackMessages()).toHaveLength(0)
+  })
+
+  it('keeps foreground completion visible through 7,999 ms and sends exactly one exact ACK at 8,000 ms', async () => {
     vi.useFakeTimers()
     const persisted = { kind: 'complete', transactionId: TX }
     seedStorage({ dh_update_state: persisted })
@@ -146,7 +224,7 @@ describe('Options reliable update projection', () => {
     expect(ackMessages()).toHaveLength(1)
   })
 
-  it('keeps the original ACK deadline across an equivalent same-ID rebroadcast', async () => {
+  it('keeps the original visible-epoch deadline across an equivalent same-ID rebroadcast', async () => {
     vi.useFakeTimers()
     const getState = deferNextResponse('DH_UPDATE_GET_STATE')
     renderOptions()
@@ -216,12 +294,12 @@ describe('Options reliable update projection', () => {
   )
 
   it.each(['rejected', 'handled-false'] as const)(
-    'keeps completion visible after a rejected or handled-false ACK and retries only after remount (%s)',
+    'keeps completion visible after a failed ACK and retries only after a fresh visibility epoch (%s)',
     async result => {
       vi.useFakeTimers()
       const firstGetState = deferNextResponse('DH_UPDATE_GET_STATE')
       const firstAck = deferNextResponse('DH_UPDATE_ACK_COMPLETE')
-      const first = renderOptions()
+      renderOptions()
       await resolveState(firstGetState, completeState())
 
       act(() => vi.advanceTimersByTime(8_000))
@@ -234,11 +312,9 @@ describe('Options reliable update projection', () => {
       act(() => vi.advanceTimersByTime(30_000))
       expect(ackMessages()).toHaveLength(1)
 
-      first.unmount()
-      const secondGetState = deferNextResponse('DH_UPDATE_GET_STATE')
+      setOptionsDocumentVisibility('hidden')
+      setOptionsDocumentVisibility('visible')
       deferNextResponse('DH_UPDATE_ACK_COMPLETE')
-      renderOptions()
-      await resolveState(secondGetState, completeState())
       act(() => vi.advanceTimersByTime(7_999))
       expect(ackMessages()).toHaveLength(1)
       act(() => vi.advanceTimersByTime(1))

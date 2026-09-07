@@ -46,6 +46,7 @@ import { getExtensionVersion } from '../utils/version';
 import { localizePromptSourceError } from '../utils/promptSourceErrors';
 import { safeErrorText } from '../utils/safeErrorText';
 import { ownDataProperty } from '../utils/ownData';
+import { useVisibleCompletionAck } from '../hooks/useVisibleCompletionAck';
 import {
     parseUpdateState,
     type UpdateErrorCode,
@@ -858,16 +859,10 @@ const OptionsInner: React.FC = () => {
     const updateCompletion = updateState.kind === 'complete'
         ? `${t(updateState.outcome === 'committed' ? 'updateComplete' : 'updateRolledBack')} ${t('version')} ${updateVersion}`
         : null;
-    useEffect(() => {
-        if (completionTransactionId === null) return;
-        const timeoutId = setTimeout(() => {
-            void chrome.runtime.sendMessage({
-                type: 'DH_UPDATE_ACK_COMPLETE',
-                transactionId: completionTransactionId,
-            }).catch(() => undefined);
-        }, 8000);
-        return () => clearTimeout(timeoutId);
-    }, [completionTransactionId]);
+    useVisibleCompletionAck({
+        transactionId: completionTransactionId,
+        surfaceVisible: completionTransactionId !== null,
+    });
     const latestTranslationRef = useRef(t);
     latestTranslationRef.current = t;
     
