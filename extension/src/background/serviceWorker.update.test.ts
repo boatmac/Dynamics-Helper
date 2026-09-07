@@ -80,7 +80,7 @@ async function loadWorkerWithCommittedCompletion() {
     dh_update_worker_version: completionVersion,
   })
   const port = queueNativePort(MAIN_HOST)
-  const importing = import('./serviceWorker')
+  const worker = await import('./serviceWorker')
 
   await vi.waitFor(() => expect(port.posted).toHaveLength(1))
   expect(port.posted[0]).toMatchObject({ action: 'get_capabilities' })
@@ -97,7 +97,6 @@ async function loadWorkerWithCommittedCompletion() {
     extension_version: completionVersion,
   })
 
-  const worker = await importing
   await worker.updateRuntimeReady
   return {
     worker,
@@ -438,8 +437,7 @@ describe('Service Worker transactional update cutover', () => {
 
   it('hydrates update state before forwarding an ordinary Native request', async () => {
     const hydration = deferNextStorageGet(UPDATE_STATE_KEY)
-    const importing = import('./serviceWorker')
-    const worker = await importing
+    const worker = await import('./serviceWorker')
     const responsePromise = dispatchRuntimeMessage({
       type: 'NATIVE_MSG',
       payload: { action: 'ping' },
@@ -582,7 +580,7 @@ describe('Service Worker transactional update cutover', () => {
       [UPDATE_STATE_KEY]: { kind: 'available', update: candidate },
     })
     const port = queueNativePort(MAIN_HOST)
-    const importing = import('./serviceWorker')
+    const worker = await import('./serviceWorker')
 
     await vi.waitFor(() => expect(port.posted).toHaveLength(1))
     expect(port.posted[0]).toMatchObject({ action: 'get_capabilities' })
@@ -598,7 +596,6 @@ describe('Service Worker transactional update cutover', () => {
       host_version: currentVersion,
       extension_version: currentVersion,
     })
-    const worker = await importing
     await worker.updateRuntimeReady
 
     expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toEqual({
@@ -614,7 +611,7 @@ describe('Service Worker transactional update cutover', () => {
       [UPDATE_STATE_KEY]: { kind: 'available', update: candidate },
     })
     const port = queueNativePort(MAIN_HOST)
-    const importing = import('./serviceWorker')
+    const worker = await import('./serviceWorker')
 
     await vi.waitFor(() => expect(port.posted).toHaveLength(1))
     emitFinal(port, port.posted[0], {
@@ -628,7 +625,6 @@ describe('Service Worker transactional update cutover', () => {
       host_version: currentVersion,
       extension_version: currentVersion,
     })
-    const worker = await importing
     await worker.updateRuntimeReady
     expect(getStorageSnapshot()[UPDATE_STATE_KEY]).toMatchObject({ kind: 'available' })
 
