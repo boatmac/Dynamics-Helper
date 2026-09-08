@@ -1,22 +1,45 @@
 # Dynamics Helper Development Handoff
 
-Updated: 2026-09-07. This existing file is the single development recovery entry.
+Updated: 2026-09-08. This existing file is the single development recovery entry.
 Read `../AGENTS.md` for execution rules. Older contents are retained in Git at
 `6413dbad9bd258bb04cf313610d602b68424e091`; do not execute their restart steps.
 
 ## Current Mode
 
-Latest user correction: remain in the LOCAL development checkout and complete a
-bounded milestone before considering Cloud PC transfer. This supersedes the
-earlier immediate-Cloud-PC direction. Do not equate documentation cleanup with
-successful B2 product delivery. The user approved the bounded local diagnosis
-milestone recorded below, not implementation. Update experiments and tool
-migration remain paused. The user has now
-confirmed global OpenCode Superpowers removal from the MyCasesKit session also
-applies to Dynamics Helper. Do not repeat that removal here. Pi installation,
-other tool/skill changes, machine configuration, pushes, and publication remain
-unauthorized. The user subsequently approved one local commit of the 35 Markdown
-changes, as recorded in the local commit boundary below.
+Current authorized task: save the completed beta3 working milestone in one local
+commit; the user separately asked whether GitHub publication is ready.
+Development stays in the LOCAL checkout; the approved Cloud PC product install
+did not migrate development. No new tests, builds, cloud operations, push, or
+publication are authorized by this local commit. Preserve the reviewed product
+changes, tests and diagnostic scripts; do not publish automatically.
+
+The user confirmed global OpenCode Superpowers removal also applies here; do not
+reload or repeat removal. No Pi installation, vendor sample submission, or
+security bypass is authorized. The earlier 35-document commit was completed as
+f283e2d and does not authorize a commit of the current product changes.
+
+## Current Milestone Summary
+
+- Alignment remains the independently delivered v2.0.75-beta.1 foundation.
+- Local beta3 fixes remove unsafe startup Extension migration, exclude the two
+  development-only Pydantic mypy plugins, and make installer failures preserve
+  security policy, user data, and process ownership.
+- Final package: `DynamicsHelper_v2.0.76-beta.3.zip`, 14,003,512 bytes, SHA-256
+  `e07a6ee401b625284f429cfec5273677f3fa57951c929540c7380d32cc7678ec`, under local
+  Temp `dh-beta3-candidate-safe-installer-20260908`. It was built from f283e2d plus
+  working changes, not an immutable release commit. Earlier beta3 is superseded.
+- Cloud PC installation returned 0; config unchanged, editable prompts remained
+  absent, installed Host/Extension beta3, real model-list Refresh successful.
+  The user also reports Analyze works. The missing bubble was its disabled
+  preference, not a confirmed regression; no bubble code change is needed.
+- Basic use is restored. No explicit final Defender audit or automatic-update/
+  interruption/recovery qualification is claimed. Historical B2 FAIL remains.
+- All three later private distribution runs were deleted/closed. Retain private
+  evidence and backups; do not rerun retired candidate-maintenance procedures.
+
+Detailed sections below preserve chronological decisions and observations. Later
+observations supersede earlier state descriptions, not their historical evidence.
+Only Current Mode and Next Single Action describe current execution authority.
 
 ## OpenCode Restart Decision
 
@@ -93,6 +116,7 @@ Options. This foundation does not implement MyCases Stage 0/1 orchestration.
 | Reliable updater | Plan A/B/C connected to production; complete-version verification and rollback implemented | A-to-B1 succeeded; later B1-to-B2 failed under Defender |
 | Visible completion | Implementation through `cf016b7`; only a real foreground surface visible continuously for eight seconds can acknowledge completion | Automated verification passed; successful B2 cloud lifecycle NOT demonstrated |
 | B2 candidate | Version `2.0.76-beta.2`, source bound to `6413dba`; Host 666/666, Extension 997/997, builds, frozen probe and static checks passed | Built, NOT published, NOT qualified for delivery |
+| Beta3 working milestone | Final package identity above; local focused/build/probe evidence below; user install, model Refresh and Analyze results | Basic use restored on Cloud PC; uncommitted, unpublished, automatic-update/recovery qualification incomplete |
 
 Exact package identities and execution evidence are in
 [the results ledger](plan-d-pragmatic-cloud-pc-results.md). B2 was built before
@@ -100,7 +124,7 @@ its source-binding commit; matching packaged inputs were subsequently checked.
 Do not describe it as a rebuild from that commit. Tests are historical results
 for those inputs, not tests run in the new Cloud PC development environment.
 
-## Last Product Failure
+## Historical B1/B2 Failures
 
 Normal B1-to-B2 transaction `ed2ff2cbbb31e571d69fc361d83777e2` failed on
 2026-09-07 when Defender reported `Behavior:Win32/Persistence.A!ml` and quarantined
@@ -110,9 +134,9 @@ was rolled-back; active/cursor were absent and transaction/receipt counts zero.
 Full strict residue checks and durable browser idle were not completed.
 
 The temporary private distribution was deleted and its URL returned 404. Do not
-reuse it. Defender's CURRENT allow/override state is unknown: the last requested
-read-only preference check has no returned result. Do not treat either a past
-UI label or an assistant assertion as current configuration evidence.
+reuse it. The subsequent current Allowed threats screenshot confirms a visible
+allow entry for `Behavior:Win32/Persistence.A!ml`; see the observation below.
+Its exact scope and company-policy provenance are not established.
 
 A/B1 frozen module comparison found only the product version constant changed;
 the other observed differences were packaging metadata. Defender engine/platform
@@ -302,23 +326,553 @@ current-status consistency review, and seven local reference targets. Git emitte
 only LF-to-CRLF notices; no line-ending conversion was performed. Product tests
 and builds were not run. All existing uncommitted changes remain preserved.
 
+## Original Company Cloud PC Observation Preparation
+
+After local documentation commit `f283e2d`, the user rejected local virtual
+machines as test environments: their Windows policy may not match the company.
+No Hyper-V or replacement VM setup is planned. Development remains local;
+observing the original company Cloud PC is not development migration.
+
+The user approved local preparation of a short read-only check, not remote
+execution, another update trial, security changes, or a new commit. Prepared:
+
+- `scripts/read-only/Test-OriginalCloudPcUpdateState.ps1`
+- `scripts/read-only/README.md`
+
+The observer uses fixed disk evidence, process counts/PIDs, read-only HKCU
+registry access, and Defender status/preferences. It never starts the Host,
+calls product RPC, imports product modules, writes files/registry/security
+settings, or wakes a browser Worker. Its separate optional storage snippet is
+for an already open, awake, non-transitioning Worker console only. Unknown state
+blocks inference; no READY or retry permission is emitted.
+
+Declared-file hashing is intentionally not a replacement for the production
+integrity parser, trusted-package provenance, or full settlement checks. Hidden
+Defender exclusions and allowed-threat state cannot be ruled out by empty visible
+counts. All observations are non-atomic, and antivirus/auditing may observe file
+reads. If policy blocks execution or a security alert occurs, stop without bypass.
+
+Local validation: Windows PowerShell 5.1 parser check and one bounded independent
+static review, not live script execution. Review corrections distinguish absent
+DH RunOnce values from a shared key and unreadable ACKs from absent ACKs. No
+product tests/builds or live Defender queries were performed by the agent during
+preparation. Subsequent user-mediated observations are recorded below.
+
+The user ran the observer and supplied its JSON at 2026-09-07 15:39:10 UTC.
+Defender service, antivirus, real-time/behavior monitoring and tamper protection
+were enabled; normal mode and cloud reporting were observed. Signature version
+was 1.459.95.0. Visible path/process/extension exclusion counts and threat-action
+ID count were each one; relevance and current allow state remain UNKNOWN. Both
+registry views had expected main registration targets and no RunOnce/status
+registration. Disk observation was skipped because one DH process was present.
+
+A subsequent user-supplied process read identified it as the ordinary main
+`dh_native_host.exe`, PID 27280, created at 2026-09-07 17:57:56.220058 UTC+8.
+This is not a recovery role or proof of active updating. The observer now separates
+main/recovery counts: main presence permits non-atomic disk observation without
+killing the Host, while recovery processes, unknown observations, registration,
+and pending-evidence stop gates remain. No claim of quiescence or full settlement
+is made.
+
+The user supplied the revised observation at 2026-09-07 15:46:00 UTC. Main Host
+27280 remained present with no recovery process. Fixed pending paths were absent,
+transaction/receipt counts were zero, and exact ACK bytes matched reported B1
+rollback. Both metadata versions were B1, but inventory observation stopped with
+the old undifferentiated code; this is not proof of corruption or successful hash
+verification. Browser and current allow state remain unknown.
+
+Local inspection found an observer compatibility defect: its path whitelist
+rejected embedded spaces, although current bundled runtime data includes such a
+filename. This has not been established as the exact B1 failure. The observer now
+accepts embedded ASCII spaces while rejecting trailing spaces/traversal, and
+emits fixed stop-phase/role/error codes plus checked-file count. `-SkipDefender`
+avoids repeating already supplied security observations during the disk follow-up.
+
+The user supplied the next observation at 2026-09-07 15:51:19 UTC with Defender
+queries skipped. All 51 declared product-file hashes matched the local inventory;
+metadata/Extension versions were B1. Pending paths remained absent, transaction
+and receipt counts remained zero, and exact ACK bytes matched B1 rollback. Main
+Host 27280 remained present with no recovery process; registration observations
+were unchanged. This closes the bounded disk observation, not trusted-package
+verification, extra-file checks, atomic settlement, or B2 qualification. Do not
+repeat the disk check without a new reason. At that observation, current allow
+state and browser state remained unobserved; the screenshot below resolves only
+the visible allowed-threat entry, not browser state or all policy overrides.
+
+The user then supplied a screenshot of the CURRENT Windows Security Allowed
+threats page, showing `Behavior:Win32/Persistence.A!ml` (Severe). This confirms a
+visible allow entry at that observation, not merely a historical allowed action. It does not
+identify the exact override scope, policy origin, detection trigger, or prove a
+false positive/malware diagnosis. The generic threat description is not an
+incident-specific process trace. A successful retry in this state cannot qualify
+B2 as compatible with unmodified protection. Do not ask the user to stop allowing
+it: reevaluation/quarantine could affect the restored installation. Recommend
+company endpoint-security/IT review for an approved representative test baseline,
+without independently changing the current machine or widening exclusions.
+
+The user said IT involvement was not feasible and subsequently reported changing
+Allow to Block themselves. This was a user action, not an agent security mutation
+or authorization for further changes. The follow-up JSON at 2026-09-07 16:03:26
+UTC shows visible threat-action IDs dropping from one to zero; this is consistent
+with the reported action but does not prove absence of all overrides/exclusions.
+All previously observed protection flags remained enabled and signature version
+remained 1.459.95.0. Visible path/process/extension exclusion counts stayed one.
+All 51 declared B1 hashes still matched; pending paths/counts, matching rollback
+ACK, main-only process and registration observations were unchanged. No missing
+declared product files were observed. The script's currentAllowState UNKNOWN is
+an intentional visibility limit, not evidence that the previous allowance remains.
+Browser storage is still unknown. Do not repeat the completed disk observation
+without a new change, resurrect the infeasible IT prerequisite, or infer retry
+permission from the user's security action.
+
+The user explicitly accepted one Worker-only wake with the disclosed possibility
+of automatic resume, not a manual new update. Their post-wake projection showed
+`preparing`, B1 Worker, B2 candidate, a URL field present, no legacy key, and
+transaction `404ded6a59bbcc86fb681c28c9827b6c` (different from the original failed
+transaction). Its creation time and pre-wake state are unknown. A second storage
+read at 2026-09-07 16:26:09.405 UTC confirmed the same transaction in `preparing`
+with `errorCode: update_prepare_failed`.
+
+Exact B1 source review confirms startup/alarm resume does not retry preparing
+when errorCode exists. The one-shot alarm can fire without making a request.
+Explicit start/retry remains mutating and is not authorized. This error can mean
+download/validation/preparation failure, request rejection, or a 120-second
+frontend timeout. Frontend cancellation does not cancel Host executor work; old
+16:03 disk observations cannot prove the later transaction is absent or stopped.
+Expected download errors are wrapped without a safe HTTP-status log, so neither
+404 nor Defender recurrence is established. The retired private URL is only a
+hypothesis until current candidate identity is clarified. Do not print/probe URLs,
+clear state, manually ACK, retry, or terminate processes.
+
+The next user storage projection confirmed the same failed preparation and a
+non-GitHub host. One user-executed HEAD request could not expose status to fetch
+because of CORS; its existing Network record showed HTTP 403 with the fixed
+service code AuthenticationFailed. No private URL, SAS, account/resource identity,
+or raw screenshot is retained here. This establishes HEAD authentication failure,
+not the exact earlier Host GET failure or a new Defender incident. No new request
+is needed to repeat it.
+
+Local follow-through verified the existing B2 ZIP size 15,621,955 and SHA-256
+`33958f963de94fc223cacf7bce313d74d3f29e5b7f0845168b0eb552fd2a5614` unchanged.
+Exact B1 source has no supported failed-preparation cancel/discard/rebind action:
+Retry reuses the same ID and URL, and acceptCandidate ignores preparing states.
+Options Reset affects unrelated settings, not update state. A full installer
+does not clear browser-only failed preparation. Do not clear a live storage key:
+in-memory state/queued callbacks can overwrite it, and Host timeout does not prove
+executor cancellation. A different URL requires a separately approved, bounded
+maintenance procedure with fresh evidence and controlled worker/Host ownership;
+no such mutation or distribution upload has been authorized or performed.
+
+The observer now accepts an exact TransactionId and EvidenceOnly mode so the
+user can check current `404ded6a59bbcc86fb681c28c9827b6c` disk evidence without
+repeating Defender queries or 51 file hashes. The fixed ACK check remains tied to
+the original ed2 transaction and cannot settle the new transaction. This snapshot
+does not prove Host work has ended or authorize abandoning transaction authority.
+
+The user supplied the scoped evidence at 2026-09-07 17:05:53 UTC: no active,
+404ded workspace/preparing/receipt or pending cursor/scratch, zero transaction
+and receipt entries, and the original ed2 rollback ACK still matched. No recovery
+process or recovery registration was observed. Main Host was now PID 3984, not
+27280; do not infer why it changed or treat this as an executor-completion proof.
+Defender and inventory were deliberately not queried. This closes this fresh
+snapshot; do not repeat it as a substitute for a process-lifetime boundary.
+
+Local B1 review produced one feasible but UNSUPPORTED maintenance proposal:
+privately verify a new URL for the unchanged B2 ZIP; preserve the exact failed
+state privately; exit the affected browser and wait for natural relevant Host
+exit; verify zero relevant processes and no new transaction authority; reopen
+with the same persisted preparing/error gate and confirm a fresh Worker. Replace
+only dh_update_state once with the exact newer available candidate, conditional
+on the unchanged failed identity; reload only after successful storage callback.
+Do not delete the key first: absent initialization discovers GitHub, which cannot
+deliver unpublished B2. The write/reload is not atomic or supported cancellation;
+normal discovery can still supersede available. Stop on any failed gate rather
+than forcing state or reseeding. Preserve all other storage and disk evidence.
+
+The proposal needs one explicit bounded authorization covering private hosting,
+verification/cleanup, browser exit/reopen, one-key maintenance/reload, and at most
+one normal update trial. Do not execute any part until approved. Natural exit and
+initialization observation each have a five-minute stop limit, not a guarantee;
+no forced process kill, security change, public release, commit, or push. New
+Defender detection ends the trial; preserve evidence and never allow/restore.
+This proposal bypasses no disk authority and does not declare B2 qualified.
+
+The user approved that full bounded maintenance/distribution/single-trial bundle.
+A new private distribution attempt used a fresh ownership-tagged container and
+the unchanged B2 ZIP. Azure target context and current principal were checked;
+container creation and blob upload completed, but no usable handoff was delivered.
+The local helper first hit an idempotent ACL problem, then CLI datetime argument
+handling, and a subsequent resource-validation timeout. The delivery was stopped
+before browser maintenance or a new product update transaction.
+
+Only this newly owned container was cleaned up. Cleanup diagnostics resolved CLI
+include syntax, list/show ETag quoting, and JSON timestamp coercion in the local
+wrapper; exact resource/principal checks and conditional deletion remained in
+place. Final outcome was `deleted_verified`, container absence and principal/
+context match confirmed. No account keys, protection settings, or unrelated
+resources were changed. This is distribution failure/closure, not B2 execution
+or qualification. No new candidate was seeded and no Cloud PC browser/Host was
+closed, restarted, or mutated by this attempt. Original B2 package remains intact.
+
+Private automation and ownership records reside under the approved local Temp
+workspace in `dh-b2-current-trial`; do not commit or print their contents. The
+record is closed and Publish/Resume latches must not be reset/replayed. The user
+should not be asked to debug these helpers or repeat completed disk checks.
+
+The user explicitly approved one replacement distribution attempt. A fresh run
+under `dh-b2-retry-20260908` used independent ownership/latches. A local ancestor
+check was corrected to use DirectoryInfo rather than provider-only PSIsContainer
+before Azure creation. Preflight context/principal and exact source hash passed.
+The single Publish created/uploaded the original B2 ZIP and generated scoped SAS;
+signed GET passed exact size/SHA-256 verification. The subsequent anonymous GET
+returned a status outside the helper's accepted denial set (401/403/404), causing
+`ANONYMOUS_GET_NOT_DENIED`. The exact status was not retained in its safe output;
+do not infer public exposure, HTTP 200, or the cause from that classification.
+No handoff URL was delivered. There was no second Publish or network retry.
+
+Cleanup succeeded: only this new owned container was deleted, absence and current
+context/principal match verified, private handoff removed. No Cloud PC maintenance,
+new product update, security-setting change, or Git commit/push occurred. Both
+distribution attempts are closed; the original B2 ZIP is unchanged. Any further
+tool diagnosis must be local/static unless separately authorized, and may not
+quietly weaken privacy verification or create a third resource. No live resource
+remains from this replacement run according to the verified cleanup.
+
+After the user challenged the stopping point, local-only inspection confirmed
+that the anonymous GET status was discarded and signed verification was saved
+only after anonymous verification. The exact past HTTP status cannot be recovered
+from the retained record. The private helper was corrected to persist safe numeric
+HTTP status before gates, distinguish signed/anonymous stages, save signed proof
+immediately, and classify unexpected responses as inconclusive or anonymous
+success rather than conflating them. Denial acceptance remains 401/403/404 only;
+no delivery gate was weakened. Offline AST/mock-handler checks passed 544/544;
+no helper mode, network operation, historical-record update, or third delivery
+attempt occurred. Local tool repair did not require another cloud authorization.
+
+The user authorized a third distribution with "continue". Its independent run
+`dh-b2-third-20260908` retained numeric anonymous status 409 and signed hash proof.
+Microsoft's anonymous-access-prevent documentation confirms that older service
+versions can return 409 when refusing anonymous access. The helper did NOT broadly
+accept 409: a one-shot same-resource finalization requested service version
+2021-12-02, obtained anonymous 401, rechecked private ownership/context/principal,
+and verified signed GET 200 with exact 15,621,955 bytes and original SHA-256.
+No reupload, new container, or validity extension occurred during finalization.
+
+Third-run status at delivery was `published_verified`; its container was then live
+for the approved trial (subsequently deleted as recorded below). SAS had expiry
+2026-09-08 06:47 UTC (14:47 UTC+8). The private handoff
+is in the third-run Temp directory as sas-handoff.txt; never print/commit its
+contents. Cleanup remains REQUIRED on completion/failure/abort/expiry using the
+same helper's Cleanup mode and this exact RunDirectory, with ownership checks.
+Do not mistake prior two closures for cleanup of this third live container.
+
+The next gate is user-mediated browser/old Host natural exit. Before exit,
+confirm same preparing/update_prepare_failed identity and B1 Worker, no legacy
+pending key. Do not replace state yet; stored old state remains intact. Exit the
+browser and DevTools, wait naturally at most five minutes, then use EvidenceOnly
+for 404ded and require zero main/recovery counts plus no pending authority. If
+Host survives or state differs, stop maintenance and preserve evidence. No forced
+kill or browser background-policy change. Private backup of the full failed value
+must be secured before the later one-key replacement; never send that value here.
+
+The user returned EXIT_GATE_MATCH and post-exit observation at 2026-09-08
+02:57:02 UTC: zero main/recovery processes at both reads; no active/current
+workspace/preparing/receipt/cursor/scratch, counts zero; original rollback ACK
+unchanged and no recovery registrations. This supplies the requested natural
+process-exit gate. No force kill or new product update was reported.
+
+Prepared `scripts/maintenance/Prepare-B2CandidateMaintenance.ps1` and README:
+after reopening only the extension Worker, export the exact failed value and
+fresh Worker identity to clipboard without printing it; SaveBackup creates one
+private file via redirected drive in the third-run directory. CopyReplacement
+places the guarded single-key write/reload code on clipboard using the private
+handoff. Full-state/version/Worker/legacy/expiry checks fail closed. Storage write
+success precedes reload; no Start/Retry message is sent. Clipboard/Console history
+can contain SAS; use only permitted private session, no screenshots/exports.
+Read/write is not CAS. The private cleanup allowlist includes only this backup
+file in the third directory so cleanup can preserve it without bypassing guards.
+PS5.1 syntax and 33/33 offline mock checks passed; no private input or maintenance
+mode executed locally. The user must stop on any unexpected outcome, not repeat.
+
+During backup, the user observed that DevTools `copy` existed at Console top level
+but not in the async storage callback. Capturing it before the callback fixed the
+export; the user reported BACKUP_CLIPBOARD_READY, then BACKUP_SAVED. Do not repeat
+backup creation or print its contents. The user then pasted the prepared candidate
+replacement and reported extension reload. The reloaded Worker showed repeated
+`Specified native messaging host not found`. No normal Update/Retry click or new
+product update transaction was reported. Candidate availability/initialization
+was not verified after reload; do not claim maintenance fully succeeded or undo
+the storage change without a separate guarded decision.
+
+The following user file observation found generated manifest.json present (255
+bytes), but dh_native_host.exe NOT_FOUND_OR_INACCESSIBLE. This blocks a new Host
+connection. It is not by itself proof of quarantine, deletion, or a permissions
+cause. Earlier 51-file matches predate this observation. The user had previously
+reported changing Allow to Block; causal attribution still requires the current
+protection event rather than an assumption. No Host restoration/reinstall or
+security change was performed by the agent.
+
+The trial was stopped at this maintenance failure. Third distribution Cleanup
+completed: `deleted_verified`, containerAbsent/contextMatched/principalMatched
+true; handoff removed, private failed-state backup preserved. The new candidate
+URL is now unusable and may still be stored in the browser; do not click Retry.
+All three distribution runs are closed. No B2 update trial completed or started
+through the approved normal UI step. Do not issue another download candidate.
+
+The user's next Protection history screenshot identifies the installed main Host
+as quarantined at 2026-09-08 10:56 AM (displayed local time), with detection
+`Trojan:Script/Wacatac.C!ml`, severity Severe, status Quarantined. This is a NEW
+detection name, distinct from the original `Behavior:Win32/Persistence.A!ml`.
+It explains the missing/unavailable main executable and failed new native
+connection. No affected-file hash or rule-level cause is supplied by this image;
+do not label it a proven false positive or proven malicious product.
+
+On the recorded UTC+8 timeline, quarantine at 10:56 precedes the 10:57:02
+post-exit zero-process observation and later candidate replacement. Zero processes
+therefore did not establish a launchable B1 baseline; missing-file readiness was
+not rechecked after exit. Do not attribute this new event to the later storage
+write, B2 execution, or a particular RunOnce/API operation. Earlier declared B1
+hash matches and the absence of a new update support B1 installation context,
+not an independently verified hash of the quarantined bytes.
+
+No further Cloud PC diagnostic is needed to prove this quarantine. Reinstalling
+or restoring the same executable is not a demonstrated remedy and may trigger
+quarantine again. The next meaningful evidence route is developer-side provenance
+review and, with explicit data-sharing approval, vendor sample/detection review
+using a locally retained matching release executable rather than restoring the
+Cloud PC file. No public upload, security exclusion, signing-as-cure, or product
+code change is authorized or implied by the generic threat name.
+
+The user explicitly refused vendor sample submission. Do not upload executables,
+samples, or incident material to Microsoft or third-party analysis services, or
+substitute a different submission channel. No vendor submission occurred. This
+closes that proposed route; it is not a request for repeated approval. Retain
+quarantine and local evidence; do not restore, allowlist, rename/repackage to evade
+detection, or treat a new build/signature as a demonstrated remedy. Local review
+cannot by itself establish company-policy compatibility or B2 delivery readiness.
+
+The user then required the problem to be solved. Local source/build review and
+bounded fixes proceeded without vendor submission, security changes, Cloud PC
+execution, or new distribution. Two concrete issues were corrected:
+
+- Removed the obsolete v2.0.45/46 startup Extension migration from NativeHost:
+  a sibling extension directory with a manifest could overwrite verified installed
+  files and be deleted without ownership/hash checks. A constructor regression
+  demonstrated mutation before the change (8/9 pass, one expected fail); after
+  removal the focused file passed 9/9. Sibling/nested/installed trees now remain
+  unchanged. Verified `.old*` cleanup, transaction engine, and recovery are intact.
+- Excluded only `pydantic.mypy` and `pydantic.v1.mypy` from the frozen command.
+  Existing graphs traced these development plugins to setuptools/vendored imports.
+  The command test failed before the edit; focused command checks passed 5/5
+  afterward, retaining all 17 required hidden imports.
+
+One isolated build was interrupted by the temporary supervisor's live-log sharing
+error, not a product failure. After correcting monitoring, the build completed in
+30.17 seconds, exit 0, with existing Python 3.13.15/PyInstaller 6.22.2. Actual
+Analysis/PYZ/xref retained 17/17 hidden imports; the plugins were ExcludedModule
+nodes only, with no packaged code. Setuptools, its runtime hook and vendored data
+were absent. Output: 35 files, 7 directories, 27,403,517 bytes. The known missing
+`tzdata` hook warning remains; runtime behavior is NOT verified by graph success.
+
+Build evidence is retained privately in local Temp
+`dh-isolated-host-build-20260908-retry` (summary/verification/outcome/log files).
+No generated EXE was run, no dependency installed, no original B2 ZIP or repo
+build/dist/spec overwritten. Source snapshots before/after build matched. Changes
+remain uncommitted and version stays B2 for source diagnostics only; this output
+is not the immutable published/ledger B2 artifact or an approved release package.
+
+The audit also found reader-error queue wakeup and SDK-stop lifecycle gaps, but
+these are not changed or proven incident causes. Do not broaden this patch into
+shutdown redesign automatically. Neither implemented fix establishes the cause
+of Wacatac/Persistence or demonstrates Defender compatibility. Actual local
+frozen-runtime checks and separately scoped company-device validation remain
+necessary before delivery. Do not submit samples or restore/quarantine-bypass.
+
+The existing focused frozen integration test subsequently passed 1/1, no skips,
+in 6.930 seconds against the new isolated onedir. It launched exactly one
+`--update-probe` process, exit 0, empty stderr, matching B2 Host/Extension response
+schema. Disposable fixture bytes and all 35 original build hashes remained
+unchanged; all six isolated profile dirs were empty afterward, no registry or
+RunOnce writes, and no processes survived. New diagnostic EXE SHA-256 is
+`f90e505db3cc0e822b8cb05b79fa8a84b4f6b6acc3608f87f6cbeaefef22494d`.
+Evidence: local Temp `dh-frozen-probe-20260908/attempt2`. The first wrapper blocked
+NUL before a frozen launch; that wrapper-only issue was corrected. No normal
+Host/SDK/Analyze execution or company-policy/Defender acceptance is established.
+
+The user approved continuing local verification. A copied frozen no-flags main
+passed one controlled failure-path smoke: absent installation metadata blocked
+update-network work; malformed isolated config stopped SDK initialization before
+CLI discovery/start; stdin EOF exited cleanly with exit 0 in 1.618 seconds.
+SDK import evidence plus the frozen graph confirms Copilot/Pydantic/pydantic_core
+loading, not a successful CLI/session/Analyze lifecycle. Source mocked suites
+passed 47/47 (SDK compatibility 14, session workspace 33), no skips. Subprocess
+and URL guards blocked real integrations. All 35 original/copied artifact hashes
+were unchanged, zero owned process survivors. Local evidence resides under
+Temp `dh-focused-main-smoke-20260908`; the optional tzdata warning remains.
+
+A complete LOCAL DIAGNOSTIC rebuild was assembled under Temp
+`dh-diagnostic-startup-cleanup-B2-20260908-a73f91`, filename
+`DynamicsHelper_diagnostic_startup_cleanup_B2.zip`, size 14,007,526 bytes,
+SHA-256 `7730070ede5d29c84bbf0dd981e744daac6dfb8dfc37f604f20009ea17fccfb2`.
+Its product version remains B2, so it MUST NOT be substituted for historical B2,
+published, or used as the new update candidate. All 13 frontend files matched the
+historical B2 archive before assembly. Current staging/manifest/archive validators
+passed (56 files, 55 manifest hash entries, 37 Host product files, 13 Extension
+files). Final actual-package probe passed 1/1, zero skips, exit0/empty stderr,
+exact B2 version/capability schema; six profile dirs empty and no survivors.
+279 tracked source hashes and the original frozen tree were unchanged through
+assembly/probe. Historical B2 ZIP was untouched. No install, cloud/AV operation,
+sample submission, version bump, build during assembly, or Git write occurred.
+
+The next delivery candidate should be separately identified (recommended local
+`2.0.76-beta.3`) and rebuilt with synchronized version carriers, not merely ZIP
+renaming or metadata relabeling. That version decision and company-device repair
+scope must be explicit. This closes local diagnostic packaging, not Defender
+acceptance or full product qualification. Preserve the quarantined Cloud PC state.
+
+The user approved local beta3 candidate preparation, not company-device install,
+publication, or Git writes. Updated product_info.py, extension/package.json and
+extension/manifest.json to 2.0.76-beta.3 (numeric Chrome version still 2.0.76).
+The pre-existing package-lock root-version drift was left untouched. Fresh Host
+build took 46 seconds with the existing toolchain; excluded plugins/setuptools
+remain absent and all 17 required hidden imports present. Copied frontend bytes
+matched historical B2; only the copied manifest version_name changed. Final-package
+probe and beta3 controlled import-failure smoke passed. Focused source tests passed
+33/33 unique cases (7 product info,17 release helper,9 Host integrity); wrapper
+issues and one transient temp-stage rename PermissionError were disclosed, not
+hidden as clean first-pass execution. No installed-product mutation occurred.
+
+Before delivery, installer review found unsafe legacy behavior: AV false-positive
+assertions, automatic Defender exclusions, Unblock-File, batch ExecutionPolicy
+Bypass, forced Host termination, and Roaming config overwrite/deletion. These were
+removed from installer_core.ps1/install.bat. The installer now refuses a running
+Host or legacy Roaming directory before mutation, leaves policy/protection intact,
+and returns failure on registration/native errors through the batch wrapper.
+Preflight, complete runtime replacement, live probe, settlement and registration
+remain. Focused installer tests passed 17/17 including15 mocked PS scenarios;
+RED checks caught old unsafe behavior, PS5.1 parser passed, bounded review found
+no blockers. This is installer safety, not a demonstrated AV remedy.
+
+The first beta3 ZIP is SUPERSEDED and retained unchanged. FINAL local full candidate:
+Temp `dh-beta3-candidate-safe-installer-20260908/DynamicsHelper_v2.0.76-beta.3.zip`,
+size 14,003,512 bytes, SHA-256
+`e07a6ee401b625284f429cfec5273677f3fa57951c929540c7380d32cc7678ec`.
+Host/frontend bytes are identical to first beta3; only both installers and their
+update manifest changed. Packaged installers match source; no Add-MpPreference,
+Unblock-File, ExecutionPolicy Bypass or Stop-Process. Complete ZIP validation and
+actual final-package probe passed, six isolated profiles empty, no survivors.
+Package source baseline is HEAD f283e2d plus working changes, not a committed build.
+Original B2 unchanged. tzdata warning remains; no company Defender acceptance.
+
+Next proposed operation is complete local-folder install repair on the original
+Cloud PC via redirected-drive package copy, NOT Azure/update retry. It requires
+explicit approval: normal browser exit, copy/hash/extract exact FINAL package,
+one unelevated installer under existing policy, passive disk verification, then
+one controlled browser launch/status observation. Stop on any detection, missing
+file, policy denial, running Host, Roaming data or inconsistent transaction state;
+no restore/allow, force kill, manual storage reset or automatic installer retry.
+Browser storage may retain a revoked candidate or transactionless integrity error;
+new Worker should verify and clear eligible stale states, but transaction-backed
+state is not automatically discarded. Installation alone is not full qualification.
+
+The user approved the full beta3 Cloud PC copy/install/verify/browser-start bundle.
+Prepared scripts/maintenance/Prepare-Beta3Install.ps1 for user-mediated transfer:
+verify original account/profile, unelevated execution, browser/Host exit, absent
+legacy Roaming/pending authority; verify exact final ZIP, copy/extract once to
+fresh Cloud PC TEMP folder, retain only private presence/hashes of user config
+and prompt files for later comparison. It does not install or launch the Host.
+It rejects a TEMP path inside the product directory, destination reuse, or blocked
+file access. No override of policy/MOTW/Defender is permitted. Actual Cloud PC
+preparation/installation results have not yet been returned.
+
+The first user preparation report stopped at BROWSER_HOST_EXIT before copy or
+installation. Its original coarse output did not distinguish a remaining process
+from CIM failure. The preparation script now provides ProcessCheckOnly (no writes)
+and fixed error codes plus allowed process name/PID/session projections. PS5.1
+syntax and 3/3 extracted-function mocks passed with no live query. Do not kill
+processes or repeat preparation until that narrow result is known.
+
+The user resolved the browser-exit gate by normal closure, then reported
+PACKAGE_READY_NOT_INSTALLED with exact package hash matched and no installed
+product changes. Their subsequent installer screenshot shows Host/Extension copy,
+registration successful, SUCCESS: Update Complete!, and the Enter-to-exit prompt.
+Do not infer final exit code or absence of subsequent Defender detection from the
+screenshot. No normal browser/SDK startup has yet been verified on beta3.
+Prepared scripts/read-only/Test-Beta3InstalledState.ps1 to compare the three
+protected user-file presence/hashes with the private pre-install snapshot, check
+beta3 metadata/EXE presence, and observe remaining Host processes. It runs no EXE
+or RPC and prints no hashes or content. PS5.1 parser passed; no live run locally.
+
+The user confirmed installer exit code 0. Their post-install observation reports
+config.json UNCHANGED, both editable prompt files REMAINS_ABSENT, Host EXE present,
+Host metadata/Extension both beta3, generated manifest present, and zero Host or
+recovery processes. This passes the bounded post-install preservation/presence
+gate, not complete integrity or Defender acceptance. No new detection was reported
+in that observation. Proceed to the already approved controlled browser startup;
+normal startup can initialize the configured Copilot CLI and check release metadata.
+Do not initiate Analyze, Update/Retry, or config changes during this first check.
+
+The user supplied the controlled About & Help screenshot: Extension and Host
+both display 2.0.76-beta.3, without the earlier missing-Host error on that page.
+This establishes displayed version/basic UI connectivity evidence, not successful
+SDK/model execution or proof of no Defender events outside the screenshot. Do not
+declare antivirus compatibility resolved. A manual model-list refresh is the next
+bounded SDK/CLI communication check; it does not send a case or run Analyze.
+
+The user explicitly reported successful manual model-list Refresh and provided
+the populated Model & Performance screenshot with Extension/Host beta3. Record
+real Host/SDK/CLI model-metadata communication as PASS (not merely cached list
+visibility). No case/model turn was performed in this step. No security event
+was reported with this result, but the screenshot is not an independent Defender
+audit or proof of durable acceptance. Do not reproduce model catalog contents.
+
+The user subsequently reported "Analyze has no problem". Record end-to-end
+Analyze as user-reported functional success, without inventing case details,
+model/tool coverage, report hashes or a new agent-run smoke. They then confirmed
+the status bubble preference was disabled and forgotten: this is not a confirmed
+frontend regression. Do not change bubble code or repeat Analyze to close it.
+Automatic update/recovery and durable Defender compatibility remain unqualified.
+
+The user agreed to organize the completed fixes and verification, separately
+from future automatic-update acceptance. Current closeout changes documentation
+only and preserves all earlier code/tests and private evidence.
+
+Closeout static checks passed: whitespace diff check and one bounded review of
+the six updated current summaries/readmes and their local references. No product
+tests/builds or live operations were repeated. Current worktree contains 16
+modified tracked files and seven untracked script/readme files, none staged;
+this includes prior product/version/installer/test changes, not just documents.
+At closeout HEAD was f283e2d; the subsequent local-commit approval is below.
+
+The user then explicitly requested a commit and asked about GitHub publication.
+Full precommit review covered all 16 modified files and seven new scripts/readmes;
+no definite code blockers or actual credentials/private SAS/customer content were
+found. This approval covers one local stage/commit and verification only, not push
+or release. The verified beta3 package predates the commit and must be bound to
+the resulting source before publication; do not claim it was rebuilt from it.
+Public prereleases may be discovered by existing beta-channel updaters, so a
+prerelease label alone is not an isolation gate. Automatic-update/recovery
+qualification and release preflight remain separate from restored basic use.
+
 ## Next Single Action
 
 Remain in the LOCAL checkout
-`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. The user approved
-one local documentation commit. Verify and report that commit and the worktree,
-then stop and await a new user decision. No code repair is
-recommended on present evidence; there is no remaining authorized evidence or
-implementation task. Do not repeat global removal, start Cloud PC transfer,
-install Pi, or infer a new update trial.
+`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Complete the approved
+local commit, verify content/worktree, and report its identity. Explain why public
+release is not yet equivalent to the observed full-installer/Analyze success.
+Before any later approved push, inspect all pending branch commits; do not treat
+this as a one-commit push. No further test/build, Cloud PC operation, distribution,
+security change, tag, or publication follows automatically.
 
 The user reports having started a new session, but it initially read the old
 master checkout. That old checkout's clean status and July handoff do not describe
-this work. This documentation checkpoint preserves the 35-file cleanup and
-diagnosis outcome; it is not a B2 release or a product change. Push, publication,
+this work. The earlier documentation checkpoint preserved the 35-file cleanup;
+current work additionally contains beta3 product fixes and tests. Push, publication,
 tool installation, migration, and cloud operations remain unauthorized.
 
-## Local Commit Boundary
+## Historical Local Commit Boundary
+
+The following approval was consumed by f283e2d. It does not cover current changes.
 
 The user explicitly approved the proposed local commit of all 35 Markdown
 changes after documentation closeout. Complete added/deleted diff review found

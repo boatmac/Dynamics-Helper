@@ -5,10 +5,12 @@ This file defines the operational rules, development workflows, and coding stand
 ## Development Entry And Execution Rules
 
 - Read `docs/session-handoff-2026-07-15.md` first for the current branch, product
-  state, authorization boundary, and next action. The latest user decision is to
-  remain in the local development checkout until a bounded milestone is complete.
-  Cloud PC transfer is deferred and is not the next action.
-- Product development is paused during handoff. Commands below are reference,
+  state, authorization boundary, and next action. Beta3 basic use was restored
+  through an approved Cloud PC product install; development remains local. Read
+  Current Milestone Summary and Next Single Action, not historical pause points.
+  Development-checkout migration remains deferred.
+- Current work is documentation closeout; no new product operations, tests,
+  builds or Git writes are authorized by that task. Commands below are reference,
   not instructions to install dependencies, test, build, register, or release
   automatically. Verify the checkout before acting; installed product state is
   separate from Git state and does not migrate with the repository.
@@ -142,7 +144,10 @@ This file defines the operational rules, development workflows, and coding stand
 
   * The release helper requires exact PyInstaller `6.22.2` and invokes it only
     as `host/venv/Scripts/python.exe -m PyInstaller` with the reviewed hidden
-    imports. It never provisions pip/PyInstaller. Installing or upgrading the
+    imports. Exclude the development-only `pydantic.mypy` and `pydantic.v1.mypy`
+    plugins; collecting them pulled setuptools and its vendored runtime/data into
+    the Host. Do not broadly exclude runtime dependencies instead. It never
+    provisions pip/PyInstaller. Installing or upgrading the
     toolchain requires separate user approval.
 
 * **Run Tests:**
@@ -334,7 +339,10 @@ This file defines the operational rules, development workflows, and coding stand
 ### 7. Self-Update Mechanism
 
 * **Production updater:** `host/update_service.py` composes package validation,
-  transaction ownership, detached recovery, rollback, and finalization. The
+  transaction ownership, detached recovery, rollback, and finalization. Ordinary
+  Host construction must not import, overwrite, or delete sibling/nested Extension
+  trees. Product replacement belongs to the transaction or matching installer;
+  verified legacy `.old*` cleanup remains separate. The
   historical `Updater.apply_update` path is not production reachable;
   `host/updater.py` remains only for verified legacy `.old*` cleanup.
 * **--onedir Layout:** The release zip contains a complete `host/` tree (exe,
@@ -404,8 +412,12 @@ This file defines the operational rules, development workflows, and coding stand
   persists transactionless matching-full-installer guidance. It clears only
   after startup verifies the complete matching product. Transaction-backed
   recovery evidence is never cleared by this shortcut.
-* **Matching installer repair:** `installer_core.ps1` removes the existing
-  `_internal` runtime tree before copying the packaged runtime, so stale files
+* **Matching installer repair:** `installer_core.ps1` refuses a running Host or
+  legacy Roaming data before mutating the installation. Never force
+  termination, migrate/delete Roaming user data, unblock downloaded files, bypass
+  execution policy, add Defender exclusions, or claim a detection is a false
+  positive. Installation failures return nonzero through `install.bat`. It removes
+  the `_internal` runtime tree before copying the packaged runtime, so stale files
   cannot survive a full-installer repair. Preserve user-owned files and
   `updates/**` evidence. Before mutation it probes a temporary combined product
   plus the exact release inventory. After copy it probes the live product and

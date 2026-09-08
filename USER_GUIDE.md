@@ -399,8 +399,8 @@ If the tool isn't working, follow these steps to collect information for the dev
 
 * **"Analysis Timed Out"**: The Agent is taking too long. This usually means it's doing a lot of work (good!) but hit the analyze-timeout budget (default 20 minutes; configurable under **Options → General → Analyze Timeout**). Raise the timeout or narrow your request, and check the logs.
 * **"Repository Instructions are missing/cannot be read"**: Repository ONLY selected `<Root>/.github/copilot-instructions.md`, but DH could not obtain strict UTF-8 content. Add/repair the file, or disable Repository ONLY. An empty existing file is valid.
-* **"Host error" / "Native host disconnected"**: The browser cannot find the Python script.
-  * Verify you ran `install.bat` as Administrator.
+* **"Host error" / "Native host disconnected"**: The Host may be missing, blocked, or unable to start.
+  * Use the complete matching installer under the same Windows account; elevation is not a remedy for a blocked executable.
   * Verify your Extension ID is correct in the host manifest.
   * Restart your browser.
 * **Update requires recovery / matching installer**: Automatic restart recovery
@@ -408,6 +408,12 @@ If the tool isn't working, follow these steps to collect information for the dev
   persists, or diagnostics show `manual_recovery_required`, run the complete
   installer for that release. Do not delete
   `%LOCALAPPDATA%\DynamicsHelper\updates`; it contains recovery evidence.
+* **Installer safety checks**: Close the browser normally so the Host can exit.
+  The installer refuses a running Host or a legacy Roaming data directory; it
+  does not force termination or overwrite/migrate that data. If Windows policy or
+  antivirus blocks the package, stop and preserve the error. Do not add exclusions,
+  restore/allow a detected file, or bypass execution policy to make installation
+  succeed. A failed installer returns a nonzero exit code.
 
 ### How to Collect Logs (Debug Info)
 

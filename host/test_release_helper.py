@@ -279,6 +279,12 @@ class PlanCPackagingTests(unittest.TestCase):
             if value == "--hidden-import"
         )
         self.assertEqual(actual_hidden, PLAN_C_EARLY_MODULES)
+        actual_excluded = tuple(
+            command[index + 1]
+            for index, value in enumerate(command)
+            if value == "--exclude-module"
+        )
+        self.assertEqual(actual_excluded, ("pydantic.mypy", "pydantic.v1.mypy"))
         self.assertEqual(
             Path(command[-1]).resolve(),
             (release_helper.HOST_DIR / "dh_native_host.py").resolve(),

@@ -1,11 +1,11 @@
 # Plan D Pragmatic Cloud PC Results
 
 Current development entry: [handoff](session-handoff-2026-07-15.md). This is an
-evidence ledger, not a command queue. Product development and further cloud
-qualification remain paused. The bounded local diagnosis and offline attribution
-check are complete, but retained evidence does not support a specific code fix.
-Cloud PC transfer is deferred. Diagnosis completion is not B2 product delivery;
-new evidence collection or implementation requires separate approval.
+evidence ledger, not a command queue. Current beta3 closeout records concrete
+startup/build/installer safety fixes and restored basic use on the original Cloud
+PC. These fixes do not establish the Defender trigger or a proven AV remedy.
+Development stays local; further automatic-update qualification, commits and
+publication are not authorized by documentation closeout.
 
 ## Scope
 
@@ -13,7 +13,8 @@ This is a single-user pragmatic gate. Exhaustive cloud-PC fault injection and bo
 legacy mixed-install directions were not run; existing automated tests cover
 those boundaries.
 
-NOT EXECUTION READY; the five current B2 local artifact gates remain PASS, but cloud
+Historical B2 qualification remains NOT EXECUTION READY: its five local artifact
+gates remain PASS, but cloud
 Scenario 1 is FAIL (Defender quarantine). B1 integrity and the reported rollback
 ACK match; active/cursor and transaction/receipt contents are absent. Remaining
 process, registration, and strict terminal checks have not been completed.
@@ -23,6 +24,7 @@ instructions. Local PASS does not establish runtime safety. Historical
 evidence and source tests alone do not authorize operations. This ledger aligns with the
 approved [qualification design](superpowers/specs/2026-09-07-pragmatic-visible-completion-qualification-design.md)
 and reviewed [documentation plan](superpowers/plans/2026-09-07-pragmatic-visible-completion-qualification.md).
+Beta3 full-installer/functional success below does not pass those B2 scenarios.
 Use the [paused qualification boundary](plan-d-pragmatic-cloud-pc-runbook.md)
 for retained criteria, not as execution permission.
 
@@ -33,6 +35,7 @@ for retained criteria, not as execution permission.
 | A | `2.0.74-beta.4` | `c77bd3a722259b098a8b8f4a4d1c941cc714e0cd` | `f605720d22fdc18be37673ac19b843d063e929a8a46f1132f54014f830aff6b5` | BUILT |
 | B1 (historical, disqualified) | `2.0.76-beta.1` | `5abe35ab2ab2262d5a7abdf1d21fefe81ebeacf0` | `77fbace3562e9052378ce025dbc6e2994fcb13989a391a5996abbc7856f06b54` | BUILT |
 | B2 (local candidate) | `2.0.76-beta.2` | `6413dbad9bd258bb04cf313610d602b68424e091` | `33958f963de94fc223cacf7bce313d74d3f29e5b7f0845168b0eb552fd2a5614` | BUILT LOCALLY; Scenario 1 FAIL: Defender quarantine; B1 rollback reported and integrity verified, full settlement checks incomplete |
+| Beta3 final safe-installer candidate | `2.0.76-beta.3` | `f283e2d` plus uncommitted working changes | `e07a6ee401b625284f429cfec5273677f3fa57951c929540c7380d32cc7678ec` | Full installation and basic functionality passed as recorded below; unpublished, update/recovery qualification incomplete |
 
 Artifact A remains historical evidence exactly as recorded. B1 remains exact
 technical build/transaction evidence but is disqualified. The existing B2 ZIP is
@@ -353,8 +356,39 @@ but canonical ACK bytes, remaining process/registration/path residue checks,
 and durable idle/no URL remain unverified. Defender's screenshot used persistent
 allow wording; the user subsequently described the action as one-time and not
 removable. No result was returned for the final requested current-preference
-check. Current allow/override state is UNKNOWN, not inferred from either report.
+check. At that point allow/override state remained UNKNOWN, not inferred from
+either report; subsequent observations below supersede that limited state.
 This record confirms neither a false positive nor a virus diagnosis.
+
+### Subsequent Read-Only State Observations
+
+User-mediated observation at 2026-09-07 15:51:19 UTC found all 51 declared B1
+product-file hashes consistent with the local inventory, no fixed pending paths,
+zero transaction/receipt entries, and exact ACK bytes matching the reported B1
+rollback. The ordinary main Host remained present, no recovery process was
+observed, and both registry views had expected main targets and absent
+RunOnce/status registrations. This is non-atomic declared-inventory consistency,
+not full Host verification, trusted provenance, or durable browser-idle evidence.
+
+The user subsequently supplied the current Windows Security Allowed threats
+page showing `Behavior:Win32/Persistence.A!ml`. A visible allow entry is now
+confirmed; exact scope and company-policy provenance remain unverified. This
+supersedes the earlier UNKNOWN for the visible entry only. The displayed generic
+threat description does not prove an attacker command, a false positive, or a
+specific triggering operation. Successful retry with this allowance would not
+prove B2 compatibility under unmodified protection. No allowance was removed and
+no security change or update trial is authorized. Company endpoint-security/IT
+review is recommended before defining a representative test baseline.
+
+The user subsequently reported that IT involvement was not feasible and that
+they changed Allow to Block. In their 2026-09-07 16:03:26 UTC read-only report,
+visible threat-action IDs fell from one to zero; observed Defender protections
+and signature version 1.459.95.0 were unchanged. The 51 declared B1 product hashes,
+matching rollback ACK, absent pending paths/zero counts and main-only process
+observations were unchanged. This supports no newly missing declared product
+files at observation, not proof of complete policy equivalence or removal of all
+overrides. Browser state remains unverified. The user action does not authorize
+another update trial or further security changes; the historical FAIL remains.
 
 Stop cloud operations and do not start a new transaction or Scenarios 2/3.
 Preserve Defender evidence, transaction journals, backups, `updates/**`,
@@ -366,6 +400,63 @@ Distribution cleanup completed separately: ownership and identity checks passed,
 only this run's private container was deleted, and its former download returned
 404. No shared keys or unrelated resources were changed. Product settlement and
 Defender allow-record removal remain unverified.
+
+### Subsequent Main Host Quarantine
+
+During a separately approved candidate-maintenance attempt, the user confirmed
+the known failed browser-state identity and then reported zero main/recovery
+processes and no pending transaction evidence at 2026-09-08 02:57:02 UTC.
+Following private backup and one-key replacement/reload, the Worker could not
+connect to the main Host. The generated registration manifest existed, but the
+main executable was missing or inaccessible. No normal Update/Retry step began.
+
+The user's Protection history screenshot then showed `Trojan:Script/Wacatac.C!ml`
+against the installed dh_native_host.exe, Quarantined, Severe, at September 8
+10:56 AM local time. This differs from the original Persistence detection and
+explains main-Host unavailability. On the recorded UTC+8 timeline it precedes the
+10:57 zero-process observation and later candidate replacement. Do not count it
+as B2 execution, infer that the manual storage write caused it, or claim a proven
+false positive from the name. The image does not supply an affected-file hash or
+the detector's triggering operation. Earlier inventory checks describe B1 before
+this event, not a freshly verified quarantine sample.
+
+The third private distribution had verified signed GET/hash and versioned
+anonymous denial before maintenance. It was then ownership-safely deleted after
+the maintenance failure, with absence/context/principal checks confirmed. All
+three new distribution runs are closed. Browser state may retain the now-revoked
+candidate; do not retry it. No restore/reinstall/allow action was performed by the
+agent. B2 cloud qualification remains failed/uncompleted, not newly passed.
+
+## Beta3 Working Milestone
+
+Final local package: `DynamicsHelper_v2.0.76-beta.3.zip`, 14,003,512 bytes, under
+Temp `dh-beta3-candidate-safe-installer-20260908`. Use the SHA-256 in the identity
+table. Earlier beta3 and same-version diagnostic packages are superseded/not
+delivery inputs. Source was uncommitted; no immutable source-build claim is made.
+
+Changes: removed unverified sibling/nested Extension migration at Host startup;
+excluded only development-time Pydantic mypy plugins (setuptools/vendor/runtime
+hook absent in actual frozen graph, 17/17 required hidden imports retained);
+removed installer protection bypass/exclusions, forced termination and automatic
+Roaming-data overwrite, with nonzero failure propagation. These address concrete
+bugs and safety, not a demonstrated cause of either Defender detection.
+
+| Verification | Recorded result and scope |
+| --- | --- |
+| Local product/version/build-command/Host integrity tests | 33/33 unique tests ultimately passed; wrapper corrections and one transient staging rename denial retained in evidence |
+| Installer safety tests | 17/17; isolated mocked branches, not real company installation |
+| Final package validation/probe | Passed against final ZIP; actual frozen probe, beta3 versions, isolated profiles, no survivors |
+| Controlled frozen imports | Passed SDK/Pydantic loading and intentional pre-CLI config-failure exit, not successful model inference |
+| Company Cloud PC complete installer | `SUCCESS: Update Complete!`, exit 0, user reported |
+| Protected files and presence | config.json unchanged; both editable prompts remained absent; beta3 metadata/Extension, EXE and registration manifest present; zero Host/recovery processes before browser launch |
+| Browser startup | About & Help displayed Extension and Host beta3 |
+| SDK/CLI communication | User reported successful manual model-list Refresh |
+| Analyze | User reported working; no private case content or invented detailed test evidence recorded |
+| Status bubble concern | User confirmed preference disabled; not a confirmed regression, no code change |
+
+No explicit final Defender audit, long-term compatibility result, or successful
+beta3 automatic-update/interruption/recovery qualification is claimed. `tzdata`
+build warning remains. Basic use is restored; historical B2 FAIL is unchanged.
 
 ## Scenario 2 Allocated Attempts
 
@@ -391,10 +482,15 @@ if all three are exactly that disposition; otherwise use
 
 ## Private Distribution Closure
 
-Distribution status: COMPLETE for this trial. Ownership checks passed; the
+Historical original distribution status: COMPLETE. Ownership checks passed; the
 run-owned private container was deleted and the former URL returned 404.
 Product settlement remains INCOMPLETE/UNVERIFIED as described above. Distribution
 closure does not establish complete product recovery or successful qualification.
+
+All three subsequent private distribution runs are also deleted/closed, with
+ownership checks and absence verified. Beta3 installation used redirected-drive
+local package transfer, not a new live Azure distribution. Private records and
+backups are retained; no cleanup of product evidence is implied.
 
 On PASS, FAIL, abort, or BLOCKED, record eventual outcome, ownership-check result,
 run-owned access revocation, private object/container cleanup as applicable, and
@@ -406,9 +502,10 @@ closure, never broader deletion/retries. Distribution cleanup is separate from
 recovery and preserves journals, backups, finalization evidence, and browser
 state; any product settlement remains separately approved and guarded.
 
-## Environment Handoff
+## Historical Deferred Environment Handoff
 
-Future handoff is outside this documentation task. These unchanged rows authorize
+This old B2 publication/migration checklist is not the current next task. The
+later beta3 product install did not migrate the development checkout. These rows authorize
 no operation, automatic release, or migration, even after qualification PASS.
 
 | Step | Result |

@@ -32,6 +32,8 @@ The project consists of three main components:
 
 * **`dh_native_host.py`**: The core backend script.
   * **Loop:** Reads messages from `stdin` (from Chrome) and writes to `stdout`.
+  * **Startup Boundary:** The constructor does not migrate sibling or nested Extension trees or overwrite the verified Extension. Verified packaged startup retains legacy `.old*` cleanup; transactional update and startup recovery remain unchanged.
+  * **Frozen Build:** `release_helper.py::pyinstaller_build_command` excludes only the development-time `pydantic.mypy` and `pydantic.v1.mypy` plugins. Their imports previously collected setuptools and its vendored runtime/data. Keep all 17 required hidden imports; confirm exclusions against actual build graphs, not just command arguments. This reduces unnecessary dependencies, not proof of antivirus compatibility.
   * **Timeout:** User-configurable timeout for Copilot requests via Options → Analyze Timeout (range 60–3600s, default 1200s). Stored as `extension_preferences.analyze_timeout_seconds` in `config.json`. Live-updated on `update_config`. See `AGENTS.md` § 4.2 for the three-site sync contract.
   * **Logging:** Uses `_SafeRotatingFileHandler` (5 MB max, 3 backups) writing to `%LOCALAPPDATA%\DynamicsHelper\native_host.log`. Log level is configurable via the Options UI (DEBUG/INFO/WARNING/ERROR) and is applied at startup from `config.json`, then live-updated on `update_config`.
   * **Config Loading:** Prioritizes `%LOCALAPPDATA%` config over the local directory.
@@ -602,10 +604,16 @@ observable break-and-fail mutation.
 packaged runtime. This exact-tree repair is required because installation
 verification rejects both missing and extra runtime files. It first creates a
 temporary combined product view and runs the packaged Host `--update-probe`
-before stopping the live Host or mutating the destination; package-root mode
+before mutating the destination; it refuses a running Host or legacy Roaming
+directory instead of terminating processes or migrating user data. Package-root mode
 also validates exact Plan A inventory/hashes. After copy, a live probe and
 frozen-only `--settle-installer-repair` settle compatible preserved authority to
 the target/prior terminal version or fail without deleting evidence.
+
+The installer does not unblock files, override execution policy, add antivirus
+exclusions, or assert a false positive. Policy/security blocks remain failures;
+the batch wrapper preserves the PowerShell exit code. Registration failure returns
+nonzero rather than leaving an incomplete installation reported as success.
 
 `updateRuntime.initialize({resume:false})` hydrates durable state without
 waiting on recovery; Service Worker starts `resume()` in the background. Exact

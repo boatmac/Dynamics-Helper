@@ -179,6 +179,10 @@ def pyinstaller_build_command() -> list[str]:
         "dh_native_host",
         "--paths",
         str(HOST_DIR.resolve()),
+        "--exclude-module",
+        "pydantic.mypy",
+        "--exclude-module",
+        "pydantic.v1.mypy",
     ]
     for module in PYINSTALLER_HIDDEN_IMPORTS:
         command.extend(("--hidden-import", module))

@@ -1,4 +1,6 @@
 import asyncio
+from pathlib import Path
+import tempfile
 import typing
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -178,6 +180,58 @@ class HostIntegrityActionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(hints["verification"], InstallationVerification)
         self.assertEqual(hints["return"], dict[str, str])
+
+    def test_verified_constructor_preserves_extension_trees(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            install = root / "DynamicsHelper"
+            installed = install / "extension"
+            sibling = root / "extension"
+            nested = installed / "extension"
+            for tree, label in (
+                (installed, "installed"),
+                (sibling, "sibling"),
+                (nested, "nested"),
+            ):
+                (tree / "assets").mkdir(parents=True)
+                (tree / "empty").mkdir()
+                (tree / "manifest.json").write_bytes(
+                    ('{"name":"' + label + '"}').encode("ascii")
+                )
+                (tree / "assets" / "content.js").write_bytes(label.encode("ascii"))
+            before = {
+                path.relative_to(root): path.read_bytes() if path.is_file() else None
+                for path in root.rglob("*")
+            }
+            executable = str(install / "dh_native_host.exe")
+            with (
+                patch("host.dh_native_host._source_runtime", False),
+                patch("host.dh_native_host.sys.frozen", True, create=True),
+                patch("host.dh_native_host.sys.executable", executable),
+                patch("host.dh_native_host.InstallationVerifier") as verifier,
+                patch("host.dh_native_host.UpdateService") as update_service,
+                patch("updater.Updater.cleanup_old_version") as cleanup,
+                patch("host.dh_native_host.CopilotClient") as client,
+            ):
+                verifier.return_value.verify.return_value = InstallationVerification(
+                    mode="packaged",
+                    integrity="verified",
+                    host_version=VERSION,
+                    extension_version=VERSION,
+                )
+                host = NativeHost()
+
+            self.assertTrue(host._installation_ready)
+            verifier.assert_called_once_with(install)
+            verifier.return_value.verify.assert_called_once_with()
+            update_service.assert_called_once_with(install)
+            cleanup.assert_called_once_with(executable)
+            client.assert_not_called()
+            after = {
+                path.relative_to(root): path.read_bytes() if path.is_file() else None
+                for path in root.rglob("*")
+            }
+            self.assertEqual(before, after)
 
 
 if __name__ == "__main__":

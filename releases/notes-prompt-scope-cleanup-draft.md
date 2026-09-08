@@ -1,9 +1,31 @@
-# Prompt Scope Cleanup (`2.0.76-beta.2` Qualification-Pending Draft)
+# Prompt Scope Cleanup (`2.0.76-beta.3` Working-Milestone Draft)
 
-This is an unpublished `2.0.76-beta.2` candidate. Local artifact checks passed,
-but the normal cloud update failed under Defender and rolled back to B1. Further
-qualification and publication are paused. Start development handoff at
-`docs/session-handoff-2026-07-15.md`; this draft is not release authorization.
+This is an unpublished beta3 working-milestone draft, not release authorization.
+The final complete installer restored basic use on the original company Cloud PC;
+automatic-update/recovery qualification and long-term Defender compatibility are
+not established. Historical B2 failed under Defender; that result is unchanged.
+Start at `docs/session-handoff-2026-07-15.md` for current authorization.
+
+## Beta3 changes and validation
+
+- Removed obsolete startup migration that could overwrite installed Extension
+  files from an unverified sibling tree and delete the source directory.
+- Excluded development-only Pydantic mypy plugins; actual frozen graphs no longer
+  collect setuptools or its vendored/runtime-hook content. All 17 required hidden
+  imports remain. The existing tzdata warning is still disclosed.
+- Installer no longer unblocks files, bypasses execution policy, adds antivirus
+  exclusions, force-stops Hosts, or migrates/overwrites legacy Roaming data. It
+  fails safely and propagates registration failures through the batch wrapper.
+- Local focused checks: 33/33 product/build/Host tests and 17/17 installer tests;
+  actual final-package probe and controlled dependency-import smoke passed.
+- User observations: full installer exit 0, configuration preserved, Host and
+  Extension beta3, manual model Refresh successful, Analyze working. The status
+  bubble concern was a disabled preference, not a confirmed regression.
+
+Final ZIP identity and precise evidence limits are in
+`docs/plan-d-pragmatic-cloud-pc-results.md`, Beta3 Working Milestone. The candidate
+was built from working changes, not an immutable release commit. None of these
+results proves the cause or permanent resolution of Defender detection.
 
 ## Deterministic instruction sources
 
@@ -104,8 +126,9 @@ is historical evidence only, not qualification for `2.0.76-beta.2`.
 ## Historical Verification
 
 The counts below belong to successive historical source boundaries; they are
-not instructions to repeat tests or a cumulative total. Current B2 evidence and
-its failed cloud result are in `docs/plan-d-pragmatic-cloud-pc-results.md`.
+not instructions to repeat tests or a cumulative total. Historical B2 evidence,
+its failed cloud result, and current beta3 results are recorded separately in
+`docs/plan-d-pragmatic-cloud-pc-results.md`.
 
 - Prompt-scope tenth-wave evidence: isolated Host **143/143 focused** and
   **207/207 full**; Extension **210/210 focused** and **340/340 full**; production
@@ -128,14 +151,15 @@ its failed cloud result are in `docs/plan-d-pragmatic-cloud-pc-results.md`.
 - Finalization durability now covers every reserved/receipt/receipt-ready/ack/
   cursor-removal crash boundary, ordinary fault replay, receipt-scratch cleanup,
   lexical reparse rejection, exact entry-type errors, and serialized concurrent
-  finalizers. Full committed-head verification is rerun after this correction.
+  finalizers. The associated rerun requirement belongs to that historical phase.
 - Follow-up hardening adds durable first-receipt-directory publication, exact
   finalization contention errors, crash-resumable partial status unregister,
   and Plan B cleanup crash replay. Production Plan D now consumes these paths.
 - Final clean-head verification passed focused **206** (one expected frozen
   skip), Plan A/B **134/134**, full Host **547** (same sole skip), Extension
   **340/340**, compile/build/static/scope, and rebuilt frozen probe **1/1**. A
-  final post-evidence no-drift rerun and broad branch verdict remain pending.
+  final post-evidence no-drift rerun and broad branch verdict were left pending
+  at that historical checkpoint; this is not a new closeout execution task.
 - Plan D cutover gates pass Host **663/663** in bounded, disjoint source
   partitions (one expected environment-gated frozen skip), Extension
   **894/894**, production Extension build **2,228 modules**, Python compilation,
