@@ -6,8 +6,8 @@ Read `../AGENTS.md` for execution rules. Older contents are retained in Git at
 
 ## Current Mode
 
-Current authorized milestone: commit current fixes and publish stable v2.0.76,
-then continue SDK1.0.13 compatibility research without changing the1.0.5 runtime.
+Stable v2.0.76 is published. Read-only SDK1.0.13 compatibility research completed
+without changing the1.0.5 runtime; isolated dependency installation is next approval.
 The user explicitly requested continuing non-approval work after publication.
 v2.0.76-beta.5 was the last published prerelease (history below).
 Historical beta3 local upgrade/repair follows. The user accepted the beta
@@ -1222,6 +1222,20 @@ current work additionally contains beta3 product fixes and tests. Push, publicat
 tool installation, migration, and cloud operations remain unauthorized.
 
 ## Historical Local Commit Boundary
+
+Stablev2.0.76 published2026-09-08 17:29:23 UTC as public non-prerelease Latest:
+https://github.com/boatmac/Dynamics-Helper/releases/tag/v2.0.76
+Feature/tag40d3f0a3adcdbc9c4bc2c08829d019a8cdbc9530;94productinputs bound, only
+intendedbranch/tag pushed. GitHubuploadedZIP14,009,878 bytes andSHA256
+5a9b7fde784dc5cf4d1d6ad3105dbbd4f78f9979f6026d044cb36bc82263d4ae match testedasset.
+No runtimeSDK upgrade or userinstallation performed. Existingbetas untouched.
+
+Per user instruction, proceeded to readonly1.0.13 assessment against officialtag
+sources, recorded docs/sdk-1.0.13-upgrade-assessment.md. UsedAPI surface remains;
+managed-approval handling needs safety adaptation, currentdependencyranges fit,
+externalCLI selection/frozen newimports need verification. No installation or
+dependency/code edits. Next approval is a separate disposable1.0.13 environment
+plus mocked compatibility execution, not replacement of host/venv or realCLI.
 
 Stable release preparation: full source review found no blockers, versions now
 2.0.76 across three carriers, SDK remains1.0.5. Full unique tests1906/1906 passed:
