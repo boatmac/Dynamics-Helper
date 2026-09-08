@@ -6,8 +6,8 @@ Read `../AGENTS.md` for execution rules. Older contents are retained in Git at
 
 ## Current Mode
 
-Current authorized task: publish v2.0.76-beta.3 directly as a GitHub prerelease.
-The user accepted the beta qualification limits and intends to test local upgrade.
+v2.0.76-beta.3 is published as a GitHub prerelease. The user accepted the beta
+qualification limits and intends to test local upgrade; no upgrade result yet.
 Development stays in the LOCAL checkout; the approved Cloud PC product install
 did not migrate development. Release authorization covers source/asset verification,
 release notes, the intended branch/tag push and exact tested ZIP publication. It
@@ -871,14 +871,25 @@ do not claim entire fresh build byte identity or rebuild the tested ZIP silently
 Release notes are releases/notes-v2.0.76-beta.3.md. Publish unchanged complete
 tested ZIP as prerelease, not latest stable, with no draft or extra assets.
 
+Publication completed at 2026-09-08 08:18:49 UTC:
+https://github.com/boatmac/Dynamics-Helper/releases/tag/v2.0.76-beta.3
+Release is public, prerelease=true, draft=false, not latest stable. Tag target is
+d03fac2 (release-notes descendant of fc14826); branch and only this tag were pushed
+atomically, without updating master or unrelated tags. GitHub reports one uploaded
+asset DynamicsHelper_v2.0.76-beta.3.zip, 14,003,512 bytes and digest
+sha256:e07a6ee401b625284f429cfec5273677f3fa57951c929540c7380d32cc7678ec,
+matching the tested final package. No rebuild or user-machine installation occurred
+during publication. Release-result documentation is a follow-up, not tag amendment.
+
 ## Next Single Action
 
 Remain in the LOCAL checkout
-`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Commit release notes
-and binding record, tag the documentation-only descendant, push only the reviewed
-branch and exact beta3 tag, publish with gh using the tested ZIP, and verify remote
-prerelease/asset identity. Report URL and normal local upgrade steps, not a claim
-that upgrade already passed. Do not run release_helper.main or push unrelated tags.
+`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Report public beta3
+URL and verified asset, then await the user's local upgrade observation. Use the
+normal beta-channel update UI only when it identifies beta3 and no recovery/error
+state is present; do not force-clear old browser state or reuse private URLs.
+On failure preserve the message/transaction evidence and stop retries. No stable
+release, automatic user-machine operation, AV bypass, or vendor submission.
 
 The user reports having started a new session, but it initially read the old
 master checkout. That old checkout's clean status and July handoff do not describe
