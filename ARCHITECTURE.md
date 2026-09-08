@@ -35,7 +35,9 @@ The browser looks up the Host ID (`com.dynamics.helper.native`) in the Registry.
 
 * The Native Host communicates via `stdout` using length-prefixed JSON.
 * **Any `print()` to stdout (from code or libraries) will corrupt the communication pipe** and cause "Native Host disconnected" errors.
-* `dh_native_host.py` redirects `sys.stdout` to `sys.stderr` at the very top of the file. **DO NOT REMOVE THIS.**
+* After early dispatch/startup recovery, `dh_native_host.py` redirects
+  `sys.stdout` to `sys.stderr` before normal initialization. **DO NOT REMOVE
+  THIS.**
 
 ## 3. Tooling Responsibilities
 
@@ -60,32 +62,63 @@ The browser looks up the Host ID (`com.dynamics.helper.native`) in the Registry.
 
 ## 4. Self-Update Architecture
 
-The host supports in-place updates without requiring the user to re-download and re-install.
+The production updater applies one complete, validated Host-and-Extension
+transaction with durable restart recovery and automatic rollback.
 
 ### Flow
 
-1. **Check:** On startup (`health_check` action), `NativeHost.check_for_updates()` queries the GitHub Releases API.
-2. **Notify:** If a newer version exists, sends `NATIVE_UPDATE_AVAILABLE` message to the extension with version and download URL.
-3. **Download:** When user clicks "Update Now", `updater.download_update()` fetches the release zip.
-4. **Apply:** The updater extracts files to the install directory (`%LOCALAPPDATA%\DynamicsHelper`).
-5. **Locked File Handling:** When replacing `dh_native_host.exe`:
-   * Try renaming old file to `.exe.old`
-   * If locked (antivirus): fall back to `.exe.old2`, `.exe.old3`
-   * Other host files (`_internal/`, `system_prompt.md`) are overwritten directly
-   * User files (`config.json`, `copilot-instructions.md`, logs) are protected via `_USER_FILES` set
-   * Log errors for debugging
-6. **Reload:** The FAB calls `chrome.runtime.reload()` to reload the extension with the new code. The `pending_update` key is cleared from `chrome.storage.local` on success; the Options page uses version guards to dismiss stale banners.
-7. **Restart:** The host process exits; Chrome relaunches it on the next native message.
+1. **Check:** `NativeHost.check_for_updates()` selects only a strictly newer
+   release with exactly one direct HTTPS ZIP asset.
+2. **Verify:** The Service Worker requires `transactional-update-v1`, matching
+   Host/Extension versions, and verified packaged integrity before accepting the
+   candidate.
+3. **Prepare:** A payload-free UI `DH_UPDATE_START` makes the Service Worker
+   persist one transaction ID, then call `UpdateService.prepare()` through the
+   strict `perform_update` Host action. Plan A validates the archive and Plan B
+   prepares the complete staged product without mutating live files.
+4. **Activate:** After persisting `activating`, the Worker calls
+   `activate_update`. Plan C launches the detached runner and the main Host exits.
+5. **Recover or roll back:** The Worker polls the read-only status Host. The
+   runner resumes after interruption and Plan B restores the complete prior
+   product on ordinary forward failure.
+6. **Reload:** Only terminal `committed` or `rolled-back` status permits the
+   coordinator to persist `reload-pending` and reload the Extension.
+7. **Finalize:** The new Worker verifies terminal version, capability, and
+   integrity, obtains a receipt through `finalize_update_status`, persists it,
+   and calls `acknowledge_update_finalization` before reporting `complete` with
+   the originating lowercase 32-hex transaction ID.
+8. **Consume once:** A foreground FAB or Options completion surface must remain
+   visible for eight continuous seconds before sending exact
+   `{type:'DH_UPDATE_ACK_COMPLETE',transactionId}`. Hidden/closed time is
+   discarded. The Worker serializes and persists the matching transition before
+    broadcasting it: committed becomes `idle` with no candidate URL; rolled-back
+    becomes `available` with the same candidate and ordinary Retry in versions
+    supporting this completion protocol. Older B1 is not qualified for this
+    rollback/Retry behavior.
 
 ### Key Files
 
-* **`host/updater.py`** (~208 lines): The `Updater` class handling download, extraction, and locked-file fallback.
-* **`extension/src/components/Options.tsx`**: Displays update status and "Update Now" button.
+* **`extension/src/background/updateRuntime.ts`**: Strict parsers, serialized
+  state machine, durable `dh_update_state`, alarms, polling, reload, and
+  finalization.
+* **`extension/src/background/serviceWorker.ts`**: Native transport, coordinator
+  wiring, capability/integrity verification, suppression, and broadcasts.
+* **`host/update_service.py`**: Production Plan A/B/C orchestration.
+* **`host/update_engine.py`** and related Plan B modules: Exclusive transaction
+  mutation and rollback.
+* **`host/update_operation.py`**: Distinct cross-process Plan D operation mutex;
+  serializes complete prepare/activate/finalize/ack scopes above the Plan B/C
+  mutation mutex.
+* **`host/update_recovery.py`, `update_status_host.py`, and
+  `update_entrypoint.py`**: Detached recovery, status, and early startup modes.
+* **`extension/src/hooks/useVisibleCompletionAck.ts`**: Shared visible-epoch,
+  timer, and ACK-transport boundary used by FAB and Options.
+* **`FAB.tsx` / `Options.tsx`**: Projection-only UI clients.
 
 ### Release Integrity Metadata (Plan A)
 
-Release staging now generates three canonical documents without changing the
-active update flow:
+Release staging generates three canonical documents consumed by the active
+transactional update flow:
 
 * `update-manifest.json` assigns every packaged regular file one ownership
   class and SHA-256. It is package-only and cannot hash itself.
@@ -102,14 +135,11 @@ entries, missing/extra files, and hash/link mismatches. The Host exposes
 metadata disagree. `--update-probe` runs before logging, config, updater, or SDK
 initialization and emits only an allowlisted JSON result.
 
-Plan A remains package hardening. Plan B adds the standard-library transaction
-engine, and Plan C adds frozen-tested detached recovery special modes. The
-existing extension-first in-place updater, reload behavior, and locked-
-executable fallback above remain active until Plan D wires ordinary update and
-installer routing. Only `prompt-scope-v1` is advertised before that complete
-cutover.
+Plan A introduced package hardening, Plan B the standard-library transaction
+engine, and Plan C frozen-tested detached recovery. Plan D now composes all
+three in production and advertises `transactional-update-v1`.
 
-### Dormant Transaction Engine (Plan B)
+### Transaction Engine (Plan B, activated by Plan D)
 
 `update_journal.py` owns strict canonical journal/active schemas, transaction-ID
 generation, transitions, and terminal-version projection. `update_ownership.py`
@@ -150,12 +180,11 @@ its receipt and calls `finalize_terminal_evidence`, which removes active before
 the matching workspace. `terminal_version` projects committed target, rolled
 back prior, or `{fresh_install:true, version:null}` for fresh rollback.
 
-### Dormant Detached Recovery (Plan C)
+### Detached Recovery (Plan C, activated by Plan D)
 
-Plan C is implemented and frozen-tested, but ordinary update-click and installer
-routing is still dormant. Update clicks continue through the historical Python
-updater; installation continues through the PowerShell installer path until Plan
-D performs the runtime cutover and advertises the transactional capability.
+Plan C is frozen-tested and is the active post-activation runtime for Plan D.
+The Service Worker switches from the main Host to this detached status/recovery
+topology until commit, rollback, or manual-recovery disposition.
 
 The stable topology is:
 
@@ -188,6 +217,7 @@ historical metadata proceeds to normal Plan A installation verification.
 | Normal main | production main or canonical source main |
 | `--register` | production main or canonical source main |
 | `--install-package` | production main only |
+| `--settle-installer-repair` | production main only |
 | `--update-probe` | production main only |
 | `--complete-update` | detached runner only |
 | `--recover-active` | detached runner only |
@@ -232,6 +262,65 @@ replays from the receipt; a crash after it replays from the fixed slot. The old
 slot remains read-only replay proof until a later transaction's acknowledgment
 replaces it. A cursor or cursor scratch blocks every newer update start, while
 an ack slot alone does not.
+
+### Production Coordination and Recovery (Plan D)
+
+The Service Worker exclusively owns `dh_update_state`. FAB and Options request
+the current projection with payload-free `DH_UPDATE_GET_STATE`, consume
+`DH_UPDATE_STATE`, and send payload-free `DH_UPDATE_START`; candidate URLs,
+transaction IDs, Host actions, update storage, and reload are not UI-owned.
+
+The Worker is also the sole serialized owner of terminal-notice consumption.
+Every `complete` projection carries the transaction's exact lowercase 32-hex
+`transactionId`. It accepts only exact own enumerable data properties
+`{type:'DH_UPDATE_ACK_COMPLETE',transactionId}`; hostile metadata, malformed
+identity, and stale/wrong/duplicate acknowledgments have no effect. The resulting
+state is durably stored before memory or broadcast changes, and only the
+authoritative `DH_UPDATE_STATE` broadcast changes live UI.
+
+FAB and Options display `complete` immediately. `useVisibleCompletionAck` treats
+one transaction's maximal continuous aggregate-visible interval as an epoch.
+FAB supplies open terminal menu OR exact transaction-bound visible completion
+bubble; Options supplies rendered completion, and both also require a visible
+document. A false transition discards elapsed time, while equivalent state and
+an aggregate-visible hand-off retain the deadline. Each epoch attempts once;
+failure may retry only after a later false-to-true transition. Views ignore ACK
+responses, so only the authoritative `DH_UPDATE_STATE` broadcast changes UI and
+simultaneous visible winners remain idempotent. The FAB bubble's ten-second
+fallback remains wall-clock based and never affects unrelated bubbles.
+
+Exactly four strict Host actions route to `UpdateService`: `perform_update`,
+`activate_update`, `finalize_update_status`, and
+`acknowledge_update_finalization`. Candidate acceptance and execution require
+one direct HTTPS ZIP, `transactional-update-v1`, matching Host/Extension
+versions, and verified product integrity. After activation, ordinary main-Host
+traffic is suppressed until terminal verification/finalization or a confirmed
+safe pre-mutation failure.
+
+Both mixed first-upgrade directions persist matching-full-installer guidance.
+A transactionless marker clears only after startup verifies matching versions,
+capability, and integrity; transaction-backed recovery evidence is retained.
+Frozen startup recovery runs before stdout protection, logging, config, SDK, or
+`NativeHost` construction. It either launches recovery and exits `0`, continues
+normally, or exits `30` with empty stdout and exact stderr
+`manual_recovery_required\n`.
+
+The matching full installer removes the prior `_internal` tree before copying
+the packaged runtime, ensuring stale runtime files cannot survive repair while
+user-owned files and update evidence remain outside that replacement. It first
+probes a temporary combined product and exact package inventory. After copy, a
+live probe and frozen-only `--settle-installer-repair` settle compatible
+preserved authority to the verified target/prior terminal version; contradiction
+stops installation.
+
+Main update leases have bounded cancellation deadlines. Finalize/ack failures
+retain their exact persisted phase for idempotent retry. A per-Worker instance
+token requires a newly loaded Worker before `reload-pending` finalization.
+
+The current frozen toolchain pin is PyInstaller `6.22.2`; Plan C's `6.18.0`
+results remain historical evidence. Standalone bootstrap and per-write
+power-loss guarantees are deferred, so extreme interruption may require the
+matching full installer. Backups and `updates/**` evidence must be preserved.
 
 ## 5. Session Persistence Architecture
 

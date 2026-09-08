@@ -236,6 +236,70 @@ describe('FAB live page identity during Analyze', () => {
         vi.useRealTimers()
     })
 
+    it.each(['08/09/2026 9:07 PM', '2031-04-17T10:23:00.123Z (UTC)'])('includes Created On %s and Customer Name in the existing textarea and outgoing context', async createdOn => {
+        await renderOpenFab({ ...A, createdOn, customerName: 'Synthetic Account' })
+        const text = expandContext().value
+        expect(screen.getAllByRole('textbox')).toHaveLength(1)
+        expect(text).toMatch(/^## Case Number\n\nA/)
+        expect(text).toContain(`## Created On\n\n${createdOn}`)
+        expect(text).toContain('## Customer Name\n\nSynthetic Account')
+        const response = deferNextResponse('analyze_error')
+        fireEvent.click(analyzeButton())
+        await flushReact()
+        expect(getMessageLog().find(entry => entry.action === 'analyze_error')?.payload)
+            .toMatchObject({ payload: { payload: { text, caseNumber: 'A' } } })
+        await resolveSuccess(response)
+    })
+
+    it('protects edited metadata from changed and shorter same-case scans until explicit refresh', async () => {
+        await renderOpenFab({ ...A, createdOn: 'Original date', customerName: 'Original Account' })
+        const textarea = expandContext()
+        expect(textarea.value).toContain('## Customer Name\n\nOriginal Account')
+        const edited = textarea.value.replace('Original date', 'Edited date').replace('Original Account', 'Edited Account')
+        fireEvent.change(textarea, { target: { value: edited } })
+        for (const fresh of [{ ...A, createdOn: 'New date', customerName: 'New Account' }, { ...A, description: 'Short', errorText: 'Short' }]) {
+            fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+            state.scanValue = fresh
+            await triggerMutation()
+            openFab()
+            await flushReact()
+            expect(expandContext().value).toBe(edited)
+            expect(state.hydrationCaseNumbers.at(-1)).toBe('A')
+        }
+        const response = deferNextResponse('analyze_error')
+        fireEvent.click(analyzeButton())
+        await flushReact()
+        expect(getMessageLog().find(entry => entry.action === 'analyze_error')?.payload)
+            .toMatchObject({ payload: { payload: { text: edited, caseNumber: 'A' } } })
+        await resolveSuccess(response)
+        openFab()
+        await flushReact()
+        state.scanValue = { ...A, createdOn: 'Refreshed date', customerName: 'Refreshed Account' }
+        fireEvent.click(screen.getByTitle('Refresh Context (Re-scan page)'))
+        await flushReact()
+        expect(expandContext().value).toContain('## Created On\n\nRefreshed date')
+        expect(expandContext().value).toContain('## Customer Name\n\nRefreshed Account')
+        expect(expandContext().value).not.toContain('Edited Account')
+    })
+
+    it('does not carry metadata or edits from A into a B scan with unloaded fields', async () => {
+        await renderOpenFab({ ...A, createdOn: 'A date', customerName: 'A Account' })
+        const textarea = expandContext()
+        expect(textarea.value).toContain('## Customer Name\n\nA Account')
+        fireEvent.change(textarea, { target: { value: textarea.value.replace('A Account', 'Edited A Account') } })
+        fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+        state.scanValue = B
+        await triggerMutation()
+        openFab()
+        await flushReact()
+        const text = expandContext().value
+        expect(text).toMatch(/^## Case Number\n\nB/)
+        expect(text).toContain('## Created On\n\n\n\n')
+        expect(text).toContain('## Customer Name\n\n\n\n')
+        expect(text).not.toContain('A Account')
+        expect(text).not.toContain('A date')
+    })
+
     it('switches identity from A to B while Analyze is busy', async () => {
         await renderOpenFab()
         const response = deferNextResponse('analyze_error')

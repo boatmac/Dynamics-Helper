@@ -1,5 +1,10 @@
 # Plan E Evidence-Loss Amendment Design
 
+> **Partial supersession:** Task 9 evidence orchestration below was replaced by
+> `2026-08-24-plan-e-task-9-evidence-correction-design.md`. Do not recreate its
+> executor, receipts, or missing historical reports. Other implemented product
+> requirements remain intact. Current entry: `docs/session-handoff-2026-07-15.md`.
+
 **Status:** Accepted
 **Date:** 2026-08-19
 **Authorized during:** Plan E recovery before Task 9

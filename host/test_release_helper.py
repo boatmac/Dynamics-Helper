@@ -9,6 +9,8 @@ from unittest.mock import patch
 import release_helper
 from package_archive import validate_staged_package, write_deterministic_archive
 from package_manifest import ManifestError, load_installed_product, load_update_manifest, sha256_file
+from product_info import VERSION
+from test_update_support import current_extension_manifest_bytes
 from updater import Updater
 
 
@@ -25,8 +27,10 @@ PLAN_C_EARLY_MODULES = (
     "update_journal",
     "update_mutex",
     "update_ownership",
+    "update_operation",
     "update_platform",
     "update_recovery",
+    "update_service",
     "update_status_host",
 )
 
@@ -39,7 +43,7 @@ class TestReleaseStaging(unittest.TestCase):
         self.source = self.root / "source"
         self.stage = self.root / "stage"
         files = {
-            "extension/dist/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+            "extension/dist/manifest.json": current_extension_manifest_bytes(),
             "extension/dist/assets/app.js": b"app",
             "dist/dh_native_host/dh_native_host.exe": b"host-exe",
             "dist/dh_native_host/_internal/python313.dll": b"runtime",
@@ -72,7 +76,7 @@ class TestReleaseStaging(unittest.TestCase):
         result = release_helper.stage_release(
             self.source,
             self.stage,
-            "2.0.74-beta.4",
+            VERSION,
         )
         self.assertEqual(result, self.stage)
         self.assertEqual(before, self._snapshot(self.source))
@@ -100,7 +104,7 @@ class TestReleaseStaging(unittest.TestCase):
             release_helper.stage_release(
                 self.source,
                 self.stage,
-                "2.0.74-beta.4",
+                VERSION,
             )
         self.assertFalse(self.stage.exists())
 
@@ -112,7 +116,7 @@ class TestReleaseStaging(unittest.TestCase):
             release_helper.stage_release(
                 self.source,
                 self.stage,
-                "2.0.74-beta.4",
+                VERSION,
             )
         self.assertEqual(sentinel.read_bytes(), b"keep")
 
@@ -126,7 +130,7 @@ class TestReleaseStaging(unittest.TestCase):
             release_helper.stage_release(
                 self.source,
                 self.stage,
-                "2.0.74-beta.4",
+                VERSION,
             )
         self.assertEqual(sentinel.read_bytes(), b"keep")
         self.assertFalse((self.stage / "sentinel.txt").exists())
@@ -144,7 +148,7 @@ class TestReleaseStaging(unittest.TestCase):
             self.assertRaises(FileExistsError),
         ):
             release_helper.create_zip(
-                "2.0.74-beta.4",
+                VERSION,
                 source_root=self.source,
                 output_dir=output,
             )
@@ -162,7 +166,7 @@ class TestReleaseStaging(unittest.TestCase):
                 release_helper.stage_release(
                     self.source,
                     self.stage,
-                    "2.0.74-beta.4",
+                    VERSION,
                 )
         preflight.assert_called_once()
         copytree.assert_not_called()
@@ -171,7 +175,7 @@ class TestReleaseStaging(unittest.TestCase):
         output = self.root / "out"
         first_path = Path(
             release_helper.create_zip(
-                "2.0.74-beta.4",
+                VERSION,
                 source_root=self.source,
                 output_dir=output,
             )
@@ -183,7 +187,7 @@ class TestReleaseStaging(unittest.TestCase):
         )
         second_path = Path(
             release_helper.create_zip(
-                "2.0.74-beta.4",
+                VERSION,
                 source_root=self.source,
                 output_dir=output,
             )
@@ -198,19 +202,19 @@ class TestReleaseStaging(unittest.TestCase):
         shutil.copytree(self.source, source)
         archive = Path(
             release_helper.create_zip(
-                "2.0.74-beta.4",
+                VERSION,
                 source_root=source,
                 output_dir=output,
             )
         )
-        self.assertEqual(archive.name, "DynamicsHelper_v2.0.74-beta.4.zip")
+        self.assertEqual(archive.name, f"DynamicsHelper_v{VERSION}.zip")
         self.assertTrue(archive.is_file())
 
     def test_historical_updater_bootstraps_both_metadata_files(self):
         release_helper.stage_release(
             self.source,
             self.stage,
-            "2.0.74-beta.4",
+            VERSION,
         )
         archive = self.root / "release.zip"
         write_deterministic_archive(self.stage, archive)
@@ -275,6 +279,12 @@ class PlanCPackagingTests(unittest.TestCase):
             if value == "--hidden-import"
         )
         self.assertEqual(actual_hidden, PLAN_C_EARLY_MODULES)
+        actual_excluded = tuple(
+            command[index + 1]
+            for index, value in enumerate(command)
+            if value == "--exclude-module"
+        )
+        self.assertEqual(actual_excluded, ("pydantic.mypy", "pydantic.v1.mypy"))
         self.assertEqual(
             Path(command[-1]).resolve(),
             (release_helper.HOST_DIR / "dh_native_host.py").resolve(),
@@ -285,9 +295,34 @@ class PlanCPackagingTests(unittest.TestCase):
             len(command) - 1,
         )
 
+    def test_matching_installer_replaces_the_complete_internal_runtime(self):
+        source = release_helper.INSTALL_SCRIPT.read_text(encoding="utf-8")
+        cleanup = 'Remove-Item "$DestDir\\_internal" -Recurse -Force'
+        copy_loop = "Get-ChildItem -Path $HostSrc -Recurse | ForEach-Object"
+        validate_source = 'foreach ($RequiredPath in @('
+        package_probe = '& "$PreflightRoot\\dh_native_host.exe" --update-probe $PackageManifest $PSScriptRoot'
+        running_host_guard = 'if ($Process) {'
+        running_host_refusal = 'Installation stopped: dh_native_host is running.'
+        live_probe = '& $ExePath --update-probe $PackageManifest'
+        settle = '& $ExePath --settle-installer-repair'
+
+        self.assertIn(cleanup, source)
+        self.assertIn(validate_source, source)
+        self.assertIn(package_probe, source)
+        self.assertNotIn('Stop-Process', source)
+        self.assertIn(running_host_refusal, source)
+        self.assertLess(source.index(running_host_guard), source.index(running_host_refusal))
+        self.assertLess(source.index('exit 1', source.index(running_host_refusal)), source.index(package_probe))
+        self.assertLess(source.index(package_probe), source.index(cleanup))
+        self.assertLess(source.index(cleanup), source.index(copy_loop))
+        self.assertIn(live_probe, source)
+        self.assertIn(settle, source)
+        self.assertLess(source.index(live_probe), source.index(settle))
+        self.assertLess(source.index(settle), source.index("Running registration command"))
+
     def test_build_host_invokes_exact_cli_command(self):
         with patch("release_helper.subprocess.run") as run:
-            run.return_value.stdout = "6.18.0\n"
+            run.return_value.stdout = "6.22.2\n"
             release_helper.build_host()
         self.assertEqual(
             run.call_args_list[0].args[0],
@@ -328,7 +363,7 @@ class PlanCPackagingTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 1)
         self.assertEqual(run.call_count, 1)
         printed.assert_any_call(
-            "ERROR: required PyInstaller 6.18.0 is unavailable."
+            "ERROR: required PyInstaller 6.22.2 is unavailable."
         )
 
     def test_no_plan_c_data_is_implicitly_bundled(self):
@@ -355,7 +390,7 @@ class PlanCPackagingTests(unittest.TestCase):
         source = self.root / "source"
         stage = self.root / "stage"
         files = {
-            "extension/dist/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+            "extension/dist/manifest.json": current_extension_manifest_bytes(),
             "extension/dist/assets/app.js": b"app",
             "dist/dh_native_host/dh_native_host.exe": b"host-exe",
             "dist/dh_native_host/_internal/python313.dll": b"runtime",
@@ -369,7 +404,7 @@ class PlanCPackagingTests(unittest.TestCase):
             path = source.joinpath(*relative.split("/"))
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(payload)
-        release_helper.stage_release(source, stage, "2.0.74-beta.4")
+        release_helper.stage_release(source, stage, VERSION)
         self.assertFalse((stage / "updates").exists())
         self.assertEqual(
             validate_staged_package(stage).manifest.entries,

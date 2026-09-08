@@ -1,6 +1,6 @@
 # Team Catalog: User-Configurable Manifest URL — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution note:** No workflow plugin is required. Execute only currently authorized scope in bounded steps, with observable progress and scope-appropriate verification. Historical checkboxes do not authorize work; read `AGENTS.md` and the current handoff first.
 
 **Goal:** Replace the build-time hardcoded `TEAM_CATALOG_BASE_URL` with a user-supplied manifest URL configured per-install, gated by an explicit opt-in toggle. Manifest entries carry their own absolute URLs.
 

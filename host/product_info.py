@@ -8,9 +8,12 @@ class HostCapabilities:
     provided: tuple[str, ...]
 
 
-VERSION = "2.0.74-beta.4"
+VERSION = "2.0.76"
 REQUIRED_PROTOCOL_CAPABILITIES = ("prompt-scope-v1",)
-PROVIDED_PROTOCOL_CAPABILITIES = ("prompt-scope-v1",)
+PROVIDED_PROTOCOL_CAPABILITIES = (
+    "prompt-scope-v1",
+    "transactional-update-v1",
+)
 
 
 def get_host_capabilities() -> HostCapabilities:

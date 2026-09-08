@@ -1,5 +1,10 @@
 # Plan E Scripted Evidence Executor Design
 
+> **Historical, superseded executor:** Replaced by
+> `2026-08-24-plan-e-task-9-evidence-correction-design.md`. Do not build or restore
+> this controller/test framework on Cloud PC. Its historical approval is not
+> current authority. Start at `docs/session-handoff-2026-07-15.md`.
+
 **Status:** Accepted
 **Date:** 2026-08-22
 **Authorized during:** Plan E Task 9 executor correction

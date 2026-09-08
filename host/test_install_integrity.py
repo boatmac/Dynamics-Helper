@@ -1,4 +1,8 @@
+import base64
+import gzip
+import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +26,7 @@ from package_manifest import (
     write_release_documents,
 )
 from product_info import VERSION
+from test_update_support import current_extension_manifest_bytes
 
 
 class InstallationVerifierTests(unittest.TestCase):
@@ -38,7 +43,7 @@ class InstallationVerifierTests(unittest.TestCase):
             "host/system_prompt.md": b"core",
             "host/register.py": b"register",
             "host/config.json": b"{}\n",
-            "extension/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+            "extension/manifest.json": current_extension_manifest_bytes(),
             "extension/assets/app.js": b"app",
             "installer_core.ps1": b"installer",
             "install.bat": b"wrapper",
@@ -165,7 +170,7 @@ class UpdateProbeTests(unittest.TestCase):
             "host/system_prompt.md": b"core",
             "host/register.py": b"register",
             "host/config.json": b"{}\n",
-            "extension/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+            "extension/manifest.json": current_extension_manifest_bytes(),
             "extension/assets/app.js": b"app",
             "installer_core.ps1": b"installer",
             "install.bat": b"wrapper",
@@ -197,7 +202,7 @@ class UpdateProbeTests(unittest.TestCase):
                 status="success",
                 host_version=VERSION,
                 extension_version=VERSION,
-                capabilities=("prompt-scope-v1",),
+                capabilities=("prompt-scope-v1", "transactional-update-v1"),
             ),
         )
 
@@ -287,6 +292,157 @@ class UpdateProbeTests(unittest.TestCase):
             InstallationVerifier(live, frozen=True).verify().integrity,
             "failed",
         )
+
+
+@unittest.skipUnless(os.name == "nt", "Windows PowerShell 5.1 required")
+class InstallerSafetyTests(unittest.TestCase):
+    repo = Path(__file__).resolve().parents[1]
+
+    def _run_installer(self, scenario):
+        source = (self.repo / "installer_core.ps1").read_text(encoding="utf-8")
+        encoded_source = base64.b64encode(source.encode("utf-8")).decode("ascii")
+        # Parse the real source, replace only native invocation targets, and reject
+        # any command not explicitly mocked or allowlisted before evaluating it.
+        harness = r'''
+$ErrorActionPreference = 'Stop'
+if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Expected Windows PowerShell 5.1' }
+$Scenario = 'SCENARIO'
+$Source = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('SOURCE'))
+$Tokens = $null
+$Errors = $null
+$Ast = [Management.Automation.Language.Parser]::ParseInput($Source, [ref]$Tokens, [ref]$Errors)
+if ($Errors.Count) { throw 'Installer parse failed' }
+$Commands = $Ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst]}, $true)
+$Allowed = @('Test-Path', 'Write-Error', 'Join-Path', 'New-Item', 'Copy-Item',
+    'Get-ChildItem', 'Remove-Item', 'Write-Host', 'Get-Process', 'Start-Sleep',
+    'ForEach-Object', 'Out-Null', 'Read-Host', 'Write-Warning', 'Stop-Process',
+    'Unblock-File', 'Add-MpPreference', 'Set-MpPreference', 'Set-ExecutionPolicy')
+foreach ($Command in ($Commands | Sort-Object { $_.Extent.StartOffset } -Descending)) {
+    if ($Command.InvocationOperator -eq 'Ampersand') {
+        $Target = $Command.CommandElements[0].Extent
+        if ($Target.Text -notin @('$ExePath', '"$PreflightRoot\dh_native_host.exe"')) {
+            throw 'Unexpected native target'
+        }
+        $Source = $Source.Remove($Target.StartOffset, $Target.EndOffset - $Target.StartOffset).Insert($Target.StartOffset, 'Invoke-MockHost')
+    } elseif ($Command.GetCommandName() -notin $Allowed) {
+        throw "Unmocked command: $($Command.GetCommandName())"
+    }
+}
+function Test-Path {
+    param($Path)
+    if ($Path -eq "$env:APPDATA\DynamicsHelper") { return $Scenario -eq 'roaming' }
+    if ($Path -eq 'C:\mock-package\host\dh_native_host.exe' -and $Scenario -eq 'missing-package') { return $false }
+    if ($Path -eq "$env:LOCALAPPDATA\DynamicsHelper\dh_native_host.exe" -and $Scenario -eq 'missing-exe') { return $false }
+    return $true
+}
+function Get-Process { if ($Scenario -eq 'running') { [pscustomobject]@{ Id = 123; ProcessName = 'dh_native_host' } } }
+function New-Item { "MUTATION:new:$args" }
+function Copy-Item {
+    if ($Scenario -eq 'copy-throw') { throw 'virus blocked SECRET-ERROR' }
+    "MUTATION:copy:$args"
+}
+function Remove-Item { "MUTATION:remove:$args" }
+function Stop-Process { 'FORBIDDEN:Stop-Process' }
+function Unblock-File { 'FORBIDDEN:Unblock-File' }
+function Add-MpPreference { 'FORBIDDEN:Add-MpPreference' }
+function Set-MpPreference { 'FORBIDDEN:Set-MpPreference' }
+function Set-ExecutionPolicy { 'FORBIDDEN:Set-ExecutionPolicy' }
+function Start-Sleep { }
+function Out-Null { process { if ($_ -like 'MUTATION:*') { Write-Host $_ } } }
+function Read-Host { param($Prompt) Write-Host "PROMPT:$Prompt"; return '' }
+function Get-ChildItem {
+    param($Path)
+    foreach ($Name in @('config.json', 'dh_native_host.exe')) {
+        [pscustomobject]@{ FullName = "$Path\$Name"; PSIsContainer = $false }
+    }
+}
+function Invoke-MockHost {
+    Write-Host "NATIVE:$args"
+    $global:LASTEXITCODE = 0
+    $Phase = if ($args -contains '--register') { 'register' } elseif ($args -contains '--settle-installer-repair') { 'settle' } elseif ($args.Count -eq 3) { 'preflight' } else { 'live' }
+    if ($Scenario -eq "$Phase-throw") { throw 'virus blocked SECRET-ERROR' }
+    if ($Scenario -eq 'register-generic-throw' -and $Phase -eq 'register') { throw 'Access denied SECRET-ERROR' }
+    if ($Scenario -eq "$Phase-nonzero") { $global:LASTEXITCODE = 17; return 'SECRET-ERROR' }
+    return 'mock host success'
+}
+. ([scriptblock]::Create('$PSScriptRoot = ''C:\mock-package'';' + $Source))
+'''.replace("SCENARIO", scenario).replace("SOURCE", encoded_source)
+        compressed = base64.b64encode(gzip.compress(harness.encode("utf-8"))).decode("ascii")
+        loader = (
+            "$stream = New-Object IO.MemoryStream(,[Convert]::FromBase64String('"
+            + compressed
+            + "')); $gzip = New-Object IO.Compression.GZipStream($stream,"
+            "[IO.Compression.CompressionMode]::Decompress); "
+            "$reader = New-Object IO.StreamReader($gzip); Invoke-Expression $reader.ReadToEnd()"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            env = os.environ.copy()
+            for name in ("LOCALAPPDATA", "APPDATA", "USERPROFILE", "HOME", "TEMP", "TMP"):
+                directory = Path(temp) / name
+                directory.mkdir()
+                env[name] = str(directory)
+            result = subprocess.run(
+                ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", loader],
+                cwd=temp, env=env, capture_output=True, text=True, timeout=20,
+            )
+            self.assertFalse(any(path.is_file() for path in Path(temp).rglob("*")))
+        output = result.stdout + result.stderr
+        self.assertNotIn("FORBIDDEN:", output)
+        self.assertNotIn("Unmocked command:", output)
+        self.assertNotIn("Installer parse failed", output)
+        return result.returncode, result.stdout
+
+    def test_no_protection_bypass_or_unsafe_advice(self):
+        source = (self.repo / "installer_core.ps1").read_text(encoding="utf-8").lower()
+        for forbidden in ("unblock-file", "stop-process", "add-mppreference", "set-mppreference",
+                          "set-executionpolicy", "false positive", "whitelist", "exclusion",
+                          "restore the blocked", "'allow'"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, source)
+
+    def test_batch_preserves_policy_and_exit_status(self):
+        source = (self.repo / "install.bat").read_text(encoding="utf-8").lower()
+        self.assertNotIn("-executionpolicy", source)
+        self.assertIn('set "installerexitcode=%errorlevel%"', source)
+        self.assertIn('exit /b %installerexitcode%', source)
+        self.assertLess(source.index('set "installerexitcode='), source.index('pause'))
+
+    def test_running_host_denies_before_any_mutation(self):
+        code, output = self._run_installer("running")
+        self.assertEqual(code, 1, output)
+        self.assertNotIn("MUTATION:", output)
+        self.assertNotIn("NATIVE:", output)
+        self.assertIn("running", output)
+        self.assertIn("PROMPT:Press Enter to exit", output)
+
+    def test_roaming_denies_before_any_mutation(self):
+        code, output = self._run_installer("roaming")
+        self.assertEqual(code, 1, output)
+        self.assertNotIn("MUTATION:", output)
+        self.assertNotIn("NATIVE:", output)
+        self.assertIn("Roaming", output)
+        self.assertIn("preserved", output)
+
+    def test_native_failures_exit_one_without_success_or_security_changes(self):
+        for scenario in ("preflight-throw", "preflight-nonzero", "live-throw", "live-nonzero",
+                         "settle-throw", "settle-nonzero", "register-throw", "register-nonzero",
+                         "register-generic-throw", "missing-exe", "missing-package", "copy-throw"):
+            with self.subTest(scenario=scenario):
+                code, output = self._run_installer(scenario)
+                self.assertEqual(code, 1, output)
+                self.assertNotIn("SUCCESS:", output)
+                self.assertNotIn("SECRET-ERROR", output)
+                self.assertIn("Installation failed.", output)
+                self.assertIn("PROMPT:Press Enter to exit", output)
+
+    def test_success_preserves_probe_settlement_registration_and_config_skip(self):
+        code, output = self._run_installer("success")
+        self.assertEqual(code, 0, output)
+        self.assertEqual(output.count("NATIVE:--update-probe"), 2)
+        self.assertLess(output.index("NATIVE:--settle-installer-repair"), output.index("NATIVE:--register"))
+        self.assertIn("SUCCESS: Update Complete!", output)
+        self.assertIn("PROMPT:Press Enter to exit", output)
+        self.assertNotIn("MUTATION:copy:C:\\mock-package\\host\\config.json", output)
 
 
 if __name__ == "__main__":

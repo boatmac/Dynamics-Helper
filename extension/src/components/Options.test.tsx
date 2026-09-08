@@ -3137,6 +3137,19 @@ describe('Options list_models outer error classification', () => {
     resetChromeMock()
     installChromeMock()
     dndMock.dropSpecs = []
+    seedStorage({ dh_items: [] })
+  })
+
+  const listModelCalls = () => chromeMockSpies.sendMessage.mock.calls.filter(call => {
+    const message = call[0] as any
+    return message?.type === 'NATIVE_MSG'
+      && message?.payload?.action === 'list_models'
+  })
+
+  const clearEffortCalls = () => chromeMockSpies.sendMessage.mock.calls.filter(call => {
+    const message = call[0] as any
+    return message?.payload?.action === 'update_config'
+      && message?.payload?.payload?.config?.extension_preferences?.reasoning_effort === ''
   })
 
   it.each([
@@ -3176,6 +3189,693 @@ describe('Options list_models outer error classification', () => {
       expect(document.body.textContent).not.toContain('must-not-reach-options')
     },
   )
+
+  it('clears an unsupported effort from a fresh legacy model cache', async () => {
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        model: 'model-a',
+        reasoningEffort: 'max',
+      },
+      dh_model_list: [{
+        id: 'model-a',
+        name: 'Model A',
+        supported_reasoning_efforts: ['low', 'max', 'high'],
+        default_reasoning_effort: 'max',
+      }],
+      dh_model_list_fetched_at: Date.now(),
+    })
+    const getConfig = deferNextResponse('get_config')
+    render(<StrictMode><Options /></StrictMode>)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: false,
+          model: 'model-a',
+          reasoning_effort: 'max',
+        },
+      },
+    }))
+    fireEvent.click(document.querySelector('[data-section="model"]') as HTMLButtonElement)
+
+    const effort = await waitFor(() => {
+      const select = document.querySelector(
+        'select[name="reasoningEffort"]',
+      ) as HTMLSelectElement | null
+      if (!select) throw new Error('reasoning effort select not rendered')
+      return select
+    })
+    await waitFor(() => expect(effort).toHaveValue(''))
+    expect(Array.from(effort.options).map(option => option.value)).toEqual([
+      '',
+      'low',
+      'high',
+    ])
+    await waitFor(() => expect(
+      (getStorageSnapshot().dh_prefs as typeof DEFAULT_PREFS).reasoningEffort,
+    ).toBe(''))
+    expect(getStorageSnapshot().dh_model_list).toEqual([{
+      id: 'model-a',
+      name: 'Model A',
+      supported_reasoning_efforts: ['low', 'high'],
+      default_reasoning_effort: null,
+    }])
+    await waitFor(() => expect(findCatchUpCall('reasoning_effort', '')).toBeTruthy())
+    expect(clearEffortCalls()).toHaveLength(1)
+  })
+
+  it('normalizes a Host model list before caching and rendering it', async () => {
+    const getConfig = deferNextResponse('get_config')
+    const listModels = deferNextResponse('list_models')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: false,
+          model: 'model-a',
+          reasoning_effort: 'max',
+        },
+      },
+    }))
+    await act(async () => listModels.resolve({
+      status: 'success',
+      data: {
+        models: [{
+          id: 'model-a',
+          name: 'Model A',
+          supported_reasoning_efforts: ['medium', 'max', 'xhigh'],
+          default_reasoning_effort: 'max',
+        }],
+      },
+    }))
+    fireEvent.click(document.querySelector('[data-section="model"]') as HTMLButtonElement)
+
+    const effort = await waitFor(() => {
+      const select = document.querySelector(
+        'select[name="reasoningEffort"]',
+      ) as HTMLSelectElement | null
+      if (!select) throw new Error('reasoning effort select not rendered')
+      return select
+    })
+    await waitFor(() => expect(effort).toHaveValue(''))
+    expect(Array.from(effort.options).map(option => option.value)).toEqual([
+      '',
+      'medium',
+      'xhigh',
+    ])
+    expect(getStorageSnapshot().dh_model_list).toEqual([{
+      id: 'model-a',
+      name: 'Model A',
+      supported_reasoning_efforts: ['medium', 'xhigh'],
+      default_reasoning_effort: null,
+    }])
+    await waitFor(() => expect(getStorageSnapshot().dh_prefs).toMatchObject({
+      model: 'model-a',
+      reasoningEffort: '',
+    }))
+    expect(clearEffortCalls()).toHaveLength(1)
+  })
+
+  it('lets hydrated Host model prefs win over a pre-hydration cache repair', async () => {
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        model: 'model-a',
+        reasoningEffort: 'max',
+      },
+      dh_model_list: [{
+        id: 'model-a',
+        name: 'Model A',
+        supported_reasoning_efforts: ['low', 'max'],
+        default_reasoning_effort: 'max',
+      }],
+      dh_model_list_fetched_at: Date.now(),
+    })
+    const outerPrefs = deferNextStorageGet('dh_prefs')
+    const innerPrefs = deferNextStorageGet('dh_prefs')
+    const modelCache = deferNextStorageGet('dh_model_list')
+    const getConfig = deferNextResponse('get_config')
+    render(<Options />)
+
+    await act(async () => {
+      outerPrefs.resolve(undefined)
+      innerPrefs.resolve(undefined)
+    })
+    await act(async () => modelCache.resolve(undefined))
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: false,
+          model: 'model-b',
+          reasoning_effort: 'high',
+        },
+      },
+    }))
+
+    await waitFor(() => expect(getStorageSnapshot().dh_prefs).toMatchObject({
+      model: 'model-b',
+      reasoningEffort: 'high',
+    }))
+    expect(findCatchUpCall('reasoning_effort', '')).toBeUndefined()
+  })
+
+  it('preserves an effort when its selected model is absent from the cache', async () => {
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        model: 'model-missing',
+        reasoningEffort: 'high',
+      },
+      dh_model_list: [{
+        id: 'model-a',
+        name: 'Model A',
+        supported_reasoning_efforts: ['low'],
+      }],
+      dh_model_list_fetched_at: Date.now(),
+    })
+    const getConfig = deferNextResponse('get_config')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: false,
+          model: 'model-missing',
+          reasoning_effort: 'high',
+        },
+      },
+    }))
+
+    await waitFor(() => expect(getStorageSnapshot().dh_prefs).toMatchObject({
+      model: 'model-missing',
+      reasoningEffort: 'high',
+    }))
+    expect(findCatchUpCall('reasoning_effort', '')).toBeUndefined()
+  })
+
+  it('treats an explicit empty capability list as known no support', async () => {
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        model: 'model-a',
+        reasoningEffort: 'high',
+      },
+      dh_model_list: [{
+        id: 'model-a',
+        name: 'Model A',
+        supported_reasoning_efforts: [],
+        default_reasoning_effort: null,
+      }],
+      dh_model_list_fetched_at: Date.now(),
+    })
+    const getConfig = deferNextResponse('get_config')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: false,
+          model: 'model-a',
+          reasoning_effort: 'high',
+        },
+      },
+    }))
+
+    await waitFor(() => expect(getStorageSnapshot().dh_prefs).toMatchObject({
+      model: 'model-a',
+      reasoningEffort: '',
+    }))
+    expect(clearEffortCalls()).toHaveLength(1)
+  })
+
+  it('preserves effort when a stale cache is followed by a Host refresh failure', async () => {
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        model: 'model-a',
+        reasoningEffort: 'high',
+      },
+      dh_model_list: [{
+        id: 'model-a',
+        name: 'Model A',
+        supported_reasoning_efforts: ['low'],
+      }],
+      dh_model_list_fetched_at: Date.now() - (25 * 60 * 60 * 1000),
+    })
+    const getConfig = deferNextResponse('get_config')
+    const listModels = deferNextResponse('list_models')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: false,
+          model: 'model-a',
+          reasoning_effort: 'high',
+        },
+      },
+    }))
+    await act(async () => listModels.resolve({
+      status: 'error',
+      errorKind: 'unavailable',
+      error: 'safe fallback',
+    }))
+
+    await waitFor(() => expect(listModelCalls()).toHaveLength(1))
+    expect(getStorageSnapshot().dh_prefs).toMatchObject({
+      model: 'model-a',
+      reasoningEffort: 'high',
+    })
+    expect(clearEffortCalls()).toHaveLength(0)
+  })
+
+  it('treats a future-dated cache as stale and preserves effort on refresh failure', async () => {
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        model: 'model-a',
+        reasoningEffort: 'high',
+      },
+      dh_model_list: [{
+        id: 'model-a',
+        name: 'Model A',
+        supported_reasoning_efforts: ['low'],
+      }],
+      dh_model_list_fetched_at: Date.now() + (25 * 60 * 60 * 1000),
+    })
+    const getConfig = deferNextResponse('get_config')
+    const listModels = deferNextResponse('list_models')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: false,
+          model: 'model-a',
+          reasoning_effort: 'high',
+        },
+      },
+    }))
+    await waitFor(() => expect(listModelCalls()).toHaveLength(1))
+    await act(async () => listModels.resolve({
+      status: 'error',
+      errorKind: 'unavailable',
+      error: 'safe fallback',
+    }))
+
+    expect(getStorageSnapshot().dh_prefs).toMatchObject({
+      model: 'model-a',
+      reasoningEffort: 'high',
+    })
+    expect(clearEffortCalls()).toHaveLength(0)
+  })
+
+  it('preserves effort and offers every value when cached capability is missing', async () => {
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        model: 'model-a',
+        reasoningEffort: 'high',
+      },
+      dh_model_list: [{ id: 'model-a', name: 'Model A' }],
+      dh_model_list_fetched_at: Date.now(),
+    })
+    const getConfig = deferNextResponse('get_config')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: false,
+          model: 'model-a',
+          reasoning_effort: 'high',
+        },
+      },
+    }))
+
+    await waitFor(() => expect(getStorageSnapshot().dh_prefs).toMatchObject({
+      model: 'model-a',
+      reasoningEffort: 'high',
+    }))
+    fireEvent.click(document.querySelector('[data-section="model"]') as HTMLButtonElement)
+    const effort = document.querySelector(
+      'select[name="reasoningEffort"]',
+    ) as HTMLSelectElement
+    expect(Array.from(effort.options).map(option => option.value)).toEqual([
+      '',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+    ])
+    expect(clearEffortCalls()).toHaveLength(0)
+    expect(listModelCalls()).toHaveLength(0)
+  })
+
+  it.each([
+    ['non-array', 'high'],
+    ['array with non-string members', [null]],
+  ] as const)('refreshes a fresh %s capability without clearing effort', async (_name, capability) => {
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        model: 'model-a',
+        reasoningEffort: 'high',
+      },
+      dh_model_list: [{
+        id: 'model-a',
+        name: 'Model A',
+        supported_reasoning_efforts: capability,
+      }],
+      dh_model_list_fetched_at: Date.now(),
+    })
+    const getConfig = deferNextResponse('get_config')
+    const listModels = deferNextResponse('list_models')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: false,
+          model: 'model-a',
+          reasoning_effort: 'high',
+        },
+      },
+    }))
+    await waitFor(() => expect(listModelCalls()).toHaveLength(1))
+    await act(async () => listModels.resolve({
+      status: 'error',
+      errorKind: 'unavailable',
+      error: 'safe fallback',
+    }))
+
+    expect(getStorageSnapshot().dh_prefs).toMatchObject({
+      model: 'model-a',
+      reasoningEffort: 'high',
+    })
+    expect(clearEffortCalls()).toHaveLength(0)
+  })
+
+  it('rejects malformed Host capability without clearing effort or replacing cache', async () => {
+    const cachedModels = [{
+      id: 'model-a',
+      name: 'Cached Model A',
+      supported_reasoning_efforts: ['high'],
+    }]
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        model: 'model-a',
+        reasoningEffort: 'high',
+      },
+      dh_model_list: cachedModels,
+      dh_model_list_fetched_at: Date.now() - (25 * 60 * 60 * 1000),
+    })
+    const getConfig = deferNextResponse('get_config')
+    const listModels = deferNextResponse('list_models')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: false,
+          model: 'model-a',
+          reasoning_effort: 'high',
+        },
+      },
+    }))
+    await waitFor(() => expect(listModelCalls()).toHaveLength(1))
+    await act(async () => listModels.resolve({
+      status: 'success',
+      data: {
+        models: [{
+          id: 'model-a',
+          name: 'Malformed Model A',
+          supported_reasoning_efforts: [null],
+        }],
+      },
+    }))
+
+    expect(getStorageSnapshot().dh_prefs).toMatchObject({
+      model: 'model-a',
+      reasoningEffort: 'high',
+    })
+    expect(getStorageSnapshot().dh_model_list).toEqual(cachedModels)
+    expect(clearEffortCalls()).toHaveLength(0)
+  })
+
+  it('preserves effort when selecting a model from stale cache before refresh fails', async () => {
+    seedStorage({
+      dh_prefs: {
+        ...DEFAULT_PREFS,
+        model: 'model-a',
+        reasoningEffort: 'high',
+      },
+      dh_model_list: [{
+        id: 'model-a',
+        name: 'Model A',
+        supported_reasoning_efforts: ['high'],
+      }, {
+        id: 'model-b',
+        name: 'Model B',
+        supported_reasoning_efforts: ['low'],
+      }],
+      dh_model_list_fetched_at: Date.now() - (25 * 60 * 60 * 1000),
+    })
+    const getConfig = deferNextResponse('get_config')
+    const listModels = deferNextResponse('list_models')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: {
+          use_workspace_only: false,
+          model: 'model-a',
+          reasoning_effort: 'high',
+        },
+      },
+    }))
+    fireEvent.click(document.querySelector('[data-section="model"]') as HTMLButtonElement)
+    fireEvent.change(document.querySelector('select[name="model"]') as HTMLSelectElement, {
+      target: { value: 'model-b' },
+    })
+    await act(async () => listModels.resolve({
+      status: 'error',
+      errorKind: 'unavailable',
+      error: 'safe fallback',
+    }))
+
+    await waitFor(() => expect(getStorageSnapshot().dh_prefs).toMatchObject({
+      model: 'model-b',
+      reasoningEffort: 'high',
+    }))
+    expect(clearEffortCalls()).toHaveLength(0)
+  })
+
+  it('refreshes a malformed fresh cache and replaces it with Host models', async () => {
+    seedStorage({
+      dh_model_list: [
+        null,
+        'hostile-row',
+        {
+          id: 7,
+          name: 'Malformed',
+          supported_reasoning_efforts: ['low'],
+        },
+      ],
+      dh_model_list_fetched_at: Date.now(),
+    })
+    const getConfig = deferNextResponse('get_config')
+    const listModels = deferNextResponse('list_models')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+    await waitFor(() => expect(listModelCalls()).toHaveLength(1))
+    await act(async () => listModels.resolve({
+      status: 'success',
+      data: {
+        models: [{
+          id: 'model-a',
+          name: 'Model A',
+          supported_reasoning_efforts: ['low'],
+          default_reasoning_effort: 'low',
+        }],
+      },
+    }))
+
+    await waitFor(() => expect(getStorageSnapshot().dh_model_list).toEqual([{
+      id: 'model-a',
+      name: 'Model A',
+      supported_reasoning_efforts: ['low'],
+      default_reasoning_effort: 'low',
+    }]))
+  })
+
+  it('allows only one in-flight model request across StrictMode and rapid Refresh', async () => {
+    seedStorage({
+      dh_model_list: [{
+        id: 'stale-model',
+        name: 'Stale Model',
+        supported_reasoning_efforts: ['low'],
+      }],
+      dh_model_list_fetched_at: Date.now() - (25 * 60 * 60 * 1000),
+    })
+    const getConfig = deferNextResponse('get_config')
+    const listModels = deferNextResponse('list_models')
+    render(<StrictMode><Options /></StrictMode>)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+    fireEvent.click(document.querySelector('[data-section="model"]') as HTMLButtonElement)
+    const refresh = await screen.findByRole('button', { name: /syncing/i })
+    fireEvent.click(refresh)
+    fireEvent.click(refresh)
+
+    await waitFor(() => expect(listModelCalls()).toHaveLength(1))
+    await act(async () => listModels.resolve({
+      status: 'success',
+      data: {
+        models: [{
+          id: 'latest-model',
+          name: 'Latest Model',
+          supported_reasoning_efforts: [],
+          default_reasoning_effort: null,
+        }],
+      },
+    }))
+    await waitFor(() => expect(getStorageSnapshot().dh_model_list).toEqual([{
+      id: 'latest-model',
+      name: 'Latest Model',
+      supported_reasoning_efforts: [],
+      default_reasoning_effort: null,
+    }]))
+  })
+
+  it('queues a forced refresh clicked while the initial cache read is in flight', async () => {
+    seedStorage({
+      dh_model_list: [{
+        id: 'cached-model',
+        name: 'Cached Model',
+        supported_reasoning_efforts: ['low'],
+      }],
+      dh_model_list_fetched_at: Date.now(),
+    })
+    const cacheRead = deferNextStorageGet('dh_model_list')
+    const getConfig = deferNextResponse('get_config')
+    const listModels = deferNextResponse('list_models')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+    fireEvent.click(document.querySelector('[data-section="model"]') as HTMLButtonElement)
+    fireEvent.click(await screen.findByRole('button', { name: /Refresh/i }))
+    expect(listModelCalls()).toHaveLength(0)
+
+    await act(async () => cacheRead.resolve(undefined))
+    await waitFor(() => expect(listModelCalls()).toHaveLength(1))
+    await act(async () => listModels.resolve({
+      status: 'success',
+      data: {
+        models: [{
+          id: 'fresh-model',
+          name: 'Fresh Model',
+          supported_reasoning_efforts: [],
+          default_reasoning_effort: null,
+        }],
+      },
+    }))
+
+    await waitFor(() => expect(getStorageSnapshot().dh_model_list).toEqual([{
+      id: 'fresh-model',
+      name: 'Fresh Model',
+      supported_reasoning_efforts: [],
+      default_reasoning_effort: null,
+    }]))
+  })
+
+  it('surfaces a safe warning when a fresh cache rewrite fails', async () => {
+    seedStorage({
+      dh_model_list: [{
+        id: 'model-a',
+        name: 'Model A',
+        supported_reasoning_efforts: ['low', 'future'],
+        default_reasoning_effort: 'future',
+      }],
+      dh_model_list_fetched_at: Date.now(),
+    })
+    const rewrite = deferNextStorageSet('dh_model_list')
+    const getConfig = deferNextResponse('get_config')
+    render(<Options />)
+
+    await act(async () => getConfig.resolve({
+      status: 'success',
+      data: {
+        root_path: '',
+        prompt_source_status: { status: 'ok' },
+        extension_preferences: { use_workspace_only: false },
+      },
+    }))
+    await act(async () => rewrite.reject(new Error('RAW CACHE STORAGE SECRET')))
+    fireEvent.click(document.querySelector('[data-section="model"]') as HTMLButtonElement)
+
+    expect(await screen.findByText(/Showing cached list; click Refresh to retry/i)).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('RAW CACHE STORAGE SECRET')
+    expect(listModelCalls()).toHaveLength(0)
+  })
 })
 
 describe('Options manifest blur retry state', () => {

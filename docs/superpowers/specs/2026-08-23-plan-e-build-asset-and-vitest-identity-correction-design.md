@@ -1,5 +1,10 @@
 # Plan E Build Asset And Vitest Identity Correction Design
 
+> **Partial supersession:** Task 9 evidence orchestration was replaced by
+> `2026-08-24-plan-e-task-9-evidence-correction-design.md`. The public default asset
+> correction remains valid; do not remove it or rebuild the retired executor.
+> Current development entry: `docs/session-handoff-2026-07-15.md`.
+
 **Status:** Accepted
 **Date:** 2026-08-23
 **Authorized during:** Plan E scripted-executor plan review

@@ -46,6 +46,12 @@ import { getExtensionVersion } from '../utils/version';
 import { localizePromptSourceError } from '../utils/promptSourceErrors';
 import { safeErrorText } from '../utils/safeErrorText';
 import { ownDataProperty } from '../utils/ownData';
+import { useVisibleCompletionAck } from '../hooks/useVisibleCompletionAck';
+import {
+    parseUpdateState,
+    type UpdateErrorCode,
+    type UpdateState,
+} from '../background/updateRuntime';
 import {
     collapseBookmarkFolders,
     loadBookmarkItems,
@@ -72,6 +78,69 @@ type PromptSourceIssue = {
     errorCode?: string;
     fallback: string;
 };
+
+function projectedUpdateState(value: unknown): UpdateState | null {
+    const property = ownDataProperty(value, 'state');
+    return property.kind === 'value' ? parseUpdateState(property.value) : null;
+}
+
+function projectedUpdateVersion(state: UpdateState): string | null {
+    if (state.kind === 'available' || state.kind === 'complete') {
+        return state.update.version;
+    }
+    if (state.kind === 'recovery-required') {
+        return state.transaction?.targetVersion ?? null;
+    }
+    return state.kind === 'idle' ? null : state.targetVersion;
+}
+
+function projectedUpdateError(state: UpdateState): UpdateErrorCode | null {
+    if (state.kind === 'recovery-required') return state.code;
+    if (state.kind === 'preparing' || state.kind === 'activating') {
+        return state.errorCode ?? null;
+    }
+    if (state.kind === 'reload-pending' || state.kind === 'ack-pending') {
+        return state.errorCode ?? null;
+    }
+    return null;
+}
+
+function updateErrorText(errorCode: UpdateErrorCode, t: (key: string) => string): string {
+    const keys: Record<UpdateErrorCode, string> = {
+        invalid_update_request: 'invalidUpdateRequest',
+        installation_integrity_failed: 'updateInstallerRequired',
+        update_already_in_progress: 'updateAlreadyInProgress',
+        update_prepare_failed: 'updatePrepareFailed',
+        update_activation_failed: 'updateActivationFailed',
+        update_not_terminal: 'updateNotTerminal',
+        update_cleanup_failed: 'updateCleanupFailed',
+        source_update_disabled: 'sourceUpdateDisabled',
+        manual_recovery_required: 'manualRecoveryRequired',
+    };
+    return t(keys[errorCode]);
+}
+
+function updateIsBusy(state: UpdateState): boolean {
+    if (state.kind === 'preparing' || state.kind === 'activating') {
+        return state.errorCode === undefined;
+    }
+    if (state.kind === 'reload-pending' || state.kind === 'ack-pending') {
+        return state.errorCode === undefined;
+    }
+    return state.kind === 'polling';
+}
+
+function updateCanStart(state: UpdateState): boolean {
+    return state.kind === 'available'
+        || state.kind === 'recovery-required' && state.transaction !== undefined
+        || state.kind === 'preparing' && state.errorCode !== undefined
+        || state.kind === 'activating'
+            && state.errorCode !== undefined
+            && !state.activationRetryUsed
+        || (state.kind === 'reload-pending' || state.kind === 'ack-pending')
+            && state.errorCode !== undefined
+        || state.kind === 'complete' && state.outcome === 'rolled-back';
+}
 
 type TeamMirrorIdentity = Readonly<{
     enabled: boolean;
@@ -677,6 +746,7 @@ const OptionsInner: React.FC = () => {
     // usable, then schedule any missed Host update through the same catch-up
     // effect as a successful response.
     const prefsHydratedRef = useRef(false);
+    const [prefsHydrated, setPrefsHydrated] = useState(false);
 
     const [promptHealthIssue, setPromptHealthIssue] = useState<PromptSourceIssue | null>(null);
     const [configUpdateIssue, setConfigUpdateIssue] = useState<ConfigUpdateIssue | null>(null);
@@ -769,8 +839,49 @@ const OptionsInner: React.FC = () => {
         }
     }, []);
     const [hostVersion, setHostVersion] = useState<string>("");
-    const [updateAvailable, setUpdateAvailable] = useState<{version: string, url: string} | null>(null);
-    const [isUpdating, setIsUpdating] = useState(false);
+    const [updateState, setUpdateState] = useState<UpdateState>({ kind: 'idle' });
+    const [updateStateReady, setUpdateStateReady] = useState(false);
+    const updateStateRef = useRef<UpdateState | null>(null);
+    const [hostConfigMerged, setHostConfigMerged] = useState(false);
+    const autoUpdateCheckConsumedRef = useRef(false);
+    const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+    const updateCheckRef = useRef<{ token: object; timer: number } | null>(null);
+    const canCheckUpdates = updateStateReady && !isCheckingUpdates
+        && ['idle', 'available', 'complete'].includes(updateState.kind);
+    const completionTransactionId = updateState.kind === 'complete'
+        ? updateState.transactionId
+        : null;
+    const updateVersion = updateState.kind === 'complete' && updateState.outcome === 'rolled-back'
+        ? getExtensionVersion()
+        : projectedUpdateVersion(updateState);
+    const updateError = projectedUpdateError(updateState);
+    const isUpdating = updateIsBusy(updateState);
+    const canStartUpdate = !isCheckingUpdates && updateCanStart(updateState);
+    const showUpdateAction = updateState.kind !== 'idle'
+        && (updateState.kind !== 'complete' || updateState.outcome === 'rolled-back');
+    const updateActionLabel = updateState.kind === 'available'
+        ? t('updateNow')
+        : isUpdating
+            ? t('updating')
+            : t('retryUpdate');
+    const updateCompletion = updateState.kind === 'complete'
+        ? `${t(updateState.outcome === 'committed' ? 'updateComplete' : 'updateRolledBack')} ${t('version')} ${updateVersion}`
+        : null;
+    useVisibleCompletionAck({
+        transactionId: completionTransactionId,
+        surfaceVisible: completionTransactionId !== null,
+    });
+    const latestTranslationRef = useRef(t);
+    latestTranslationRef.current = t;
+
+    const settleUpdateCheck = (token: object, message: string, type: 'success' | 'error') => {
+        const pending = updateCheckRef.current;
+        if (!pending || pending.token !== token) return;
+        clearTimeout(pending.timer);
+        updateCheckRef.current = null;
+        setIsCheckingUpdates(false);
+        showStatus(message, type, 5000);
+    };
     
     // Editor State
     const [editingItemPath, setEditingItemPath] = useState<number[] | null>(null); // path of indices
@@ -803,11 +914,18 @@ const OptionsInner: React.FC = () => {
         supported_reasoning_efforts?: string[];
         default_reasoning_effort?: string | null;
     }
-    const [modelList, setModelList] = useState<ModelInfo[]>([]);
+    const [modelCatalog, setModelCatalog] = useState<{
+        models: ModelInfo[];
+        canRepairEffort: boolean;
+    }>({ models: [], canRepairEffort: false });
+    const modelList = modelCatalog.models;
     const [modelFetching, setModelFetching] = useState<boolean>(false);
     const [modelFetchError, setModelFetchError] = useState<null | {
         kind: 'auth' | 'unavailable' | 'unknown';
     }>(null);
+    const modelFetchGenerationRef = useRef(0);
+    const modelFetchInFlightRef = useRef<number | null>(null);
+    const modelForceRefreshPendingRef = useRef(false);
     // Sidebar-nav layout (spec 2026-07-03-options-sidebar-nav-layout). The
     // Options page is a left nav + wide content pane; only the active section
     // renders. This is a pure shell change — every field's JSX/state/persist
@@ -1498,6 +1616,7 @@ const OptionsInner: React.FC = () => {
                      // open. Without this fallback the guard would deadlock
                      // the user when host crashes / starts up slowly.
                      prefsHydratedRef.current = true;
+                     setPrefsHydrated(true);
 
                      // Catch-up attempt for user edits made during the window.
                      // Host is unreachable so this RPC will almost certainly
@@ -1508,8 +1627,15 @@ const OptionsInner: React.FC = () => {
                      return;
                 }
                 
-                if (response && response.status === "success" && response.data) {
-                    const hostConfig = response.data;
+                const configStatus = ownDataProperty(response, 'status');
+                const configData = ownDataProperty(response, 'data');
+                if (configStatus.kind === 'value' && configStatus.value === 'success'
+                    && configData.kind === 'value'
+                    && typeof configData.value === 'object' && configData.value !== null
+                    && !Array.isArray(configData.value)
+                    && (Object.getPrototypeOf(configData.value) === Object.prototype
+                        || Object.getPrototypeOf(configData.value) === null)) {
+                    const hostConfig = configData.value as Record<string, any>;
                     const promptSourceStatus = hostConfig.prompt_source_status;
                     console.log("[Options] Synced config from Host:", {
                         host_version: hostConfig.host_version,
@@ -1682,22 +1808,26 @@ const OptionsInner: React.FC = () => {
                         const merged = changed ? newPrefs : prev;
                         setCurrentPrefs(merged);
                         prefsHydratedRef.current = true;
+                        setPrefsHydrated(true);
                         requestHydrationMirror(merged);
+                        setHostConfigMerged(true);
                     }
                     requestHydrationCatchUp();
                 } else {
                     // Host responded but not with success+data. Same
                     // rationale as the lastError branch above — don't
                     // deadlock the user. Local dh_prefs is what we have.
+                    const configErrorCode = ownDataProperty(response, 'error_code');
                     console.warn(
                         "[Options] Host get_config returned non-success; " +
                         "marking prefs hydrated to unblock user actions.",
                         {
-                            status: response?.status,
-                            error_code: response?.error_code,
+                            status: configStatus.kind === 'value' ? configStatus.value : undefined,
+                            error_code: configErrorCode.kind === 'value' ? configErrorCode.value : undefined,
                         },
                     );
                     prefsHydratedRef.current = true;
+                    setPrefsHydrated(true);
 
                     // Catch-up still attempted in the non-success branch — if
                     // the user edited during the window, their changes are in
@@ -2464,19 +2594,156 @@ const OptionsInner: React.FC = () => {
     // classified fetch failures (never a silent empty list — spec § 5).
     const MODEL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
     const fetchModels = (force: boolean = false) => {
+        if (modelFetchInFlightRef.current !== null) {
+            modelForceRefreshPendingRef.current ||= force;
+            return;
+        }
+        const generation = ++modelFetchGenerationRef.current;
+        modelFetchInFlightRef.current = generation;
+        const ownsRequest = () =>
+            modelFetchGenerationRef.current === generation
+            && modelFetchInFlightRef.current === generation;
+        const finishRequest = () => {
+            if (!ownsRequest()) return;
+            modelFetchInFlightRef.current = null;
+            setModelFetching(false);
+            if (modelForceRefreshPendingRef.current) {
+                modelForceRefreshPendingRef.current = false;
+                fetchModels(true);
+            }
+        };
+
         chrome.storage.local.get(['dh_model_list', 'dh_model_list_fetched_at'], (cache) => {
-            const cached: ModelInfo[] | null = Array.isArray(cache.dh_model_list) ? cache.dh_model_list : null;
-            const fetchedAt = typeof cache.dh_model_list_fetched_at === 'number' ? cache.dh_model_list_fetched_at : 0;
-            const stale = Date.now() - fetchedAt > MODEL_CACHE_MAX_AGE_MS;
+            if (!ownsRequest()) return;
+            const cachedProperty = ownDataProperty(cache, 'dh_model_list');
+            const cached = cachedProperty.kind === 'value'
+                && Array.isArray(cachedProperty.value)
+                ? cachedProperty.value
+                : null;
+            const fetchedAtProperty = ownDataProperty(cache, 'dh_model_list_fetched_at');
+            const fetchedAt = fetchedAtProperty.kind === 'value'
+                && typeof fetchedAtProperty.value === 'number'
+                && Number.isFinite(fetchedAtProperty.value)
+                ? fetchedAtProperty.value
+                : 0;
+            const cacheAge = Date.now() - fetchedAt;
+            const stale = cacheAge < 0 || cacheAge > MODEL_CACHE_MAX_AGE_MS;
+
+            const normalizeModels = (rows: unknown[]) => {
+                let changed = false;
+                let structurallyValid = true;
+                const supportedValues = new Set(['low', 'medium', 'high', 'xhigh']);
+                const models: ModelInfo[] = [];
+
+                try {
+                    for (const row of rows) {
+                        const id = ownDataProperty(row, 'id');
+                        if (
+                            id.kind !== 'value'
+                            || typeof id.value !== 'string'
+                            || !id.value.trim()
+                        ) {
+                            changed = true;
+                            structurallyValid = false;
+                            continue;
+                        }
+
+                        const name = ownDataProperty(row, 'name');
+                        const effortsProperty = ownDataProperty(
+                            row,
+                            'supported_reasoning_efforts',
+                        );
+                        let efforts: string[] | undefined;
+                        if (
+                            effortsProperty.kind === 'value'
+                            && Array.isArray(effortsProperty.value)
+                        ) {
+                            efforts = [];
+                            for (const effort of effortsProperty.value) {
+                                if (typeof effort !== 'string') {
+                                    changed = true;
+                                    structurallyValid = false;
+                                    efforts = undefined;
+                                    break;
+                                } else if (supportedValues.has(effort)) {
+                                    efforts.push(effort);
+                                } else {
+                                    changed = true;
+                                }
+                            }
+                        } else if (effortsProperty.kind !== 'absent') {
+                            changed = true;
+                            structurallyValid = false;
+                        }
+
+                        const defaultProperty = ownDataProperty(
+                            row,
+                            'default_reasoning_effort',
+                        );
+                        const defaultEffort = efforts
+                            && defaultProperty.kind === 'value'
+                            && typeof defaultProperty.value === 'string'
+                            && efforts.includes(defaultProperty.value)
+                            ? defaultProperty.value
+                            : null;
+                        changed ||= defaultProperty.kind !== 'value'
+                            || defaultProperty.value !== defaultEffort;
+
+                        models.push({
+                            id: id.value,
+                            name: name.kind === 'value'
+                                && typeof name.value === 'string'
+                                && name.value
+                                ? name.value
+                                : id.value,
+                            ...(efforts
+                                ? { supported_reasoning_efforts: efforts }
+                                : {}),
+                            default_reasoning_effort: defaultEffort,
+                        });
+                    }
+                } catch {
+                    changed = true;
+                    structurallyValid = false;
+                }
+
+                return { models, changed, structurallyValid };
+            };
 
             // Populate from cache immediately so the dropdown works offline /
             // before the network call returns (graceful degradation).
+            let normalizedCache: ReturnType<typeof normalizeModels> | null = null;
             if (cached && cached.length) {
-                setModelList(cached);
+                normalizedCache = normalizeModels(cached);
+                setModelCatalog({
+                    models: normalizedCache.models,
+                    canRepairEffort: !stale && normalizedCache.structurallyValid,
+                });
             }
 
             // Skip the host RPC unless forced, or the cache is empty / stale.
-            if (!force && cached && cached.length && !stale) {
+            const needsHost = force
+                || !normalizedCache
+                || !normalizedCache.structurallyValid
+                || normalizedCache.models.length === 0
+                || stale;
+            if (!needsHost && normalizedCache) {
+                if (!normalizedCache.changed) {
+                    finishRequest();
+                    return;
+                }
+                chrome.storage.local.set(
+                    { dh_model_list: normalizedCache.models },
+                    () => {
+                        if (!ownsRequest()) return;
+                        if (chrome.runtime.lastError) {
+                            setModelFetchError({ kind: 'unavailable' });
+                        } else {
+                            setModelFetchError(null);
+                        }
+                        finishRequest();
+                    },
+                );
                 return;
             }
 
@@ -2484,24 +2751,56 @@ const OptionsInner: React.FC = () => {
             chrome.runtime.sendMessage(
                 { type: "NATIVE_MSG", payload: { action: "list_models" } },
                 (response) => {
-                    setModelFetching(false);
+                    if (!ownsRequest()) return;
                     if (chrome.runtime.lastError) {
                         // Host unreachable — keep cached list, surface as unavailable.
                         setModelFetchError({ kind: 'unavailable' });
+                        finishRequest();
                         return;
                     }
                     if (!response || response.status !== "success") {
                         const kind = (response?.errorKind as 'auth' | 'unavailable' | 'unknown') || 'unknown';
                         setModelFetchError({ kind }); // keep cached list intact
+                        finishRequest();
                         return;
                     }
-                    const models = (response.data?.models || []) as ModelInfo[];
-                    setModelList(models);
-                    setModelFetchError(null);
-                    chrome.storage.local.set({
-                        dh_model_list: models,
-                        dh_model_list_fetched_at: Date.now(),
+                    const data = ownDataProperty(response, 'data');
+                    const modelsProperty = data.kind === 'value'
+                        ? ownDataProperty(data.value, 'models')
+                        : { kind: 'invalid' as const };
+                    const rows = modelsProperty.kind === 'value'
+                        && Array.isArray(modelsProperty.value)
+                        ? modelsProperty.value
+                        : [];
+                    const normalized = normalizeModels(rows);
+                    if (
+                        modelsProperty.kind !== 'value'
+                        || !Array.isArray(modelsProperty.value)
+                        || !normalized.structurallyValid
+                    ) {
+                        setModelFetchError({ kind: 'unknown' });
+                        finishRequest();
+                        return;
+                    }
+                    setModelCatalog({
+                        models: normalized.models,
+                        canRepairEffort: true,
                     });
+                    chrome.storage.local.set(
+                        {
+                            dh_model_list: normalized.models,
+                            dh_model_list_fetched_at: Date.now(),
+                        },
+                        () => {
+                            if (!ownsRequest()) return;
+                            if (chrome.runtime.lastError) {
+                                setModelFetchError({ kind: 'unavailable' });
+                            } else {
+                                setModelFetchError(null);
+                            }
+                            finishRequest();
+                        },
+                    );
                 }
             );
         });
@@ -2513,6 +2812,23 @@ const OptionsInner: React.FC = () => {
         fetchModels(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        if (!prefsHydrated || !modelCatalog.canRepairEffort) return;
+        const current = prefsRef.current;
+        const selected = modelList.find(model => model.id === current.model);
+        const currentEffort = current.reasoningEffort || '';
+        if (
+            selected
+            && currentEffort
+            && Array.isArray(selected.supported_reasoning_efforts)
+            && !selected.supported_reasoning_efforts.includes(currentEffort)
+        ) {
+            updatePref({ reasoningEffort: '' });
+        }
+        // updatePref synchronously updates prefsRef, preventing StrictMode replay.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [prefsHydrated, modelCatalog, prefs.model, prefs.reasoningEffort]);
 
     const handleTeamRefresh = async () => {
         const manifestUrl = prefsRef.current.teamManifestUrl;
@@ -2587,119 +2903,131 @@ const OptionsInner: React.FC = () => {
         });
     };
 
-    // Listen for updates
-    //
-    // `t` is captured in a ref because the runtime-message handler is
-    // registered once at mount (deps []) — putting `t` in the dep array
-    // would remove+re-add the listener on every language change and can
-    // drop messages that arrive during the swap. Same pattern as
-    // isAnalyzingRef in FAB.tsx (see AGENTS.md § notes on ref-vs-deps
-    // trade-offs). Without this ref, `t()` inside handleRuntimeMsg
-    // returns the language that was active AT MOUNT TIME — for a user
-    // who set language=zh but whose prefs hydrate from the host after
-    // the effect runs, the 'You are up to date!' string stays in English
-    // even after the UI otherwise switches to Chinese.
-    const tRef = useRef(t);
+    // The Service Worker owns update storage, Host actions, and reloads.
+    // Options only hydrates and renders its projected state.
     useEffect(() => {
-        tRef.current = t;
-    }, [t]);
-
-    useEffect(() => {
+        let mounted = true;
+        let liveProjectionSeen = false;
+        const applyProjection = (value: unknown) => {
+            const next = projectedUpdateState(value);
+            if (mounted && next) {
+                updateStateRef.current = next;
+                setUpdateState(next);
+                setUpdateStateReady(true);
+            }
+        };
         const handleRuntimeMsg = (message: unknown) => {
             const type = ownDataProperty(message, 'type');
-            if (type.kind !== 'value') return;
-            if (type.value === "NATIVE_UPDATE_AVAILABLE") {
-                const updateMessage = message as {
-                    payload: { version: string; url: string };
-                };
-                const currentVer = getExtensionVersion();
-                if (updateMessage.payload.version === currentVer) {
-                    setUpdateAvailable(null);
-                    chrome.storage.local.remove("pending_update");
-                    return;
+            if (type.kind === 'value' && type.value === 'DH_UPDATE_STATE') {
+                const next = projectedUpdateState(message);
+                if (next) {
+                    liveProjectionSeen = true;
+                    applyProjection({ state: next });
                 }
-                console.log("[Options] Received update available:", updateMessage.payload);
-                setUpdateAvailable(updateMessage.payload);
-                showSuccess(`${updateMessage.payload.version.replace(/^v?/, 'v')} ${tRef.current('availableForUpdate')}`, 5000);
-            }
-            
-            if (type.value === "NATIVE_UPDATE_NOT_AVAILABLE") {
-                showSuccess(tRef.current('upToDate'), 3000);
-            }
-
-            if (type.value === "NATIVE_UPDATE_ERROR") {
+            } else if (type.kind === 'value' && type.value === 'DH_UPDATE_CHECK_RESULT') {
+                const outcome = ownDataProperty(message, 'outcome');
+                const pending = updateCheckRef.current;
+                if (!pending || outcome.kind !== 'value') return;
+                if (outcome.value === 'not-available' || outcome.value === 'available' || outcome.value === 'finished') {
+                    settleUpdateCheck(pending.token, latestTranslationRef.current(
+                        outcome.value === 'not-available' ? 'upToDate'
+                            : outcome.value === 'available' ? 'updateAvailable' : 'updateCheckFinished',
+                    ), 'success');
+                }
+            } else if (type.kind === 'value' && type.value === 'NATIVE_UPDATE_ERROR') {
                 const payload = ownDataProperty(message, 'payload');
                 const candidate = payload.kind === 'value'
                     ? ownDataProperty(payload.value, 'error')
                     : { kind: 'invalid' as const };
-                showError(safeErrorText([
+                const error = safeErrorText([
                     candidate.kind === 'value' ? candidate.value : undefined,
-                ], tRef.current('updateCheckFailed')), 5000);
+                ], latestTranslationRef.current('updateCheckFailed'));
+                const pending = updateCheckRef.current;
+                if (pending) settleUpdateCheck(pending.token, error, 'error');
+                else showError(error, 5000);
             }
         };
 
         chrome.runtime.onMessage.addListener(handleRuntimeMsg);
-        
-        // Trigger check on load (fire and forget, legacy hosts might ignore 'check_updates')
-        chrome.runtime.sendMessage({ 
-            type: "NATIVE_MSG", 
-            payload: { action: "check_updates" } 
-        });
-
-        return () => chrome.runtime.onMessage.removeListener(handleRuntimeMsg);
-    }, []);
-
-    // Check persistent storage for pending updates on mount
-    useEffect(() => {
-        chrome.storage.local.get("pending_update", (data) => {
-            const pending = data.pending_update as {version: string, url: string} | undefined;
-            if (pending && pending.version && pending.url) {
-                const currentVer = getExtensionVersion();
-                if (pending.version === currentVer) {
-                    // Already updated — stale entry, clean up
-                    chrome.storage.local.remove("pending_update");
-                    return;
+        void chrome.runtime.sendMessage({ type: 'DH_UPDATE_GET_STATE' })
+            .then(response => {
+                if (!mounted) return;
+                const handled = ownDataProperty(response, 'handled');
+                if (
+                    handled.kind === 'value'
+                    && handled.value === true
+                    && !liveProjectionSeen
+                ) {
+                    applyProjection(response);
+                } else if (handled.kind !== 'value' || handled.value !== true) {
+                    showError(t('updateRequestFailed'), 5000);
                 }
-                console.log("[Options] Found pending update in storage:", pending);
-                setUpdateAvailable(pending);
-            }
-        });
+            })
+            .catch(() => undefined);
+
+        return () => {
+            mounted = false;
+            updateStateRef.current = null;
+            if (updateCheckRef.current) clearTimeout(updateCheckRef.current.timer);
+            updateCheckRef.current = null;
+            chrome.runtime.onMessage.removeListener(handleRuntimeMsg);
+        };
     }, []);
 
-    const handleUpdate = () => {
-        if (!updateAvailable) return;
-        if (!confirm(t('updateConfirm').replace('{version}', updateAvailable.version))) return;
-
-        setIsUpdating(true);
-        showSuccess(t('downloadingUpdate'));
-
-        chrome.runtime.sendMessage({
-            type: "NATIVE_MSG",
-            payload: { 
-                action: "perform_update", 
-                payload: { url: updateAvailable.url } 
+    const handleCheckUpdates = async () => {
+        if (!updateStateReady || updateCheckRef.current || !updateStateRef.current
+            || !['idle', 'available', 'complete'].includes(updateStateRef.current.kind)) return;
+        // An admitted manual check also consumes this mount's automatic check.
+        autoUpdateCheckConsumedRef.current = true;
+        const token = {};
+        updateCheckRef.current = {
+            token,
+            timer: window.setTimeout(() => {
+                settleUpdateCheck(token, latestTranslationRef.current('checkTimedOut'), 'error');
+            }, 45_000),
+        };
+        setIsCheckingUpdates(true);
+        clearStatus();
+        try {
+            const response = await chrome.runtime.sendMessage({
+                type: 'NATIVE_MSG', payload: { action: 'check_updates' },
+            });
+            const status = ownDataProperty(response, 'status');
+            // Success only acknowledges initiation; unsolicited discovery settles the check.
+            if (status.kind !== 'value' || status.value !== 'success') {
+                settleUpdateCheck(token, latestTranslationRef.current('updateCheckFailed'), 'error');
             }
-        }, (response) => {
-            setIsUpdating(false);
-            if (chrome.runtime.lastError) {
-                showError(`${t('updateFailed')}: ` + chrome.runtime.lastError.message);
-                return;
-            }
-            
-            if (response && response.status === "success") {
-                setUpdateAvailable(null);
-                chrome.storage.local.remove("pending_update");
-                showSuccess(t('updateSuccess'));
-                setTimeout(() => {
-                    chrome.runtime.reload();
-                }, 1000);
+        } catch {
+            settleUpdateCheck(token, latestTranslationRef.current('updateCheckFailed'), 'error');
+        }
+    };
+
+    useEffect(() => {
+        if (!hostConfigMerged || !prefsHydrated || !canCheckUpdates
+            || autoUpdateCheckConsumedRef.current) return;
+        void handleCheckUpdates();
+    }, [hostConfigMerged, prefsHydrated, canCheckUpdates, updateState.kind]);
+
+    const handleUpdate = async () => {
+        if (!canStartUpdate || updateCheckRef.current) return;
+        if (updateState.kind === 'available' && updateVersion) {
+            if (!confirm(t('updateConfirm').replace('{version}', updateVersion))) return;
+        }
+        try {
+            const response = await chrome.runtime.sendMessage({ type: 'DH_UPDATE_START' });
+            const handled = ownDataProperty(response, 'handled');
+            if (handled.kind === 'value' && handled.value === true) {
+                const next = projectedUpdateState(response);
+                if (next) {
+                    updateStateRef.current = next;
+                    setUpdateState(next);
+                }
             } else {
-                showError(`${t('updateFailed')}: ${safeErrorText(
-                    [response?.error, response?.message],
-                    t('unknownError'),
-                )}`);
+                showError(t('updateRequestFailed'), 5000);
             }
-        });
+        } catch {
+            showError(t('updateRequestFailed'), 5000);
+        }
     };
 
     // About & Help: copy the log folder path (Explorer expands %LOCALAPPDATA%).
@@ -2707,24 +3035,6 @@ const OptionsInner: React.FC = () => {
         navigator.clipboard?.writeText('%LOCALAPPDATA%\\DynamicsHelper')
             .then(() => showSuccess(t('copied'), 2000))
             .catch(() => {/* clipboard blocked; no-op */});
-    };
-
-    const handleCheckUpdates = () => {
-        showSuccess(t('checkingForUpdates'));
-        chrome.runtime.sendMessage({ 
-            type: "NATIVE_MSG", 
-            payload: { action: "check_updates" } 
-        });
-        
-        // Safety timeout (60s) in case host doesn't respond.
-        // Only flip to "timed out" if the status is still the "checking" message
-        // (i.e. user hasn't received a real response in the meantime).
-        const checkingMsg = t('checkingForUpdates');
-        const timedOutMsg = t('checkTimedOut');
-        setTimeout(() => {
-            setStatus(prev => (prev?.message === checkingMsg ? { message: timedOutMsg, type: 'error' } : prev));
-            setTimeout(() => setStatus(prev => (prev?.message === timedOutMsg ? null : prev)), 3000);
-        }, 60000);
     };
 
     // Merged view for the bookmark manager. Personal items are editable;
@@ -3090,25 +3400,32 @@ const OptionsInner: React.FC = () => {
                                 <div className="flex gap-3 text-xs text-slate-500 font-medium uppercase tracking-wider items-center">
                                     <span>Extension v{getExtensionVersion()}</span>
                                     {hostVersion && <span>• {t('hostVersion')} v{hostVersion}</span>}
-                                    <button 
-                                        onClick={handleCheckUpdates} 
-                                        className="ml-1 p-1 hover:text-teal-600 hover:bg-teal-50 rounded-full transition-colors" 
-                                        title={t('updateAvailable')}
+                                    <button
+                                        onClick={() => { void handleCheckUpdates(); }}
+                                        disabled={!canCheckUpdates}
+                                        title={t('checkForUpdates')}
+                                        aria-label={t('checkForUpdates')}
+                                        className="p-1 rounded text-slate-500 hover:text-teal-600 disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
-                                        <RefreshCw size={12} />
+                                        <RefreshCw size={14} className={isCheckingUpdates ? 'animate-spin' : ''} />
                                     </button>
                                 </div>
                             </div>
                         </div>
                         <div className="flex gap-3">
-                            {updateAvailable && (
+                            {showUpdateAction && (
                                 <button 
-                                    onClick={handleUpdate} 
-                                    disabled={isUpdating}
-                                    className="flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg text-sm font-medium transition-colors animate-pulse"
+                                    onClick={() => { void handleUpdate(); }}
+                                    disabled={!canStartUpdate}
+                                    className={cn(
+                                        'flex items-center gap-2 px-4 py-2 border rounded-lg text-sm font-medium transition-colors',
+                                        updateError
+                                            ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+                                            : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100',
+                                    )}
                                 >
                                     {isUpdating ? <RotateCcw size={16} className="animate-spin" /> : <Download size={16} />}
-                                    {isUpdating ? t('updating') : t('updateNow')}
+                                    {updateActionLabel}{updateVersion ? ` ${updateVersion}` : ''}
                                 </button>
                             )}
                              <button onClick={handleReset} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-800 rounded-lg text-sm font-medium transition-colors">
@@ -3135,6 +3452,24 @@ const OptionsInner: React.FC = () => {
                                         {t('retryResetCleanup')}
                                     </button>
                                 )}
+                        </div>
+                    )}
+
+                    {updateError && (
+                        <div
+                            className="bg-amber-50 text-amber-800 text-center py-3 px-4 font-medium text-sm border-b border-amber-200"
+                            role="alert"
+                        >
+                            {updateErrorText(updateError, t)}
+                        </div>
+                    )}
+
+                    {updateCompletion && (
+                        <div
+                            className="bg-emerald-50 text-emerald-800 text-center py-3 px-4 font-medium text-sm border-b border-emerald-200"
+                            role="status"
+                        >
+                            {updateCompletion}
                         </div>
                     )}
 
@@ -3792,9 +4127,14 @@ const OptionsInner: React.FC = () => {
                                                         // not support reasoning effort configuration".
                                                         const newModel = e.target.value;
                                                         const sel = modelList.find(m => m.id === newModel);
-                                                        const supported = sel?.supported_reasoning_efforts || [];
+                                                        const supported = sel?.supported_reasoning_efforts;
                                                         const patch: { model: string; reasoningEffort?: '' } = { model: newModel };
-                                                        if (prefs.reasoningEffort && !supported.includes(prefs.reasoningEffort)) {
+                                                        if (
+                                                            modelCatalog.canRepairEffort
+                                                            && prefs.reasoningEffort
+                                                            && Array.isArray(supported)
+                                                            && !supported.includes(prefs.reasoningEffort)
+                                                        ) {
                                                             patch.reasoningEffort = '';
                                                         }
                                                         updatePref(patch);
@@ -3834,18 +4174,20 @@ const OptionsInner: React.FC = () => {
                                                         // "Use CLI default" is offered, preventing the
                                                         // create_session "does not support reasoning effort"
                                                         // failure. When no model is picked (inherit CLI
-                                                        // default) we also can't know support → no efforts.
+                                                         // default) we also can't know support, so all four
+                                                         // reviewed effort values remain available.
                                                         const sel = modelList.find(m => m.id === prefs.model);
-                                                        const efforts = sel?.supported_reasoning_efforts || [];
+                                                         const efforts = sel?.supported_reasoning_efforts
+                                                             ?? ['low', 'medium', 'high', 'xhigh'];
                                                         return efforts.map(ef => <option key={ef} value={ef}>{ef}</option>);
                                                     })()}
                                                 </select>
-                                                {prefs.model && (() => {
-                                                    const sel = modelList.find(m => m.id === prefs.model);
-                                                    const supported = sel?.supported_reasoning_efforts || [];
-                                                    return supported.length === 0 ? (
-                                                        <p className="text-[10px] text-slate-400 mt-1">{t('effortUnsupported')}</p>
-                                                    ) : null;
+                                                 {prefs.model && (() => {
+                                                     const sel = modelList.find(m => m.id === prefs.model);
+                                                     const supported = sel?.supported_reasoning_efforts;
+                                                     return Array.isArray(supported) && supported.length === 0 ? (
+                                                         <p className="text-[10px] text-slate-400 mt-1">{t('effortUnsupported')}</p>
+                                                     ) : null;
                                                 })()}
 
                                                 {/* Context tier */}
@@ -3990,19 +4332,26 @@ const OptionsInner: React.FC = () => {
                                 </div>
                                 <div className="flex items-center gap-2 mt-3">
                                     <button
-                                        onClick={handleCheckUpdates}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 text-xs font-medium rounded-lg border border-slate-200 transition-colors shadow-sm"
+                                        onClick={() => { void handleCheckUpdates(); }}
+                                        disabled={!canCheckUpdates}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
-                                        <RefreshCw size={12} /> {t('checkForUpdates')}
+                                        <RefreshCw size={12} className={isCheckingUpdates ? 'animate-spin' : ''} />
+                                        {t('checkForUpdates')}
                                     </button>
-                                    {updateAvailable && (
+                                    {showUpdateAction && (
                                         <button
-                                            onClick={handleUpdate}
-                                            disabled={isUpdating}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-medium transition-colors"
+                                            onClick={() => { void handleUpdate(); }}
+                                            disabled={!canStartUpdate}
+                                            className={cn(
+                                                'flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-medium transition-colors',
+                                                updateError
+                                                    ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+                                                    : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100',
+                                            )}
                                         >
                                             {isUpdating ? <RotateCcw size={12} className="animate-spin" /> : <Download size={12} />}
-                                            {isUpdating ? t('updating') : t('updateNow')}
+                                            {updateActionLabel}{updateVersion ? ` ${updateVersion}` : ''}
                                         </button>
                                     )}
                                 </div>

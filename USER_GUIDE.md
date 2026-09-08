@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Dynamics Helper is a browser extension designed to assist Technical Support Engineers. It acts as a bridge between your browser (Edge/Chrome) and a powerful local AI Agent (GitHub Copilot), allowing you to analyze support cases, error logs, and telemetry securely and efficiently.
+Dynamics Helper is a browser extension for Technical Support Engineers. It bridges your browser (Edge/Chrome) to GitHub Copilot through a local Native Host for support-case analysis.
 
 ## Prerequisites
 
@@ -217,10 +217,23 @@ Important behavior:
 1. **Open a Ticket:** Navigate to a support ticket in Dynamics 365 or Azure Portal.
 2. **Open Dynamics Helper:** Click the "DH" floating button or the extension icon.
 3. **Review Context:** Expand the "Case Context" section to see what was scraped from the page.
+   The template also includes **Created On** (the current open record's creation
+   time, whether a case or a task) and **Customer Name** (the Summary Customer
+   lookup's displayed associated name, not a verified ultimate customer or TPID).
+   When the loaded form matches the full visible 16/19-digit record number,
+   Created On can be read without opening Details and is explicitly formatted
+   as an ISO timestamp with `(UTC)`. No parent-case lookup or timezone guessing is
+   performed. If that form access is unavailable, the displayed Details date/time
+   remains the fallback, with no inferred timezone. Other unloaded/ambiguous fields
+   remain blank; there is no cross-tab metadata cache or automatic tab activation.
+   You can correct the context manually; same-case background scans preserve edits.
+   Customer names are not generally removed by the existing pattern scrubber and
+   are included in analysis/report text when present; remove them before Analyze
+   if they should not be sent.
     * You can **edit the context** directly in the textarea — your edits are preserved even if the page changes in the background.
     * Click the **refresh icon** to re-scrape the page (this will replace your edits with fresh data).
 4. **Analyze:** Click the **Analyze** button.
-    * The tool will send the context to the local AI Agent.
+    * The Native Host applies local pattern redaction, then sends the resulting context to cloud-hosted GitHub Copilot.
     * **Wait:** Deep analysis can take **2-5 minutes** if the agent needs to search logs or run database queries.
 5. **View Results:**
     * The analysis summary will appear inline in the floating panel.
@@ -236,6 +249,11 @@ In the extension settings, you can enable automatic analysis:
 
 * **Always:** The tool automatically analyzes when you navigate to a new case.
 * **Initial Pending:** The tool only auto-analyzes cases in "Initial Pending" status.
+
+Auto-Analyze sends the freshly scraped Case Context after local pattern
+redaction, without pausing for manual review or edits. If you need to inspect or
+remove content before it is sent to GitHub Copilot, keep Auto-Analyze disabled,
+open Case Context, edit it, and click **Analyze** manually.
 
 ### Session Persistence (Copilot CLI Integration)
 
@@ -294,17 +312,53 @@ Each team's bookmark file at its `url`:
 
 ### Automatic Updates
 
-The extension checks for updates on startup. When a new version is available:
+The extension checks for updates on startup. To check immediately, use the refresh
+icon beside the Host version in Options or **Check for Updates** in **About & Help**.
+Opening Options also requests one check after configuration and update state have
+loaded successfully and the update state is safe; an accepted manual check shares
+that attempt rather than causing a duplicate automatic request.
+These controls check only; they do not install automatically. They share an active
+check and are disabled until update state loads or while an update/recovery is in
+progress. A check that does not finish within 45 seconds reports a timeout.
+
+When a new version is available:
 
 1. A notification appears in the FAB and the Options page.
 2. Click **"Update Now"** to download and apply the update.
-3. The host will restart automatically after the update.
+3. Progress is saved while the UI closes, the Service Worker restarts, or the
+   Extension reloads.
+4. Dynamics Helper verifies the complete Host and Extension before and after
+   replacement. Ordinary failures automatically restore the previous complete
+   version.
+5. The Extension reloads only after the update commits or rollback completes.
+6. The terminal result is acknowledged only after eight continuous visible
+   seconds in a foreground document: an open FAB menu showing its terminal
+   banner, a visible Status bubble bound to that completion transaction, or the
+   visible Options completion status. Hiding the document or closing the last
+   qualifying surface discards elapsed time; showing a qualifying surface again
+   starts a full new interval. Hidden time never counts. The closed-FAB red dot
+   and unrelated bubbles do not count, and Dynamics Helper never forces Status
+   bubble on to acknowledge an update.
 
-*Note: Antivirus software may temporarily block the update. If this happens, try again after a few minutes or check the logs.*
+If acknowledgment fails, the notice remains until an authoritative Service
+Worker update-state broadcast changes it. There is no same-epoch ACK retry;
+hide/show or close/reopen the last qualifying surface to start a fresh interval.
+After a committed update is acknowledged, the updater returns to idle with no
+private candidate address. After rollback, acknowledgment restores the same
+candidate as the ordinary **Retry** action only in versions supporting this
+completion protocol. Older B1 is not qualified for this rollback/Retry behavior.
+
+If the installed Host and Extension do not match, guidance to run the matching
+full installer remains visible until the complete product is repaired. An
+extreme power interruption can also require that installer. The matching
+installer verifies the release before mutation, verifies the repaired product,
+and settles compatible preserved update evidence. Contradictory evidence stops
+the installer instead of reporting false success.
 
 ### Manual Update
 
-Re-run the Quick Install command or download the latest release from the Releases page.
+Re-run the Quick Install command or download and run the complete matching
+release from the Releases page. Do not mix individual Host/Extension files.
 
 ### Beta Channel
 
@@ -339,13 +393,17 @@ The tool includes a built-in "PII Scrubber" that attempts to remove the followin
 * **IPv4 Addresses**: Replaced with `[REDACTED_IP]`
 * **US Phone Numbers**: Replaced with `[REDACTED_PHONE]`
 
-*Note: GUID/UUID redaction is currently disabled to allow the AI to query specific resources (Subscription IDs, etc.). While the scrubber is robust, no regex is perfect. Always review the `native_host.log` if you are concerned about what was sent.*
+*Redaction is pattern-limited, and GUID/UUID values are intentionally preserved
+for technical investigation. Before clicking **Analyze**, review and edit the
+Case Context to remove anything you do not want sent. The operational
+`native_host.log` is not a record of prompt or case content and cannot replace
+this pre-send review.*
 
 ### Telemetry
 
-* The extension collects **anonymous usage telemetry** (event counts, error rates) via Azure Application Insights.
-* A stable anonymous UUID is generated locally — **no personal identity information** is collected.
-* Telemetry helps improve the tool but contains no case data or PII.
+* The extension sends operational telemetry such as event counts and error classifications through Azure Application Insights, not Case Context or prompt content.
+* A locally generated random UUID correlates events without using your name or account identity.
+* Telemetry is used to improve reliability; review Case Context separately before Analyze because telemetry controls do not change what an analysis sends.
 
 ### Auditing
 
@@ -363,11 +421,21 @@ If the tool isn't working, follow these steps to collect information for the dev
 
 * **"Analysis Timed Out"**: The Agent is taking too long. This usually means it's doing a lot of work (good!) but hit the analyze-timeout budget (default 20 minutes; configurable under **Options → General → Analyze Timeout**). Raise the timeout or narrow your request, and check the logs.
 * **"Repository Instructions are missing/cannot be read"**: Repository ONLY selected `<Root>/.github/copilot-instructions.md`, but DH could not obtain strict UTF-8 content. Add/repair the file, or disable Repository ONLY. An empty existing file is valid.
-* **"Host error" / "Native host disconnected"**: The browser cannot find the Python script.
-  * Verify you ran `install.bat` as Administrator.
+* **"Host error" / "Native host disconnected"**: The Host may be missing, blocked, or unable to start.
+  * Use the complete matching installer under the same Windows account; elevation is not a remedy for a blocked executable.
   * Verify your Extension ID is correct in the host manifest.
   * Restart your browser.
-* **Update fails silently**: Antivirus software may be locking the executable. Check the native_host.log for "PermissionError" entries. Try closing and reopening the browser, then update again.
+* **Update requires recovery / matching installer**: Automatic restart recovery
+  and rollback resume ordinary interruptions. If matching-installer guidance
+  persists, or diagnostics show `manual_recovery_required`, run the complete
+  installer for that release. Do not delete
+  `%LOCALAPPDATA%\DynamicsHelper\updates`; it contains recovery evidence.
+* **Installer safety checks**: Close the browser normally so the Host can exit.
+  The installer refuses a running Host or a legacy Roaming data directory; it
+  does not force termination or overwrite/migrate that data. If Windows policy or
+  antivirus blocks the package, stop and preserve the error. Do not add exclusions,
+  restore/allow a detected file, or bypass execution policy to make installation
+  succeed. A failed installer returns a nonzero exit code.
 
 ### How to Collect Logs (Debug Info)
 

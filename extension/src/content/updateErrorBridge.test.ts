@@ -21,6 +21,7 @@ vi.mock('../components/LegacyStyles', () => ({ LEGACY_CSS: '' }))
 
 describe('updateErrorBridge', () => {
     beforeEach(() => {
+        vi.resetModules()
         resetChromeMock()
         installChromeMock()
     })
@@ -56,5 +57,44 @@ describe('updateErrorBridge', () => {
             payload: { error: 'safe tab failure' },
         })
         expect(contentObserved).toEqual([{ error: 'safe tab failure' }])
+    })
+
+    it('ignores accessor-backed content messages without invoking them', async () => {
+        await import('./index')
+        const getter = vi.fn(() => 'NATIVE_PROGRESS')
+        const message = {}
+        Object.defineProperty(message, 'type', { enumerable: true, get: getter })
+
+        emitTabMessage(17, message)
+
+        expect(getter).not.toHaveBeenCalled()
+    })
+
+    it('bridges only exact nonempty progress messages', async () => {
+        await import('./index')
+        const observed: unknown[] = []
+        window.addEventListener('dh-native-progress', event => {
+            observed.push((event as CustomEvent).detail)
+        })
+
+        emitTabMessage(17, {
+            type: 'NATIVE_PROGRESS',
+            requestId: 'request-1',
+            payload: 'working',
+        })
+        emitTabMessage(17, {
+            type: 'NATIVE_PROGRESS',
+            requestId: 'request-2',
+            payload: '',
+        })
+        emitTabMessage(17, {
+            type: 'NATIVE_PROGRESS',
+            requestId: 'request-3',
+            payload: 'unsafe',
+            extra: true,
+        })
+
+        expect(observed).toEqual([{ requestId: 'request-1', payload: 'working' }])
+        expect(Object.isFrozen(observed[0])).toBe(true)
     })
 })

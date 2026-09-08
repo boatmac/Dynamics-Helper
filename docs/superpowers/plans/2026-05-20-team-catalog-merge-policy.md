@@ -1,6 +1,6 @@
 # Team Catalog Merge Policy Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution note:** No workflow plugin is required. Execute only currently authorized scope in bounded steps, with observable progress and scope-appropriate verification. Historical checkboxes do not authorize work; read `AGENTS.md` and the current handoff first.
 
 **Goal:** Flat-merge personal + team bookmarks at the top level (no wrapper folder), personal wins on label collisions, with team items shown read-only in the Options bookmark manager.
 

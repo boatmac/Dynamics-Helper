@@ -1,6 +1,6 @@
 # Plan E Extension Data and Request Hardening Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution note:** No workflow plugin is required. Execute only currently authorized scope in bounded steps, with observable progress and scope-appropriate verification. Historical checkboxes do not authorize work; read `AGENTS.md` and the current handoff first.
 
 **Goal:** Make bookmark, Analyze, SPA identity, per-request Root, update-error, and config-acknowledgment boundaries strict and non-destructive without changing the approved Prompt Scope Cleanup product contract.
 
@@ -5269,11 +5269,11 @@ Expected: the exact staged set contains all fourteen Task 8 files and nothing el
 
 ## Task 9: Windows Preparing-Promotion Retry and Final Evidence
 
-> **Implementation worker:** Use `superpowers:test-driven-development` for the
-> retry, `superpowers:verification-before-completion` before completion claims,
-> and `superpowers:requesting-code-review` for the independent review. This
-> section supersedes every earlier Task 9 instruction. Tasks 1-8 remain
-> byte-identical historical instructions.
+> **Implementation method:** For an authorized behavior change, observe the
+> failing regression test before fixing it, verify results before completion
+> claims, and obtain a bounded independent review. No named skill is required.
+> This section supersedes earlier Task 9 instructions; Tasks 1-8 remain historical
+> instructions, with their workflow-plugin header made tool-neutral.
 
 ### 9.1 Authority, Safety, and Exact Scope
 

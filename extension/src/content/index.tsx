@@ -5,6 +5,34 @@ import { startClipboardListener, setupSapTextAreaWatcher } from '../utils/legacy
 import { LEGACY_CSS } from '../components/LegacyStyles';
 import { forwardNativeUpdateErrorToWindow } from './updateErrorBridge';
 
+function exactProgressMessage(value: unknown): Readonly<{
+    requestId: string;
+    payload: string;
+}> | null {
+    try {
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+        const descriptors = Object.getOwnPropertyDescriptors(value);
+        if (
+            Reflect.ownKeys(descriptors).length !== 3
+            || !['type', 'requestId', 'payload'].every(key => {
+                const descriptor = descriptors[key];
+                return descriptor?.enumerable && Object.hasOwn(descriptor, 'value');
+            })
+            || descriptors.type.value !== 'NATIVE_PROGRESS'
+            || typeof descriptors.requestId.value !== 'string'
+            || descriptors.requestId.value.length === 0
+            || typeof descriptors.payload.value !== 'string'
+            || descriptors.payload.value.length === 0
+        ) return null;
+        return Object.freeze({
+            requestId: descriptors.requestId.value,
+            payload: descriptors.payload.value,
+        });
+    } catch {
+        return null;
+    }
+}
+
 console.log("[DH] Content Script Loaded");
 
 // Listen for broadcasted Native Progress updates from Background
@@ -12,28 +40,20 @@ chrome.runtime.onMessage.addListener((msg) => {
     if (forwardNativeUpdateErrorToWindow(msg)) {
         return;
     }
-    if (msg.type === "NATIVE_PROGRESS") {
+    const type = Reflect.getOwnPropertyDescriptor(msg, 'type')
+    if (!type || !Object.hasOwn(type, 'value') || typeof type.value !== 'string') return
+    if (type.value === "NATIVE_PROGRESS") {
+        const detail = exactProgressMessage(msg);
+        if (!detail) return;
         // Dispatch a custom DOM event so the React component (FAB) can listen to it
         // We use window because the React app is in Shadow DOM, but the script runs in the main context (mostly)
         // Actually, custom events on window are the easiest bridge.
-        const event = new CustomEvent("dh-native-progress", { 
-            detail: { 
-                requestId: msg.requestId, 
-                payload: msg.payload 
-            } 
-        });
+        const event = new CustomEvent("dh-native-progress", { detail });
         window.dispatchEvent(event);
     }
-    else if (msg.type === "TRIGGER_ANALYZE") {
+    else if (type.value === "TRIGGER_ANALYZE") {
         console.log("[DH] Received TRIGGER_ANALYZE from Context Menu");
         const event = new CustomEvent("dh-trigger-analyze", { 
-            detail: msg.payload 
-        });
-        window.dispatchEvent(event);
-    }
-    else if (msg.type === "NATIVE_UPDATE_AVAILABLE") {
-        console.log("[DH] Dispatching Update Event");
-        const event = new CustomEvent("dh-update-available", { 
             detail: msg.payload 
         });
         window.dispatchEvent(event);

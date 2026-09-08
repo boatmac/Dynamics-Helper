@@ -29,6 +29,13 @@ from package_manifest import (
 )
 
 
+_MAX_ARCHIVE_ENTRIES = 20_000
+_MAX_ARCHIVE_ENTRY_BYTES = 128 * 1024 * 1024
+_MAX_ARCHIVE_TOTAL_BYTES = 512 * 1024 * 1024
+_MAX_ARCHIVE_COMPRESSION_RATIO = 200
+_EXTRACTION_CHUNK_BYTES = 1024 * 1024
+
+
 class PackageValidationError(ValueError):
     _ALLOWED = {
         "invalid_package_path",
@@ -194,10 +201,14 @@ def write_deterministic_archive(stage_root: Path, archive_path: Path) -> None:
 def _preflight_zip_infos(
     infos: list[zipfile.ZipInfo],
 ) -> tuple[tuple[str, zipfile.ZipInfo], ...]:
+    if len(infos) > _MAX_ARCHIVE_ENTRIES:
+        raise PackageValidationError("unsupported_archive_entry")
     records: list[tuple[str, zipfile.ZipInfo]] = []
     exact: set[str] = set()
     folded: set[str] = set()
     files_folded: set[str] = set()
+    ancestor_prefixes: set[str] = set()
+    declared_total = 0
     for info in infos:
         if info.flag_bits & 0x0001:
             raise PackageValidationError("unsupported_archive_entry")
@@ -217,19 +228,63 @@ def _preflight_zip_infos(
         folded_path = logical.casefold()
         if logical in exact or folded_path in folded:
             raise PackageValidationError("duplicate_package_path")
+        if (
+            type(info.file_size) is not int
+            or type(info.compress_size) is not int
+            or info.file_size < 0
+            or info.compress_size < 0
+            or info.file_size > _MAX_ARCHIVE_ENTRY_BYTES
+            or (
+                info.file_size > 0
+                and (
+                    info.compress_size == 0
+                    or info.file_size
+                    > info.compress_size * _MAX_ARCHIVE_COMPRESSION_RATIO
+                )
+            )
+        ):
+            raise PackageValidationError("unsupported_archive_entry")
+        declared_total += info.file_size
+        if declared_total > _MAX_ARCHIVE_TOTAL_BYTES:
+            raise PackageValidationError("unsupported_archive_entry")
         parts = folded_path.split("/")
         prefixes = {
             "/".join(parts[:index]) for index in range(1, len(parts))
         }
-        if prefixes & files_folded or any(
-            path.startswith(folded_path + "/") for path in files_folded
-        ):
+        if prefixes & files_folded or folded_path in ancestor_prefixes:
             raise PackageValidationError("unsupported_archive_entry")
         exact.add(logical)
         folded.add(folded_path)
         files_folded.add(folded_path)
+        ancestor_prefixes.update(prefixes)
         records.append((logical, info))
     return tuple(sorted(records, key=lambda item: item[0]))
+
+
+def _extract_bounded_entry(
+    source,
+    target,
+    *,
+    declared_size: int,
+    extracted_total: int,
+) -> int:
+    entry_bytes = 0
+    while True:
+        chunk = source.read(_EXTRACTION_CHUNK_BYTES)
+        if not chunk:
+            break
+        entry_bytes += len(chunk)
+        extracted_total += len(chunk)
+        if (
+            entry_bytes > _MAX_ARCHIVE_ENTRY_BYTES
+            or extracted_total > _MAX_ARCHIVE_TOTAL_BYTES
+            or entry_bytes > declared_size
+        ):
+            raise PackageValidationError("unsupported_archive_entry")
+        target.write(chunk)
+    if entry_bytes != declared_size:
+        raise PackageValidationError("unsupported_archive_entry")
+    return extracted_total
 
 
 def stage_and_validate_archive(
@@ -245,6 +300,7 @@ def stage_and_validate_archive(
         with zipfile.ZipFile(archive_path, "r") as archive:
             entries = _preflight_zip_infos(archive.infolist())
             root = temporary.resolve(strict=True)
+            extracted_total = 0
             for logical_path, info in entries:
                 destination = temporary.joinpath(*logical_path.split("/"))
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -254,7 +310,12 @@ def stage_and_validate_archive(
                 with archive.open(info, "r") as source, destination.open(
                     "xb"
                 ) as target:
-                    shutil.copyfileobj(source, target)
+                    extracted_total = _extract_bounded_entry(
+                        source,
+                        target,
+                        declared_size=info.file_size,
+                        extracted_total=extracted_total,
+                    )
         validated = validate_staged_package(
             temporary,
             expected_version=expected_version,

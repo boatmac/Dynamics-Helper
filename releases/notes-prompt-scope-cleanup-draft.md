@@ -1,4 +1,31 @@
-# Prompt Scope Cleanup (Next Beta Draft)
+# Prompt Scope Cleanup (`2.0.76-beta.3` Working-Milestone Draft)
+
+This is an unpublished beta3 working-milestone draft, not release authorization.
+The final complete installer restored basic use on the original company Cloud PC;
+automatic-update/recovery qualification and long-term Defender compatibility are
+not established. Historical B2 failed under Defender; that result is unchanged.
+Start at `docs/session-handoff-2026-07-15.md` for current authorization.
+
+## Beta3 changes and validation
+
+- Removed obsolete startup migration that could overwrite installed Extension
+  files from an unverified sibling tree and delete the source directory.
+- Excluded development-only Pydantic mypy plugins; actual frozen graphs no longer
+  collect setuptools or its vendored/runtime-hook content. All 17 required hidden
+  imports remain. The existing tzdata warning is still disclosed.
+- Installer no longer unblocks files, bypasses execution policy, adds antivirus
+  exclusions, force-stops Hosts, or migrates/overwrites legacy Roaming data. It
+  fails safely and propagates registration failures through the batch wrapper.
+- Local focused checks: 33/33 product/build/Host tests and 17/17 installer tests;
+  actual final-package probe and controlled dependency-import smoke passed.
+- User observations: full installer exit 0, configuration preserved, Host and
+  Extension beta3, manual model Refresh successful, Analyze working. The status
+  bubble concern was a disabled preference, not a confirmed regression.
+
+Final ZIP identity and precise evidence limits are in
+`docs/plan-d-pragmatic-cloud-pc-results.md`, Beta3 Working Milestone. The candidate
+was built from working changes, not an immutable release commit. None of these
+results proves the cause or permanent resolution of Defender detection.
 
 ## Deterministic instruction sources
 
@@ -52,21 +79,56 @@ Core, DH-specific, and Repository instruction read failures retain machine-reada
 - Options normalizes omitted team identity to the empty string for every manifest current/response check, so no-team committed/unchanged requests deduplicate while failed/stale/skipped requests remain retryable and old callbacks are ignored after team selection.
 - One shared string-only selector now covers Analyze persistence, Native response normalization, config updates, prompt health, Options warnings, FAB nested errors, and Service Worker immediate paths. Objects, arrays, functions, symbols, and null are never coerced; valid strings and allowlisted metadata are preserved.
 
-## Dormant update recovery hardening
+## Reliable transactional automatic updates
 
-This build includes frozen-tested detached recovery primitives: exact staged
-Host/Extension preflight, identity-safe detached runners, RunOnce recovery, a
-read-only status Native Host, and bounded receipt-backed terminal cleanup. These
-primitives are dormant infrastructure only. Update clicks still use the
-historical Python updater, while installation still uses the historical
-PowerShell installer path. `transactional-update-v1` is not yet advertised.
+Plan D now activates the previously hardened package, transaction, and detached
+recovery layers. The Service Worker owns durable `dh_update_state`, exact
+capability/version/integrity checks, status polling, terminal reload, and
+receipt-backed finalization. FAB and Options only render projected state and send
+payload-free start requests.
 
-The first historical upgrade into this build therefore remains nontransactional.
-A complete copy bootstraps integrity metadata; a partial but startable copy is
-reported as `installation_integrity_failed`. Transactional routing is enabled
-only after the remaining Extension-data and runtime-installer plans complete.
+Exactly four strict Host actions route to `UpdateService`. Ordinary application
+failures restore the complete previous Host/Extension product; interruption
+resumes through the detached runner, RunOnce recovery, and read-only status Host.
+Mixed installs retain matching-full-installer guidance. Unsafe frozen startup
+recovery exits `30` with empty stdout and exact stderr
+`manual_recovery_required\n` before normal
+Host initialization.
 
-## Verification
+Plan D operations use a distinct cross-process mutex above the Plan B/C mutation
+mutex. The matching installer now replaces `_internal` as an exact tree so stale
+runtime files cannot survive repair, and probes a temporary complete product
+view before any live mutation. Startup state hydration remains responsive while
+recovery resumes in the background; source mode is check-only, exact pre-launch
+activation failures are explicit-retry states, and rollback remains visible with
+an explicit retry path.
+
+Final hardening bounds every main update lease, retries finalize/ack in their
+exact persisted phase, and requires a newly loaded Worker before terminal
+finalization. The matching installer validates exact release inventory, probes
+the repaired live product, and settles compatible preserved transaction
+authority without deleting contradictory evidence.
+
+Terminal completion is transaction-bound and consumed only after eight
+continuous visible seconds. A foreground Options status, an open FAB terminal
+banner, or the exact transaction-bound FAB completion bubble can acknowledge it;
+background tabs, a closed FAB red dot, and unrelated bubbles cannot. Visibility
+loss starts the interval over, and an ACK transport failure gets no same-epoch
+retry. B2 was built and the qualification design/documentation was completed.
+Its normal cloud trial failed; the remaining scenarios were not run. There is
+no new implementation or qualification task implied by these release notes.
+
+Private `2.0.76-beta.1` completed its update transaction, integrity checks,
+finalization ACK, Analyze, and Options checks successfully, but is DISQUALIFIED
+because its completion notice replayed permanently. It remains unpublished and
+is historical evidence only, not qualification for `2.0.76-beta.2`.
+
+## Historical Verification
+
+The counts below belong to successive historical source boundaries; they are
+not instructions to repeat tests or a cumulative total. Historical B2 evidence,
+its failed cloud result, and current beta3 results are recorded separately in
+`docs/plan-d-pragmatic-cloud-pc-results.md`.
 
 - Prompt-scope tenth-wave evidence: isolated Host **143/143 focused** and
   **207/207 full**; Extension **210/210 focused** and **340/340 full**; production
@@ -76,23 +138,39 @@ only after the remaining Extension-data and runtime-installer plans complete.
   `1/1` against the built runtime.
 - Committed-head full Host discovery ran **523** tests with that same sole frozen
   skip; the separate frozen selector passed.
-- Plan C frozen gate passed exact PyInstaller **6.18.0**, all **15/15** required
+- Historical Plan C frozen gate passed exact PyInstaller **6.18.0**, all **15/15** required
   modules, and an onedir inventory of **73 internal files / 10 directories**.
 - Plan A/B regressions passed **134/134**; full Extension remained **340/340**;
   isolated compile/static/scope gates and restored break-and-fail mutations
   passed.
-- Disposable-VM recovery smoke remains required before release and was not run.
+- The approved pragmatic B2 cloud-PC gate replaces the broader disposable-VM
+  claim. It requires uninterrupted B1-to-B2 update, exact original-runner
+  interruption with same-transaction recovery, and matching-installer repair on
+  an effectively empty cloud PC. The normal scenario subsequently failed;
+  interruption and repair scenarios were not run. None is claimed as passed.
 - Finalization durability now covers every reserved/receipt/receipt-ready/ack/
   cursor-removal crash boundary, ordinary fault replay, receipt-scratch cleanup,
   lexical reparse rejection, exact entry-type errors, and serialized concurrent
-  finalizers. Full committed-head verification is rerun after this correction.
+  finalizers. The associated rerun requirement belongs to that historical phase.
 - Follow-up hardening adds durable first-receipt-directory publication, exact
   finalization contention errors, crash-resumable partial status unregister,
-  and Plan B cleanup crash replay. These remain dormant until Plan D routing.
+  and Plan B cleanup crash replay. Production Plan D now consumes these paths.
 - Final clean-head verification passed focused **206** (one expected frozen
   skip), Plan A/B **134/134**, full Host **547** (same sole skip), Extension
   **340/340**, compile/build/static/scope, and rebuilt frozen probe **1/1**. A
-  final post-evidence no-drift rerun and broad branch verdict remain pending.
+  final post-evidence no-drift rerun and broad branch verdict were left pending
+  at that historical checkpoint; this is not a new closeout execution task.
+- Plan D cutover gates pass Host **663/663** in bounded, disjoint source
+  partitions (one expected environment-gated frozen skip), Extension
+  **894/894**, production Extension build **2,228 modules**, Python compilation,
+  and diff/static checks. The approved project venv built the frozen Host with
+  exact PyInstaller **6.22.2**; the graph contains all **17/17** reviewed hidden
+  imports, the onedir inventory is **35 internal files / 10 directories**, and
+  the real frozen staged-probe integration passes **1/1**.
+- Implementer-reported one-shot development checks passed Extension
+  **951/951**, update-focused **181/181**, UI **55/55**, and TypeScript. B2
+  artifact verification was subsequently recorded separately; cloud qualification
+  failed and does not follow from those development checks.
 
 ## Upgrade notes
 
@@ -105,8 +183,13 @@ runs before normal startup side effects. These checks detect incomplete or
 mixed product files; SHA-256 values are consistency checks, not package
 authentication.
 
-The first upgrade into this build still runs the historical in-place updater.
-A complete ordinary-file copy bootstraps both Host metadata files, while a
-partial but startable copy is reported as `installation_integrity_failed`.
-That first upgrade is not transactional, and the active updater remains the
-legacy implementation until the later transaction/runtime plans are completed.
+The first upgrade from `v2.0.75-beta.1` into the cutover release still runs the
+old version's historical in-place updater and is not retroactively
+transactional. Cutover startup immediately verifies Host, Extension, capability,
+and package integrity. A complete install enables all future transactional
+updates; either mixed direction persists matching-full-installer guidance.
+
+Subsequent updates cannot report success before terminal verification and
+finalization. Standalone bootstrap and per-write power-loss guarantees remain
+deferred, so an extreme interruption may still require the matching full
+installer.

@@ -3,9 +3,10 @@ import { PageReader, ScrapedData } from '../utils/pageReader';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 import { useTranslation } from '../utils/i18n';
 import { usePrefs } from '../utils/prefs';
-import { trackEvent, trackException, hashCaseId } from '../utils/telemetry';
+import { trackEvent, hashCaseId } from '../utils/telemetry';
 import { getExtensionVersion } from '../utils/version';
 import { useAnalysisHydration } from '../hooks/useAnalysisHydration';
+import { useVisibleCompletionAck } from '../hooks/useVisibleCompletionAck';
 import type {
     AnalysisPersistenceWarning,
     LastAnalysisIdentity,
@@ -14,6 +15,11 @@ import { applyCurrentUserPrompt } from '../utils/analysisPrompt';
 import { safeErrorText } from '../utils/safeErrorText';
 import { ownDataProperty } from '../utils/ownData';
 import { parseAnalyzeForwardResult } from '../background/analyzeBridge';
+import {
+    parseUpdateState,
+    type UpdateErrorCode,
+    type UpdateState,
+} from '../background/updateRuntime';
 import {
     parsePageIdentitySnapshot,
     parseScrapedDataSnapshot,
@@ -92,10 +98,76 @@ function safeAnalyzeRejectionText(value: unknown, fallback: string): string {
     return safeErrorText([message, direct], fallback);
 }
 
+function projectedUpdateState(value: unknown): UpdateState | null {
+    const property = ownDataProperty(value, 'state');
+    return property.kind === 'value' ? parseUpdateState(property.value) : null;
+}
+
+function projectedUpdateVersion(state: UpdateState): string | null {
+    if (state.kind === 'available' || state.kind === 'complete') {
+        return state.update.version;
+    }
+    if (state.kind === 'recovery-required') {
+        return state.transaction?.targetVersion ?? null;
+    }
+    return state.kind === 'idle' ? null : state.targetVersion;
+}
+
+function projectedUpdateError(state: UpdateState): UpdateErrorCode | null {
+    if (state.kind === 'recovery-required') return state.code;
+    if (state.kind === 'preparing' || state.kind === 'activating') {
+        return state.errorCode ?? null;
+    }
+    if (state.kind === 'reload-pending' || state.kind === 'ack-pending') {
+        return state.errorCode ?? null;
+    }
+    return null;
+}
+
+function updateErrorText(errorCode: UpdateErrorCode, t: (key: string) => string): string {
+    const keys: Record<UpdateErrorCode, string> = {
+        invalid_update_request: 'invalidUpdateRequest',
+        installation_integrity_failed: 'updateInstallerRequired',
+        update_already_in_progress: 'updateAlreadyInProgress',
+        update_prepare_failed: 'updatePrepareFailed',
+        update_activation_failed: 'updateActivationFailed',
+        update_not_terminal: 'updateNotTerminal',
+        update_cleanup_failed: 'updateCleanupFailed',
+        source_update_disabled: 'sourceUpdateDisabled',
+        manual_recovery_required: 'manualRecoveryRequired',
+    };
+    return t(keys[errorCode]);
+}
+
+function updateIsBusy(state: UpdateState): boolean {
+    if (state.kind === 'preparing' || state.kind === 'activating') {
+        return state.errorCode === undefined;
+    }
+    if (state.kind === 'reload-pending' || state.kind === 'ack-pending') {
+        return state.errorCode === undefined;
+    }
+    return state.kind === 'polling';
+}
+
+function updateCanStart(state: UpdateState): boolean {
+    return state.kind === 'available'
+        || state.kind === 'recovery-required' && state.transaction !== undefined
+        || state.kind === 'preparing' && state.errorCode !== undefined
+        || state.kind === 'activating'
+            && state.errorCode !== undefined
+            && !state.activationRetryUsed
+        || (state.kind === 'reload-pending' || state.kind === 'ack-pending')
+            && state.errorCode !== undefined
+        || state.kind === 'complete' && state.outcome === 'rolled-back';
+}
+
 const FAB: React.FC = () => {
     const { t } = useTranslation();
     const latestTranslationRef = React.useRef(t);
     latestTranslationRef.current = t;
+    const { prefs } = usePrefs();
+    const latestPrefsRef = React.useRef(prefs);
+    latestPrefsRef.current = prefs;
     const [isOpen, setIsOpen] = useState(false);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [scrapedData, setScrapedData] = useState<ScrapedData | null>(null);
@@ -114,7 +186,29 @@ const FAB: React.FC = () => {
     // docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md
     // § 1. All error surfacing now flows through `setResultPopover` so the
     // user sees a persistent popover instead of a 4-second bubble flash.
-    const [updateAvailable, setUpdateAvailable] = useState<{version: string, url: string} | null>(null);
+    const [updateState, setUpdateState] = useState<UpdateState>({ kind: 'idle' });
+    const completionTransactionId = updateState.kind === 'complete'
+        ? updateState.transactionId
+        : null;
+    const updateVersion = updateState.kind === 'complete' && updateState.outcome === 'rolled-back'
+        ? getExtensionVersion()
+        : projectedUpdateVersion(updateState);
+    const updateError = projectedUpdateError(updateState);
+    const isUpdateBusy = updateIsBusy(updateState);
+    const canStartUpdate = updateCanStart(updateState);
+    const showUpdateBanner = updateState.kind !== 'idle';
+    const updateTitle = updateState.kind === 'available'
+        ? t('updateAvailable')
+        : updateState.kind === 'complete'
+            ? t(updateState.outcome === 'committed' ? 'updateComplete' : 'updateRolledBack')
+        : isUpdateBusy
+            ? t('updating')
+            : t('retryUpdate');
+    const updateDetail = updateError
+        ? updateErrorText(updateError, t)
+        : updateVersion
+            ? `${t('version')} ${updateVersion}`
+            : t('updateRequiresAttention');
 
     // Track whether the currently-displayed ResultPopover originated from an
     // analyze flow (vs a bookmark markdown). Only analyze popovers should
@@ -142,7 +236,64 @@ const FAB: React.FC = () => {
         text: string; 
         type: 'default' | 'success' | 'error';
     }>({ visible: false, text: '', type: 'default' });
-    const statusTimeoutRef = React.useRef<any>(null);
+    const statusBubbleRef = React.useRef(statusBubble);
+    const statusTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const statusCompletionTransactionIdRef = React.useRef<string | null>(null);
+
+    const completionBubbleVisible = completionTransactionId !== null
+        && statusBubble.visible
+        && statusCompletionTransactionIdRef.current === completionTransactionId;
+    const completionSurfaceVisible = completionTransactionId !== null
+        && (isOpen || completionBubbleVisible);
+
+    useVisibleCompletionAck({
+        transactionId: completionTransactionId,
+        surfaceVisible: completionSurfaceVisible,
+    });
+
+    function hideStatusBubble(onlyType?: 'default' | 'success' | 'error'): void {
+        if (onlyType !== undefined && statusBubbleRef.current.type !== onlyType) return;
+        if (statusTimeoutRef.current !== null) {
+            clearTimeout(statusTimeoutRef.current);
+            statusTimeoutRef.current = null;
+        }
+        statusCompletionTransactionIdRef.current = null;
+        const next = { ...statusBubbleRef.current, visible: false };
+        statusBubbleRef.current = next;
+        setStatusBubble(next);
+    }
+
+    function showStatusBubble(
+        text: string,
+        type: 'default' | 'success' | 'error' = 'default',
+        autoHideDuration = 3000,
+        completionTransactionId: string | null = null,
+    ): void {
+        if (!latestPrefsRef.current.enableStatusBubble) return;
+
+        if (statusTimeoutRef.current !== null) {
+            clearTimeout(statusTimeoutRef.current);
+            statusTimeoutRef.current = null;
+        }
+        statusCompletionTransactionIdRef.current = completionTransactionId;
+        const next = { visible: true, text, type };
+        statusBubbleRef.current = next;
+        setStatusBubble(next);
+
+        if (autoHideDuration > 0) {
+            const timeoutId = setTimeout(() => {
+                if (statusTimeoutRef.current !== timeoutId) return;
+                statusTimeoutRef.current = null;
+                if (statusCompletionTransactionIdRef.current === completionTransactionId) {
+                    statusCompletionTransactionIdRef.current = null;
+                }
+                const hidden = { ...statusBubbleRef.current, visible: false };
+                statusBubbleRef.current = hidden;
+                setStatusBubble(hidden);
+            }, autoHideDuration);
+            statusTimeoutRef.current = timeoutId;
+        }
+    }
 
     // Analyze-flow bubble protection (fixes SAP/clipboard notifications
     // clobbering the "analyzing" or "Analysis Complete" bubble). The status
@@ -311,46 +462,105 @@ const FAB: React.FC = () => {
             coordinator.changeSignal.resolve();
             terminalRevalidationRef.current = null;
         }
+        if (statusTimeoutRef.current !== null) {
+            clearTimeout(statusTimeoutRef.current);
+            statusTimeoutRef.current = null;
+        }
+        statusCompletionTransactionIdRef.current = null;
     }, []);
 
-    // Initial Health Check to wake up Host and check for updates
+    // The Service Worker owns update storage, Host actions, and reloads. FAB
+    // only hydrates and renders its projected state.
     useEffect(() => {
-        const checkHealth = async () => {
-            try {
-                // We don't need to show UI for this, just wake up the host
-                // This ensures check_for_updates() runs immediately
-                await chrome.runtime.sendMessage({
-                    type: "NATIVE_MSG",
-                    payload: { action: "health_check", requestId: crypto.randomUUID() }
-                });
-            } catch (e) {
-                // Ignore errors on initial wake-up
-                console.debug("[DH] Initial wake-up failed (host might be missing)", e);
+        let mounted = true;
+        let liveProjectionSeen = false;
+        const applyProjection = (value: unknown, announce: boolean) => {
+            const next = projectedUpdateState(value);
+            if (!mounted || !next) return;
+            const nextCompletionTransactionId = next.kind === 'complete'
+                ? next.transactionId
+                : null;
+            if (
+                statusCompletionTransactionIdRef.current !== null
+                && statusCompletionTransactionIdRef.current !== nextCompletionTransactionId
+            ) {
+                hideStatusBubble();
             }
-        };
-        // Small delay to ensure listeners are ready
-        setTimeout(checkHealth, 1000);
-
-        // Check persistent storage for pending updates (in case the live event was missed)
-        chrome.storage.local.get("pending_update", (data) => {
-            const pending = data.pending_update as {version: string, url: string} | undefined;
-            if (pending?.version) {
-                const currentVer = getExtensionVersion();
-                if (pending.version === currentVer) {
-                    // Already updated — stale entry, clean up
-                    chrome.storage.local.remove("pending_update");
-                } else {
-                    console.log("[DH-FAB] Found pending update in storage:", pending);
-                    setUpdateAvailable(pending);
+            setUpdateState(next);
+            if (!announce) return;
+            if (next.kind === 'available') {
+                showStatusBubble(
+                    `${latestTranslationRef.current('updateAvailable')}: ${next.update.version}`,
+                    'success',
+                    10000,
+                );
+            } else if (next.kind === 'complete') {
+                showStatusBubble(
+                    latestTranslationRef.current(
+                        next.outcome === 'committed' ? 'updateComplete' : 'updateRolledBack',
+                    ),
+                    next.outcome === 'committed' ? 'success' : 'error',
+                    10000,
+                    next.transactionId,
+                );
+            } else {
+                const errorCode = projectedUpdateError(next);
+                if (errorCode) {
+                    showStatusBubble(
+                        updateErrorText(errorCode, latestTranslationRef.current),
+                        'error',
+                        10000,
+                    );
                 }
             }
-        });
+        };
+        const handleUpdateState = (message: unknown) => {
+            const type = ownDataProperty(message, 'type');
+            if (type.kind === 'value' && type.value === 'DH_UPDATE_STATE') {
+                const next = projectedUpdateState(message);
+                if (next) {
+                    liveProjectionSeen = true;
+                    applyProjection({ state: next }, true);
+                }
+            }
+        };
+
+        chrome.runtime.onMessage.addListener(handleUpdateState);
+        void chrome.runtime.sendMessage({ type: 'DH_UPDATE_GET_STATE' })
+            .then(response => {
+                const handled = ownDataProperty(response, 'handled');
+                if (
+                    handled.kind === 'value'
+                    && handled.value === true
+                    && !liveProjectionSeen
+                ) {
+                    applyProjection(response, false);
+                } else if (handled.kind !== 'value' || handled.value !== true) {
+                    showStatusBubble(t('updateRequestFailed'), 'error', 5000);
+                }
+            })
+            .catch(() => undefined);
+
+        return () => {
+            mounted = false;
+            chrome.runtime.onMessage.removeListener(handleUpdateState);
+        };
     }, []);
 
     // Progress Listener Effect
     useEffect(() => {
-        const handleProgress = (e: any) => {
-            const { requestId, payload } = e.detail;
+        const handleProgress = (event: Event) => {
+            const detail = ownDataProperty((event as CustomEvent<unknown>).detail, 'requestId');
+            const progress = ownDataProperty((event as CustomEvent<unknown>).detail, 'payload');
+            if (
+                detail.kind !== 'value'
+                || typeof detail.value !== 'string'
+                || progress.kind !== 'value'
+                || typeof progress.value !== 'string'
+                || progress.value.length === 0
+            ) return;
+            const requestId = detail.value;
+            const payload = progress.value;
             const localPage = localAnalyzePageRef.current;
             const requestOwnsVisiblePage = Boolean(
                 localPage !== null
@@ -369,23 +579,6 @@ const FAB: React.FC = () => {
                  // Auto-hide is 0 to keep it visible
                  showStatusBubble(payload, 'default', 0);
             }
-        };
-
-        const handleUpdate = (e: any) => {
-            // Check if available update is NEWER than current
-            // If we just updated, current version == available version, so don't show it.
-            const currentVer = getExtensionVersion();
-            const availableVer = e.detail.version;
-            
-            // Simple semver compare (assuming x.y.z)
-            // If available == current, we are up to date
-            if (availableVer === currentVer) {
-                setUpdateAvailable(null);
-                return;
-            }
-
-            setUpdateAvailable(e.detail);
-            showStatusBubble(`${t('updateAvailable')}: ${e.detail.version}`, 'success', 10000); 
         };
 
         const handleUpdateError = (event: Event) => {
@@ -422,34 +615,18 @@ const FAB: React.FC = () => {
         };
 
         window.addEventListener('dh-native-progress', handleProgress);
-        window.addEventListener('dh-update-available', handleUpdate);
         window.addEventListener('dh-update-error', handleUpdateError);
         window.addEventListener('DH_NOTIFICATION', handleNotification);
         window.addEventListener('DH_TOAST', handleToast);
         
         return () => {
             window.removeEventListener('dh-native-progress', handleProgress);
-            window.removeEventListener('dh-update-available', handleUpdate);
             window.removeEventListener('dh-update-error', handleUpdateError);
             window.removeEventListener('DH_NOTIFICATION', handleNotification);
             window.removeEventListener('DH_TOAST', handleToast);
         };
     }, []);
 
-
-    const showStatusBubble = (text: string, type: 'default' | 'success' | 'error' = 'default', autoHideDuration = 3000) => {
-        if (!latestPrefsRef.current.enableStatusBubble) return;
-
-        if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
-        
-        setStatusBubble({ visible: true, text, type });
-        
-        if (autoHideDuration > 0) {
-            statusTimeoutRef.current = setTimeout(() => {
-                setStatusBubble(prev => ({ ...prev, visible: false }));
-            }, autoHideDuration);
-        }
-    };
 
     // C2a+: surface an analyze failure as a persistent ResultPopover (the
     // prior pattern of an inline error string + 4-second bubble was invisible
@@ -474,10 +651,6 @@ const FAB: React.FC = () => {
         });
         showStatusBubble(t('analysisFailed'), 'error', 4000);
     };
-    
-    const { prefs } = usePrefs();
-    const latestPrefsRef = React.useRef(prefs);
-    latestPrefsRef.current = prefs;
     
     // UI States
     const [isContextExpanded, setIsContextExpanded] = useState(false);
@@ -508,7 +681,7 @@ const FAB: React.FC = () => {
                 && generation > scheduledAuto.context.accepted.generation
             )
         ) {
-            setStatusBubble(previous => ({ ...previous, visible: false }));
+            hideStatusBubble();
         }
         reconcileVisibleAnalyzingState();
         const completion = (async () => {
@@ -559,7 +732,7 @@ const FAB: React.FC = () => {
             setHydrationCaseNumber(caseNumber);
             if (identityChanged && wasInitialized) {
                 setResultPopover(previous => ({ ...previous, isOpen: false }));
-                setStatusBubble(previous => ({ ...previous, visible: false }));
+                hideStatusBubble();
                 setIsOpen(false);
             }
             reconcileVisibleAnalyzingState();
@@ -783,6 +956,8 @@ const FAB: React.FC = () => {
         const parts = [
             `## Case Number\n\n${data.caseNumber || ''}`,
             `## Case Title\n\n${data.ticketTitle || ''}`,
+            `## Created On\n\n${data.createdOn || ''}`,
+            `## Customer Name\n\n${data.customerName || ''}`,
             `## Severity\n\n${data.severity || ''}`,
             `## Status Reason\n\n${data.statusReason || ''}`,
             `## SAP\n\n${data.productCategory || ''}`,
@@ -803,9 +978,7 @@ const FAB: React.FC = () => {
             if (!editableAnalyzeContextIsCurrent(context)) {
                 if (editableAnalyzeContextRef.current === context) {
                     setHasAutoAnalyzed(false);
-                    setStatusBubble(previous => previous.type === 'default'
-                        ? { ...previous, visible: false }
-                        : previous);
+                    hideStatusBubble('default');
                 }
                 return;
             }
@@ -1485,42 +1658,24 @@ const FAB: React.FC = () => {
         setIsOpen(false);
     };
 
-    const handleFabUpdate = () => {
-        if (!updateAvailable) return;
+    const handleFabUpdate = async () => {
+        if (!canStartUpdate) return;
         setIsOpen(false);
-        showStatusBubble(`${t('downloadingVersion')} ${updateAvailable.version.replace(/^v?/, 'v')}...`, 'default', 0);
-        trackEvent('FAB Update Started', { version: updateAvailable.version });
-
-        chrome.runtime.sendMessage({
-            type: "NATIVE_MSG",
-            payload: {
-                action: "perform_update",
-                payload: { url: updateAvailable.url }
-            }
-        }, (response) => {
-            if (chrome.runtime.lastError) {
-                showStatusBubble(`${t('updateFailed')}: ` + chrome.runtime.lastError.message, 'error');
-                trackException(new Error('FAB Update: ' + chrome.runtime.lastError.message));
-                return;
-            }
-
-            if (response && response.status === "success") {
-                showStatusBubble(t('updateInstalled'), 'success', 5000);
-                trackEvent('FAB Update Success', { version: updateAvailable.version });
-                setUpdateAvailable(null);
-                chrome.storage.local.remove("pending_update");
-                setTimeout(() => {
-                    chrome.runtime.reload();
-                }, 1500);
+        if (updateVersion) {
+            trackEvent('FAB Update Started', { version: updateVersion });
+        }
+        try {
+            const response = await chrome.runtime.sendMessage({ type: 'DH_UPDATE_START' });
+            const handled = ownDataProperty(response, 'handled');
+            if (handled.kind === 'value' && handled.value === true) {
+                const next = projectedUpdateState(response);
+                if (next) setUpdateState(next);
             } else {
-                const errMsg = safeErrorText(
-                    [response?.error, response?.message],
-                    t('unknownError'),
-                );
-                showStatusBubble(`${t('updateFailed')}: ` + errMsg, 'error');
-                trackEvent('FAB Update Failed', { version: updateAvailable.version, error: errMsg });
+                showStatusBubble(t('updateRequestFailed'), 'error', 5000);
             }
-        });
+        } catch {
+            showStatusBubble(t('updateRequestFailed'), 'error', 5000);
+        }
     };
 
     const handleItemClick = async (item: MenuItem) => {
@@ -1642,18 +1797,23 @@ const FAB: React.FC = () => {
                             </div>
                         )}
                         {/* Update Banner */}
-                        {updateAvailable && (
+                        {showUpdateBanner && (
                             <button
-                                onClick={() => { handleFabUpdate(); }}
+                                onClick={() => { void handleFabUpdate(); }}
+                                disabled={!canStartUpdate}
                                 className="dh-item"
-                                style={{ backgroundColor: '#F0FDF4', borderBottom: '1px solid #BBF7D0' }}
+                                style={{
+                                    backgroundColor: updateError ? '#FFF7ED' : '#F0FDF4',
+                                    borderBottom: `1px solid ${updateError ? '#FED7AA' : '#BBF7D0'}`,
+                                    cursor: canStartUpdate ? 'pointer' : 'default',
+                                }}
                             >
-                                <span className="dh-item-icon" style={{ color: '#16A34A' }}>
-                                    <RefreshCw size={18} />
+                                <span className="dh-item-icon" style={{ color: updateError ? '#EA580C' : '#16A34A' }}>
+                                    <RefreshCw size={18} className={isUpdateBusy ? 'animate-spin' : undefined} />
                                 </span>
                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                                    <span className="dh-item-label" style={{ color: '#15803D' }}>{t('updateAvailable')}</span>
-                                    <span style={{ fontSize: '11px', color: '#16A34A' }}>{t('version')} {updateAvailable.version}</span>
+                                    <span className="dh-item-label" style={{ color: updateError ? '#C2410C' : '#15803D' }}>{updateTitle}</span>
+                                    <span style={{ fontSize: '11px', color: updateError ? '#EA580C' : '#16A34A', textAlign: 'left' }}>{updateDetail}</span>
                                 </div>
                             </button>
                         )}
@@ -1801,7 +1961,7 @@ const FAB: React.FC = () => {
                 ) : (
                     <>
                         <span style={{ fontSize: '18px', fontWeight: 'bold' }}>{prefs.buttonText}</span>
-                        {updateAvailable && (
+                        {showUpdateBanner && (
                             <span style={{
                                 position: 'absolute',
                                 top: '0px',

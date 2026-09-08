@@ -1,4 +1,22 @@
+import json
 from pathlib import Path
+
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+
+
+def current_extension_manifest_bytes() -> bytes:
+    manifest = json.loads(
+        (_REPOSITORY_ROOT / "extension" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    projected = {"version": manifest["version"]}
+    if "version_name" in manifest:
+        projected["version_name"] = manifest["version_name"]
+    return (
+        json.dumps(projected, ensure_ascii=True, separators=(",", ":")) + "\n"
+    ).encode("ascii")
 
 
 class InjectedCrash(BaseException):
