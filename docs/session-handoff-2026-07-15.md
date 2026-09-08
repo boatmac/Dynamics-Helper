@@ -6,7 +6,7 @@ Read `../AGENTS.md` for execution rules. Older contents are retained in Git at
 
 ## Current Mode
 
-v2.0.76-beta.4 is now published as a GitHub prerelease (latest result below).
+v2.0.76-beta.5 is now published as a GitHub prerelease (latest result below).
 Historical beta3 local upgrade/repair follows. The user accepted the beta
 qualification limits and tested local upgrade. The resulting mixed-install
 integrity failure is confirmed below; the user approved one local full-installer
@@ -1150,11 +1150,19 @@ Frontend wrapper timeout did not stop the monitored test process; it finished
 exit0 and was not rerun. Final probe beta5/schema valid, profiles empty, no
 surviving processes. tzdata/Browserslist warnings remain. Release notes prepared.
 
+Beta5 published at2026-09-08 14:51:41 UTC, public prerelease/notdraft/notlateststable:
+https://github.com/boatmac/Dynamics-Helper/releases/tag/v2.0.76-beta.5
+Feature/tag commit be19f8fb9ae9a05d26da4c0aac0c6fd495f65da8,92productinputs bound
+to commit, only intended branch/tag pushed. GitHub uploaded asset size14,007,154
+and digest862d81d8f7ac5801f03b56b8276313202e25541aca016706c8a112b18b486f65 match
+testedZIP. No user-machine installation performed. Workflow docs are committed
+and AGENTS-linked; global MCP config remains local developer setup, not packaged.
+
 Remain in the LOCAL checkout
-`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Complete authorized
-beta5 commit/binding/tag/branch push/prerelease publication with unchanged tested
-ZIP, verify remote asset digest, then report workflow entry and live field test
-guidance. No automatic user-machine upgrade, security change or case edits.
+`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Report beta5 URL,
+workflow reference and validation. Await user's normal upgrade/Created On field
+observation, without requesting customer content. No automatic user-machine
+upgrade, security change, case edits, or additional release scope.
 
 The user reports having started a new session, but it initially read the old
 master checkout. That old checkout's clean status and July handoff do not describe
