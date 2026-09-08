@@ -42,6 +42,7 @@ import {
     type ResetExtensionStateRequest,
 } from './resetExtensionState';
 import { ownDataProperty } from '../utils/ownData';
+import { handleReadCreatedOn } from '../utils/createdOnBridge';
 import {
     handleNativeUpdateError,
     type NativeUpdateErrorDeliveryDeps,
@@ -547,6 +548,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         messageType = type.value
     } catch {
         return false
+    }
+    if (messageType === 'DH_READ_CREATED_ON') {
+        void handleReadCreatedOn(message, sender).then(sendResponse)
+        return true
     }
     const payload = ownDataProperty(message, 'payload')
     const messagePayload = payload.kind === 'value' ? payload.value : undefined

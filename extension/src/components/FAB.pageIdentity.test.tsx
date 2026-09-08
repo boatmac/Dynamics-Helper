@@ -236,12 +236,12 @@ describe('FAB live page identity during Analyze', () => {
         vi.useRealTimers()
     })
 
-    it('includes Created On and Customer Name in the existing textarea and outgoing context', async () => {
-        await renderOpenFab({ ...A, createdOn: '08/09/2026 9:07 PM', customerName: 'Synthetic Account' })
+    it.each(['08/09/2026 9:07 PM', '2031-04-17T10:23:00.123Z (UTC)'])('includes Created On %s and Customer Name in the existing textarea and outgoing context', async createdOn => {
+        await renderOpenFab({ ...A, createdOn, customerName: 'Synthetic Account' })
         const text = expandContext().value
         expect(screen.getAllByRole('textbox')).toHaveLength(1)
         expect(text).toMatch(/^## Case Number\n\nA/)
-        expect(text).toContain('## Created On\n\n08/09/2026 9:07 PM')
+        expect(text).toContain(`## Created On\n\n${createdOn}`)
         expect(text).toContain('## Customer Name\n\nSynthetic Account')
         const response = deferNextResponse('analyze_error')
         fireEvent.click(analyzeButton())

@@ -1,4 +1,5 @@
 import { getReactProps } from './reactFiber';
+import { requestCreatedOn } from './createdOnBridge';
 
 export interface ScrapedData {
     errorText?: string;
@@ -63,7 +64,7 @@ export class PageReader {
                             if (!data.severity && /^[1ABC]$/i.test(value)) data.severity = value;
                         } else if (name === 'header_statuscode') {
                             data.statusReason ||= value;
-                        } else if (label === 'case number / service name') {
+                        } else if (name === 'header_msdfm_casenumberservicelevel' || label === 'case number / service name') {
                             data.caseNumber ||= value.match(ID_REGEX)?.[0];
                         } else if (name === 'header_ticketnumber') {
                             aliasCaseNumber ||= value.match(ID_REGEX)?.[0];
@@ -75,6 +76,61 @@ export class PageReader {
         }
         data.caseNumber ||= aliasCaseNumber;
         return data;
+    }
+
+    // Synchronous and bounded: no identity captured before a yield can authorize a scan.
+    // undefined means no supported identity surface; null means present but unsafe.
+    private static readLiveRecordNumber(): string | null | undefined {
+        const lists = document.querySelectorAll('uci-header-control-list');
+        if (lists.length > 20) return null;
+        const roots: Node[] = Array.from(lists);
+        const seen = new Set<Node>();
+        const items: Element[] = [];
+        let visited = 0;
+        while (roots.length) {
+            const root = roots.pop()!;
+            if (root instanceof Element && root.shadowRoot) roots.push(root.shadowRoot);
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+            let node: Element | null;
+            while ((node = walker.nextNode() as Element | null)) {
+                if (seen.has(node)) continue;
+                seen.add(node);
+                if (++visited > 2000) return null;
+                if (node.shadowRoot) roots.push(node.shadowRoot);
+                if (node.localName === 'uci-header-control-list-item') items.push(node);
+            }
+        }
+        const primary = new Set<string>();
+        const aliases = new Set<string>();
+        for (const item of items) {
+            if (!item.isConnected) continue;
+            const children = Array.from(item.children);
+            const label = children.find(el => el.getAttribute('slot') === 'label')?.textContent?.replace(/\s+/g, ' ').trim().toLowerCase();
+            const name = item.getAttribute('data-name');
+            const numbers = name === 'header_msdfm_casenumberservicelevel' || label === 'case number / service name'
+                ? primary : name === 'header_ticketnumber' ? aliases : undefined;
+            if (!numbers) continue;
+            for (const value of children.filter(el => el.getAttribute('slot') === 'value')) {
+                for (const match of (value.textContent || '').matchAll(new RegExp(ID_REGEX.source, 'g'))) numbers.add(match[0]);
+            }
+        }
+        const numbers = primary.size ? primary : aliases;
+        if (numbers.size) return numbers.size === 1 ? [...numbers][0] : null;
+        // Same legacy header/title surfaces as extraction, without a broad label/body scan.
+        for (const selector of ['[id^="headerControlsList_"]', '[id^="headerContainer"]', '[data-automation-id="ticket-title"], [data-test-id="ticket-header-title"], [id^="formHeaderTitle_"], h1, [role="heading"][aria-level="1"]']) {
+            const header = document.querySelector(selector);
+            if (!header) continue;
+            const walker = document.createTreeWalker(header, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+            let text = '';
+            let node: Node | null;
+            while ((node = walker.nextNode())) {
+                if (++visited > 2000 || text.length > 10000) return null;
+                if (node.nodeType === Node.TEXT_NODE) text += node.textContent || '';
+            }
+            const match = text.match(ID_REGEX)?.[0];
+            if (match) return match;
+        }
+        return undefined;
     }
 
     private static async readCreatedOn(context: Element): Promise<string | undefined> {
@@ -495,6 +551,17 @@ export class PageReader {
                         break;
                     }
                 }
+            }
+        }
+
+        if (data.caseNumber && /^\d{16}(?:\d{3})?$/.test(data.caseNumber)) {
+            const before = this.readLiveRecordNumber();
+            if (before === null || (before !== undefined && before !== data.caseNumber)) return null;
+            // Unsupported legacy identity keeps DOM data without starting an unbound wait.
+            if (before !== undefined) {
+                const createdOn = await requestCreatedOn(data.caseNumber);
+                if (this.readLiveRecordNumber() !== before) return null;
+                if (createdOn) data.createdOn = createdOn;
             }
         }
 

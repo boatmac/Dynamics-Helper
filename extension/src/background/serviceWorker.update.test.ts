@@ -111,6 +111,28 @@ async function loadWorkerWithCommittedCompletion() {
 }
 
 describe('Service Worker transactional update cutover', () => {
+  it('routes Created On only to the sender document and replies without Host, storage, or broadcasts', async () => {
+    await loadWorker()
+    const caseNumber = '2601190030003106001'
+    const documentId = '11111111-2222-3333-4444-555555555555'
+    const result = { status: 'ok', caseNumber, createdOnUtc: '2031-04-17T10:23:00.123Z' }
+    const executeScript = vi.fn().mockResolvedValue([{ frameId: 0, documentId, result }])
+    Object.assign(chrome, { scripting: { executeScript } })
+    Object.assign(chrome.runtime, { id: 'test-extension' })
+    const listener = chromeMockSpies.runtimeOnMessageAddListener.mock.calls.at(-1)![0]
+    const sendResponse = vi.fn()
+    const baseline = [chromeMockSpies.storageSet, chromeMockSpies.runtimeSendMessage, chromeMockSpies.tabsSendMessage, chromeMockSpies.connectNative]
+      .map(spy => spy.mock.calls.length)
+    expect(listener({ type: 'DH_READ_CREATED_ON', caseNumber }, {
+      id: chrome.runtime.id, tab: { id: 42 } as chrome.tabs.Tab, frameId: 0, documentId,
+      origin: 'https://onesupport.crm.dynamics.com', url: 'https://onesupport.crm.dynamics.com/main.aspx',
+    }, sendResponse)).toBe(true)
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledExactlyOnceWith(result))
+    expect(executeScript).toHaveBeenCalledWith(expect.objectContaining({ target: { tabId: 42, documentIds: [documentId] }, world: 'MAIN', args: [caseNumber] }))
+    expect([chromeMockSpies.storageSet, chromeMockSpies.runtimeSendMessage, chromeMockSpies.tabsSendMessage, chromeMockSpies.connectNative]
+      .map(spy => spy.mock.calls.length)).toEqual(baseline)
+  })
+
   it('relays actual idle no-update discovery, not the initiation ACK or raw payload', async () => {
     await loadWorker()
     const port = queueNativePort(MAIN_HOST)

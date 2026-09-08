@@ -217,12 +217,15 @@ Important behavior:
 1. **Open a Ticket:** Navigate to a support ticket in Dynamics 365 or Azure Portal.
 2. **Open Dynamics Helper:** Click the "DH" floating button or the extension icon.
 3. **Review Context:** Expand the "Case Context" section to see what was scraped from the page.
-   The template also includes **Created On** (the displayed date/time, without
-   assumed timezone conversion) and **Customer Name** (the Summary Customer
+   The template also includes **Created On** (the current open record's creation
+   time, whether a case or a task) and **Customer Name** (the Summary Customer
    lookup's displayed associated name, not a verified ultimate customer or TPID).
-   Only loaded controls can be read; DH does not open Details/Audit automatically.
-   Missing or ambiguous values remain blank. No cross-tab metadata cache is used,
-   so values can disappear from an unedited rescan if their controls unload.
+   When the loaded form matches the full visible 16/19-digit record number,
+   Created On can be read without opening Details and is explicitly formatted
+   as an ISO timestamp with `(UTC)`. No parent-case lookup or timezone guessing is
+   performed. If that form access is unavailable, the displayed Details date/time
+   remains the fallback, with no inferred timezone. Other unloaded/ambiguous fields
+   remain blank; there is no cross-tab metadata cache or automatic tab activation.
    You can correct the context manually; same-case background scans preserve edits.
    Customer names are not generally removed by the existing pattern scrubber and
    are included in analysis/report text when present; remove them before Analyze

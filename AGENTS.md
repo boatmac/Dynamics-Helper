@@ -530,6 +530,15 @@ This file defines the operational rules, development workflows, and coding stand
 
 ## 5. Debugging Workflow
 
+Created On model reads use `DH_READ_CREATED_ON` only through the same-extension,
+allowed-origin, top-frame, document-bound MAIN bridge. Preserve the full16/19-digit
+current record identity (never truncate task suffixes or query the parent), stable
+record and visible-header checks, bounded known-header traversal, and strict
+response parsing. No generic MAIN evaluator or caller-selected tab/frame target.
+After every awaited bridge result, including failure, discard scans whose live
+identity changed. Label genuine model instants UTC; never apply a current/browser
+offset to historical D365 dates or label raw DOM text with an inferred zone.
+
 For Edge/D365 field extraction, follow
 `docs/edge-d365-debugging-workflow.md` after checking current task authorization.
 Use an approved existing browser session, scoped structural evidence and one

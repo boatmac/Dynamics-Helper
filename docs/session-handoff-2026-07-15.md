@@ -6,7 +6,10 @@ Read `../AGENTS.md` for execution rules. Older contents are retained in Git at
 
 ## Current Mode
 
-v2.0.76-beta.5 is now published as a GitHub prerelease (latest result below).
+Current authorized milestone: commit current fixes and publish stable v2.0.76,
+then continue SDK1.0.13 compatibility research without changing the1.0.5 runtime.
+The user explicitly requested continuing non-approval work after publication.
+v2.0.76-beta.5 was the last published prerelease (history below).
 Historical beta3 local upgrade/repair follows. The user accepted the beta
 qualification limits and tested local upgrade. The resulting mixed-install
 integrity failure is confirmed below; the user approved one local full-installer
@@ -1158,11 +1161,59 @@ and digest862d81d8f7ac5801f03b56b8276313202e25541aca016706c8a112b18b486f65 match
 testedZIP. No user-machine installation performed. Workflow docs are committed
 and AGENTS-linked; global MCP config remains local developer setup, not packaged.
 
+Post-beta5 user feedback: upgrade succeeded but CreatedOn unavailable until
+Details is opened. User supplied D365 Personal Options timezone GMT+08 Beijing/
+Chongqing/HongKong/Urumqi, then refreshed/opened a case without Details and
+authorized readonly loaded-data/timezone investigation, no new business requests.
+
+Direct CDP confirmed global userSettings accessible in the top allowed context:
+getTimeZoneOffsetMinutes() returned480 once, dateFormattingInfo is an object;
+browser Intl timezone Asia/Shanghai and Date offset now -480. These are distinct
+APIs with different observed signs; don't blindly apply browser offset or current
+offset to historic DST dates. A duplicate Options timezone is not needed merely
+because global settings were presumed inaccessible.
+
+One loaded incident-form static Xrm.Page context exposed createdon/ticketnumber
+before Details; createdon.getValue returned a non-null object. Local instanceof
+Date was false (possibly cross-realm); validity/UTC semantics are not established.
+The form is UNBOUND to the visible case because identity was not compared.
+Xrm.Page is deprecated; no production bridge added. No tab navigation, business
+HTTP or customer values output. Initial over-gating of globals and one connection
+timeout returned no evidence, not absentdata. Final connection detached/exited.
+
 Remain in the LOCAL checkout
-`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Report beta5 URL,
-workflow reference and validation. Await user's normal upgrade/Created On field
-observation, without requesting customer content. No automatic user-machine
-upgrade, security change, case edits, or additional release scope.
+`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Report observed
+timezone access and unbound loaded createdon. Establish visible-case identity
+match and cross-realm Date/UTC semantics with one scoped readonly check before
+proposing production extraction. No new Options setting, broad state sweep,
+network API, tab click, release, or user-case mutation follows automatically.
+
+The user approved that check and emphasized repeated debugging prompts. Exactly
+one subsequent WebSocket attempt waited60seconds then CONNECT_TIMEOUT before any
+page/API read. No automatic retry, no attached target or surviving helper. This
+does not identify why connection failed; previously observed global timezone and
+UNBOUND createdon evidence stand unchanged. Do not keep launching short probes.
+Coordinate one user-visible connection/approval window before any next attempt;
+do not infer matched record or valid Date from this failed run.
+
+In the next user-coordinated single connection, Date.prototype.getTime.call
+succeeded for createdon in two incident contexts, including one foreign-realm
+Date (instanceof false). No dates/epoch values were returned. Exact CreatedOn DOM
+container count remained zero. Global offset480/browserAsiaShanghai/-480 observed.
+However, visible-header gate admitted zero slots, so model-to-visible-case binding
+remains UNBOUND. Offline review found helper visibility stricter than product
+header extraction; root count1 is before visibility, not proof of absent/mismatched
+case identity. Do not substitute another independent parser or trust unbound dates.
+
+User requested explicit timezone suffix when established. Keep that requirement:
+actual UTC instant must be labelled UTC; D365 local UTC+8 only after source-aware
+conversion, never append +8 to unconverted UTC or infer from browser alone. Current
+offset does not encode historical DST. No Options timezone field or production
+MAIN-world bridge has been implemented. Before implementation, require independent
+active-case identity binding; extension content script is ISOLATED and has no
+existing MAIN bridge. Xrm.Page compatibility is deprecated; modern formContext
+needs execution context. No new business request, tab click, code release, or
+additional automatic debugging connection was performed in this step.
 
 The user reports having started a new session, but it initially read the old
 master checkout. That old checkout's clean status and July handoff do not describe
@@ -1171,6 +1222,56 @@ current work additionally contains beta3 product fixes and tests. Push, publicat
 tool installation, migration, and cloud operations remain unauthorized.
 
 ## Historical Local Commit Boundary
+
+Stable release preparation: full source review found no blockers, versions now
+2.0.76 across three carriers, SDK remains1.0.5. Full unique tests1906/1906 passed:
+Host673,Vitest1228,defaultitems5. Host needed sequential continuations after
+temporaryguard errors/timeouts, final6subprocess and1frozen testpassed; do not
+claim clean uninterruptedfull run. No remaining skips or ownedprocesses.
+
+Final stable ZIP: Temp dh-stable-2076-release-20260908/DynamicsHelper_v2.0.76.zip,
+14,009,878 bytes,SHA2565a9b7fde784dc5cf4d1d6ad3105dbbd4f78f9979f6026d044cb36bc82263d4ae.
+56files/55manifestentries,13frontend/35runtime,17requiredimports,setuptools0;
+94productinputs snapshotsmatch. Fullbuild/actualprobe/importfailuresmoke passed,
+no actualinstalledproductmutation. Release notes notes-v2.0.76.md disclose legacy
+overlay fullinstaller guidance, validationlimits, UTC currentrecordsemantics,
+and SDKversionunchanged. Bind snapshotto commit before stablepublication.
+
+Latest user clarification: Created On is the CURRENT OPEN RECORD's creation time,
+regardless of main case/task. No parent lookup or task-suffix truncation. A final
+single CDP connection confirmed full19-digit header/model MATCH,stable GUID/number,
+valid nativeDate, and no CreatedOn DOM container before Details. The prior
+UNBOUND results were diagnostic errors (entire composite header vs extracted full
+number,16digit-only gate, overlystrict visibility), not evidence of mismatched data.
+
+Implemented local uncommitted current-record bridge: new createdOnModel/Bridge
+modules and tests, SW route and PageReader integration, strict sender/document/
+origin/frame validation, self-contained MAIN compatibility reader, fullrecord
+before/after guards, native Date ISO extraction. Successful value includes `(UTC)`;
+does not claim UTC+8 conversion or a new timezone Option. DOM text remains fallback
+without inferred timezone. No WebAPI/tabs/parent query/HostRPC/newpermissions.
+
+Review fixed bridge-await identity race: every outcome revalidates live identity,
+mismatch discards whole scan; knownheader traversal reads after finalyield and
+excludes arbitrarypage shadowtrees. Final focused296/296,TypeScript/build passed,
+defaultmenu5/5/sourcecopy passed. Existing FAB user edits preserved. Final build
+local only, versionstillbeta5; no installed/public ZIP replacement or Git write.
+Next work is user-approved live/deployment validation or newrelease scope, not
+another identity/permission loop. New SOURCE reading uses deprecated constrained
+Xrm.Page compatibility, not a claim of modern formContext integration.
+
+Latest identity investigation found one exact Case number / Service name value
+slot under header_msdfm_casenumberservicelevel with a rectangle and case-number
+pattern. Two incident models agreed internally on ticket/date, but the helper
+rejected composed visibility without recording the precise ancestor condition.
+Its checks mixed accessibility aria-hidden with visual visibility and rejected
+ancestor visibility even when descendants can override it; those are diagnostic
+limitations, not evidence of wrong case data. Header/model equality was still
+not returned. A follow-up single connection timed out at90seconds before reads.
+No further automatic connection is warranted. A single user-run local Console
+metadata comparison is an acceptable fallback if direct connection remains blocked;
+return booleans only, never record IDs or timestamps. Do not claim binding passed
+or implement source selection from an unbound model.
 
 The following approval was consumed by f283e2d. It does not cover current changes.
 

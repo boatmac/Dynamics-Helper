@@ -26,12 +26,22 @@ The project consists of three main components:
   single-connection CDP fallback and synthetic fixtures for observed DOM structure.
   These strings pass through
   `pageIdentity.ts`'s explicit snapshot whitelist into the Case Context template;
-  they are not identity keys or new Host RPC fields. Created On uses associated
+  they are not identity keys or new Host RPC fields. Created On DOM fallback uses
   controls in a single-field boundary or explicit createdon controls, never nearby
   Modified On. Customer reads the specific selected customer lookup; ambiguous or
   GUID-only values are rejected. No tab activation/cache/timezone inference is
   performed. Both sections use the existing scrubbed-text analysis/report path;
   the scrubber does not generally redact company names.
+  `createdOnBridge.ts` sends one extension-local `DH_READ_CREATED_ON` request to
+  the SW; strict sender origin/top-frame/document checks target only the originating
+  document in MAIN. Self-contained `createdOnModel.ts` reads the constrained
+  deprecated `Xrm.Page` compatibility surface, binding the full 16/19-digit record
+  number and stable record GUID to the visible header before/after yielding. No
+  parent normalization, Web API, frame sweep, tab activation, or Host RPC is used.
+  Genuine cross-realm Dates serialize as ISO UTC with `(UTC)`; DOM fallback gains
+  no invented offset. Ambiguity/errors/timeouts fail closed. PageReader rechecks
+  live identity for every bridge outcome and discards a stale whole scan; FAB's
+  existing generation and user-edit protections remain authoritative.
 * **`src/background/serviceWorker.ts`**: Service worker handling telemetry, native messaging relay, analysis-result persistence, and the sole production update coordinator. Native-message logging is metadata-only; it must not log prompt-bearing payloads.
 * **`src/background/updateRuntime.ts`**: Strict update parsers and serialized durable state machine for `dh_update_state`, restart resume, alarms, detached status polling, terminal reload, and receipt-backed finalization.
 * **`src/background/teamManifestSync.ts`**: Team sync response boundary. Manifest-only fetches re-read `dh_prefs` after every fetch result, including failure/null/304. Selected-team responses preserve `committed|unchanged|failed|skipped|stale` plus captured identity.

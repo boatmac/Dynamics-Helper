@@ -1,5 +1,6 @@
-import { afterEach, describe, it, expect } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { ID_REGEX, PageReader } from './pageReader'
+import { parseScrapedDataSnapshot } from './pageIdentity'
 
 // ID_REGEX matches case/task IDs scraped from D365 pages:
 //   - 16-digit case number
@@ -244,6 +245,130 @@ describe('D365 structured headers', () => {
   it('does not pierce closed header roots', async () => {
     item(header('closed'), 'header_ticketnumber', 'Case number / Service name', caseId)
     expect(await PageReader.scanForErrors()).toBeNull()
+  })
+})
+
+describe('current-record Created On bridge in a page scan', () => {
+  const caseNumber = '2601190030003106001'
+  const createdOnUtc = '2031-04-17T10:23:00.123Z'
+  const sendMessage = vi.fn()
+  beforeEach(() => {
+    vi.stubGlobal('location', { origin: 'https://onesupport.crm.dynamics.com' })
+    vi.stubGlobal('chrome', { runtime: { sendMessage } })
+    sendMessage.mockReset().mockResolvedValue({ status: 'ok', caseNumber, createdOnUtc })
+    document.body.innerHTML = `<main role="main"><h1>Synthetic case</h1></main><uci-header-control-list><uci-header-control-list-item data-name="header_msdfm_casenumberservicelevel"><span slot="value">${caseNumber} | Synthetic service</span></uci-header-control-list-item></uci-header-control-list>`
+  })
+  afterEach(() => {
+    document.body.replaceChildren()
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('reads once without Details and preserves UTC in the existing snapshot field', async () => {
+    const data = await PageReader.scanForErrors()
+    expect(data).toMatchObject({ caseNumber, createdOn: `${createdOnUtc} (UTC)` })
+    expect(parseScrapedDataSnapshot(data)).toMatchObject({ caseNumber, createdOn: `${createdOnUtc} (UTC)` })
+    expect(sendMessage).toHaveBeenCalledExactlyOnceWith({ type: 'DH_READ_CREATED_ON', caseNumber })
+  })
+
+  it.each(['unavailable', 'parent', 'accessor', 'unsupported', 'success'])('preserves raw DOM fallback unless a valid model UTC is available: %s', async mode => {
+    document.querySelector('main')!.insertAdjacentHTML('beforeend', '<input data-id="createdon.fieldControl-date-time-input" value="04/17/2031 6:23 PM">')
+    const get = vi.fn(() => createdOnUtc)
+    if (mode === 'unavailable') sendMessage.mockResolvedValue({ status: 'unavailable' })
+    if (mode === 'parent') sendMessage.mockResolvedValue({ status: 'ok', caseNumber: caseNumber.slice(0, 16), createdOnUtc })
+    if (mode === 'accessor') sendMessage.mockResolvedValue(Object.defineProperty({ status: 'ok', caseNumber }, 'createdOnUtc', { get }))
+    if (mode === 'unsupported') vi.stubGlobal('chrome', undefined)
+    expect((await PageReader.scanForErrors())?.createdOn).toBe(mode === 'success' ? `${createdOnUtc} (UTC)` : '04/17/2031 6:23 PM')
+    expect(get).not.toHaveBeenCalled()
+  })
+
+  it.each(['success', 'unavailable', 'timeout'])('discards the entire scan when identity changes during bridge %s', async outcome => {
+    vi.useFakeTimers()
+    sendMessage.mockImplementation(async () => {
+      document.querySelector('[slot="value"]')!.textContent = '2601190030003107 | Other service'
+      if (outcome === 'timeout') return new Promise(() => {})
+      return outcome === 'success' ? { status: 'ok', caseNumber, createdOnUtc } : { status: 'unavailable' }
+    })
+    const pending = PageReader.scanForErrors()
+    await vi.runAllTimersAsync()
+    expect(await pending).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('discards stale extracted identity before requesting a model date', async () => {
+    vi.useFakeTimers()
+    document.querySelector('uci-header-control-list')!.insertAdjacentHTML('beforeend', '<span></span>'.repeat(60))
+    const schedule = setTimeout
+    let changed = false
+    const original = document.createTreeWalker.bind(document)
+    vi.spyOn(document, 'createTreeWalker').mockImplementation((...args) => {
+      const walker = original(...args)
+      if (args[0] instanceof Element && args[0].localName === 'uci-header-control-list' && !changed) {
+        changed = true
+        schedule(() => { document.querySelector('[slot="value"]')!.textContent = '2601190030003107 | Other service' }, 0)
+      }
+      return walker
+    })
+    const pending = PageReader.scanForErrors()
+    await vi.runAllTimersAsync()
+    expect(await pending).toBeNull()
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('reads live slots rather than identity captured before a post-bridge traversal yield', async () => {
+    vi.useFakeTimers()
+    sendMessage.mockImplementation(async () => {
+      document.querySelector('uci-header-control-list')!.insertAdjacentHTML('beforeend', '<span></span>'.repeat(60))
+      const original = document.createTreeWalker.bind(document)
+      vi.spyOn(document, 'createTreeWalker').mockImplementation((...args) => {
+        const walker = original(...args)
+        if (args[0] instanceof Element && args[0].localName === 'uci-header-control-list') {
+          const next = walker.nextNode.bind(walker)
+          let visited = 0
+          vi.spyOn(walker, 'nextNode').mockImplementation(() => {
+            const node = next()
+            if (++visited === 50) document.querySelector('[slot="value"]')!.textContent = '2601190030003107 | Other service'
+            return node
+          })
+        }
+        return walker
+      })
+      return { status: 'ok', caseNumber, createdOnUtc }
+    })
+    const pending = PageReader.scanForErrors()
+    await vi.runAllTimersAsync()
+    expect(await pending).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(['same', 'changed'])('revalidates a legacy header with %s identity on unavailable response', async mode => {
+    document.querySelector('uci-header-control-list')!.remove()
+    document.querySelector('main')!.insertAdjacentHTML('beforeend', `<div id="headerControlsList_1">${caseNumber}</div><input data-id="createdon.fieldControl-date-time-input" value="Raw date">`)
+    sendMessage.mockImplementation(async () => {
+      if (mode === 'changed') document.querySelector('#headerControlsList_1')!.textContent = '2601190030003107'
+      return { status: 'unavailable' }
+    })
+    const data = await PageReader.scanForErrors()
+    if (mode === 'changed') expect(data).toBeNull()
+    else expect(data).toMatchObject({ caseNumber, createdOn: 'Raw date' })
+  })
+
+  it('preserves a same-identity raw DOM date after bridge timeout', async () => {
+    vi.useFakeTimers()
+    document.querySelector('main')!.insertAdjacentHTML('beforeend', '<input data-id="createdon.fieldControl-date-time-input" value="Raw date">')
+    sendMessage.mockReturnValue(new Promise(() => {}))
+    const pending = PageReader.scanForErrors()
+    await vi.runAllTimersAsync()
+    expect(await pending).toMatchObject({ caseNumber, createdOn: 'Raw date' })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('does not request a model date for nonnumeric identities', async () => {
+    document.querySelector('[slot="value"]')!.textContent = 'WO-12345'
+    expect((await PageReader.scanForErrors())?.caseNumber).toBe('WO-12345')
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 })
 
