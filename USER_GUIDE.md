@@ -311,6 +311,9 @@ Each team's bookmark file at its `url`:
 
 The extension checks for updates on startup. To check immediately, use the refresh
 icon beside the Host version in Options or **Check for Updates** in **About & Help**.
+Opening Options also requests one check after configuration and update state have
+loaded successfully and the update state is safe; an accepted manual check shares
+that attempt rather than causing a duplicate automatic request.
 These controls check only; they do not install automatically. They share an active
 check and are disabled until update state loads or while an update/recovery is in
 progress. A check that does not finish within 45 seconds reports a timeout.

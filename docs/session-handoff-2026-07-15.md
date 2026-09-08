@@ -1044,15 +1044,117 @@ stable. One uploaded asset size14,007,795 and GitHub SHA-256 bef3ef4971d88750a62
 from tag claim. No local user installation or beta3 asset replacement occurred.
 Release-result follow-up is docs-only and does not amend the release tag.
 
+After publication, the user correctly noted old Options mount behavior checked
+updates automatically. Historical review confirmed that trigger was lost during
+cutover. Restored a one-shot per-mount automatic check after successful Host-config
+merge, prefs hydration and valid safe update-state hydration, sharing the manual
+pending/latch so manual-first does not duplicate. Unsafe states remain blocked;
+no new install action/protocol. Options.update62 and related focused suites total
+458/458 passed, with RED/break-fail checks, then build/defaultmenu5/5/tsc/copy passed.
+This change remains uncommitted and is NOT in published beta4.
+
+The user then reported both LOCAL and Cloud PC upgrades succeeded and success
+notifications disappeared after approximately8 seconds. Record actual two-machine
+normal-upgrade/UI observations as user-reported PASS, not exact timing, interrupted
+recovery, or full independent forensic acceptance. They reported Severity,
+Priority, Case Number, Customer Name and Status captured, with only Created On
+empty. Priority is recorded as their observation, not a claim that this release
+introduced a dedicated Priority field. Do not repeat successful upgrade checks.
+
+Created On remains the sole reported extraction gap. Before further selector
+changes, distinguish unloaded Details or preserved edited text from actual control
+shape; request one sanitized selected date control and its small field ancestry.
+The current implementation only reads inputs/textarea in document-visible scoped
+fields, so attribute/read-only display or shadow roots are possible but unproven.
+Do not substitute Modified On, Audit events or local current time.
+
+The user's Created On selected-input projection showed a nonempty ordinary text
+input with no data-id/aria-labelledby, outside shadow DOM, followed by five
+wrappers without identifying attributes. This does not yet establish its field
+boundary; do not substitute nearby Modified On or loosen all-form extraction.
+
+The user requested direct Edge MCP debugging and supplied Microsoft's official
+devtools-mcp-server article. They confirmed Edge remote debugging already enabled.
+Read-only discovery found Edge's DevToolsActivePort in the normal local User Data
+directory. Global OpenCode config now includes chrome-devtools local server pinned
+1.8.0 with autoConnect/user-data-dir, no usage statistics/CrUX/network/performance/
+emulation categories. Existing four MCP entries were preserved; no Superpowers
+loaded. Node24.11.0 compatible. Package help and actual stdio initialize/tools-list
+passed (protocol2024-11-05,server1.8.0,22 tools, disabled categories absent), owned
+test processes stopped. No tools/call, Edge attachment, page enumeration, cookies,
+or business-page data access occurred. Config is global, not a product dependency.
+
+Restart OpenCode to load new tools; keep Edge and current D365 Details page open.
+Next session must use this exact source checkout, preserve pending Options-onload
+fix (458 tests/build passed, not released) and Created On investigation. Initial
+browser use must be limited to the user's current D365 tab/field structure, with
+no raw customer values, broad screenshot, cookie/request collection, or case edits.
+A working MCP handshake is not yet proof that Edge attachment succeeds. Microsoft
+documents autoConnect for existing Edge; no new browser/profile is needed here.
+
+## Direct Debugging Follow-Up
+
+The user confirmed clicking Allow. MCP list_pages still returned Network.enable
+timeout, but a direct minimal Runtime.evaluate subsequently succeeded on the
+existing local D365 target. Targeted readonly structural scans also succeeded,
+returning no Created On label/attribute in the accessible D365 documents (4332
+elements,20iframe nodes, no scan limit reached); connector target likewise had
+no matching label. No customer values were returned. This establishes usable
+direct CDP, not a captured Created On field; cross-origin/current-page scope is
+still unresolved. Ask user to ensure the LOCAL Edge current case Details panel
+is visible, rather than more permission clicks or manual DOM-copy scripts.
+
+Post-restart connection attempt: MCP tools are now available but list_pages timed
+out, then reported Network.enable timeout. Edge owns loopback9222 and its
+DevToolsActivePort exists. A bounded direct CDP fallback successfully enumerated
+only D365 target identifiers/domains, but targeted inspection of the D365 page
+and connector iframe each timed out at25seconds. No DOM result or customer values
+were retrieved; no network instrumentation, navigation, case writes or browser
+termination occurred. Do not keep retrying. Ask the user whether Edge shows a
+remote-debugging approval dialog or DevTools paused-script indicator. The exact
+timed-out CDP command was not recorded, so do not assert an authorization cause.
+
+The user explained every new node process caused another authorization prompt and
+identified the active D365 internal case tab. A single-connection readonly CDP
+investigation then found Created On in the MAIN document. Exact container:
+`[data-id="createdon.fieldControl-datetime-description_container"]`. Its readonly
+text inputs have no id/data-id and are nested9/5levels; label for does not match
+either input. Modified On has its own separate equivalent container. No field
+values/customer content were returned;17frame contexts inspected, connection
+detached and process exited. Avoid repeated new connections/permission prompts.
+
+PageReader now prioritizes that exact scoped container, descendant text controls,
+DOM-order raw strings, and excludes nested foreign field controls. Multiple
+containers or more than2eligible controls fail closed; missing/empty falls back.
+Five synthetic regressions reproduce actual nesting/readonly/non-input label
+target and separation from Modified On. RED oldreader failed; final130/130 tests
+(scraper/snapshot/FABidentity) passed, TypeScript and final build passed, menu5/5
+and sourcecopy passed; bounded review no blockers. No installed extension/public
+asset changed, no dates copied to fixtures, no timezone or caching change.
+
 ## Next Single Action
 
+The user approved beta5 plus reusable debugging workflow. Added
+docs/edge-d365-debugging-workflow.md and AGENTS/guide entry points; no embedded
+private profile paths, customer values or automatic plugin installation. The
+workflow preserves one-connection CDP, scoped field/iframe evidence and explicit
+authorization boundaries. All three version carriers now beta.5.
+
+Final beta5 local build/probe passed: Temp dh-beta5-release-20260908,
+DynamicsHelper_v2.0.76-beta.5.zip,14,007,154 bytes,SHA-256
+862d81d8f7ac5801f03b56b8276313202e25541aca016706c8a112b18b486f65.
+56files/55manifestentries,13frontend/35runtime,17requiredimports,2plugins excluded,
+setuptools0.92productinputs unchanged through build. Focused tests569/569 unique
+(519frontend,50Host),zero failures/skips/retries; Reactact warnings disclosed.
+Frontend wrapper timeout did not stop the monitored test process; it finished
+exit0 and was not rerun. Final probe beta5/schema valid, profiles empty, no
+surviving processes. tzdata/Browserslist warnings remain. Release notes prepared.
+
 Remain in the LOCAL checkout
-`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Report beta4 release
-URL and verified asset. Await normal beta3-to-beta4 upgrade and live D365 field
-feedback; do not automatically install/retry or ask for full customer screenshots.
-CreatedOn depends on loaded Details controls; Customer is linked display name,
-no timezone inference/TPID/Audit. Preserve user-edited context and beta3 release.
-No vendor submission or security bypass. Old-overlay versions use full installer.
+`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Complete authorized
+beta5 commit/binding/tag/branch push/prerelease publication with unchanged tested
+ZIP, verify remote asset digest, then report workflow entry and live field test
+guidance. No automatic user-machine upgrade, security change or case edits.
 
 The user reports having started a new session, but it initially read the old
 master checkout. That old checkout's clean status and July handoff do not describe

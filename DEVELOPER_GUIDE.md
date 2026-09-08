@@ -21,6 +21,10 @@ The project consists of three main components:
 * **`src/components/MarkdownPreview.tsx`**: Shared Markdown renderer using `react-markdown` + `remark-gfm`. Provides styled GFM rendering (headings, code blocks, tables, links, lists, blockquotes). Used by Options.tsx for preview toggles.
 * **`src/utils/pageReader.ts`**: Logic for scraping Dynamics/Azure Portal pages to extract case numbers, error text, and context. Reads direct value/label slots inside known `uci-header-control-list` open shadow trees first, then retains the legacy 4-strategy cascade (header controls, label search, header container regex, ticket title fallback). Structured traversal is capped at 20 lists/2,000 elements and yields every 50 elements; it does not search arbitrary shadow text or closed roots. Shadow-only mutations do not independently trigger the existing document observer, so later field changes require an existing scan signal or explicit refresh. Existing user-edited context remains protected.
   `createdOn` and `customerName` are optional scraped strings carried through
+  the pipeline. Field investigations should use the bounded, privacy-preserving
+  [Edge D365 debugging workflow](docs/edge-d365-debugging-workflow.md), including
+  single-connection CDP fallback and synthetic fixtures for observed DOM structure.
+  These strings pass through
   `pageIdentity.ts`'s explicit snapshot whitelist into the Case Context template;
   they are not identity keys or new Host RPC fields. Created On uses associated
   controls in a single-field boundary or explicit createdon controls, never nearby

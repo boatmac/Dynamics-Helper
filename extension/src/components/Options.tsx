@@ -842,6 +842,8 @@ const OptionsInner: React.FC = () => {
     const [updateState, setUpdateState] = useState<UpdateState>({ kind: 'idle' });
     const [updateStateReady, setUpdateStateReady] = useState(false);
     const updateStateRef = useRef<UpdateState | null>(null);
+    const [hostConfigMerged, setHostConfigMerged] = useState(false);
+    const autoUpdateCheckConsumedRef = useRef(false);
     const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
     const updateCheckRef = useRef<{ token: object; timer: number } | null>(null);
     const canCheckUpdates = updateStateReady && !isCheckingUpdates
@@ -1625,8 +1627,15 @@ const OptionsInner: React.FC = () => {
                      return;
                 }
                 
-                if (response && response.status === "success" && response.data) {
-                    const hostConfig = response.data;
+                const configStatus = ownDataProperty(response, 'status');
+                const configData = ownDataProperty(response, 'data');
+                if (configStatus.kind === 'value' && configStatus.value === 'success'
+                    && configData.kind === 'value'
+                    && typeof configData.value === 'object' && configData.value !== null
+                    && !Array.isArray(configData.value)
+                    && (Object.getPrototypeOf(configData.value) === Object.prototype
+                        || Object.getPrototypeOf(configData.value) === null)) {
+                    const hostConfig = configData.value as Record<string, any>;
                     const promptSourceStatus = hostConfig.prompt_source_status;
                     console.log("[Options] Synced config from Host:", {
                         host_version: hostConfig.host_version,
@@ -1801,18 +1810,20 @@ const OptionsInner: React.FC = () => {
                         prefsHydratedRef.current = true;
                         setPrefsHydrated(true);
                         requestHydrationMirror(merged);
+                        setHostConfigMerged(true);
                     }
                     requestHydrationCatchUp();
                 } else {
                     // Host responded but not with success+data. Same
                     // rationale as the lastError branch above — don't
                     // deadlock the user. Local dh_prefs is what we have.
+                    const configErrorCode = ownDataProperty(response, 'error_code');
                     console.warn(
                         "[Options] Host get_config returned non-success; " +
                         "marking prefs hydrated to unblock user actions.",
                         {
-                            status: response?.status,
-                            error_code: response?.error_code,
+                            status: configStatus.kind === 'value' ? configStatus.value : undefined,
+                            error_code: configErrorCode.kind === 'value' ? configErrorCode.value : undefined,
                         },
                     );
                     prefsHydratedRef.current = true;
@@ -2964,8 +2975,10 @@ const OptionsInner: React.FC = () => {
     }, []);
 
     const handleCheckUpdates = async () => {
-        if (updateCheckRef.current || !updateStateRef.current
+        if (!updateStateReady || updateCheckRef.current || !updateStateRef.current
             || !['idle', 'available', 'complete'].includes(updateStateRef.current.kind)) return;
+        // An admitted manual check also consumes this mount's automatic check.
+        autoUpdateCheckConsumedRef.current = true;
         const token = {};
         updateCheckRef.current = {
             token,
@@ -2988,6 +3001,12 @@ const OptionsInner: React.FC = () => {
             settleUpdateCheck(token, latestTranslationRef.current('updateCheckFailed'), 'error');
         }
     };
+
+    useEffect(() => {
+        if (!hostConfigMerged || !prefsHydrated || !canCheckUpdates
+            || autoUpdateCheckConsumedRef.current) return;
+        void handleCheckUpdates();
+    }, [hostConfigMerged, prefsHydrated, canCheckUpdates, updateState.kind]);
 
     const handleUpdate = async () => {
         if (!canStartUpdate || updateCheckRef.current) return;

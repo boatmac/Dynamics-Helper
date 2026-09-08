@@ -285,6 +285,58 @@ describe('D365 case metadata', () => {
     expect(await PageReader.scanForErrors()).toMatchObject({ createdOn: '08/09/2026 9:07 PM' })
   })
 
+  function createdOnDatetime(date = '04/17/2031', time = '6:23 PM') {
+    return `<label for="created-display">Created On</label><span id="created-display"></span>
+      <div data-id="createdon.fieldControl-datetime-description_container">
+        ${'<div>'.repeat(8)}<input type="text" readonly aria-label="Created On" value="${date}">${'</div>'.repeat(8)}
+        ${'<div>'.repeat(4)}<label>Time</label><input type="text" readonly aria-label="Created On Time" value="${time}">${'</div>'.repeat(4)}
+      </div>`
+  }
+
+  it('reads deep readonly Created On datetime inputs despite a non-input label target, before generic labels', async () => {
+    const fields = `${createdOnDatetime()}
+      <div data-id="modifiedon.fieldControl-datetime-description_container">
+        <label>Modified On</label><input type="text" readonly value="WRONG MODIFIED DATE">
+      </div>`
+    page(fields, createdOnDatetime('OUTSIDE MAIN', 'OUTSIDE TIME'))
+    expect(await PageReader.scanForErrors()).toMatchObject({ createdOn: '04/17/2031 6:23 PM' })
+    page(`<label for="generic-created">Created On</label><input id="generic-created" value="GENERIC FALLBACK">${fields}`)
+    expect(await PageReader.scanForErrors()).toMatchObject({ createdOn: '04/17/2031 6:23 PM' })
+  })
+
+  it('retains label fallback for absent or empty datetime containers without leaving main', async () => {
+    for (const fields of ['', createdOnDatetime(' ', '')]) {
+      page(fields, createdOnDatetime())
+      expect((await PageReader.scanForErrors())?.createdOn).toBeUndefined()
+      page(`${fields}<label for="fallback-created">Created On</label><input id="fallback-created" value="Apr 17, 2031">`, createdOnDatetime())
+      expect(await PageReader.scanForErrors()).toMatchObject({ createdOn: 'Apr 17, 2031' })
+    }
+  })
+
+  it('keeps either populated datetime part as raw display text', async () => {
+    page(createdOnDatetime('04/17/2031', ' '))
+    expect(await PageReader.scanForErrors()).toMatchObject({ createdOn: '04/17/2031' })
+    page(createdOnDatetime('', '6:23 PM'))
+    expect(await PageReader.scanForErrors()).toMatchObject({ createdOn: '6:23 PM' })
+  })
+
+  it('does not combine ambiguous datetime containers or accept more than two controls', async () => {
+    page(`<div data-id="createdon.fieldControl-datetime-description_container"><input value="04/17/2031"></div>
+      <div data-id="createdon.fieldControl-datetime-description_container"><input value="6:23 PM"></div>`)
+    expect((await PageReader.scanForErrors())?.createdOn).toBeUndefined()
+    page(createdOnDatetime())
+    document.querySelector('[data-id="createdon.fieldControl-datetime-description_container"]')!.insertAdjacentHTML('beforeend', '<input type="text" value="EXTRA">')
+    expect((await PageReader.scanForErrors())?.createdOn).toBeUndefined()
+  })
+
+  it('excludes nested Modified On and other foreign field controls from datetime values and count', async () => {
+    page(createdOnDatetime())
+    document.querySelector('[data-id="createdon.fieldControl-datetime-description_container"]')!.insertAdjacentHTML('beforeend', `
+      <div data-id="modifiedon.fieldControl-datetime-description_container"><div><input type="text" value="WRONG MODIFIED DATE"></div></div>
+      <div data-id="ownerid.fieldControl-container"><div><input type="text" value="WRONG OWNER"></div></div>`)
+    expect(await PageReader.scanForErrors()).toMatchObject({ createdOn: '04/17/2031 6:23 PM' })
+  })
+
   it.each([
     ['form', '<input value="WRONG MODIFIED DATE">'],
     ['div', '<label>Modified On</label><input value="WRONG MODIFIED DATE">'],

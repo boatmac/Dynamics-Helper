@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ReactNode } from 'react'
+import { StrictMode, type ReactNode } from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import {
   chromeMockSpies,
@@ -95,6 +95,17 @@ function ackMessages() {
   return getMessageLog().filter(entry => entry.action === 'DH_UPDATE_ACK_COMPLETE')
 }
 
+function checkMessages() {
+  return getMessageLog().filter(entry => entry.action === 'check_updates')
+}
+
+async function resolveConfig(deferred: ReturnType<typeof deferNextResponse>) {
+  await act(async () => deferred.resolve({
+    status: 'success',
+    data: { extension_preferences: { beta_channel_enabled: true } },
+  }))
+}
+
 function completeState(transactionId = TX, outcome: 'committed' | 'rolled-back' = 'committed') {
   return { kind: 'complete', update: candidate, transactionId, outcome } as const
 }
@@ -122,6 +133,145 @@ describe('Options reliable update projection', () => {
     restoreDocumentDescriptor('hidden', originalHiddenDescriptor)
     restoreDocumentDescriptor('visibilityState', originalVisibilityDescriptor)
     vi.restoreAllMocks()
+  })
+
+  it.each(['config-first', 'state-first'])('auto-checks once after both hydrations: %s', async order => {
+    const config = deferNextResponse('get_config')
+    const state = deferNextResponse('DH_UPDATE_GET_STATE')
+    render(<Options />)
+    expect(checkMessages()).toHaveLength(0)
+    if (order === 'config-first') await resolveConfig(config)
+    else await resolveState(state, { kind: 'idle' })
+    expect(checkMessages()).toHaveLength(0)
+    if (order === 'config-first') await resolveState(state, { kind: 'idle' })
+    else await resolveConfig(config)
+    expect(checkMessages()).toHaveLength(1)
+    expect(checkMessages()[0].payload).toEqual({ type: 'NATIVE_MSG', payload: { action: 'check_updates' } })
+    expect(getStorageSnapshot().dh_prefs).toMatchObject({ betaChannelEnabled: true })
+    expect(getMessageLog().some(entry => entry.action === 'DH_UPDATE_START')).toBe(false)
+  })
+
+  it.each([
+    ['transport failure', undefined],
+    ['non-success', { status: 'error' }],
+    ['missing data', { status: 'success' }],
+    ['null data', { status: 'success', data: null }],
+    ['array data', { status: 'success', data: [] }],
+    ['string data', { status: 'success', data: 'invalid' }],
+    ['number data', { status: 'success', data: 42 }],
+    ['non-plain data', { status: 'success', data: new Date() }],
+    ['inherited status', Object.assign(Object.create({ status: 'success' }), { data: {} })],
+    ['accessor data', Object.defineProperty({ status: 'success' }, 'data', { get: () => { throw new Error('must not read') } })],
+  ])('denies auto-check after %s config hydration', async (_label, response) => {
+    const config = deferNextResponse('get_config')
+    const state = deferNextResponse('DH_UPDATE_GET_STATE')
+    render(<Options />)
+    await resolveState(state, { kind: 'idle' })
+    await act(async () => {
+      if (response === undefined) config.reject(new Error('offline'))
+      else config.resolve(response)
+    })
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: { kind: 'available', update: candidate } }))
+    expect(checkMessages()).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }))
+    expect(checkMessages()).toHaveLength(1)
+  })
+
+  it('waits through invalid and blocked projections, then auto-checks once when idle', async () => {
+    const config = deferNextResponse('get_config')
+    const state = deferNextResponse('DH_UPDATE_GET_STATE')
+    render(<Options />)
+    await resolveConfig(config)
+    await resolveState(state, { kind: 'broken' })
+    expect(checkMessages()).toHaveLength(0)
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: { kind: 'preparing', ...transaction } }))
+    expect(checkMessages()).toHaveLength(0)
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: { kind: 'idle' } }))
+    expect(checkMessages()).toHaveLength(1)
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_CHECK_RESULT', outcome: 'not-available' }))
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: { kind: 'idle' } }))
+    expect(checkMessages()).toHaveLength(1)
+  })
+
+  it.each(['pending', 'settled'])('manual-first consumes auto-check before config hydration: %s', async outcome => {
+    const config = deferNextResponse('get_config')
+    const state = deferNextResponse('DH_UPDATE_GET_STATE')
+    render(<Options />)
+    await resolveState(state, { kind: 'idle' })
+    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }))
+    if (outcome === 'settled') act(() => emitRuntimeMessage({ type: 'DH_UPDATE_CHECK_RESULT', outcome: 'not-available' }))
+    await resolveConfig(config)
+    expect(checkMessages()).toHaveLength(1)
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_CHECK_RESULT', outcome: 'not-available' }))
+    expect(checkMessages()).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }))
+    expect(checkMessages()).toHaveLength(2)
+  })
+
+  it('auto-checks once under StrictMode and resets only on a real remount', async () => {
+    const configs = [deferNextResponse('get_config'), deferNextResponse('get_config')]
+    const states = [deferNextResponse('DH_UPDATE_GET_STATE'), deferNextResponse('DH_UPDATE_GET_STATE')]
+    const view = render(<StrictMode><Options /></StrictMode>)
+    for (const state of states) await resolveState(state, { kind: 'idle' })
+    await resolveConfig(configs[0])
+    expect(checkMessages()).toHaveLength(1)
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_CHECK_RESULT', outcome: 'not-available' }))
+    await resolveConfig(configs[1])
+    view.rerender(<StrictMode><Options /></StrictMode>)
+    expect(checkMessages()).toHaveLength(1)
+    view.unmount()
+    const config = deferNextResponse('get_config')
+    const state = deferNextResponse('DH_UPDATE_GET_STATE')
+    render(<Options />)
+    await resolveConfig(config)
+    await resolveState(state, { kind: 'idle' })
+    expect(checkMessages()).toHaveLength(2)
+  })
+
+  it.each(['not-available', 'available', 'finished', 'error', 'non-success', 'rejection', 'timeout'])(
+    'does not loop auto-check after %s; manual retry stays available', async outcome => {
+      vi.useFakeTimers()
+      const config = deferNextResponse('get_config')
+      const state = deferNextResponse('DH_UPDATE_GET_STATE')
+      const check = deferNextResponse('check_updates')
+      const view = render(<Options />)
+      await resolveConfig(config)
+      await resolveState(state, { kind: 'available', update: candidate })
+      expect(checkMessages()).toHaveLength(1)
+      await act(async () => {
+        if (outcome === 'rejection') check.reject(new Error('offline'))
+        else if (outcome === 'non-success') check.resolve({ status: 'error' })
+        else {
+          check.resolve({ status: 'success' })
+          if (outcome === 'timeout') vi.advanceTimersByTime(45_000)
+          else emitRuntimeMessage(outcome === 'error'
+            ? { type: 'NATIVE_UPDATE_ERROR', payload: { error: 'Check failed' } }
+            : { type: 'DH_UPDATE_CHECK_RESULT', outcome })
+        }
+      })
+      view.rerender(<Options />)
+      act(() => vi.advanceTimersByTime(90_000))
+      expect(checkMessages()).toHaveLength(1)
+      expect(screen.getByRole('button', { name: 'Check for Updates' })).toBeEnabled()
+      fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }))
+      expect(checkMessages()).toHaveLength(2)
+      expect(getMessageLog().some(entry => entry.action === 'DH_UPDATE_START')).toBe(false)
+    },
+  )
+
+  it('does not auto-check again after the eight-second completion ACK transitions to idle', async () => {
+    vi.useFakeTimers()
+    const config = deferNextResponse('get_config')
+    const state = deferNextResponse('DH_UPDATE_GET_STATE')
+    render(<Options />)
+    await resolveConfig(config)
+    await resolveState(state, completeState())
+    expect(checkMessages()).toHaveLength(1)
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_CHECK_RESULT', outcome: 'not-available' }))
+    act(() => vi.advanceTimersByTime(8_000))
+    expect(ackMessages()).toHaveLength(1)
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: { kind: 'idle' } }))
+    expect(checkMessages()).toHaveLength(1)
   })
 
   it('hydrates from one payload-free DH_UPDATE_GET_STATE request', async () => {

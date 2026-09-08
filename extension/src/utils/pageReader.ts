@@ -79,6 +79,19 @@ export class PageReader {
 
     private static async readCreatedOn(context: Element): Promise<string | undefined> {
         const inputSelector = 'input:not([type="hidden"]):not([type="button"]), textarea';
+        const datetimeFields = context.querySelectorAll('[data-id="createdon.fieldControl-datetime-description_container"]');
+        if (datetimeFields.length > 1) return undefined;
+        if (datetimeFields.length === 1) {
+            // D365's readonly inputs can be deeply nested and have no usable label-for target.
+            const field = datetimeFields[0];
+            const inputs = Array.from(field.querySelectorAll(inputSelector)).filter(input => {
+                const foreignField = input.closest('[data-id*=".fieldControl"]:not([data-id^="createdon."])');
+                return !foreignField || !field.contains(foreignField);
+            });
+            if (inputs.length > 2) return undefined;
+            const values = inputs.map(el => (el as HTMLInputElement).value.trim()).filter(Boolean);
+            if (values.length) return values.join(' ');
+        }
         const labels = Array.from(context.querySelectorAll('label, span, div')).filter(el =>
             el.childElementCount === 0 && el.textContent?.trim().toLowerCase() === 'created on'
         );

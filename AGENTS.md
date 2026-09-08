@@ -530,6 +530,16 @@ This file defines the operational rules, development workflows, and coding stand
 
 ## 5. Debugging Workflow
 
+For Edge/D365 field extraction, follow
+`docs/edge-d365-debugging-workflow.md` after checking current task authorization.
+Use an approved existing browser session, scoped structural evidence and one
+maintained CDP connection; do not export customer values or repeatedly reconnect
+for each query. D365 internal case tabs, frames, and loaded panels are distinct.
+Use observed field containers and synthetic regression fixtures. MCP registration
+does not prove browser attachment; never infer unavailable data from a wrong
+frame or a failed connection. This tooling is not a product dependency or permission
+to install plugins, bypass company policy, operate cases, or publish changes.
+
 Since you cannot see the browser or console:
 
 1. **Check Host Logs:** Read `%LOCALAPPDATA%\DynamicsHelper\native_host.log` for backend errors.
