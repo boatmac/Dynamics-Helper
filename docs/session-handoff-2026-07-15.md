@@ -6,7 +6,8 @@ Read `../AGENTS.md` for execution rules. Older contents are retained in Git at
 
 ## Current Mode
 
-v2.0.76-beta.3 is published as a GitHub prerelease. The user accepted the beta
+v2.0.76-beta.4 is now published as a GitHub prerelease (latest result below).
+Historical beta3 local upgrade/repair follows. The user accepted the beta
 qualification limits and tested local upgrade. The resulting mixed-install
 integrity failure is confirmed below; the user approved one local full-installer
 repair and verification, with no security changes or forced process termination.
@@ -1034,15 +1035,24 @@ executions including retries. No hidden skips. tzdata/Browserslist warnings rema
 Release notes: releases/notes-v2.0.76-beta.4.md, explicitly disclose liveDOM and
 update qualification limits and old-overlay full-installer migration requirement.
 
+Beta4 publication completed 2026-09-08 10:38:26 UTC:
+https://github.com/boatmac/Dynamics-Helper/releases/tag/v2.0.76-beta.4
+Tag/feature commit bf6f9cc0aa6c2bd00f8b49687df4ba1742ce6631; only intended branch
+and beta4 tag pushed atomically. Public prerelease=true,draft=false,not latest
+stable. One uploaded asset size14,007,795 and GitHub SHA-256 bef3ef4971d88750a62bef627de0590996cf0ba7d89c459959554599cf9d0806 match testedZIP.
+92/92inputs and21/21Hostsources bound to commit before publication; no rebuild
+from tag claim. No local user installation or beta3 asset replacement occurred.
+Release-result follow-up is docs-only and does not amend the release tag.
+
 ## Next Single Action
 
 Remain in the LOCAL checkout
-`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Complete authorized
-beta4 commit, bind packaged inputs to committed source, push reviewed branch/tag
-and publish exact tested ZIP as prerelease/not latest stable. Verify remote asset
-digest and report normal upgrade guidance; do not automatically install. Preserve
-beta3 release and local repair evidence. No vendor submission, AV bypass or
-additional Audit/TPID scope. Live D365 extraction validation remains pending.
+`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Report beta4 release
+URL and verified asset. Await normal beta3-to-beta4 upgrade and live D365 field
+feedback; do not automatically install/retry or ask for full customer screenshots.
+CreatedOn depends on loaded Details controls; Customer is linked display name,
+no timezone inference/TPID/Audit. Preserve user-edited context and beta3 release.
+No vendor submission or security bypass. Old-overlay versions use full installer.
 
 The user reports having started a new session, but it initially read the old
 master checkout. That old checkout's clean status and July handoff do not describe
