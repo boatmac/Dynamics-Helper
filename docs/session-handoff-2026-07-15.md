@@ -6,12 +6,12 @@ Read `../AGENTS.md` for execution rules. Older contents are retained in Git at
 
 ## Current Mode
 
-Current authorized task: save the completed beta3 working milestone in one local
-commit; the user separately asked whether GitHub publication is ready.
+Current authorized task: publish v2.0.76-beta.3 directly as a GitHub prerelease.
+The user accepted the beta qualification limits and intends to test local upgrade.
 Development stays in the LOCAL checkout; the approved Cloud PC product install
-did not migrate development. No new tests, builds, cloud operations, push, or
-publication are authorized by this local commit. Preserve the reviewed product
-changes, tests and diagnostic scripts; do not publish automatically.
+did not migrate development. Release authorization covers source/asset verification,
+release notes, the intended branch/tag push and exact tested ZIP publication. It
+does not authorize local installation, security changes, or stable publication.
 
 The user confirmed global OpenCode Superpowers removal also applies here; do not
 reload or repeat removal. No Pi installation, vendor sample submission, or
@@ -854,15 +854,31 @@ Public prereleases may be discovered by existing beta-channel updaters, so a
 prerelease label alone is not an isolation gate. Automatic-update/recovery
 qualification and release preflight remain separate from restored basic use.
 
+The local product commit completed as fc148268e1e34b4fc78ecb16d2f4fa460ba5f9e4.
+The user then explicitly approved beta release without a Draft, accepting missing
+automatic-update target acceptance and planning local upgrade testing. After
+fetch, the branch is 53 commits ahead/0 behind its origin tracking reference;
+all53 outgoing commit inventories/added patches were reviewed for release scope
+and credential risks, with no definite blockers. No master merge is required.
+
+Final ZIP e07a6ee4... binding passed:178 tracked input comparisons,82 assembly
+inputs,34 Host snapshots,21 project Python graph sources,35 runtime files and
+13 frontend files. Only expected newline/CRXJS transformations were accepted.
+The pre-tag npm build passed TypeScript/default menu5/5/source-dist byte gate.
+12/13 frontend files matched the tested ZIP exactly; the sole difference is the
+non-runtime .vite manifest CRX virtual-asset hash field. Runtime assets match;
+do not claim entire fresh build byte identity or rebuild the tested ZIP silently.
+Release notes are releases/notes-v2.0.76-beta.3.md. Publish unchanged complete
+tested ZIP as prerelease, not latest stable, with no draft or extra assets.
+
 ## Next Single Action
 
 Remain in the LOCAL checkout
-`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Complete the approved
-local commit, verify content/worktree, and report its identity. Explain why public
-release is not yet equivalent to the observed full-installer/Analyze success.
-Before any later approved push, inspect all pending branch commits; do not treat
-this as a one-commit push. No further test/build, Cloud PC operation, distribution,
-security change, tag, or publication follows automatically.
+`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Commit release notes
+and binding record, tag the documentation-only descendant, push only the reviewed
+branch and exact beta3 tag, publish with gh using the tested ZIP, and verify remote
+prerelease/asset identity. Report URL and normal local upgrade steps, not a claim
+that upgrade already passed. Do not run release_helper.main or push unrelated tags.
 
 The user reports having started a new session, but it initially read the old
 master checkout. That old checkout's clean status and July handoff do not describe
