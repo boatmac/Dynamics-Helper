@@ -111,6 +111,134 @@ async function loadWorkerWithCommittedCompletion() {
 }
 
 describe('Service Worker transactional update cutover', () => {
+  it('relays actual idle no-update discovery, not the initiation ACK or raw payload', async () => {
+    await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    const response = dispatchRuntimeMessage({ type: 'NATIVE_MSG', payload: { action: 'check_updates' } })
+    await vi.waitFor(() => expect(port.posted).toHaveLength(1))
+    emitFinal(port, port.posted[0], 'Update check initiated')
+    await expect(response).resolves.toEqual({ status: 'success', data: 'Update check initiated' })
+    expect(chromeMockSpies.runtimeSendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'DH_UPDATE_CHECK_RESULT' }),
+    )
+    const writes = chromeMockSpies.storageSet.mock.calls.length
+    port.emitMessage({ action: 'update_not_available', payload: { url: 'private', error: 'private' } })
+    await vi.waitFor(() => expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledWith({
+      type: 'DH_UPDATE_CHECK_RESULT', outcome: 'not-available',
+    }))
+    expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(writes)
+    expect(chromeMockSpies.runtimeReload).not.toHaveBeenCalled()
+  })
+
+  it('blocks manual discovery in transactionless recovery without blocking ordinary ping', async () => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    seedStorage({ [UPDATE_STATE_KEY]: {
+      kind: 'recovery-required', code: 'installation_integrity_failed', action: 'recheck-installation',
+    } })
+    const initializing = worker.updateRuntime.initialize({ resume: false })
+    await vi.waitFor(() => expect(port.posted).toHaveLength(1))
+    emitFinal(port, port.posted[0], { host_version: currentVersion, capabilities: [] })
+    await initializing
+    const check = dispatchRuntimeMessage({ type: 'NATIVE_MSG', payload: { action: 'check_updates' } })
+    await expect(check).resolves.toMatchObject({ status: 'error', error_code: 'update_temporarily_unavailable' })
+    expect(port.posted).toHaveLength(1)
+    const ping = dispatchRuntimeMessage({ type: 'NATIVE_MSG', payload: { action: 'ping' } })
+    await vi.waitFor(() => expect(port.posted).toHaveLength(2))
+    emitFinal(port, port.posted[1], 'pong')
+    await expect(ping).resolves.toEqual({ status: 'success', data: 'pong' })
+  })
+
+  it('waits for candidate acceptance before relaying only a fixed available result', async () => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    const ping = worker.requestNativeMessage({ action: 'ping' })
+    emitFinal(port, port.posted[0], 'pong')
+    await ping.response
+    let accept!: (state: { kind: 'available'; update: typeof candidate }) => void
+    vi.spyOn(worker.updateRuntime, 'acceptCandidate').mockReturnValue(new Promise(resolve => { accept = resolve }))
+    port.emitMessage({ action: 'update_available', payload: candidateWire })
+    await vi.waitFor(() => expect(worker.updateRuntime.acceptCandidate).toHaveBeenCalledWith(candidate))
+    expect(chromeMockSpies.runtimeSendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'DH_UPDATE_CHECK_RESULT' }),
+    )
+    accept({ kind: 'available', update: candidate })
+    await vi.waitFor(() => expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledWith({
+      type: 'DH_UPDATE_CHECK_RESULT', outcome: 'available',
+    }))
+  })
+
+  it.each(['idle', 'complete', 'different-candidate', 'recovery', 'failure', 'malformed'])(
+    'does not relay available when candidate processing rejects or fails (%s)', async result => {
+      const worker = await loadWorker()
+      const port = queueNativePort(MAIN_HOST)
+      const ping = worker.requestNativeMessage({ action: 'ping' })
+      emitFinal(port, port.posted[0], 'pong')
+      await ping.response
+      const accept = vi.spyOn(worker.updateRuntime, 'acceptCandidate')
+      if (result === 'failure') accept.mockRejectedValue(new Error('private-url-and-error'))
+      else accept.mockResolvedValue(result === 'complete' ? committedCompletion
+        : result === 'different-candidate' ? { kind: 'available', update: { ...candidate, url: 'https://example.invalid/other.zip' } }
+        : result === 'recovery' ? { kind: 'recovery-required', code: 'source_update_disabled', action: 'recheck-installation' }
+        : { kind: 'idle' })
+      port.emitMessage({ action: 'update_available', payload: result === 'malformed' ? { url: 'private' } : candidateWire })
+      await vi.waitFor(() => expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledWith({
+        type: 'NATIVE_UPDATE_ERROR', payload: { error: 'Update check failed.' },
+      }))
+      expect(chromeMockSpies.runtimeSendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'DH_UPDATE_CHECK_RESULT' }),
+      )
+    },
+  )
+
+  it('settles an unchanged rolled-back candidate without claiming fresh validation', async () => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    const ping = worker.requestNativeMessage({ action: 'ping' })
+    emitFinal(port, port.posted[0], 'pong')
+    await ping.response
+    vi.spyOn(worker.updateRuntime, 'acceptCandidate').mockResolvedValue({ ...committedCompletion, outcome: 'rolled-back' })
+    port.emitMessage({ action: 'update_available', payload: candidateWire })
+    await vi.waitFor(() => expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledWith({
+      type: 'DH_UPDATE_CHECK_RESULT', outcome: 'finished',
+    }))
+  })
+
+  it('relays discovery errors without raw Host text or URLs', async () => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    const ping = worker.requestNativeMessage({ action: 'ping' })
+    emitFinal(port, port.posted[0], 'pong')
+    await ping.response
+    port.emitMessage({ action: 'update_error', payload: { error: 'private-url-and-error' } })
+    await vi.waitFor(() => expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledWith({
+      type: 'NATIVE_UPDATE_ERROR', payload: { error: 'Update check failed.' },
+    }))
+  })
+
+  it.each(['rejected', 'blocked', 'complete'])(
+    'reports no-update only after successful coordinator clearing (%s)', async result => {
+      const worker = await loadWorker()
+      const port = queueNativePort(MAIN_HOST)
+      const ping = worker.requestNativeMessage({ action: 'ping' })
+      emitFinal(port, port.posted[0], 'pong')
+      await ping.response
+      const clear = vi.spyOn(worker.updateRuntime, 'clearAvailable')
+      if (result === 'rejected') clear.mockRejectedValue(new Error('private'))
+      else clear.mockResolvedValue(result === 'complete' ? committedCompletion : {
+        kind: 'recovery-required', code: 'installation_integrity_failed', action: 'recheck-installation',
+      })
+      port.emitMessage({ action: 'update_not_available' })
+      await vi.waitFor(() => expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledWith(
+        result === 'complete' ? { type: 'DH_UPDATE_CHECK_RESULT', outcome: 'not-available' }
+          : { type: 'NATIVE_UPDATE_ERROR', payload: { error: 'Update check failed.' } },
+      ))
+      if (result !== 'complete') expect(chromeMockSpies.runtimeSendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'DH_UPDATE_CHECK_RESULT' }),
+      )
+    },
+  )
+
   it('routes an exact DH_UPDATE_ACK_COMPLETE message to durable committed consumption', async () => {
     const { port, baselines } = await loadWorkerWithCommittedCompletion()
 
@@ -435,12 +563,12 @@ describe('Service Worker transactional update cutover', () => {
     expect(chromeMockSpies.tabsQuery).toHaveBeenCalledTimes(baselines.tabsQuery)
   })
 
-  it('hydrates update state before forwarding an ordinary Native request', async () => {
+  it.each(['ping', 'check_updates'])('hydrates update state before forwarding %s', async action => {
     const hydration = deferNextStorageGet(UPDATE_STATE_KEY)
     const worker = await import('./serviceWorker')
     const responsePromise = dispatchRuntimeMessage({
       type: 'NATIVE_MSG',
-      payload: { action: 'ping' },
+      payload: { action },
     })
     await Promise.resolve()
     expect(chromeMockSpies.connectNative.mock.calls.some(
@@ -543,6 +671,9 @@ describe('Service Worker transactional update cutover', () => {
       state: { kind: 'available', update: candidate },
     })
     expect(chromeMockSpies.tabsQuery).toHaveBeenCalledWith({})
+    await vi.waitFor(() => expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledWith({
+      type: 'DH_UPDATE_CHECK_RESULT', outcome: 'available',
+    }))
   })
 
   it('clears durable availability when a fresh check reports no update', async () => {

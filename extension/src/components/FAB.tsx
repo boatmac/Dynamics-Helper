@@ -956,6 +956,8 @@ const FAB: React.FC = () => {
         const parts = [
             `## Case Number\n\n${data.caseNumber || ''}`,
             `## Case Title\n\n${data.ticketTitle || ''}`,
+            `## Created On\n\n${data.createdOn || ''}`,
+            `## Customer Name\n\n${data.customerName || ''}`,
             `## Severity\n\n${data.severity || ''}`,
             `## Status Reason\n\n${data.statusReason || ''}`,
             `## SAP\n\n${data.productCategory || ''}`,

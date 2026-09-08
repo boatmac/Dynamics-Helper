@@ -217,6 +217,16 @@ Important behavior:
 1. **Open a Ticket:** Navigate to a support ticket in Dynamics 365 or Azure Portal.
 2. **Open Dynamics Helper:** Click the "DH" floating button or the extension icon.
 3. **Review Context:** Expand the "Case Context" section to see what was scraped from the page.
+   The template also includes **Created On** (the displayed date/time, without
+   assumed timezone conversion) and **Customer Name** (the Summary Customer
+   lookup's displayed associated name, not a verified ultimate customer or TPID).
+   Only loaded controls can be read; DH does not open Details/Audit automatically.
+   Missing or ambiguous values remain blank. No cross-tab metadata cache is used,
+   so values can disappear from an unedited rescan if their controls unload.
+   You can correct the context manually; same-case background scans preserve edits.
+   Customer names are not generally removed by the existing pattern scrubber and
+   are included in analysis/report text when present; remove them before Analyze
+   if they should not be sent.
     * You can **edit the context** directly in the textarea — your edits are preserved even if the page changes in the background.
     * Click the **refresh icon** to re-scrape the page (this will replace your edits with fresh data).
 4. **Analyze:** Click the **Analyze** button.
@@ -299,7 +309,13 @@ Each team's bookmark file at its `url`:
 
 ### Automatic Updates
 
-The extension checks for updates on startup. When a new version is available:
+The extension checks for updates on startup. To check immediately, use the refresh
+icon beside the Host version in Options or **Check for Updates** in **About & Help**.
+These controls check only; they do not install automatically. They share an active
+check and are disabled until update state loads or while an update/recovery is in
+progress. A check that does not finish within 45 seconds reports a timeout.
+
+When a new version is available:
 
 1. A notification appears in the FAB and the Options page.
 2. Click **"Update Now"** to download and apply the update.

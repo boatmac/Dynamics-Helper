@@ -301,14 +301,18 @@ class PlanCPackagingTests(unittest.TestCase):
         copy_loop = "Get-ChildItem -Path $HostSrc -Recurse | ForEach-Object"
         validate_source = 'foreach ($RequiredPath in @('
         package_probe = '& "$PreflightRoot\\dh_native_host.exe" --update-probe $PackageManifest $PSScriptRoot'
-        stop_process = 'Stop-Process -Name "dh_native_host" -Force'
+        running_host_guard = 'if ($Process) {'
+        running_host_refusal = 'Installation stopped: dh_native_host is running.'
         live_probe = '& $ExePath --update-probe $PackageManifest'
         settle = '& $ExePath --settle-installer-repair'
 
         self.assertIn(cleanup, source)
         self.assertIn(validate_source, source)
         self.assertIn(package_probe, source)
-        self.assertLess(source.index(package_probe), source.index(stop_process))
+        self.assertNotIn('Stop-Process', source)
+        self.assertIn(running_host_refusal, source)
+        self.assertLess(source.index(running_host_guard), source.index(running_host_refusal))
+        self.assertLess(source.index('exit 1', source.index(running_host_refusal)), source.index(package_probe))
         self.assertLess(source.index(package_probe), source.index(cleanup))
         self.assertLess(source.index(cleanup), source.index(copy_loop))
         self.assertIn(live_probe, source)

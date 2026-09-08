@@ -337,6 +337,7 @@ export const translations: TranslationDictionary = {
     checkingForUpdates: { en: "Checking for updates...", zh: "正在检查更新..." },
     upToDate: { en: "You are up to date!", zh: "已是最新版本！" },
     checkTimedOut: { en: "Check timed out.", zh: "检查超时。" },
+    updateCheckFinished: { en: "Update check finished. See the current update status.", zh: "更新检查已完成，请查看当前更新状态。" },
     downloadingUpdate: { en: "Downloading update...", zh: "正在下载更新..." },
     downloadingVersion: { en: "Downloading", zh: "正在下载" },
     updateSuccess: { en: "Update success! Restarting...", zh: "更新成功！正在重启..." },

@@ -7,7 +7,9 @@ Read `../AGENTS.md` for execution rules. Older contents are retained in Git at
 ## Current Mode
 
 v2.0.76-beta.3 is published as a GitHub prerelease. The user accepted the beta
-qualification limits and intends to test local upgrade; no upgrade result yet.
+qualification limits and tested local upgrade. The resulting mixed-install
+integrity failure is confirmed below; the user approved one local full-installer
+repair and verification, with no security changes or forced process termination.
 Development stays in the LOCAL checkout; the approved Cloud PC product install
 did not migrate development. Release authorization covers source/asset verification,
 release notes, the intended branch/tag push and exact tested ZIP publication. It
@@ -881,15 +883,166 @@ sha256:e07a6ee401b625284f429cfec5273677f3fa57951c929540c7380d32cc7678ec,
 matching the tested final package. No rebuild or user-machine installation occurred
 during publication. Release-result documentation is a follow-up, not tag amendment.
 
+The user's local upgrade showed beta3 for both components and ping/pong success,
+but persistent installation_integrity_failed guidance. Read-only local audit at
+2026-09-08 16:24-16:25 UTC+8 confirmed genuine mixed product bytes:
+_internal expected34/actual650,616 extra files and18 declared hash mismatches;
+Extension expected13/actual57,44 extra bundles, all13 declared files matching.
+The new Host executable and top-level product files matched; canonical metadata
+and its linkage passed. Production pure validator returned packaged/failed.
+No local updates directory/transaction authority exists. No settings, SDK/Host
+process, browser, network, or installed files were changed by the audit.
+
+Filtered local log sequence indicates probable v2.0.75-beta.1 to beta3 through
+legacy overlay updater (prior version inferred from previous successful log,
+not previous executable). It merges trees/tolerates replacement failures, leaving
+old runtime and hashed bundles. Exact reason for18 runtime replacement differences
+is not established; no new lock-error diagnosis is claimed. Ping bypasses integrity
+and version labels do not validate bytes, so they do not contradict the warning.
+This is a real legacy-upgrade failure, not a cosmetic banner or evidence that
+beta3 transactional updates ran. Do not weaken inventory or remove warning.
+
+Recommended recovery is one complete beta3 installer with browsers/Host naturally
+closed, preserving config/prompts/updates evidence. It replaces _internal and
+Extension trees and probes the resulting product before registration. No manual
+file deletion, Settings Reset, update Retry, force kill, or security bypass. This
+local machine is distinct from the already repaired Cloud PC; its repair needs
+applicable approval. Publication notes should warn legacy in-app upgraders to use
+the full installer; no automatic release asset replacement or publication edit
+is authorized by the screenshot report.
+
+The user explicitly authorized that local repair and stated the local update was
+NOT blocked by Defender. Record this as the user's observation for this local
+upgrade, separately from the confirmed mixed-install integrity failure and earlier
+Cloud PC detections. It is not an independent security-event audit or proof of
+universal antivirus compatibility. Do not misattribute this local failure to AV.
+
+Pre-repair local process observation found Edge still running and main Host PID
+51060, no recovery-role executable in the returned list. No installation or forced
+termination was attempted. The verified complete beta3 package remains available
+locally; wait for the user to save work and normally exit Edge/DevTools before
+executing the already approved repair. Preserve configuration and update evidence.
+
+After the user normally exited the remaining Edge windows, a fresh process check
+returned zero browsers/main/recovery processes. The approved LOCAL full-installer
+repair ran exactly once under the current unelevated account at 2026-09-08
+16:36:57 UTC+8, PID20972,17.2 seconds, exit0 and SUCCESS: Update Complete!.
+The exact published beta3 ZIP was verified before use. Read-only production
+validator then returned packaged/verified with both versions beta3, runtime34/34
+and Extension13/13, zero extras/missing/hash mismatches. All three existing user
+config/prompt files remained present with identical hashes; updates remained
+absent. No installer/supervisor/product processes survived, stderr empty. No
+browser/SDK was launched or security policy changed; no independent AV audit.
+Private evidence is retained under Temp dh-local-beta3-repair-20260908-7dc9a461.
+The local legacy-overlay corruption is repaired on disk. The user subsequently
+confirmed the warning disappeared and supplied the normal Options screenshot
+showing both components beta3. Browser-level mismatch guidance has cleared without
+manual storage reset. Local full-installer repair is complete for these checks.
+
+The user then asked about the old Host-version refresh icon. Read-only historical
+review identified it as forced check_updates, not Host restart/config reload. It
+and the About & Help check-now button were removed by81f7dc6 during Plan D cutover,
+already absent in B2. Current update actions only appear for available/progress/
+retry states; no manual discovery button remains. This is not caused by the mixed
+installation or beta3 repair. The user subsequently requested restoration.
+
+Manual discovery restored in local source: Header RefreshCw beside Host version
+and About & Help Check for Updates share one pending guard/spinner and45s timeout.
+Valid state hydration and idle/available/complete are required; Worker serialized
+authorization independently rechecks the allowlist. Initiation ACK never reports
+up-to-date; fixed shared discovery outcomes/error notifications settle UI without
+URLs. Host protocol and automatic check timing are unchanged. Notifications are
+not per-request correlated. No Start/Retry, install or reload occurs from Check.
+
+Focused tests passed164/164 (Options38,SW42,runtime84); removing the gate produced
+two expected regression failures before restoration. TypeScript and npm build
+passed, default menu5/5 and source/dist item identity passed. One bounded review
+found no blockers. Browserslist warning remains. These are uncommitted changes
+at existing beta3 source version; local extension/dist differs from published
+beta3 and must not replace that immutable release asset. Installed user extension
+and GitHub package were not changed or browser-tested for this feature.
+
+Before beta4, the user reported Case Context fields Case Number, Severity and
+Status Reason blank despite populated D365 header. Beta4 publication is paused.
+Read-only source review found old header-ID and text XPath/previous-sibling-only
+extraction, scoped to main; no ticketnumber/severitycode/statuscode selectors or
+DOM fixture coverage. Screenshot values are compatible with current validators,
+so no evidence warrants loosening ID/severity validation. HTML layout/scope/value
+source changes are hypotheses; collect a narrow sanitized header structure before
+changing selectors. Preserve async yielding and same-case user edit protection.
+No page customer text or complete DOM should enter repository fixtures/logs.
+
+The user's Elements screenshot subsequently supplied actual structural evidence:
+uci-header-control-list has an open shadow root containing items identified by
+header_severitycode/header_statuscode; values and labels are direct light-DOM
+children with slot=value/label, and each item has another open shadow root.
+The original structural diagnostic stopped at a shadow boundary; no further
+customer page dump is required. Do not retain case/customer text from screenshots.
+
+PageReader now enters open roots within document-visible known header lists,
+reads the direct slots, prioritizes the observed Case number / Service name label
+with exact header_ticketnumber fallback, and retains old extraction fallbacks.
+ID/severity validation, title/SAP/description and FAB edit ownership are unchanged.
+Traversal caps20lists/2000elements and yields every50. Closed roots, header lists
+inside unrelated external shadow wrappers, and shadow-only slot rendering are
+not supported. Shadow-only mutation rescans are not added; existing scan signals
+or explicit refresh remain necessary.
+
+11 new synthetic DOM tests added: pageReader22/22 and FAB.pageIdentity41/41 passed
+(63/63). Initial old-code run failed6 tests; disabling shadow traversal made both
+composite-ID regressions fail, restored green afterward. TypeScript and build
+passed, defaultmenu5/5/source-distcopy passed, bounded review no blockers. Actual
+D365 verification remains pending; no installed extension or published asset was
+changed. Beta4 publication remains paused pending the user's next release/test
+instruction. Preserve concurrent manual-check restoration and local repair docs.
+
+The user then requested only Created On and customer name metadata, deferring
+TPID and Audit ingestion. Added optional createdOn/customerName strings to the
+scraper/snapshot whitelist and English Created On/Customer Name template sections.
+Customer source is the explicitly observed Summary customerid selected lookup,
+not an inferred ultimate customer. Created On uses scoped label association or
+explicit createdon inputs, preserving raw display date/time with no UTC inference.
+Actual Created On DOM remains unverified beyond synthetic fixtures. Unloaded or
+ambiguous controls remain blank; no automatic tab switch or metadata cache.
+An unedited later scan can lose unloaded metadata; manual edits remain protected.
+Existing scrubbed-text Host/report path is reused, no new RPC/PII-rule changes.
+The user was informed company names are not generally scrubbed before model use.
+
+Review caught and fixed mixed-field aria-labelledby containers and GUID-only
+customer candidates;10 additional regressions cover rejection and valid cases.
+Final focused scraper/snapshot/FAB tests passed125/125 after expected RED failures,
+TypeScript and final build passed, defaultmenu5/5/source-distcopy passed. No
+installed extension or published artifact changed; no case data retained in tests.
+
+The user authorized committing and publishing beta4. Versions synchronized to
+2.0.76-beta.4 in the three carriers. Full precommit review found no blockers or
+customer/credential leaks in the18 initial changed files. Required frontend build
+passed (defaultmenu5/5,TypeScript,Vite,source-distcopy). Fresh isolated Host build
+retains17/17 required imports and excludes2plugins/setuptools. Complete ZIP:
+Temp dh-beta4-release-20260908/DynamicsHelper_v2.0.76-beta.4.zip,14,007,795 bytes,
+SHA-256 bef3ef4971d88750a62bef627de0590996cf0ba7d89c459959554599cf9d0806.
+56 files/55manifest entries, actual finalpackage probe beta4 both components,
+empty isolated profiles, no survivors.92 product-input snapshots matched before/
+after build; later commit binding remains necessary. No installed product touched.
+
+Final focused verification: frontend289/289, Host50/50 unique cases ultimately
+passed. One legacy test still required removed Stop-Process and was corrected to
+require early refusal/nonzero exit before probe plus preserved cleanup ordering.
+One mocked PowerShell timeout passed unchanged on targeted retry; corrected
+release-helper+installer full34/34 rerun passed,339 unique tests total across374
+executions including retries. No hidden skips. tzdata/Browserslist warnings remain.
+Release notes: releases/notes-v2.0.76-beta.4.md, explicitly disclose liveDOM and
+update qualification limits and old-overlay full-installer migration requirement.
+
 ## Next Single Action
 
 Remain in the LOCAL checkout
-`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Report public beta3
-URL and verified asset, then await the user's local upgrade observation. Use the
-normal beta-channel update UI only when it identifies beta3 and no recovery/error
-state is present; do not force-clear old browser state or reuse private URLs.
-On failure preserve the message/transaction evidence and stop retries. No stable
-release, automatic user-machine operation, AV bypass, or vendor submission.
+`C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`. Complete authorized
+beta4 commit, bind packaged inputs to committed source, push reviewed branch/tag
+and publish exact tested ZIP as prerelease/not latest stable. Verify remote asset
+digest and report normal upgrade guidance; do not automatically install. Preserve
+beta3 release and local repair evidence. No vendor submission, AV bypass or
+additional Audit/TPID scope. Live D365 extraction validation remains pending.
 
 The user reports having started a new session, but it initially read the old
 master checkout. That old checkout's clean status and July handoff do not describe

@@ -404,6 +404,12 @@ This file defines the operational rules, development workflows, and coding stand
   always operation mutex before the existing Plan B/C mutation mutex. Never use
   a process-local lock or recursively reuse the mutation mutex.
 * **Candidate and suppression boundary:** Accept only a strictly newer normalized
+  release. Manual `check_updates` requests are permitted only in hydrated
+  `idle`, `available`, or `complete` states, rechecked in the serialized Worker
+  authorization path. The initiation reply is not a discovery result. Fixed
+  shared `DH_UPDATE_CHECK_RESULT` outcomes contain no URLs and settle the Options
+  check; discovery notifications lack per-request correlation. Do not turn manual
+  discovery into `DH_UPDATE_START`. Accept a candidate only from a normalized
   release containing exactly one direct HTTPS ZIP. Once activation starts, use
   only the detached status Host plus the one recovery kick; ordinary main-Host
   Analyze/config/health traffic stays suppressed until a verified safe

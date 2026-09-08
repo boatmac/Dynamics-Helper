@@ -480,6 +480,33 @@ if all three are exactly that disposition; otherwise use
 | Ordinal | Transaction ID | Interruption witnessed | Zero executor proved | Recovery witnessed | Terminal version/outcome | Gates | Disposition | Cleanup/baseline readiness |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 
+## Local Published Beta3 Upgrade Observation
+
+After public prerelease publication, the user's LOCAL upgrade displayed matching
+beta3 versions and ping success but installation-integrity guidance. Read-only
+audit confirmed _internal expected34/actual650 (616 extras,18 declared hash
+mismatches) and Extension expected13/actual57 (44 extras, all declared hashes
+matching). Metadata linkage and the new executable matched. Local update logs
+indicate legacy overlay behavior; the prior version is inferred as beta.1 of
+2.0.75 from prior logs, not a recovered prior executable. No updates directory
+or transaction journal was present at observation. This is not a passed
+transactional-upgrade result and cannot be dismissed as cosmetic UI state.
+
+The user explicitly stated that this local update was NOT blocked by Defender.
+This observation applies to this machine/attempt, not the earlier Cloud PC
+quarantines and not a full security audit. No evidence attributes the confirmed
+local mixed-file failure to Defender. The user approved one complete local beta3
+installer repair. After normal browser/Host exit, it ran once at 2026-09-08
+16:36:57 UTC+8 and completed in17.2 seconds, exit0/SUCCESS: Update Complete!.
+Read-only production verification passed packaged/verified: runtime34/34 and
+Extension13/13, no extras/missing/hash mismatches, both versions beta3. All three
+existing config/editable-prompt files preserved identical hashes; updates remained
+absent, no owned processes survived. No security changes or browser/SDK launch
+were performed during repair. The user subsequently reopened the browser and
+confirmed the mismatch banner disappeared, with both beta3 versions displayed.
+No manual browser-storage reset was needed. This full-installer repair does not convert the
+failed legacy overlay upgrade into successful transactional-update evidence.
+
 ## Private Distribution Closure
 
 Historical original distribution status: COMPLETE. Ownership checks passed; the

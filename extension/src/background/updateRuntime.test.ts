@@ -502,6 +502,60 @@ describe('status port sender', () => {
 })
 
 describe('serialized update coordinator', () => {
+  it('restricts manual discovery to safe kinds without tightening ordinary Host traffic', async () => {
+    const receipt = {
+      transactionId: TX, outcome: 'committed' as const,
+      terminal_version: { fresh_install: false, version: candidate.version },
+      state: 'finalized-awaiting-ack' as const,
+    }
+    const states: UpdateState[] = [
+      { kind: 'idle' }, { kind: 'available', update: candidate }, completeState(), completeState(TX, 'rolled-back'),
+      { kind: 'preparing', ...transaction },
+      { kind: 'preparing', ...transaction, errorCode: 'update_prepare_failed' },
+      { kind: 'activating', ...transaction, activationRetryUsed: false },
+      { kind: 'activating', ...transaction, activationRetryUsed: true, errorCode: 'update_activation_failed' },
+      { kind: 'polling', ...transaction, lastStatus: null, lastProgressAt: 1000, recoveryKick: 'unused' },
+      { kind: 'reload-pending', ...transaction, outcome: 'committed' },
+      { kind: 'reload-pending', ...transaction, outcome: 'committed', errorCode: 'update_cleanup_failed' },
+      { kind: 'ack-pending', ...transaction, receipt },
+      { kind: 'ack-pending', ...transaction, receipt, errorCode: 'update_cleanup_failed' },
+      { kind: 'recovery-required', code: 'installation_integrity_failed', action: 'recheck-installation' },
+      { kind: 'recovery-required', code: 'update_not_terminal', action: 'resume', transaction },
+    ]
+    for (const state of states) {
+      seedStorage({ [UPDATE_STATE_KEY]: state })
+      const deps = runtimeDeps(state.kind === 'recovery-required' ? { getVerifiedProduct: vi.fn().mockResolvedValue(null) } : {})
+      const runtime = createUpdateRuntime(deps)
+      await runtime.initialize({ resume: false })
+      expect(runtime.getState()).toEqual(state)
+      const start = vi.fn().mockResolvedValue('ack')
+      const allowed = ['idle', 'available', 'complete'].includes(state.kind)
+      const lease = await runtime.beginOrdinaryMainHostRequest(start, 'check_updates')
+      expect(lease.allowed, state.kind).toBe(allowed)
+      expect(start).toHaveBeenCalledTimes(allowed ? 1 : 0)
+      const ordinaryAllowed = await runtime.ordinaryMainHostAllowed()
+      const ordinary = await runtime.beginOrdinaryMainHostRequest(start)
+      expect(ordinary.allowed).toBe(ordinaryAllowed)
+    }
+  })
+
+  it('rechecks the manual discovery allowlist after a queued transition', async () => {
+    seedStorage({ [UPDATE_STATE_KEY]: { kind: 'idle' } })
+    const runtime = createUpdateRuntime(runtimeDeps())
+    const initializing = runtime.initialize({ resume: false })
+    const start = vi.fn().mockResolvedValue('ack')
+    await expect(runtime.beginOrdinaryMainHostRequest(start, 'check_updates')).resolves.toEqual({ allowed: false })
+    await initializing
+    seedStorage({ [UPDATE_STATE_KEY]: { kind: 'preparing', ...transaction, errorCode: 'update_prepare_failed' } })
+    const storage = deferNextStorageGet(UPDATE_STATE_KEY)
+    const transition = runtime.initialize({ resume: false })
+    const check = runtime.beginOrdinaryMainHostRequest(start, 'check_updates')
+    await storage.resolve(undefined)
+    await transition
+    await expect(check).resolves.toEqual({ allowed: false })
+    expect(start).not.toHaveBeenCalled()
+  })
+
   it('accepts only newer candidates and isolates nonterminal transactions', async () => {
     const deps = runtimeDeps()
     const runtime = createUpdateRuntime(deps)

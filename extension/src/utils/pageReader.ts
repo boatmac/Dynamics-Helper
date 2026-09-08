@@ -5,6 +5,8 @@ export interface ScrapedData {
     ticketTitle?: string;
     productCategory?: string;
     caseNumber?: string; // New field for Case Number
+    createdOn?: string;
+    customerName?: string;
     severity?: string; // New field for Severity
     statusReason?: string; // New field for Status Reason
     description?: string;
@@ -33,6 +35,99 @@ export class PageReader {
      */
     private static async yieldToMain() {
         return new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    private static async readStructuredHeaders(): Promise<Partial<ScrapedData>> {
+        const data: Partial<ScrapedData> = {};
+        let aliasCaseNumber: string | undefined;
+        // Only known header lists are entry points, never arbitrary page/shadow text.
+        const roots: Node[] = Array.from(document.querySelectorAll('uci-header-control-list')).slice(0, 20).reverse();
+        let visited = 0;
+        while (roots.length && visited < 2000) {
+            const root = roots.pop()!;
+            if (root instanceof Element && root.shadowRoot) roots.push(root.shadowRoot);
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+            let node = walker.nextNode() as Element | null;
+            while (node && visited < 2000) {
+                if (++visited % 50 === 0) await this.yieldToMain();
+                if (node.shadowRoot) roots.push(node.shadowRoot);
+                if (node.localName === 'uci-header-control-list-item') {
+                    // The observed values are light children, not text in the item's shadow controls.
+                    const valueNode = node.querySelector('[slot="value"]');
+                    const labelNode = node.querySelector('[slot="label"]');
+                    const value = valueNode?.parentElement === node ? valueNode.textContent?.trim() : undefined;
+                    const label = labelNode?.parentElement === node ? labelNode.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() : undefined;
+                    const name = node.getAttribute('data-name');
+                    if (value) {
+                        if (name === 'header_severitycode') {
+                            if (!data.severity && /^[1ABC]$/i.test(value)) data.severity = value;
+                        } else if (name === 'header_statuscode') {
+                            data.statusReason ||= value;
+                        } else if (label === 'case number / service name') {
+                            data.caseNumber ||= value.match(ID_REGEX)?.[0];
+                        } else if (name === 'header_ticketnumber') {
+                            aliasCaseNumber ||= value.match(ID_REGEX)?.[0];
+                        }
+                    }
+                }
+                node = walker.nextNode() as Element | null;
+            }
+        }
+        data.caseNumber ||= aliasCaseNumber;
+        return data;
+    }
+
+    private static async readCreatedOn(context: Element): Promise<string | undefined> {
+        const inputSelector = 'input:not([type="hidden"]):not([type="button"]), textarea';
+        const labels = Array.from(context.querySelectorAll('label, span, div')).filter(el =>
+            el.childElementCount === 0 && el.textContent?.trim().toLowerCase() === 'created on'
+        );
+        for (const label of labels.slice(0, 20)) {
+            await this.yieldToMain();
+            const associated = new Set<Element>();
+            const targetId = label.getAttribute('for');
+            const target = targetId ? document.getElementById(targetId) : null;
+            if (targetId && (!target || !context.contains(target))) continue;
+            if (target && context.contains(target)) associated.add(target);
+            if (label.id) {
+                for (const control of context.querySelectorAll('[aria-labelledby]')) {
+                    if (control.getAttribute('aria-labelledby')?.split(/\s+/).includes(label.id)) associated.add(control);
+                }
+            }
+            const isSingleField = (field: Element) => field !== context
+                && !field.matches('section, form, main, [role="main"]')
+                && ![field, ...field.querySelectorAll('label, span, div, [aria-label], [data-id]')].some(el =>
+                    (el.matches('label') && el !== label && el.textContent?.trim().toLowerCase() !== 'created on')
+                    || (el.childElementCount === 0 && el.textContent?.trim().toLowerCase() === 'modified on')
+                    || /modified on/i.test(el.getAttribute('aria-label') || '')
+                    || (el.getAttribute('data-id')?.includes('.fieldControl') && !el.getAttribute('data-id')?.startsWith('createdon.'))
+                );
+            // Apply the same boundary to ancestors and aria-labelledby groups.
+            let field = label.parentElement;
+            for (let depth = 0; field && depth < 3; depth++, field = field.parentElement) {
+                if (!isSingleField(field)) break;
+                const inputs = Array.from(field.querySelectorAll(inputSelector));
+                if (inputs.length) {
+                    if (inputs.length <= 2 && (!target || field.contains(target))) inputs.forEach(input => associated.add(input));
+                    break;
+                }
+            }
+            const controls = new Set<Element>();
+            for (const el of associated) {
+                if (el.matches(inputSelector)) controls.add(el);
+                else if (isSingleField(el)) el.querySelectorAll(inputSelector).forEach(input => controls.add(input));
+            }
+            if (controls.size > 2) continue;
+            const values = Array.from(controls)
+                .sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)
+                .map(el => (el as HTMLInputElement).value.trim()).filter(Boolean);
+            if (values.length) return values.join(' ');
+        }
+        const explicit = Array.from(context.querySelectorAll(inputSelector)).filter(el =>
+            el.getAttribute('data-id')?.startsWith('createdon.')
+        );
+        if (explicit.length > 2) return undefined;
+        return explicit.map(el => (el as HTMLInputElement).value.trim()).filter(Boolean).join(' ') || undefined;
     }
 
     /**
@@ -176,9 +271,12 @@ export class PageReader {
         // can target the pattern directly.
         const idRegex = ID_REGEX;
 
+        const structuredHeaders = await this.readStructuredHeaders();
+        data.caseNumber = structuredHeaders.caseNumber;
+
         // Strategy A: Check specific header container if it exists (Case Number specific)
         const headerControls = document.querySelector('[id^="headerControlsList_"]');
-        if (headerControls) {
+        if (!data.caseNumber && headerControls) {
              const text = headerControls.textContent || '';
              const match = text.match(idRegex);
              if (match) {
@@ -256,12 +354,45 @@ export class PageReader {
 
         // 3.1 Try to find Severity (New)
         // Use helper with regex for 1, A, B, C
-        data.severity = await this.findValueForLabel('Severity', /^[1ABC]$/i, contextNode);
+        data.severity = structuredHeaders.severity || await this.findValueForLabel('Severity', /^[1ABC]$/i, contextNode);
 
         // 3.2 Try to find Status Reason (New)
         // Use helper with basic length validation
-        data.statusReason = await this.findValueForLabel('Status reason', undefined, contextNode);
+        data.statusReason = structuredHeaders.statusReason || await this.findValueForLabel('Status reason', undefined, contextNode);
 
+        data.createdOn = await this.readCreatedOn(contextNode);
+        const customerSelector = '[data-id="customerid.fieldControl-LookupResultsDropdown_customerid_SelectedRecordList"]';
+        // This observed lookup can sit outside main. Never read its search input or contact-company fields.
+        const customerLists = contextNode.querySelectorAll(customerSelector);
+        const lists = customerLists.length ? customerLists : document.querySelectorAll(customerSelector);
+        const customerNames = new Set<string>();
+        let ambiguousCustomer = false;
+        for (const list of Array.from(lists).slice(0, 20)) {
+            await this.yieldToMain();
+            const items = list.querySelectorAll('li');
+            if (items.length > 1) ambiguousCustomer = true;
+            for (const item of Array.from(items).slice(0, 2)) {
+                const displayed = item.cloneNode(true) as Element;
+                displayed.querySelectorAll('button, [role="button"], svg, img, input, [hidden], [aria-hidden="true"], [aria-label*="remove" i], [aria-label*="clear" i], [data-id^="customerid.fieldControl-entityIconContainer_"]').forEach(el => el.remove());
+                const links = Array.from(displayed.querySelectorAll('a')).map(el => el.textContent?.trim()).filter(Boolean);
+                const walker = document.createTreeWalker(displayed, NodeFilter.SHOW_TEXT);
+                const leaves: string[] = [];
+                let node: Node | null;
+                while ((node = walker.nextNode())) {
+                    const text = node.textContent?.trim();
+                    if (text && !/^(x|\u00d7|remove|clear)$/i.test(text)) leaves.push(text);
+                }
+                const names = new Set(links.length ? links : leaves);
+                if (names.size > 1) ambiguousCustomer = true;
+                else names.forEach(name => { if (name) customerNames.add(name); });
+            }
+        }
+        if (!ambiguousCustomer && customerNames.size === 1) {
+            const name = customerNames.values().next().value;
+            if (name && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name.replace(/^\{(.+)\}$/, '$1'))) {
+                data.customerName = name;
+            }
+        }
 
         // 4. Try to find Product Category
         const categorySelectors = [

@@ -701,6 +701,7 @@ export interface UpdateRuntime {
   ordinaryMainHostAllowed(): Promise<boolean>
   beginOrdinaryMainHostRequest<T>(
     start: () => Promise<T>,
+    action?: string,
   ): Promise<Readonly<
     | { allowed: false }
     | { allowed: true; response: Promise<T> }
@@ -1663,10 +1664,11 @@ export function createUpdateRuntime(deps: UpdateRuntimeDeps): UpdateRuntime {
     ordinaryMainHostAllowed: () => !ordinaryMainAllowedForState(state)
       ? Promise.resolve(false)
       : serialize(async () => ordinaryMainAllowedForState(state)),
-    beginOrdinaryMainHostRequest: start => !ordinaryMainAllowedForState(state)
+    beginOrdinaryMainHostRequest: (start, action) => !ordinaryMainAllowedForState(state)
       ? Promise.resolve(Object.freeze({ allowed: false as const }))
       : serialize(async () => {
-      if (!ordinaryMainAllowedForState(state)) {
+      if (!ordinaryMainAllowedForState(state)
+        || action === 'check_updates' && !['idle', 'available', 'complete'].includes(state.kind)) {
         return Object.freeze({ allowed: false as const })
       }
       return Object.freeze({

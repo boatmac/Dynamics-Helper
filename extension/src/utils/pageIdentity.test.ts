@@ -174,4 +174,25 @@ describe('page identity snapshots', () => {
             caseNumber: '',
         })
     })
+
+    it('retains metadata as own strings without making it part of page identity', () => {
+        const raw = { caseNumber: 'A', createdOn: '08/09/2026 9:07 PM', customerName: 'Synthetic Account' }
+        expect(parseScrapedDataSnapshot(raw)).toEqual(raw)
+        expect(parsePageIdentity(raw)).toBe('case:A')
+        expect(parsePageIdentity({ ...raw, createdOn: '', customerName: 'Changed' })).toBe('case:A')
+        expect(parsePageIdentity({ createdOn: raw.createdOn, customerName: raw.customerName })).toBeNull()
+        expect(parseScrapedDataSnapshot(Object.create(raw))).toEqual({})
+        expect(parseScrapedDataSnapshot({ createdOn: undefined, customerName: undefined })).toEqual({})
+    })
+
+    it.each(['createdOn', 'customerName'])('rejects malformed %s without getter or coercion side effects', key => {
+        const getter = vi.fn(() => 'SECRET')
+        const toString = vi.fn(() => 'SECRET')
+        expect(parseScrapedDataSnapshot(Object.defineProperty({ caseNumber: 'A' }, key, { get: getter }))).toBeNull()
+        for (const value of [null, 7, [], { toString }, Symbol('value'), toString]) {
+            expect(parseScrapedDataSnapshot({ caseNumber: 'A', [key]: value })).toBeNull()
+        }
+        expect(getter).not.toHaveBeenCalled()
+        expect(toString).not.toHaveBeenCalled()
+    })
 })

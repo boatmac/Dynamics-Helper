@@ -60,6 +60,8 @@ const SCRAPED_STRING_FIELDS = [
     'ticketTitle',
     'productCategory',
     'caseNumber',
+    'createdOn',
+    'customerName',
     'severity',
     'statusReason',
     'description',

@@ -139,6 +139,159 @@ describe('Options reliable update projection', () => {
     expect(await screen.findByRole('button', { name: /update now/i })).toHaveTextContent(targetVersion)
   })
 
+  it('shares manual discovery across the header and About without completing on ACK', async () => {
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    const check = deferNextResponse('check_updates')
+    renderOptions()
+    const header = screen.getByRole('button', { name: 'Check for Updates' })
+    expect(header).toHaveAttribute('title', 'Check for Updates')
+    expect(header).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'About & Help' }))
+    expect(screen.getAllByRole('button', { name: 'Check for Updates' })).toHaveLength(2)
+    await resolveState(getState, { kind: 'idle' })
+    const buttons = screen.getAllByRole('button', { name: 'Check for Updates' })
+    const writes = chromeMockSpies.storageSet.mock.calls.length
+    act(() => {
+      buttons[1].click()
+      buttons[0].click()
+    })
+    expect(getMessageLog().filter(entry => entry.action === 'check_updates')).toHaveLength(1)
+    expect(getMessageLog().find(entry => entry.action === 'check_updates')?.payload)
+      .toEqual({ type: 'NATIVE_MSG', payload: { action: 'check_updates' } })
+    await act(async () => check.resolve({ status: 'success', data: 'Update check initiated' }))
+    for (const button of buttons) {
+      expect(button).toBeDisabled()
+      expect(button.querySelector('svg')).toHaveClass('animate-spin')
+    }
+    expect(screen.queryByText('You are up to date!')).toBeNull()
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_CHECK_RESULT', outcome: 'not-available' }))
+    expect(screen.getByText('You are up to date!')).toBeInTheDocument()
+    for (const button of buttons) expect(button).toBeEnabled()
+    expect(getMessageLog().some(entry => entry.action === 'DH_UPDATE_START')).toBe(false)
+    expect(chromeMockSpies.storageSet).toHaveBeenCalledTimes(writes)
+    expect(chromeMockSpies.runtimeReload).not.toHaveBeenCalled()
+  })
+
+  it('allows discovery only in hydrated idle, available and complete states, including live changes', async () => {
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    fireEvent.click(screen.getByRole('button', { name: 'About & Help' }))
+    const buttons = screen.getAllByRole('button', { name: 'Check for Updates' })
+    for (const button of buttons) expect(button).toBeDisabled()
+    await resolveState(getState, { kind: 'idle' })
+    const receipt = { transactionId: TX, outcome: 'committed', terminal_version: { fresh_install: false, version: targetVersion }, state: 'finalized-awaiting-ack' }
+    const blocked = [
+      { kind: 'preparing', ...transaction },
+      { kind: 'preparing', ...transaction, errorCode: 'update_prepare_failed' },
+      { kind: 'activating', ...transaction, activationRetryUsed: false },
+      { kind: 'activating', ...transaction, activationRetryUsed: true, errorCode: 'update_activation_failed' },
+      { kind: 'polling', ...transaction, lastStatus: null, lastProgressAt: 1000, recoveryKick: 'unused' },
+      { kind: 'reload-pending', ...transaction, outcome: 'committed' },
+      { kind: 'reload-pending', ...transaction, outcome: 'committed', errorCode: 'update_cleanup_failed' },
+      { kind: 'ack-pending', ...transaction, receipt },
+      { kind: 'ack-pending', ...transaction, receipt, errorCode: 'update_cleanup_failed' },
+      { kind: 'recovery-required', code: 'installation_integrity_failed', action: 'recheck-installation' },
+      { kind: 'recovery-required', code: 'update_not_terminal', action: 'resume', transaction },
+    ]
+    for (const state of blocked) {
+      act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state }))
+      for (const button of buttons) expect(button, JSON.stringify(state)).toBeDisabled()
+    }
+    for (const state of [{ kind: 'idle' }, { kind: 'available', update: candidate }, completeState(), completeState(TX, 'rolled-back')]) {
+      act(() => emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state }))
+      for (const button of buttons) expect(button).toBeEnabled()
+    }
+  })
+
+  it.each(['malformed', 'rejected'])('keeps discovery disabled after %s hydration', async result => {
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await act(async () => {
+      if (result === 'rejected') getState.reject(new Error('offline'))
+      else getState.resolve({ handled: true, state: { kind: 'broken' } })
+    })
+    expect(screen.getByRole('button', { name: 'Check for Updates' })).toBeDisabled()
+  })
+
+  it('uses the latest live state even before React renders disabled controls', async () => {
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await resolveState(getState, { kind: 'idle' })
+    const button = screen.getByRole('button', { name: 'Check for Updates' })
+    act(() => {
+      emitRuntimeMessage({ type: 'DH_UPDATE_STATE', state: { kind: 'preparing', ...transaction } })
+      button.click()
+    })
+    expect(getMessageLog().some(entry => entry.action === 'check_updates')).toBe(false)
+    expect(button).toBeDisabled()
+  })
+
+  it.each(['available', 'finished', 'error', 'rejection', 'non-success'])(
+    'settles pending discovery on %s without starting an update', async outcome => {
+      const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+      const check = deferNextResponse('check_updates')
+      renderOptions()
+      await resolveState(getState, { kind: 'available', update: candidate })
+      fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }))
+      expect(screen.getByRole('button', { name: /update now/i })).toBeDisabled()
+      await act(async () => {
+        if (outcome === 'rejection') check.reject(new Error('private'))
+        else if (outcome === 'non-success') check.resolve({ status: 'error', error: { private: true } })
+        else emitRuntimeMessage(outcome === 'error'
+          ? { type: 'NATIVE_UPDATE_ERROR', payload: { error: {} } }
+          : { type: 'DH_UPDATE_CHECK_RESULT', outcome })
+      })
+      expect(screen.getByRole('button', { name: 'Check for Updates' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: /update now/i })).toBeEnabled()
+      expect(screen.getByText(outcome === 'available' ? 'Update Available'
+        : outcome === 'finished' ? 'Update check finished. See the current update status.' : 'Update check failed.')).toBeInTheDocument()
+      expect(getMessageLog().some(entry => entry.action === 'DH_UPDATE_START')).toBe(false)
+    },
+  )
+
+  it('times out at 45 seconds and ignores stale callbacks during a newer check', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    const first = deferNextResponse('check_updates')
+    renderOptions()
+    await resolveState(getState, { kind: 'idle' })
+    const button = screen.getByRole('button', { name: 'Check for Updates' })
+    fireEvent.click(button)
+    act(() => vi.advanceTimersByTime(44_999))
+    expect(button).toBeDisabled()
+    act(() => vi.advanceTimersByTime(1))
+    expect(button).toBeEnabled()
+    expect(screen.getByText('Check timed out.')).toBeInTheDocument()
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_CHECK_RESULT', outcome: 'not-available' }))
+    expect(screen.getByText('Check timed out.')).toBeInTheDocument()
+    const second = deferNextResponse('check_updates')
+    fireEvent.click(button)
+    await act(async () => first.reject(new Error('stale')))
+    expect(button).toBeDisabled()
+    expect(screen.queryByText('Update check failed.')).toBeNull()
+    act(() => emitRuntimeMessage({ type: 'DH_UPDATE_CHECK_RESULT', outcome: 'not-available' }))
+    await act(async () => second.resolve({ status: 'error' }))
+    expect(screen.getByText('You are up to date!')).toBeInTheDocument()
+  })
+
+  it('cancels discovery timers and callbacks on unmount', async () => {
+    vi.useFakeTimers()
+    const getState = deferNextResponse('DH_UPDATE_GET_STATE')
+    const check = deferNextResponse('check_updates')
+    const first = renderOptions()
+    await resolveState(getState, { kind: 'idle' })
+    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }))
+    first.unmount()
+    const nextState = deferNextResponse('DH_UPDATE_GET_STATE')
+    renderOptions()
+    await resolveState(nextState, { kind: 'idle' })
+    await act(async () => check.reject(new Error('stale')))
+    act(() => vi.advanceTimersByTime(45_000))
+    expect(screen.getByRole('button', { name: 'Check for Updates' })).toBeEnabled()
+    expect(screen.queryByText('Check timed out.')).toBeNull()
+    expect(screen.queryByText('Update check failed.')).toBeNull()
+  })
+
   it.each([
     ['committed', 'Update completed successfully.', targetVersion],
     ['rolled-back', 'previous version was restored', transaction.priorVersion],

@@ -240,7 +240,7 @@ function connectToNativeHost() {
             if (requestId.kind !== 'absent') return
             const action = ownDataProperty(msg, 'action')
             if (action.kind === 'value' && action.value === 'update_error') {
-                void handleNativeUpdateError(msg, productionUpdateErrorDeps)
+                void handleNativeUpdateError({}, productionUpdateErrorDeps)
                 return
             }
 
@@ -249,14 +249,22 @@ function connectToNativeHost() {
             // Handle Update Available
             if (action.kind === 'value' && action.value === "update_available") {
                 const payload = ownDataProperty(msg, 'payload')
-                if (payload.kind === 'value') void acceptNativeUpdateCandidate(payload.value)
+                void acceptNativeUpdateCandidate(payload.kind === 'value' ? payload.value : undefined)
+                    .catch(() => handleNativeUpdateError({}, productionUpdateErrorDeps))
                 return;
             }
 
             // Handle Update Not Available
             if (action.kind === 'value' && action.value === "update_not_available") {
                 console.log("[DH-SW] Update Not Available (User is up to date)");
-                void updateRuntime.clearAvailable()
+                void updateRuntimeReady.then(() => updateRuntime.clearAvailable()).then(state => {
+                    if (state.kind !== 'idle' && state.kind !== 'complete') {
+                        return handleNativeUpdateError({}, productionUpdateErrorDeps)
+                    }
+                    void chrome.runtime.sendMessage({
+                        type: 'DH_UPDATE_CHECK_RESULT', outcome: 'not-available',
+                    }).catch(() => undefined)
+                }).catch(() => handleNativeUpdateError({}, productionUpdateErrorDeps))
                 return;
             }
         });
@@ -494,15 +502,26 @@ async function requestUpdateCheck(): Promise<void> {
 
 async function acceptNativeUpdateCandidate(value: unknown): Promise<void> {
     const raw = exactOwnObject(value, ['version', 'url', 'is_prerelease'])
-    if (!raw || typeof raw.is_prerelease !== 'boolean') return
+    if (!raw || typeof raw.is_prerelease !== 'boolean') throw new Error('Invalid update candidate')
     const candidate = parseUpdateCandidate({
         version: raw.version,
         url: raw.url,
         isPrerelease: raw.is_prerelease,
     })
-    if (!candidate) return
+    if (!candidate) throw new Error('Invalid update candidate')
     await updateRuntimeReady
-    await updateRuntime.acceptCandidate(candidate)
+    const state = await updateRuntime.acceptCandidate(candidate)
+    if ((state.kind !== 'available' && !(state.kind === 'complete' && state.outcome === 'rolled-back'))
+        || state.update.version !== candidate.version
+        || state.update.url !== candidate.url
+        || state.update.isPrerelease !== candidate.isPrerelease) {
+        throw new Error('Update candidate not accepted')
+    }
+    // Discovery has no request ID; this is a shared result, not a correlated reply.
+    void chrome.runtime.sendMessage({
+        type: 'DH_UPDATE_CHECK_RESULT',
+        outcome: state.kind === 'available' ? 'available' : 'finished',
+    }).catch(() => undefined)
 }
 
 function reservedUpdateAction(value: unknown): boolean {
@@ -585,6 +604,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 : updateRuntimeReady.then(async () => {
                     const lease = await updateRuntime.beginOrdinaryMainHostRequest(
                         () => sendNativeMessage(guarded.forwarded),
+                        guarded.forwarded.action === 'check_updates' ? 'check_updates' : undefined,
                     )
                     if (!lease.allowed) {
                         return UPDATE_UNAVAILABLE_RESPONSE

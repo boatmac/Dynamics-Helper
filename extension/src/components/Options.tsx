@@ -840,6 +840,12 @@ const OptionsInner: React.FC = () => {
     }, []);
     const [hostVersion, setHostVersion] = useState<string>("");
     const [updateState, setUpdateState] = useState<UpdateState>({ kind: 'idle' });
+    const [updateStateReady, setUpdateStateReady] = useState(false);
+    const updateStateRef = useRef<UpdateState | null>(null);
+    const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+    const updateCheckRef = useRef<{ token: object; timer: number } | null>(null);
+    const canCheckUpdates = updateStateReady && !isCheckingUpdates
+        && ['idle', 'available', 'complete'].includes(updateState.kind);
     const completionTransactionId = updateState.kind === 'complete'
         ? updateState.transactionId
         : null;
@@ -848,7 +854,7 @@ const OptionsInner: React.FC = () => {
         : projectedUpdateVersion(updateState);
     const updateError = projectedUpdateError(updateState);
     const isUpdating = updateIsBusy(updateState);
-    const canStartUpdate = updateCanStart(updateState);
+    const canStartUpdate = !isCheckingUpdates && updateCanStart(updateState);
     const showUpdateAction = updateState.kind !== 'idle'
         && (updateState.kind !== 'complete' || updateState.outcome === 'rolled-back');
     const updateActionLabel = updateState.kind === 'available'
@@ -865,6 +871,15 @@ const OptionsInner: React.FC = () => {
     });
     const latestTranslationRef = useRef(t);
     latestTranslationRef.current = t;
+
+    const settleUpdateCheck = (token: object, message: string, type: 'success' | 'error') => {
+        const pending = updateCheckRef.current;
+        if (!pending || pending.token !== token) return;
+        clearTimeout(pending.timer);
+        updateCheckRef.current = null;
+        setIsCheckingUpdates(false);
+        showStatus(message, type, 5000);
+    };
     
     // Editor State
     const [editingItemPath, setEditingItemPath] = useState<number[] | null>(null); // path of indices
@@ -2884,7 +2899,11 @@ const OptionsInner: React.FC = () => {
         let liveProjectionSeen = false;
         const applyProjection = (value: unknown) => {
             const next = projectedUpdateState(value);
-            if (mounted && next) setUpdateState(next);
+            if (mounted && next) {
+                updateStateRef.current = next;
+                setUpdateState(next);
+                setUpdateStateReady(true);
+            }
         };
         const handleRuntimeMsg = (message: unknown) => {
             const type = ownDataProperty(message, 'type');
@@ -2894,20 +2913,34 @@ const OptionsInner: React.FC = () => {
                     liveProjectionSeen = true;
                     applyProjection({ state: next });
                 }
+            } else if (type.kind === 'value' && type.value === 'DH_UPDATE_CHECK_RESULT') {
+                const outcome = ownDataProperty(message, 'outcome');
+                const pending = updateCheckRef.current;
+                if (!pending || outcome.kind !== 'value') return;
+                if (outcome.value === 'not-available' || outcome.value === 'available' || outcome.value === 'finished') {
+                    settleUpdateCheck(pending.token, latestTranslationRef.current(
+                        outcome.value === 'not-available' ? 'upToDate'
+                            : outcome.value === 'available' ? 'updateAvailable' : 'updateCheckFinished',
+                    ), 'success');
+                }
             } else if (type.kind === 'value' && type.value === 'NATIVE_UPDATE_ERROR') {
                 const payload = ownDataProperty(message, 'payload');
                 const candidate = payload.kind === 'value'
                     ? ownDataProperty(payload.value, 'error')
                     : { kind: 'invalid' as const };
-                showError(safeErrorText([
+                const error = safeErrorText([
                     candidate.kind === 'value' ? candidate.value : undefined,
-                ], latestTranslationRef.current('updateCheckFailed')), 5000);
+                ], latestTranslationRef.current('updateCheckFailed'));
+                const pending = updateCheckRef.current;
+                if (pending) settleUpdateCheck(pending.token, error, 'error');
+                else showError(error, 5000);
             }
         };
 
         chrome.runtime.onMessage.addListener(handleRuntimeMsg);
         void chrome.runtime.sendMessage({ type: 'DH_UPDATE_GET_STATE' })
             .then(response => {
+                if (!mounted) return;
                 const handled = ownDataProperty(response, 'handled');
                 if (
                     handled.kind === 'value'
@@ -2923,12 +2956,41 @@ const OptionsInner: React.FC = () => {
 
         return () => {
             mounted = false;
+            updateStateRef.current = null;
+            if (updateCheckRef.current) clearTimeout(updateCheckRef.current.timer);
+            updateCheckRef.current = null;
             chrome.runtime.onMessage.removeListener(handleRuntimeMsg);
         };
     }, []);
 
+    const handleCheckUpdates = async () => {
+        if (updateCheckRef.current || !updateStateRef.current
+            || !['idle', 'available', 'complete'].includes(updateStateRef.current.kind)) return;
+        const token = {};
+        updateCheckRef.current = {
+            token,
+            timer: window.setTimeout(() => {
+                settleUpdateCheck(token, latestTranslationRef.current('checkTimedOut'), 'error');
+            }, 45_000),
+        };
+        setIsCheckingUpdates(true);
+        clearStatus();
+        try {
+            const response = await chrome.runtime.sendMessage({
+                type: 'NATIVE_MSG', payload: { action: 'check_updates' },
+            });
+            const status = ownDataProperty(response, 'status');
+            // Success only acknowledges initiation; unsolicited discovery settles the check.
+            if (status.kind !== 'value' || status.value !== 'success') {
+                settleUpdateCheck(token, latestTranslationRef.current('updateCheckFailed'), 'error');
+            }
+        } catch {
+            settleUpdateCheck(token, latestTranslationRef.current('updateCheckFailed'), 'error');
+        }
+    };
+
     const handleUpdate = async () => {
-        if (!canStartUpdate) return;
+        if (!canStartUpdate || updateCheckRef.current) return;
         if (updateState.kind === 'available' && updateVersion) {
             if (!confirm(t('updateConfirm').replace('{version}', updateVersion))) return;
         }
@@ -2937,7 +2999,10 @@ const OptionsInner: React.FC = () => {
             const handled = ownDataProperty(response, 'handled');
             if (handled.kind === 'value' && handled.value === true) {
                 const next = projectedUpdateState(response);
-                if (next) setUpdateState(next);
+                if (next) {
+                    updateStateRef.current = next;
+                    setUpdateState(next);
+                }
             } else {
                 showError(t('updateRequestFailed'), 5000);
             }
@@ -3316,6 +3381,15 @@ const OptionsInner: React.FC = () => {
                                 <div className="flex gap-3 text-xs text-slate-500 font-medium uppercase tracking-wider items-center">
                                     <span>Extension v{getExtensionVersion()}</span>
                                     {hostVersion && <span>• {t('hostVersion')} v{hostVersion}</span>}
+                                    <button
+                                        onClick={() => { void handleCheckUpdates(); }}
+                                        disabled={!canCheckUpdates}
+                                        title={t('checkForUpdates')}
+                                        aria-label={t('checkForUpdates')}
+                                        className="p-1 rounded text-slate-500 hover:text-teal-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        <RefreshCw size={14} className={isCheckingUpdates ? 'animate-spin' : ''} />
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -4238,6 +4312,14 @@ const OptionsInner: React.FC = () => {
                                     {hostVersion && <span>• {t('hostVersion')} v{hostVersion}</span>}
                                 </div>
                                 <div className="flex items-center gap-2 mt-3">
+                                    <button
+                                        onClick={() => { void handleCheckUpdates(); }}
+                                        disabled={!canCheckUpdates}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        <RefreshCw size={12} className={isCheckingUpdates ? 'animate-spin' : ''} />
+                                        {t('checkForUpdates')}
+                                    </button>
                                     {showUpdateAction && (
                                         <button
                                             onClick={() => { void handleUpdate(); }}
