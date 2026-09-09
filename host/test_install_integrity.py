@@ -1,5 +1,4 @@
-import base64
-import gzip
+import json
 import os
 import shutil
 import subprocess
@@ -27,6 +26,7 @@ from package_manifest import (
 )
 from product_info import VERSION
 from test_update_support import current_extension_manifest_bytes
+from scripts.test_profile_state import PROFILE_KEYS, capture_profile_state, validate_profile_state
 
 
 class InstallationVerifierTests(unittest.TestCase):
@@ -294,103 +294,80 @@ class UpdateProbeTests(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(os.name == "nt", "Windows PowerShell 5.1 required")
 class InstallerSafetyTests(unittest.TestCase):
     repo = Path(__file__).resolve().parents[1]
+    scenarios = frozenset((
+        "running", "roaming", "preflight-throw", "preflight-nonzero",
+        "live-throw", "live-nonzero", "settle-throw", "settle-nonzero",
+        "register-throw", "register-nonzero", "register-generic-throw",
+        "missing-exe", "missing-package", "copy-throw", "success",
+    ))
 
     def _run_installer(self, scenario):
-        source = (self.repo / "installer_core.ps1").read_text(encoding="utf-8")
-        encoded_source = base64.b64encode(source.encode("utf-8")).decode("ascii")
-        # Parse the real source, replace only native invocation targets, and reject
-        # any command not explicitly mocked or allowlisted before evaluating it.
-        harness = r'''
-$ErrorActionPreference = 'Stop'
-if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Expected Windows PowerShell 5.1' }
-$Scenario = 'SCENARIO'
-$Source = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('SOURCE'))
-$Tokens = $null
-$Errors = $null
-$Ast = [Management.Automation.Language.Parser]::ParseInput($Source, [ref]$Tokens, [ref]$Errors)
-if ($Errors.Count) { throw 'Installer parse failed' }
-$Commands = $Ast.FindAll({param($n) $n -is [Management.Automation.Language.CommandAst]}, $true)
-$Allowed = @('Test-Path', 'Write-Error', 'Join-Path', 'New-Item', 'Copy-Item',
-    'Get-ChildItem', 'Remove-Item', 'Write-Host', 'Get-Process', 'Start-Sleep',
-    'ForEach-Object', 'Out-Null', 'Read-Host', 'Write-Warning', 'Stop-Process',
-    'Unblock-File', 'Add-MpPreference', 'Set-MpPreference', 'Set-ExecutionPolicy')
-foreach ($Command in ($Commands | Sort-Object { $_.Extent.StartOffset } -Descending)) {
-    if ($Command.InvocationOperator -eq 'Ampersand') {
-        $Target = $Command.CommandElements[0].Extent
-        if ($Target.Text -notin @('$ExePath', '"$PreflightRoot\dh_native_host.exe"')) {
-            throw 'Unexpected native target'
-        }
-        $Source = $Source.Remove($Target.StartOffset, $Target.EndOffset - $Target.StartOffset).Insert($Target.StartOffset, 'Invoke-MockHost')
-    } elseif ($Command.GetCommandName() -notin $Allowed) {
-        throw "Unmocked command: $($Command.GetCommandName())"
-    }
-}
-function Test-Path {
-    param($Path)
-    if ($Path -eq "$env:APPDATA\DynamicsHelper") { return $Scenario -eq 'roaming' }
-    if ($Path -eq 'C:\mock-package\host\dh_native_host.exe' -and $Scenario -eq 'missing-package') { return $false }
-    if ($Path -eq "$env:LOCALAPPDATA\DynamicsHelper\dh_native_host.exe" -and $Scenario -eq 'missing-exe') { return $false }
-    return $true
-}
-function Get-Process { if ($Scenario -eq 'running') { [pscustomobject]@{ Id = 123; ProcessName = 'dh_native_host' } } }
-function New-Item { "MUTATION:new:$args" }
-function Copy-Item {
-    if ($Scenario -eq 'copy-throw') { throw 'virus blocked SECRET-ERROR' }
-    "MUTATION:copy:$args"
-}
-function Remove-Item { "MUTATION:remove:$args" }
-function Stop-Process { 'FORBIDDEN:Stop-Process' }
-function Unblock-File { 'FORBIDDEN:Unblock-File' }
-function Add-MpPreference { 'FORBIDDEN:Add-MpPreference' }
-function Set-MpPreference { 'FORBIDDEN:Set-MpPreference' }
-function Set-ExecutionPolicy { 'FORBIDDEN:Set-ExecutionPolicy' }
-function Start-Sleep { }
-function Out-Null { process { if ($_ -like 'MUTATION:*') { Write-Host $_ } } }
-function Read-Host { param($Prompt) Write-Host "PROMPT:$Prompt"; return '' }
-function Get-ChildItem {
-    param($Path)
-    foreach ($Name in @('config.json', 'dh_native_host.exe')) {
-        [pscustomobject]@{ FullName = "$Path\$Name"; PSIsContainer = $false }
-    }
-}
-function Invoke-MockHost {
-    Write-Host "NATIVE:$args"
-    $global:LASTEXITCODE = 0
-    $Phase = if ($args -contains '--register') { 'register' } elseif ($args -contains '--settle-installer-repair') { 'settle' } elseif ($args.Count -eq 3) { 'preflight' } else { 'live' }
-    if ($Scenario -eq "$Phase-throw") { throw 'virus blocked SECRET-ERROR' }
-    if ($Scenario -eq 'register-generic-throw' -and $Phase -eq 'register') { throw 'Access denied SECRET-ERROR' }
-    if ($Scenario -eq "$Phase-nonzero") { $global:LASTEXITCODE = 17; return 'SECRET-ERROR' }
-    return 'mock host success'
-}
-. ([scriptblock]::Create('$PSScriptRoot = ''C:\mock-package'';' + $Source))
-'''.replace("SCENARIO", scenario).replace("SOURCE", encoded_source)
-        compressed = base64.b64encode(gzip.compress(harness.encode("utf-8"))).decode("ascii")
-        loader = (
-            "$stream = New-Object IO.MemoryStream(,[Convert]::FromBase64String('"
-            + compressed
-            + "')); $gzip = New-Object IO.Compression.GZipStream($stream,"
-            "[IO.Compression.CompressionMode]::Decompress); "
-            "$reader = New-Object IO.StreamReader($gzip); Invoke-Expression $reader.ReadToEnd()"
-        )
-        with tempfile.TemporaryDirectory() as temp:
-            env = os.environ.copy()
-            for name in ("LOCALAPPDATA", "APPDATA", "USERPROFILE", "HOME", "TEMP", "TMP"):
-                directory = Path(temp) / name
-                directory.mkdir()
-                env[name] = str(directory)
+        # Gate only behavior invocation, never static discovery or source checks.
+        if os.environ.get("DH_TEST_ALLOW_POWERSHELL_HARNESS") != "1":
+            self.skipTest("PowerShell harness requires explicit DH_TEST_ALLOW_POWERSHELL_HARNESS=1")
+        if os.name != "nt":
+            self.skipTest("Windows PowerShell 5.1 required")
+        self.assertIn(scenario, self.scenarios)
+        system_root = Path(os.environ["SystemRoot"])
+        self.assertTrue(system_root.is_absolute())
+        self.assertEqual(system_root.resolve(), system_root)
+        executable = system_root / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        self.assertTrue(executable.is_file())
+        self.assertEqual(executable.resolve(), executable)
+        harness = self.repo / "tests/harnesses/installer_safety.ps1"
+        self.assertTrue(harness.is_file())
+        self.assertEqual(harness.resolve(), harness)
+        parent = Path(os.environ["TEMP"])
+        self.assertTrue(parent.is_absolute() and parent.is_dir())
+        parent = parent.resolve()
+        temp = Path(tempfile.mkdtemp(prefix="dh-installer-harness-", dir=parent))
+        sentinel = temp / "owner.txt"
+        sentinel.write_text(temp.name, encoding="ascii")
+        # Even passing tests can trigger a later security alert. Retain evidence;
+        # deletion is a separate reviewed operation, not unittest cleanup.
+        env = {"SystemRoot": str(system_root), "WINDIR": str(system_root)}
+        for name in PROFILE_KEYS:
+            directory = temp / name
+            directory.mkdir()
+            env[name] = str(directory)
+        self.assertTrue(all(not entries for entries in capture_profile_state(temp).values()))
+        # Finite checked-in scenarios emit finite event lists, not arbitrary user
+        # output. capture_output is not a general memory cap; timeout is 20 seconds.
+        try:
             result = subprocess.run(
-                ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", loader],
-                cwd=temp, env=env, capture_output=True, text=True, timeout=20,
+                [str(executable), "-NoLogo", "-NoProfile", "-NonInteractive",
+                 "-File", str(harness), "-Scenario", scenario],
+                cwd=temp, env=env, shell=False, capture_output=True, text=True, timeout=20,
             )
-            self.assertFalse(any(path.is_file() for path in Path(temp).rglob("*")))
-        output = result.stdout + result.stderr
-        self.assertNotIn("FORBIDDEN:", output)
-        self.assertNotIn("Unmocked command:", output)
-        self.assertNotIn("Installer parse failed", output)
-        return result.returncode, result.stdout
+        except subprocess.TimeoutExpired as error:
+            # TimeoutExpired can carry bytes even with text=True. Preserve them
+            # without logging the exception's command or claiming scenario success.
+            for name, value in (("stdout.partial", error.stdout), ("stderr.partial", error.stderr)):
+                data = value if isinstance(value, bytes) else (value or "").encode("utf-8")
+                (temp / name).write_bytes(data)
+            (temp / "timeout.json").write_text(
+                json.dumps({"scenario": scenario, "timeout_seconds": 20}), encoding="utf-8"
+            )
+            self.fail(f"Plain PowerShell harness timed out; evidence retained: {temp}")
+        (temp / "stdout.json").write_text(result.stdout, encoding="utf-8")
+        (temp / "stderr.txt").write_text(result.stderr, encoding="utf-8")
+        self.assertEqual(result.stderr, "", f"Harness stderr; evidence: {temp}")
+        self.assertTrue("SECRET-ERROR" not in result.stdout, f"Native output leaked; evidence: {temp}")
+        validate_profile_state(capture_profile_state(temp))
+        report = json.loads(result.stdout)
+        self.assertEqual(set(report), {"exitCode", "isUpdate", "events"})
+        self.assertEqual(report["exitCode"], result.returncode)
+        self.assertIsInstance(report["events"], list)
+        self.assertTrue(all(event["kind"] in {
+            "test-path", "running-host", "create-directory", "copy", "enumerate",
+            "remove-tree", "invoke-host", "emit", "prompt",
+        } and isinstance(event["phase"], str) for event in report["events"]))
+        self.assertEqual(report["events"][-1], {
+            "kind": "prompt", "phase": "finish", "message": "Press Enter to exit",
+        })
+        return report["exitCode"], report["events"]
 
     def test_no_protection_bypass_or_unsafe_advice(self):
         source = (self.repo / "installer_core.ps1").read_text(encoding="utf-8").lower()
@@ -407,42 +384,124 @@ function Invoke-MockHost {
         self.assertIn('exit /b %installerexitcode%', source)
         self.assertLess(source.index('set "installerexitcode='), source.index('pause'))
 
+    def test_checked_in_harness_and_definitions_only_dependency_boundary(self):
+        source = (self.repo / "installer_core.ps1").read_text(encoding="utf-8")
+        harness = (self.repo / "tests/harnesses/installer_safety.ps1").read_text(encoding="utf-8")
+        guard = "if ($MyInvocation.InvocationName -eq '.') { return }"
+        definitions, main = source.split(guard)
+        self.assertEqual(definitions.count("function "), 2)
+        self.assertIn("$DefaultOps = New-InstallerOperations", main)
+        self.assertIn("exit $Result.ExitCode", main)
+        workflow = definitions.split("function Invoke-InstallerWorkflow {", 1)[1]
+        self.assertNotIn("New-InstallerOperations", workflow)
+        self.assertIn("[Parameter(Mandatory = $true)][hashtable]$Ops", workflow)
+        required = "'TestPath', 'RunningHost', 'CreateDirectory', 'CopyFiles',\n        'Enumerate', 'RemoveTree', 'InvokeHost', 'Emit', 'Prompt'"
+        self.assertIn(required, workflow)
+        self.assertIn("$Ops.Count -ne $RequiredOps.Count", workflow)
+        self.assertIn("-not $Ops.ContainsKey($Name) -or $Ops[$Name] -isnot [scriptblock]", workflow)
+        self.assertLess(workflow.index("throw 'Invalid installer operations.'"), workflow.index("& $Ops.Emit"))
+        self.assertIn(". (Join-Path -Path $PSScriptRoot -ChildPath '../../installer_core.ps1')", harness)
+        self.assertNotIn("New-InstallerOperations", harness)
+        self.assertIn("'missing', 'not-scriptblock', 'extra'", harness)
+        self.assertIn("$Events.Count -ne 0", harness)
+        for scenario in self.scenarios:
+            self.assertIn("'" + scenario + "'", harness.split("[string]$Scenario", 1)[0])
+        for forbidden in ("invoke-expression", "scriptblock]::create", "frombase64", "gzip", "parseinput"):
+            self.assertNotIn(forbidden, (source + harness).lower())
+        for forbidden in ("new-item", "copy-item", "remove-item", "get-process", "start-process", "read-host", "$env:"):
+            self.assertNotIn(forbidden, harness.lower())
+
     def test_running_host_denies_before_any_mutation(self):
-        code, output = self._run_installer("running")
-        self.assertEqual(code, 1, output)
-        self.assertNotIn("MUTATION:", output)
-        self.assertNotIn("NATIVE:", output)
-        self.assertIn("running", output)
-        self.assertIn("PROMPT:Press Enter to exit", output)
+        code, events = self._run_installer("running")
+        self.assertEqual(code, 1)
+        self.assertEqual([event["kind"] for event in events], ["emit", "running-host", "emit", "prompt"])
+        self.assertIn("dh_native_host is running", events[-2]["message"])
 
     def test_roaming_denies_before_any_mutation(self):
-        code, output = self._run_installer("roaming")
-        self.assertEqual(code, 1, output)
-        self.assertNotIn("MUTATION:", output)
-        self.assertNotIn("NATIVE:", output)
-        self.assertIn("Roaming", output)
-        self.assertIn("preserved", output)
+        code, events = self._run_installer("roaming")
+        self.assertEqual(code, 1)
+        self.assertEqual([event["kind"] for event in events], ["emit", "running-host", "test-path", "emit", "prompt"])
+        self.assertIn("Roaming", events[-2]["message"])
+        self.assertIn("preserved", events[-2]["message"])
+
+    def _assert_safe_failure(self, scenario):
+        code, events = self._run_installer(scenario)
+        self.assertEqual(code, 1)
+        self.assertFalse(any(event["phase"] == "success" for event in events))
+        self.assertEqual(events[-2]["kind"], "emit")
+        self.assertEqual(events[-2]["phase"], "error")
+        self.assertTrue(events[-2]["message"].startswith("Installation failed."))
+        self.assertIn("Keep security protections unchanged", events[-2]["message"])
+        return events
+
+    def test_preflight_failures_clean_only_owned_root_before_live_writes(self):
+        for scenario in ("preflight-throw", "preflight-nonzero", "missing-package", "copy-throw"):
+            with self.subTest(scenario=scenario):
+                events = self._assert_safe_failure(scenario)
+                effects = [event for event in events if event["kind"] in {
+                    "create-directory", "copy", "remove-tree", "invoke-host",
+                }]
+                self.assertTrue(all(event["phase"] in {"preflight", "preflight-cleanup"} for event in effects))
+                if scenario == "missing-package":
+                    self.assertEqual(effects, [])
+                else:
+                    root = effects[0]["path"]
+                    self.assertTrue(root.startswith("C:\\synthetic\\temp\\DynamicsHelper-preflight-"))
+                    self.assertEqual([event for event in effects if event["kind"] == "remove-tree"], [
+                        {"kind": "remove-tree", "phase": "preflight-cleanup", "path": root},
+                    ])
+                    self.assertEqual(effects[-1]["kind"], "remove-tree")
 
     def test_native_failures_exit_one_without_success_or_security_changes(self):
-        for scenario in ("preflight-throw", "preflight-nonzero", "live-throw", "live-nonzero",
-                         "settle-throw", "settle-nonzero", "register-throw", "register-nonzero",
-                         "register-generic-throw", "missing-exe", "missing-package", "copy-throw"):
+        for scenario in ("live-throw", "live-nonzero", "settle-throw", "settle-nonzero"):
             with self.subTest(scenario=scenario):
-                code, output = self._run_installer(scenario)
-                self.assertEqual(code, 1, output)
-                self.assertNotIn("SUCCESS:", output)
-                self.assertNotIn("SECRET-ERROR", output)
-                self.assertIn("Installation failed.", output)
-                self.assertIn("PROMPT:Press Enter to exit", output)
+                events = self._assert_safe_failure(scenario)
+                phases = [event["phase"] for event in events if event["kind"] == "invoke-host"]
+                self.assertEqual(phases, ["preflight", "live"] + (["settle"] if scenario.startswith("settle-") else []))
+
+    def test_registration_failures_never_report_success(self):
+        for scenario in ("register-throw", "register-nonzero", "register-generic-throw", "missing-exe"):
+            with self.subTest(scenario=scenario):
+                events = self._assert_safe_failure(scenario)
+                phases = [event["phase"] for event in events if event["kind"] == "invoke-host"]
+                self.assertEqual(phases, ["preflight", "live", "settle"] + ([] if scenario == "missing-exe" else ["register"]))
+                self.assertFalse(any(event.get("message") == "    - Registration successful." for event in events))
 
     def test_success_preserves_probe_settlement_registration_and_config_skip(self):
-        code, output = self._run_installer("success")
-        self.assertEqual(code, 0, output)
-        self.assertEqual(output.count("NATIVE:--update-probe"), 2)
-        self.assertLess(output.index("NATIVE:--settle-installer-repair"), output.index("NATIVE:--register"))
-        self.assertIn("SUCCESS: Update Complete!", output)
-        self.assertIn("PROMPT:Press Enter to exit", output)
-        self.assertNotIn("MUTATION:copy:C:\\mock-package\\host\\config.json", output)
+        code, events = self._run_installer("success")
+        self.assertEqual(code, 0)
+        native = [event for event in events if event["kind"] == "invoke-host"]
+        self.assertEqual([event["phase"] for event in native], ["preflight", "live", "settle", "register"])
+        package = "C:\\synthetic\\package"
+        live = "C:\\synthetic\\local\\DynamicsHelper"
+        self.assertEqual([event["arguments"] for event in native], [
+            ["--update-probe", package + "\\update-manifest.json", package],
+            ["--update-probe", package + "\\update-manifest.json"],
+            ["--settle-installer-repair"], ["--register"],
+        ])
+        self.assertTrue(all(event["executable"] == live + "\\dh_native_host.exe" for event in native[1:]))
+        self.assertTrue(any(event.get("message") == "SUCCESS: Update Complete!" for event in events))
+        removals = [event for event in events if event["kind"] == "remove-tree"]
+        self.assertEqual([event["phase"] for event in removals], ["preflight-cleanup", "host-copy", "extension-copy"])
+        self.assertEqual([event["path"] for event in removals[1:]], [live + "\\_internal", live + "\\extension"])
+        preflight_root = next(event["path"] for event in events if event["kind"] == "create-directory")
+        self.assertEqual(removals[0]["path"], preflight_root)
+        self.assertEqual(native[0]["executable"], preflight_root + "\\dh_native_host.exe")
+        host_copies = [event for event in events if event["kind"] == "copy" and event["phase"] == "host-copy"]
+        self.assertEqual([event["destination"] for event in host_copies], [
+            live + "\\" + name for name in (
+                "dh_native_host.exe", "_internal\\runtime.dll", "_internal\\nested\\library.dll",
+                "release-integrity.json", "installed-product.json", "system_prompt.md", "system_prompt.md",
+            )
+        ])
+        self.assertTrue(all(not event["recurse"] for event in host_copies))
+        for name in ("config.json", "copilot-instructions.md", "user_prompt.md"):
+            self.assertTrue(any(event["kind"] == "test-path" and event.get("path") == live + "\\" + name and event["exists"] for event in events))
+        for path in (live + "\\_internal", live + "\\_internal\\nested"):
+            self.assertTrue(any(event["kind"] == "create-directory" and event["path"] == path for event in events))
+        extension_copy = next(event for event in events if event["kind"] == "copy" and event["phase"] == "extension-copy")
+        ordered = [native[0], removals[0], removals[1], host_copies[0], removals[2], extension_copy, *native[1:]]
+        self.assertEqual([events.index(event) for event in ordered], sorted(events.index(event) for event in ordered))
 
 
 if __name__ == "__main__":

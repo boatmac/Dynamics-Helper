@@ -1,197 +1,218 @@
 # Dynamics Helper - One-Click Installer/Updater
-# Run this script with PowerShell to Install or Update
+# Dot-sourcing defines functions only; -File keeps the normal installation entry.
 
-$ErrorActionPreference = "Stop"
-$AppName = "DynamicsHelper"
-
-# CRITICAL FIX: The user's legacy install and standard Windows app behavior prefer LOCAL AppData.
-# We default to LOCALAPPDATA to match the legacy behavior.
-$DestDir = "$env:LOCALAPPDATA\$AppName"
-
-# CRITICAL FIX: Must match the Host ID defined in extension/background/serviceWorker.ts
-$HostName = "com.dynamics.helper.native"
-$HostSrc = "$PSScriptRoot\host"
-$ExtSrc = "$PSScriptRoot\extension"
-$PackageManifest = "$PSScriptRoot\update-manifest.json"
-
-try {
-# Refuse ambiguous user state and active Hosts before any filesystem mutation.
-Write-Host "[*] Checking for running processes..."
-$Process = Get-Process -Name "dh_native_host" -ErrorAction SilentlyContinue
-if ($Process) {
-    Write-Host "Installation stopped: dh_native_host is running. Close Dynamics Helper and its browser normally before retrying. No files or processes were changed." -ForegroundColor Yellow
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-$LegacyDir = "$env:APPDATA\$AppName"
-if (Test-Path $LegacyDir) {
-    Write-Host "Installation stopped: a legacy Roaming directory exists at '$LegacyDir'. Local and Roaming data are preserved; resolve the legacy installation with your administrator before retrying. No automatic migration was performed." -ForegroundColor Yellow
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-# Validate the complete packaged product before changing user state.
-# The probe expects the installed layout, so materialize a
-# temporary combined Host/Extension view from the extracted release.
-foreach ($RequiredPath in @(
-    "$HostSrc\dh_native_host.exe",
-    "$HostSrc\_internal",
-    "$HostSrc\release-integrity.json",
-    "$HostSrc\installed-product.json",
-    "$ExtSrc\manifest.json",
-    $PackageManifest
-)) {
-    if (-not (Test-Path $RequiredPath)) {
-        Write-Error "The installer package is incomplete: '$RequiredPath' is missing."
-    }
-}
-$PreflightRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("DynamicsHelper-preflight-" + [guid]::NewGuid().ToString("N"))
-try {
-    New-Item -ItemType Directory -Path $PreflightRoot | Out-Null
-    Copy-Item "$HostSrc\*" -Destination $PreflightRoot -Recurse -Force
-    New-Item -ItemType Directory -Path "$PreflightRoot\extension" | Out-Null
-    Copy-Item "$ExtSrc\*" -Destination "$PreflightRoot\extension" -Recurse -Force
-    $PreflightOutput = & "$PreflightRoot\dh_native_host.exe" --update-probe $PackageManifest $PSScriptRoot 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "The installer package failed integrity validation. Output: $PreflightOutput"
-    }
-} finally {
-    if (Test-Path $PreflightRoot) {
-        Remove-Item $PreflightRoot -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "   Dynamics Helper Installer / Updater" -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "Target Installation Directory: $DestDir" -ForegroundColor Gray
-
-# 2. Prepare Destination
-if (-not (Test-Path $DestDir)) {
-    Write-Host "[*] Creating installation directory: $DestDir"
-    New-Item -ItemType Directory -Path $DestDir | Out-Null
-}
-
-# 3. Copy Host Files
-Write-Host "[*] Installing Host files..."
-
-# The packaged runtime is one exact product tree. Remove the old runtime first
-# so a matching full installer can repair stale or mixed _internal bytes.
-if (Test-Path "$DestDir\_internal") {
-    Remove-Item "$DestDir\_internal" -Recurse -Force
-}
-
-# Copy all host files (exe + DLLs from --onedir build + config files)
-# This overwrites existing files but preserves user config (checked below)
-Get-ChildItem -Path $HostSrc -Recurse | ForEach-Object {
-    $RelPath = $_.FullName.Substring($HostSrc.Length + 1)
-    $DestPath = Join-Path $DestDir $RelPath
-
-    if ($_.PSIsContainer) {
-        if (-not (Test-Path $DestPath)) {
-            New-Item -ItemType Directory -Path $DestPath | Out-Null
+function New-InstallerOperations {
+    return @{
+        TestPath = { param($Phase, $Path) Test-Path -LiteralPath $Path }
+        RunningHost = { Get-Process -Name "dh_native_host" -ErrorAction SilentlyContinue }
+        CreateDirectory = {
+            param($Phase, $Path)
+            New-Item -ItemType Directory -Path $Path -ErrorAction Stop | Out-Null
         }
-    } else {
-        # Skip config.json if user already has one (preserve user settings)
-        if ($RelPath -eq "config.json" -and (Test-Path "$DestDir\config.json")) {
-            return
+        CopyFiles = {
+            param($Phase, $Source, $Destination, [bool]$Recurse)
+            if ($Recurse) {
+                Copy-Item -Path "$Source\*" -Destination $Destination -Recurse -Force -ErrorAction Stop
+            } else {
+                Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
+            }
         }
-        Copy-Item $_.FullName -Destination $DestPath -Force
+        Enumerate = {
+            param($Phase, $Root)
+            Get-ChildItem -LiteralPath $Root -Recurse -ErrorAction Stop | ForEach-Object {
+                [pscustomobject]@{
+                    RelativePath = $_.FullName.Substring($Root.Length + 1)
+                    IsDirectory = $_.PSIsContainer
+                }
+            }
+        }
+        RemoveTree = {
+            param($Phase, $Path)
+            Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+        }
+        InvokeHost = {
+            param($Phase, $Executable, [string[]]$Arguments)
+            $Output = & $Executable @Arguments 2>&1
+            [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $Output }
+        }
+        Emit = {
+            param($Phase, $Message, $Color = 'White')
+            Write-Host $Message -ForegroundColor $Color
+        }
+        Prompt = { param($Message) Read-Host $Message | Out-Null }
     }
 }
-Write-Host "    - Host files copied (exe + runtime libraries)."
 
-# Force update system_prompt.md (already copied above, but ensure it's there)
-if (Test-Path "$HostSrc\system_prompt.md") {
-    Copy-Item "$HostSrc\system_prompt.md" -Destination "$DestDir\" -Force
-    Write-Host "    - system_prompt.md updated."
+function Invoke-InstallerWorkflow {
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Ops,
+        [Parameter(Mandatory = $true)][string]$PackageRoot,
+        [Parameter(Mandatory = $true)][string]$DestDir,
+        [Parameter(Mandatory = $true)][string]$LegacyDir,
+        [Parameter(Mandatory = $true)][string]$TempDir
+    )
+    # Validate the entire dependency boundary before even emitting or prompting.
+    $RequiredOps = @('TestPath', 'RunningHost', 'CreateDirectory', 'CopyFiles',
+        'Enumerate', 'RemoveTree', 'InvokeHost', 'Emit', 'Prompt')
+    if ($Ops.Count -ne $RequiredOps.Count) { throw 'Invalid installer operations.' }
+    foreach ($Name in $RequiredOps) {
+        if (-not $Ops.ContainsKey($Name) -or $Ops[$Name] -isnot [scriptblock]) {
+            throw 'Invalid installer operations.'
+        }
+    }
+
+    $ErrorActionPreference = 'Stop'
+    $HostSrc = "$PackageRoot\host"
+    $ExtSrc = "$PackageRoot\extension"
+    $PackageManifest = "$PackageRoot\update-manifest.json"
+    $IsUpdate = $false
+    try {
+        & $Ops.Emit 'refusal' "[*] Checking for running processes..."
+        if (& $Ops.RunningHost) {
+            & $Ops.Emit 'refusal' "Installation stopped: dh_native_host is running. Close Dynamics Helper and its browser normally before retrying. No files or processes were changed." 'Yellow'
+            return [pscustomobject]@{ ExitCode = 1; IsUpdate = $IsUpdate }
+        }
+        if (& $Ops.TestPath 'refusal' $LegacyDir) {
+            & $Ops.Emit 'refusal' "Installation stopped: a legacy Roaming directory exists at '$LegacyDir'. Local and Roaming data are preserved; resolve the legacy installation with your administrator before retrying. No automatic migration was performed." 'Yellow'
+            return [pscustomobject]@{ ExitCode = 1; IsUpdate = $IsUpdate }
+        }
+
+        foreach ($RequiredPath in @(
+            "$HostSrc\dh_native_host.exe", "$HostSrc\_internal",
+            "$HostSrc\release-integrity.json", "$HostSrc\installed-product.json",
+            "$ExtSrc\manifest.json", $PackageManifest
+        )) {
+            if (-not (& $Ops.TestPath 'preflight' $RequiredPath)) {
+                throw 'The installer package is incomplete.'
+            }
+        }
+        $PreflightRoot = "$TempDir\DynamicsHelper-preflight-$([guid]::NewGuid().ToString('N'))"
+        $PreflightOwned = $false
+        try {
+            & $Ops.CreateDirectory 'preflight' $PreflightRoot
+            $PreflightOwned = $true
+            & $Ops.CopyFiles 'preflight' $HostSrc $PreflightRoot $true
+            & $Ops.CreateDirectory 'preflight' "$PreflightRoot\extension"
+            & $Ops.CopyFiles 'preflight' $ExtSrc "$PreflightRoot\extension" $true
+            $Probe = & $Ops.InvokeHost 'preflight' "$PreflightRoot\dh_native_host.exe" @('--update-probe', $PackageManifest, $PackageRoot)
+            if ($null -eq $Probe -or $Probe.ExitCode -ne 0) {
+                throw 'The installer package failed integrity validation.'
+            }
+        } finally {
+            # Only the root created by this invocation is eligible for cleanup.
+            if ($PreflightOwned -and (& $Ops.TestPath 'preflight-cleanup' $PreflightRoot)) {
+                & $Ops.RemoveTree 'preflight-cleanup' $PreflightRoot
+            }
+        }
+
+        & $Ops.Emit 'copy' "==========================================" 'Cyan'
+        & $Ops.Emit 'copy' "   Dynamics Helper Installer / Updater" 'Cyan'
+        & $Ops.Emit 'copy' "==========================================" 'Cyan'
+        & $Ops.Emit 'copy' ""
+        & $Ops.Emit 'copy' "Target Installation Directory: $DestDir" 'Gray'
+        if (-not (& $Ops.TestPath 'copy' $DestDir)) {
+            & $Ops.Emit 'copy' "[*] Creating installation directory: $DestDir"
+            & $Ops.CreateDirectory 'copy' $DestDir
+        }
+        & $Ops.Emit 'host-copy' "[*] Installing Host files..."
+        # Replace the exact runtime tree, never overlay stale runtime files.
+        if (& $Ops.TestPath 'host-copy' "$DestDir\_internal") {
+            & $Ops.RemoveTree 'host-copy' "$DestDir\_internal"
+        }
+        foreach ($Entry in (& $Ops.Enumerate 'host-copy' $HostSrc)) {
+            $RelPath = $Entry.RelativePath
+            $DestPath = "$DestDir\$RelPath"
+            if ($Entry.IsDirectory) {
+                if (-not (& $Ops.TestPath 'host-copy' $DestPath)) {
+                    & $Ops.CreateDirectory 'host-copy' $DestPath
+                }
+            } else {
+                if ($RelPath -in @('config.json', 'copilot-instructions.md', 'user_prompt.md') -and
+                    (& $Ops.TestPath 'host-copy' $DestPath)) {
+                    continue
+                }
+                & $Ops.CopyFiles 'host-copy' "$HostSrc\$RelPath" $DestPath $false
+            }
+        }
+        & $Ops.Emit 'host-copy' "    - Host files copied (exe + runtime libraries)."
+        if (& $Ops.TestPath 'host-copy' "$HostSrc\system_prompt.md") {
+            & $Ops.CopyFiles 'host-copy' "$HostSrc\system_prompt.md" "$DestDir\system_prompt.md" $false
+            & $Ops.Emit 'host-copy' "    - system_prompt.md updated."
+        }
+
+        & $Ops.Emit 'extension-copy' "[*] Installing Extension files..."
+        $ExtDest = "$DestDir\extension"
+        if (& $Ops.TestPath 'extension-copy' $ExtDest) {
+            & $Ops.RemoveTree 'extension-copy' $ExtDest
+        }
+        & $Ops.CreateDirectory 'extension-copy' $ExtDest
+        & $Ops.CopyFiles 'extension-copy' $ExtSrc $ExtDest $true
+        $FileCount = @(& $Ops.Enumerate 'extension-copy' $ExtDest).Count
+        if ($FileCount -eq 0) { throw 'Extension copy failed.' }
+        & $Ops.Emit 'extension-copy' "    - Extension files copied to: $ExtDest ($FileCount files)"
+
+        $ExePath = "$DestDir\dh_native_host.exe"
+        $Probe = & $Ops.InvokeHost 'live' $ExePath @('--update-probe', $PackageManifest)
+        if ($null -eq $Probe -or $Probe.ExitCode -ne 0) {
+            throw 'The installed product failed integrity validation.'
+        }
+        $Settlement = & $Ops.InvokeHost 'settle' $ExePath @('--settle-installer-repair')
+        if ($null -eq $Settlement -or $Settlement.ExitCode -ne 0) {
+            throw 'The preserved update transaction could not be settled.'
+        }
+        $IsUpdate = & $Ops.TestPath 'register' "$DestDir\manifest.json"
+        & $Ops.Emit 'register' "Configuring Native Host Manifest..." 'Gray'
+        if (-not (& $Ops.TestPath 'register' $ExePath)) {
+            throw 'The installed Host executable is missing.'
+        }
+        # The Host owns strict UTF-8 manifest generation and browser registration.
+        & $Ops.Emit 'register' "    Running registration command..."
+        $Registration = & $Ops.InvokeHost 'register' $ExePath @('--register')
+        if ($null -eq $Registration -or $Registration.ExitCode -ne 0) {
+            throw 'Registration failed.'
+        }
+        # Native output is deliberately never forwarded, even on success.
+        & $Ops.Emit 'register' "    - Registration successful."
+        if ($IsUpdate) {
+            & $Ops.Emit 'success' ""
+            & $Ops.Emit 'success' "SUCCESS: Update Complete!" 'Green'
+            & $Ops.Emit 'success' "-------------------------"
+            & $Ops.Emit 'success' "The Native Host manifest has been updated with the latest Allowed Origins." 'Yellow'
+            & $Ops.Emit 'success' "Please restart your browser (Edge/Chrome) for changes to take effect." 'Cyan'
+            & $Ops.Emit 'success' ""
+            & $Ops.Emit 'success' "IMPORTANT: Ensure your browser is loading the extension from:" 'Yellow'
+            & $Ops.Emit 'success' "   $ExtDest" 'Cyan'
+            & $Ops.Emit 'success' ""
+        } else {
+            & $Ops.Emit 'success' ""
+            & $Ops.Emit 'success' "SUCCESS: Installation Complete!" 'Green'
+            & $Ops.Emit 'success' "-------------------------"
+            & $Ops.Emit 'success' "1. Go to chrome://extensions (or edge://extensions)"
+            & $Ops.Emit 'success' "2. Enable 'Developer mode'"
+            & $Ops.Emit 'success' "3. Click 'Load unpacked'"
+            & $Ops.Emit 'success' "4. Select this folder:"
+            & $Ops.Emit 'success' "   $ExtDest" 'Cyan'
+            & $Ops.Emit 'success' ""
+        }
+        & $Ops.Emit 'success' ""
+        return [pscustomobject]@{ ExitCode = 0; IsUpdate = $IsUpdate }
+    } catch {
+        & $Ops.Emit 'error' "Installation failed. A required file or operation is unavailable or blocked. Keep security protections unchanged; preserve any security detection details and contact your administrator or the project maintainer." 'Red'
+        return [pscustomobject]@{ ExitCode = 1; IsUpdate = $IsUpdate }
+    } finally {
+        & $Ops.Prompt "Press Enter to exit"
+    }
 }
 
-# 4. Copy Extension Files
-Write-Host "[*] Installing Extension files..."
-$ExtDest = "$DestDir\extension"
-# Clean old extension files to remove stale files
-if (Test-Path $ExtDest) {
-    Remove-Item $ExtDest -Recurse -Force
-}
-New-Item -ItemType Directory -Path $ExtDest | Out-Null
-Copy-Item "$ExtSrc\*" -Destination $ExtDest -Recurse
+if ($MyInvocation.InvocationName -eq '.') { return }
 
-# VERIFY Extension Copy
-$FileCount = (Get-ChildItem $ExtDest -Recurse).Count
-if ($FileCount -eq 0) {
-    Write-Error "Extension copy failed! Destination '$ExtDest' is empty. Check permissions or disk space."
-}
-Write-Host "    - Extension files copied to: $ExtDest ($FileCount files)"
-
-# Verify the exact installed product and settle any preserved transaction to the
-# matching target/prior terminal state before registration can report success.
-$ExePath = "$DestDir\dh_native_host.exe"
-$LiveProbeOutput = & $ExePath --update-probe $PackageManifest 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "The installed product failed integrity validation. Output: $LiveProbeOutput"
-}
-$SettlementOutput = & $ExePath --settle-installer-repair 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "The preserved update transaction could not be settled. Output: $SettlementOutput"
-}
-
-# 5. Registry Update
-$ManifestPath = "$DestDir\manifest.json"
-$IsUpdate = Test-Path $ManifestPath
-
-
-# --- COMMON: Generate Manifest & Register ---
-
-Write-Host "Configuring Native Host Manifest..." -ForegroundColor Gray
-
-# CRITICAL FIX (v2.0.39): Delegate registration to the Python Executable.
-# PowerShell has proven unreliable for generating JSON without BOM or encoding issues across different Windows locales.
-# The executable now has a '--register' flag that uses Python's standard library to:
-# 1. Generate 'manifest.json' (Strict UTF-8, No BOM)
-# 2. Update the Windows Registry for Chrome and Edge
-# This ensures perfect consistency regardless of the user's shell environment.
-
-if (-not (Test-Path $ExePath)) {
-    throw "The installed Host executable is missing."
-}
-
-Write-Host "    Running registration command..."
-$RegisterOutput = & $ExePath --register 2>&1
-if ($LASTEXITCODE -ne 0) {
-    throw "Registration failed."
-}
-Write-Host "    $RegisterOutput" -ForegroundColor Gray
-Write-Host "    - Registration successful."
-
-if ($IsUpdate) {
-    Write-Host ""
-    Write-Host "SUCCESS: Update Complete!" -ForegroundColor Green
-    Write-Host "-------------------------"
-    Write-Host "The Native Host manifest has been updated with the latest Allowed Origins." -ForegroundColor Yellow
-    Write-Host "Please restart your browser (Edge/Chrome) for changes to take effect." -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "IMPORTANT: Ensure your browser is loading the extension from:" -ForegroundColor Yellow
-    Write-Host "   $ExtDest" -ForegroundColor Cyan
-    Write-Host ""
-} else {
-    Write-Host ""
-    Write-Host "SUCCESS: Installation Complete!" -ForegroundColor Green
-    Write-Host "-------------------------"
-    Write-Host "1. Go to chrome://extensions (or edge://extensions)"
-    Write-Host "2. Enable 'Developer mode'"
-    Write-Host "3. Click 'Load unpacked'"
-    Write-Host "4. Select this folder:"
-    Write-Host "   $ExtDest" -ForegroundColor Cyan
-    Write-Host ""
-}
+$ErrorActionPreference = 'Stop'
+try {
+    $DefaultOps = New-InstallerOperations
+    $Result = Invoke-InstallerWorkflow -Ops $DefaultOps -PackageRoot $PSScriptRoot -DestDir "$env:LOCALAPPDATA\DynamicsHelper" -LegacyDir "$env:APPDATA\DynamicsHelper" -TempDir ([System.IO.Path]::GetTempPath().TrimEnd('\'))
+    exit $Result.ExitCode
 } catch {
     Write-Host "Installation failed. A required file or operation is unavailable or blocked. Keep security protections unchanged; preserve any security detection details and contact your administrator or the project maintainer." -ForegroundColor Red
-    Read-Host "Press Enter to exit"
+    Read-Host "Press Enter to exit" | Out-Null
     exit 1
 }
-
-Write-Host ""
-Read-Host "Press Enter to exit"
-exit 0

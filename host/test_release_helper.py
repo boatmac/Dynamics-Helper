@@ -297,14 +297,15 @@ class PlanCPackagingTests(unittest.TestCase):
 
     def test_matching_installer_replaces_the_complete_internal_runtime(self):
         source = release_helper.INSTALL_SCRIPT.read_text(encoding="utf-8")
-        cleanup = 'Remove-Item "$DestDir\\_internal" -Recurse -Force'
-        copy_loop = "Get-ChildItem -Path $HostSrc -Recurse | ForEach-Object"
+        source = source.split("function Invoke-InstallerWorkflow {", 1)[1].split("if ($MyInvocation.InvocationName", 1)[0]
+        cleanup = '& $Ops.RemoveTree \'host-copy\' "$DestDir\\_internal"'
+        copy_loop = "foreach ($Entry in (& $Ops.Enumerate 'host-copy' $HostSrc))"
         validate_source = 'foreach ($RequiredPath in @('
-        package_probe = '& "$PreflightRoot\\dh_native_host.exe" --update-probe $PackageManifest $PSScriptRoot'
-        running_host_guard = 'if ($Process) {'
+        package_probe = '& $Ops.InvokeHost \'preflight\' "$PreflightRoot\\dh_native_host.exe" @(\'--update-probe\', $PackageManifest, $PackageRoot)'
+        running_host_guard = 'if (& $Ops.RunningHost) {'
         running_host_refusal = 'Installation stopped: dh_native_host is running.'
-        live_probe = '& $ExePath --update-probe $PackageManifest'
-        settle = '& $ExePath --settle-installer-repair'
+        live_probe = "& $Ops.InvokeHost 'live' $ExePath @('--update-probe', $PackageManifest)"
+        settle = "& $Ops.InvokeHost 'settle' $ExePath @('--settle-installer-repair')"
 
         self.assertIn(cleanup, source)
         self.assertIn(validate_source, source)
@@ -312,13 +313,17 @@ class PlanCPackagingTests(unittest.TestCase):
         self.assertNotIn('Stop-Process', source)
         self.assertIn(running_host_refusal, source)
         self.assertLess(source.index(running_host_guard), source.index(running_host_refusal))
-        self.assertLess(source.index('exit 1', source.index(running_host_refusal)), source.index(package_probe))
+        self.assertLess(source.index('return [pscustomobject]@{ ExitCode = 1;', source.index(running_host_refusal)), source.index(package_probe))
+        self.assertLess(source.index(validate_source), source.index(package_probe))
         self.assertLess(source.index(package_probe), source.index(cleanup))
         self.assertLess(source.index(cleanup), source.index(copy_loop))
         self.assertIn(live_probe, source)
         self.assertIn(settle, source)
         self.assertLess(source.index(live_probe), source.index(settle))
         self.assertLess(source.index(settle), source.index("Running registration command"))
+        self.assertLess(source.index("& $Ops.RemoveTree 'extension-copy' $ExtDest"), source.index("& $Ops.CopyFiles 'extension-copy'"))
+        self.assertLess(source.index("& $Ops.CopyFiles 'extension-copy'"), source.index(live_probe))
+        self.assertLess(source.index(settle), source.index("& $Ops.InvokeHost 'register' $ExePath @('--register')"))
 
     def test_build_host_invokes_exact_cli_command(self):
         with patch("release_helper.subprocess.run") as run:
