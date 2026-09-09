@@ -29,16 +29,42 @@ its origin, tags and Git directory; preserve all sibling directories, ignored fi
 and the source/alignment worktree relationship. No network fetch, push or deletion.
 The source was at `7280454` before saving the 27-line product-readiness follow-up.
 
-Migration status at this source checkpoint: import/switch pending. The active
-handoff in the canonical checkout will record completion. This retained source
-copy is not the ongoing status authority after that transition.
+Migration completed: source handoff saved as `0e86787`, that exact branch tip
+imported using a local-only fetch with no tag auto-follow, and canonical switched
+normally to `hardening/plan-d-runtime-installer`. No merge/rebase or directory rename.
+Canonical `master` remains at `bfedc9f`. The source checkout stays at `0e86787` as a
+clean reference; alignment remains attached to its original Git store. Continue
+development only in canonical; this file here is the ongoing status authority.
 
 Source adoption does not refresh either repository's virtual environment, node
 dependencies or built artifacts. Installed Chrome/Edge native-host registration
 was observed pointing to the LocalAppData installed executable, not either checkout.
-No registry/browser/runtime cutover is included. Correct the stale development
-manifest and the supervisor's hardcoded checkout dependency in canonical source
-before treating those entry points as portable; do not run installation tests here.
+No registry/browser/runtime cutover is included. The checked-in development manifest
+now points to canonical `host/launch_host.bat`; no registry key was changed. The
+dedicated installer supervisor's fixed root was updated to canonical, retaining
+its exact-location checks. Its earlier qualification hashes remain evidence of
+the original executed bytes, not qualification of the relocated entry. No installer
+test rerun is part of this migration.
+
+No upstream was assigned to the imported local branch: canonical's remote-tracking
+refs were deliberately not refreshed from the network and remain older snapshots.
+Do not interpret them as current GitHub state. Original tags and origin are retained.
+Ignored dependencies, compiled outputs and old local data remain in their original
+directories and are not certified compatible with the adopted source. No cleanup
+or dependency installation was performed.
+
+Next directory task, if requested, is grouping historical staging/evidence folders
+outside the project-root listing while preserving contents and Git worktree links.
+Do not resume product builds automatically or run historical migration scripts.
+
+Canonical verification: `safety-core` passed 55/55 with zero failures/errors/skips
+using base Python and the imported reviewed hashes. Evidence:
+`C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-safe-tests-wgqrhv4s`.
+Runner exit 0, sources unchanged, no capture/cleanup errors, no pending reader or
+unreaped worker. This verifies the gate from the canonical path, not old dependency
+environments, installed product behavior or the relocated installer supervisor.
+The manifest target and all four supervisor source paths were checked for existence;
+only their path edits were statically reviewed. No installer was run.
 
 ## Current Task
 

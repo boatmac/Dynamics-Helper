@@ -19,7 +19,7 @@ import tempfile
 import threading
 import time
 
-ROOT = Path(r'C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec')
+ROOT = Path(r'C:\MyWorkbench\Repository\Dynamics-Helper')
 BASE = Path(r'C:\Users\zhaobo\AppData\Local\Temp\opencode')
 SOURCES = ('tests/harnesses/installer_safety.ps1', 'installer_core.ps1',
            'tests/validate_installer_harness.py', 'scripts/test_profile_state.py')
