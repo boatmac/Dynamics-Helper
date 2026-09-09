@@ -7,12 +7,38 @@ are evidence only; the current user instruction and its limits control this work
 
 ## Repository Identity
 
-- Checkout: `C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`.
+- Canonical development entry: `C:\MyWorkbench\Repository\Dynamics-Helper`.
+- Migration source/reference: `C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`.
 - Branch: `hardening/plan-d-runtime-installer`.
 - Pre-checkpoint baseline: `70fcdbd`. Local checkpoint commits follow that baseline;
   use `git log` and `git status` for exact current identity, not this baseline hash.
-- The separate `Dynamics-Helper` checkout is not this task's development root.
+- The source checkout is retained as a reference and owns the alignment worktree;
+  do not continue parallel development there after the canonical import.
 - Installed product state is independent of source state; development remains local.
+
+## Canonical Entry Migration
+
+The user approved the local import/switch plan and confirmed no other session is
+operating these repositories. This section supersedes historical checkout/next-step
+directions below. Product builds and qualification are paused for this migration.
+
+Execution sequence: save the source handoff in a local commit, fetch only the
+hardening branch from the local source into the canonical repository, verify the
+tip, then switch normally without force. Preserve canonical `master` at `bfedc9f`,
+its origin, tags and Git directory; preserve all sibling directories, ignored files
+and the source/alignment worktree relationship. No network fetch, push or deletion.
+The source was at `7280454` before saving the 27-line product-readiness follow-up.
+
+Migration status at this source checkpoint: import/switch pending. The active
+handoff in the canonical checkout will record completion. This retained source
+copy is not the ongoing status authority after that transition.
+
+Source adoption does not refresh either repository's virtual environment, node
+dependencies or built artifacts. Installed Chrome/Edge native-host registration
+was observed pointing to the LocalAppData installed executable, not either checkout.
+No registry/browser/runtime cutover is included. Correct the stale development
+manifest and the supervisor's hardcoded checkout dependency in canonical source
+before treating those entry points as portable; do not run installation tests here.
 
 ## Current Task
 
@@ -322,6 +348,33 @@ product-qualification procedure and artifact readiness without running a build,
 installer or live product. Real installation, packaged runtime and product
 integration execution remain separate scopes; no push or release is authorized.
 No real installation has been performed.
+
+### Post-Commit Product Readiness
+
+The follow-up was committed as `7280454` (`test: qualify plain installer refusal and
+failure scenarios`); the worktree was clean immediately after that commit. No push.
+The installer test-safety remediation milestone can close with the 15 fake scenarios;
+real installation qualification is a separate, optional continuation, not another
+prerequisite for that completed milestone.
+
+Read-only readiness inspection found an existing frozen Host output and Extension
+dist version `2.0.76`, but neither is bound to current source. The only local ZIP
+found is `releases/DynamicsHelper_v2.0.76-beta.2.zip`; its historical ledger binds
+source `6413dba`, predating changes to both installer scripts. Do not reuse it as a
+current-installer qualification candidate. No binaries or installers were executed.
+
+Existing prerequisites and matching-installer repair scenario are in
+`docs/superpowers/specs/2026-09-07-pragmatic-visible-completion-qualification-design.md`
+(prerequisite checklist and Scenario 3). The old commands in
+`docs/plan-d-pragmatic-cloud-pc-runbook.md` are retired, not execution authority.
+
+Next bounded proposal: explicitly approve a local-only build/package work package
+using existing build/staging functions, bind current source and package hashes,
+then stop before installation. Do not run the normal `release_helper.py` CLI: it
+cleans release outputs, changes versions and commits/tags even without publication.
+No dependency installation, SDK upgrade, push or release is implied. Actual repair
+qualification later requires an approved disposable environment and separate scope.
+This readiness inspection did not build, probe, install, or mutate the product.
 
 Do not expand into `pii-core`, SDK upgrade or new testing frameworks as prerequisites.
 PowerShell terminal transport is not a separate authorization blocker. Existing
