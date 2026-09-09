@@ -49,7 +49,7 @@ gaps, not temporary paths or the number of scripts created.
 | `tests/validate_test_safety.py` | Narrow plain Python bootstrap for inert checker/profile fixtures, not broad discovery or product qualification. |
 | `tests/validate_safe_runner.py` | Finite synthetic runner outcomes, distinct from qualification of product integrations. |
 | `scripts/test_profile_state.py` | Shared bounded snapshots and exact profile-directory delta checks. |
-| `tests/validate_installer_harness.py` | Bounded supervisor for the plain installer harness; real process execution. |
+| `tests/validate_installer_harness.py` | Bounded supervisor for one plain installer scenario per invocation; no arguments selects success, `--scenario <known name>` selects a specific case. Real process execution; expected child failure is validation success only when assertions pass. |
 | `tests/validate_powershell_startup.py` | Minimal startup comparison without installer operations; real process execution. |
 
 These responsibilities describe the maintained entry points, not their validation

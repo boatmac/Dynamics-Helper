@@ -24,6 +24,10 @@ BASE = Path(r'C:\Users\zhaobo\AppData\Local\Temp\opencode')
 SOURCES = ('tests/harnesses/installer_safety.ps1', 'installer_core.ps1',
            'tests/validate_installer_harness.py', 'scripts/test_profile_state.py')
 LIMIT = 1024 * 1024
+SCENARIOS = ('running', 'roaming', 'preflight-throw', 'preflight-nonzero',
+             'live-throw', 'live-nonzero', 'settle-throw', 'settle-nonzero',
+             'register-throw', 'register-nonzero', 'register-generic-throw',
+             'missing-exe', 'missing-package', 'copy-throw', 'success')
 
 
 def checked(path):
@@ -40,9 +44,13 @@ def hashes():
     return {name: hashlib.sha256(checked(ROOT / name).read_bytes()).hexdigest() for name in SOURCES}
 
 
-def validate(report):
+def validate(report, scenario='success'):
+    assert scenario in SCENARIOS
     assert set(report) == {'exitCode', 'isUpdate', 'events'}
-    assert type(report['exitCode']) is int and report['exitCode'] == 0 and report['isUpdate'] is True
+    assert type(report['exitCode']) is int and report['exitCode'] == (0 if scenario == 'success' else 1)
+    assert type(report['isUpdate']) is bool
+    assert report['isUpdate'] == (scenario in (
+        'register-throw', 'register-nonzero', 'register-generic-throw', 'missing-exe', 'success'))
     events = report['events']
     assert isinstance(events, list) and events
     allowed = {'test-path', 'running-host', 'create-directory', 'copy', 'enumerate',
@@ -51,6 +59,66 @@ def validate(report):
     assert events[-1] == {'kind': 'prompt', 'phase': 'finish', 'message': 'Press Enter to exit'}
     native = [e for e in events if e['kind'] == 'invoke-host']
     package, live = r'C:\synthetic\package', r'C:\synthetic\local\DynamicsHelper'
+    if scenario != 'success':
+        assert not any(e['phase'] == 'success' for e in events)
+        assert not any(e.get('message') == '    - Registration successful.' for e in events)
+        assert events[-2]['kind'] == 'emit'
+        if scenario in ('running', 'roaming'):
+            assert [e['kind'] for e in events] == (
+                ['emit', 'running-host'] + (['test-path'] if scenario == 'roaming' else []) + ['emit', 'prompt'])
+            assert events[-2]['phase'] == 'refusal'
+            if scenario == 'running':
+                assert 'dh_native_host is running' in events[-2]['message']
+            else:
+                assert 'Roaming' in events[-2]['message'] and 'preserved' in events[-2]['message']
+            return
+        assert events[-2]['phase'] == 'error'
+        assert events[-2]['message'].startswith('Installation failed.')
+        assert 'Keep security protections unchanged' in events[-2]['message']
+        count = 0 if scenario in ('missing-package', 'copy-throw') else (
+            1 if scenario.startswith('preflight-') else 2 if scenario.startswith('live-') else
+            3 if scenario.startswith('settle-') or scenario == 'missing-exe' else 4)
+        assert [e['phase'] for e in native] == ['preflight', 'live', 'settle', 'register'][:count]
+        assert [e['arguments'] for e in native] == [
+            ['--update-probe', package + '\\update-manifest.json', package],
+            ['--update-probe', package + '\\update-manifest.json'],
+            ['--settle-installer-repair'], ['--register']][:count]
+        assert all(e['executable'] == live + '\\dh_native_host.exe' for e in native[1:])
+        effects = [e for e in events if e['kind'] in {
+            'create-directory', 'copy', 'remove-tree', 'invoke-host',
+        }]
+        if scenario == 'missing-package':
+            assert effects == []
+            assert events[-3] == dict(kind='test-path', phase='preflight',
+                                     path=package + '\\host\\dh_native_host.exe', exists=False)
+            return
+        preflight = effects[0]['path']
+        assert effects[0]['kind'] == 'create-directory' and effects[0]['phase'] == 'preflight'
+        assert preflight.startswith('C:\\synthetic\\temp\\DynamicsHelper-preflight-')
+        cleanup = dict(kind='remove-tree', phase='preflight-cleanup', path=preflight)
+        assert [e for e in events if e['phase'] == 'preflight-cleanup'] == [
+            dict(kind='test-path', phase='preflight-cleanup', path=preflight, exists=True), cleanup]
+        if native:
+            assert native[0]['executable'] == preflight + '\\dh_native_host.exe'
+            assert events.index(native[0]) < events.index(cleanup)
+        if scenario in ('preflight-throw', 'preflight-nonzero', 'copy-throw'):
+            assert all(e['phase'] in {'preflight', 'preflight-cleanup'} for e in effects)
+            assert [e for e in effects if e['kind'] == 'remove-tree'] == [cleanup]
+            assert effects[-1] == cleanup
+            failed = native[-1] if native else next(e for e in events if e['kind'] == 'copy')
+            assert events[events.index(failed) + 1:] == [
+                dict(kind='test-path', phase='preflight-cleanup', path=preflight, exists=True),
+                cleanup, *events[-2:]]
+        else:
+            assert events.index(cleanup) < events.index(native[1])
+            if scenario == 'missing-exe':
+                failed = dict(kind='test-path', phase='register',
+                              path=live + '\\dh_native_host.exe', exists=False)
+                assert events.index(native[-1]) < events.index(failed)
+            else:
+                failed = native[-1]
+            assert events[events.index(failed) + 1:] == events[-2:]
+        return
     assert [e['phase'] for e in native] == ['preflight', 'live', 'settle', 'register']
     assert [e['arguments'] for e in native] == [
         ['--update-probe', package + '\\update-manifest.json', package],
@@ -81,9 +149,14 @@ def validate(report):
 
 
 def main():
-    if (os.name != 'nt' or len(sys.argv) != 1 or sys.flags.optimize
+    args = sys.argv[1:]
+    if args and (len(args) != 2 or args[0] != '--scenario' or args[1] not in SCENARIOS):
+        raise ValueError('expected no arguments or exactly --scenario <known scenario>')
+    scenario = args[1] if args else 'success'
+    expected_child_exit = 0 if scenario == 'success' else 1
+    if (os.name != 'nt' or sys.flags.optimize
             or not (sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode)):
-        raise ValueError('Windows base Python -I -B -S without extra arguments required')
+        raise ValueError('Windows base Python -I -B -S required')
     base = getattr(sys, '_base_executable', None)
     if (not isinstance(base, str) or not base or checked(Path(sys.executable)) != checked(Path(base))
             or sys.prefix != sys.base_prefix or not Path(sys.executable).is_file()):
@@ -99,7 +172,8 @@ def main():
     assert executable.is_file()
     run = checked(Path(tempfile.mkdtemp(prefix='dh-installer-validation-', dir=checked(BASE))))
     print('Evidence retained: ' + str(run), flush=True)
-    record = dict(schema_version=2, scenario='success', stage='prepare', passed=False, pid=None, returncode=None,
+    record = dict(schema_version=2, scenario=scenario, expected_child_exit=expected_child_exit,
+                  stage='prepare', passed=False, pid=None, returncode=None,
                   start_time=None, hashes_before=None, hashes_after=None, source_unchanged=None,
                   profiles_before=None, profiles_after=None, profiles_empty=None,
                   profile_delta_allowed=None, timeout_seconds=20,
@@ -115,9 +189,9 @@ def main():
         for key in ISOLATED:
             (run / key).mkdir()
             env[key] = str(checked(run / key))
-        record.update(env=env, cwd=str(run), supervisor_argv=[sys.executable, '-I', '-B', '-S', str(ROOT / SOURCES[2])],
+        record.update(env=env, cwd=str(run), supervisor_argv=list(sys.orig_argv),
                       argv=[str(executable), '-NoLogo', '-NoProfile', '-NonInteractive',
-                            '-File', str(checked(ROOT / SOURCES[0])), '-Scenario', 'success'])
+                            '-File', str(checked(ROOT / SOURCES[0])), '-Scenario', scenario])
         record['profiles_before'], record['hashes_before'] = capture_profile_state(run), hashes()
         assert all(not entries for entries in record['profiles_before'].values())
         for name in ('stdout', 'stderr'):
@@ -166,10 +240,10 @@ def main():
                 break
             time.sleep(0.01)
         record['stage'] = 'assertions'
-        assert proc.returncode == 0
+        assert proc.returncode == expected_child_exit
         out, err = Path(record['stdout']).read_bytes(), Path(record['stderr']).read_bytes()
         assert not err and b'SECRET' not in out and b'SECRET' not in err
-        validate(json.loads(out))
+        validate(json.loads(out), scenario)
         record['invalid_dependencies']['inferred'] = True
         record['passed'] = True
     except BaseException as error:

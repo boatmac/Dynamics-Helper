@@ -35,7 +35,9 @@ qualification gaps are recorded below.
   PowerShell terminal transport alone does not require separate reapproval for
   already agreed Python checks. This clarification does not expand task scope.
 - Corrected harness attempts, Host/SDK runs, browser operations, product suites,
-  builds, installation and dependency provisioning remain outside this package.
+  builds, installation and dependency provisioning were outside the original package.
+  The user's subsequent continuation approved one corrected success harness attempt;
+  that attempt is now consumed and passed as recorded below. Other scopes remain out.
 - User approved local staging and logically split commits for this checkpoint.
   No amend, tag, push or publication is authorized.
 - No payload decoding/execution, security-policy changes or original-incident
@@ -59,7 +61,8 @@ qualification gaps are recorded below.
 - The shared exact-directory rule and pure mocked regressions are implemented.
   It rejects files, extra/partial paths, aliases, links/reparse points and changes
   in other roots; observed changes remain distinct from allowed baseline deltas.
-- No corrected PowerShell harness run has occurred. Do not relabel its earlier FAIL.
+- One corrected PowerShell success harness attempt has now passed. This is a new
+  result with the exact directory allowance; the earlier overall FAIL stays failed.
 - Manifest v2 `safety-core` now has three test files, 55 exact test IDs and three
   dependencies, with all six source hashes reviewed and bound. Its gated run passes.
   `pii-core` still uses whole-module selection and has pending test/helper hashes;
@@ -177,12 +180,148 @@ Its original header and superseded instructions remain unchanged for byte identi
 
 ## Next Single Action
 
-Resume in `C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec` on
-`hardening/plan-d-runtime-installer`, reading this handoff and `AGENTS.md` first.
-The task is installer test-safety remediation: determine the remaining review and
-execution scope for the checked-in plain installer harness, then complete bounded
-qualification under applicable user authorization. The corrected harness has not
-been rerun; preserve the earlier failure as a failure. Do not perform a real install.
+### Authorized Failure-Scenario Package
+
+The next user continuation approves the 14 remaining fake refusal/failure scenarios,
+once each, stopping at the first unexpected outcome without automatic retry. The
+existing supervisor now accepts exactly `--scenario <known name>`; no arguments
+still select success. Only supervisor assertions/selection changed, not installer
+or harness operations. Expected child exit is 1; supervisor exit 0 means the expected
+failure and all safety postconditions passed. No real installation or new framework.
+
+Reviewed supervisor SHA-256:
+`3c1444e3ad618d12395bc18687fcd2015b4b2fdadc6086c726cc512b9029f0f6`.
+The other three reviewed raw-byte hashes remain as in the success table below.
+Names: running, roaming, preflight-throw, preflight-nonzero, live-throw, live-nonzero,
+settle-throw, settle-nonzero, register-throw, register-nonzero,
+register-generic-throw, missing-exe, missing-package, copy-throw.
+
+Each launch retains its Python process handle, emits cumulative progress/PID/start
+and log paths, uses a 40-second outer wait plus 5-second owned-handle cleanup, and
+retains separate new stdout/stderr under `dh-installer-failure-20260909-<scenario>-1`.
+Before each launch all four review hashes are rechecked. Existing output files stop
+the package rather than overwrite evidence. The supervisor creates its own fresh
+inner evidence and retains its existing profile/capture/PowerShell cleanup checks.
+Outcome: **14/14 expected outcomes**, one launch each, no retries. All outer Python
+processes exited 0; all PowerShell children returned expected exit 1. Each result
+was read independently: correct scenario/arguments, passed assertions, four source
+hashes matching the reviewed before/after identities, zero stderr/capture errors,
+no pending readers, output cap or cleanup/finalization errors. All profiles started
+empty; only the same two empty USERPROFILE directories appeared afterwards, with
+`profiles_empty=false` and `profile_delta_allowed=true` in every case. The 27
+invalid-table checks per invocation remain inferred, not separately reported tests.
+
+Evidence directories under `C:\Users\zhaobo\AppData\Local\Temp\opencode`:
+
+| Scenario | Inner evidence directory | Python PID | PowerShell PID |
+| --- | --- | --- | --- |
+| running | `dh-installer-validation-23wrv107` | 68660 | 62744 |
+| roaming | `dh-installer-validation-fi32i2zt` | 46716 | 22972 |
+| preflight-throw | `dh-installer-validation-c38xjkbn` | 46076 | 59748 |
+| preflight-nonzero | `dh-installer-validation-yow3d9pf` | 59084 | 69048 |
+| live-throw | `dh-installer-validation-lig0lg8v` | 27684 | 76760 |
+| live-nonzero | `dh-installer-validation-653r9062` | 43660 | 2660 |
+| settle-throw | `dh-installer-validation-2wt19ps6` | 29056 | 25708 |
+| settle-nonzero | `dh-installer-validation-mypve_ar` | 73520 | 68124 |
+| register-throw | `dh-installer-validation-e_2onmty` | 69996 | 52336 |
+| register-nonzero | `dh-installer-validation-y5repbvv` | 27812 | 67256 |
+| register-generic-throw | `dh-installer-validation-7z2biksu` | 77048 | 64572 |
+| missing-exe | `dh-installer-validation-5nweyg0p` | 59596 | 3776 |
+| missing-package | `dh-installer-validation-ceblxgen` | 31084 | 61384 |
+| copy-throw | `dh-installer-validation-273_xy_x` | 67816 | 38840 |
+
+PIDs are historical owned-process completion evidence, not current PID checks or
+descendant enumeration. The launch window started `2026-09-09T12:58:28.6155644Z`;
+last Python launch was `2026-09-09T12:58:46.4114242Z`. Success was not rerun.
+Supervisor execution behavior and bytes remain at the reviewed hash above;
+post-validation documentation describes its scenario interface separately.
+
+### Authorized Success Attempt
+
+The user's subsequent "continue" authorized one corrected success attempt via the
+existing dedicated supervisor. It completed and passed; authorization is consumed.
+No automatic retry or real installation. Reviewed
+source identities before launch (SHA-256 of raw bytes):
+
+| Source | SHA-256 |
+| --- | --- |
+| `tests/validate_installer_harness.py` | `6462b11ccfa729e83ae797a04929fde1e6c6eef53fd46c98bd1b2b78354775a0` |
+| `scripts/test_profile_state.py` | `edcafb19545cb734f0508b3ef68807f5a01e421369667f9055623bb41dcb1152` |
+| `tests/harnesses/installer_safety.ps1` | `fab6cd5af754b7f427765d09900924a59de8777f8bfdfda4c6e8d71174632c0f` |
+| `installer_core.ps1` | `0c80c0218c6ed49dfa67d55c17ff09427afa4cac8dc7740b5b1ce45174d880d8` |
+
+Launch uses absolute base Python 3.13 with `-I -B -S`; the supervisor selects
+`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`. The caller retains
+the Python process object, reports its PID/start time and redirected log paths,
+waits up to 40 seconds, and on timeout terminates only that owned Python handle
+with a further 5-second wait. This is not descendant-tree cleanup. Inner supervisor
+owns its PowerShell handle and has its existing 20-second capture budget.
+
+Outer logs are new files under the approved Temp root with prefix
+`dh-installer-supervisor-20260909-success-1`; do not overwrite an existing file.
+The supervisor reports its separate fresh `dh-installer-validation-*` evidence
+directory. No retry or additional scenario is implied by this attempt.
+
+Outcome: **PASS**, one invocation, no retry. Python supervisor PID 57120 started at
+`2026-09-09T12:51:02.2503579Z` and exited 0 within the outer wait. Its stderr is empty.
+The fresh inner evidence is
+`C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-installer-validation-bjwkx785`.
+`result.json` records PowerShell PID 43288, exit 0, `passed=true`, elapsed 1.58s,
+`source_unchanged=true`, empty capture errors, no pending readers, no output-cap hit,
+and no cleanup/finalization error fields. All four before/after hashes match the
+reviewed values above. Output: 8,106 stdout bytes, zero stderr bytes.
+
+All six profile roots started empty. Afterwards only USERPROFILE contained the
+two empty directories `AppData` and `AppData/Roaming`; the other roots stayed empty.
+Thus `profiles_empty=false`, `profile_delta_allowed=true`. This is an allowed
+observed filesystem change, not absence of change. The 27 invalid-table calls are
+inferred completed before the success report, not 27 separately reported test cases.
+Only owned process completion is established; descendants were not enumerated and
+absence of endpoint alerts is not established. Earlier failed evidence is untouched.
+
+Continue in `C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec` on
+`hardening/plan-d-runtime-installer`; a new session is not required. Local checkpoint
+HEAD is `87bc044`; it follows code commit `4e8d0c0`. Neither was pushed.
+
+The user started step 1 (static review) of installer test-safety qualification.
+Review covered `installer_core.ps1`, `tests/harnesses/installer_safety.ps1`,
+`tests/validate_installer_harness.py`, `scripts/test_profile_state.py`, and related
+assertions/policy. No definite static blocker for one mocked success attempt was
+found. No harness was executed and no attempt was consumed during this review.
+
+- Dot-source defines functions and returns before the real operation factory or
+  production entry. All nine supplied operations record events or mutate in-memory
+  state. The harness performs invalid-table checks then one update-success workflow.
+- The existing dedicated supervisor checks workflow assertions and the corrected
+  exact profile allowance. It distinguishes `profiles_empty` from
+  `profile_delta_allowed`; allowed empty AppData/Roaming is not unchanged state.
+- A run would create fresh Temp evidence and six profile directories, start one
+  real PowerShell child from base Python, and capture output with two reader threads.
+  No real Host, copy/delete installation operation, registry or network call is
+  reachable in the reviewed fake path. This is not an OS sandbox or alert guarantee.
+- Supervisor interface: base Python `-I -B -S` plus the absolute existing
+  `tests/validate_installer_harness.py` path. No script arguments select success;
+  `--scenario <known name>` selects one case. Do not invent an installer profile or bypass
+  the gate with broad discovery; this is the separately reviewed maintained entry.
+- Before execution, explicitly establish the one-attempt scope, bind the four source
+  files' raw-byte review hashes, verify absolute executable/evidence paths, and own
+  the supervisor process with observable PID/progress and outer cancellation.
+- Child capture budget is 20 seconds and 1 MiB per stream, plus cleanup/finalization;
+  this is not a whole-supervisor deadline. Evidence finalization can itself fail,
+  reader threads can remain pending, and descendants are not confined. Retain and
+  report failures without automatic retry or a new wrapper/framework project.
+
+The fake installer qualification now covers all 15 declared harness scenarios:
+one success with the earlier supervisor and 14 expected refusal/failure outcomes
+with scenario-aware assertions. Installer core/harness bytes were unchanged across
+both packages. This is not a full Host test suite or production qualification.
+No more scenario retries or new framework work is needed for this bounded milestone.
+The user explicitly requested committing this supervisor/documentation follow-up
+and proceeding to the next step. After the local commit, inspect the existing
+product-qualification procedure and artifact readiness without running a build,
+installer or live product. Real installation, packaged runtime and product
+integration execution remain separate scopes; no push or release is authorized.
+No real installation has been performed.
 
 Do not expand into `pii-core`, SDK upgrade or new testing frameworks as prerequisites.
 PowerShell terminal transport is not a separate authorization blocker. Existing
