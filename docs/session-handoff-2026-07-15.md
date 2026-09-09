@@ -2,23 +2,285 @@
 
 ## Current Status
 
-Updated: 2026-09-09.
+Updated: 2026-09-10.
 
 - Canonical checkout: `C:\MyWorkbench\Repository\Dynamics-Helper`;
-  branch `hardening/plan-d-runtime-installer`, last observed HEAD `9ed6d89`.
-  `master` remains at `bfedc9f`. Use Git for the current commit and worktree status.
-- Latest work: requested documentation corrections are complete in `AGENTS.md`,
-  `docs/test-safety.md` and this record. All eight review findings were checked;
-  referenced files/headings exist and diff whitespace checks passed. No product
-  code or tests changed, and no tests/builds were run for this documentation fix.
-- Directory cleanup is paused. The old source checkout remains at its original
-  path after an occupied-directory move failure; the lock owner is unconfirmed.
-  The archived alignment worktree still depends on that source's Git store.
-- The current user request defines this correction's scope, not assistant
-  summaries. Historical records do not independently grant execution authority.
-- The user requested a local commit of these documentation changes and retained
-  cleanup records. Directory cleanup remains paused as described above; this record
-  does not automatically resume it or a product build.
+  branch `hardening/plan-d-runtime-installer`, verified HEAD
+  `0d1c6ee346b95acd3e3607d63726387438d13040`. `master` remains at `bfedc9f`.
+  Current uncommitted changes include Created On diagnostics in bridge/PageReader/
+  FAB, assertions in three existing tests, this record, `DEVELOPER_GUIDE.md` and
+  frontend entry clarifications in `docs/test-safety.md`.
+- Current request: after authorized read-only Edge diagnosis, add minimal safe
+  Created On diagnostics. Implementation, focused verification and the diagnostic
+  Extension build are complete. The user confirmed switching Edge's unpacked
+  extension source to canonical `extension/dist` and subsequently seeing diagnostic
+  logs. Supplied screenshots now locate failure at the Worker sender gate before
+  injection, then specifically `sender_document_format_rejected`. The overly
+  strict hyphenated document UUID gate is now removed, regression-tested and
+  rebuilt. The user has now confirmed successful Created On output with explicit
+  UTC after the requested reload/verification. The reported local defect is resolved;
+  this is not release/package or full product qualification.
+  The user subsequently requested commit and push. Local checkpointing is authorized;
+  public push scope is awaiting clarification because the remote branch is at
+  `70fcdbd` and six additional local commits include previously local-only private
+  session/security history. No release publication is requested.
+- Remaining directory cleanup is COMPLETE. File Locksmith identified the Edge
+  CDP proxy `node.exe` PID `31376` as the occupant. With explicit user approval,
+  that exact process was stopped after command-line/creation-time verification;
+  the source then moved successfully by same-volume rename, without copy/delete.
+- Source is now under
+  `C:\MyWorkbench\Repository\_archive\Dynamics-Helper-retired-checkouts\Dynamics-Helper-prompt-scope-spec`;
+  its old path no longer exists. Source HEAD `0e86787` and alignment HEAD `fcc21f2`
+  remain unchanged and both worktrees are clean. `git worktree repair` completed;
+  both Git link directions and registered locations were verified. No full-tree
+  byte certification is claimed. The external archive README was also updated.
+- The preceding local build/package is COMPLETE following the user's request to
+  start the stated environment-alignment/build-to-ZIP scope. SDK is now `1.0.5`,
+  PyInstaller `6.22.2`, hooks `2026.7`; all four phases exited 0. Extension's five
+  default-menu tests and byte-copy gate passed. No installer simulations reran.
+- Validated package: `releases/local-20260909-0d1c6ee/DynamicsHelper_v2.0.76.zip`,
+  14,010,577 bytes, SHA-256
+  `92873a415d7bdecb07ebdf1e6227f6cccdd844ef37e5b166d7e4627354ff4320`.
+  Existing archive validation passed 55 manifest entries; extracted verification
+  tree and `build-record.json` remain beside the ZIP. Product version stays `2.0.76`.
+- That ZIP predates the current diagnostic source changes and does NOT include
+  them. Do not present it as a diagnostic or fixed Created On build.
+- Stop point: local ZIP only. No frozen Host execution/probe, real installation,
+  registration, browser reload, full suites, commit, tag, push or publication.
+  Installation/runtime qualification is not established by this result and needs
+  separate scope. No build processes or direct children matched the recorded IDs
+  at final inspection; this is not general descendant confinement.
+
+### Created On Diagnostic Continuation
+
+The user reported that installed `2.0.76` still needs Details opened to obtain
+Created On, then shows no timezone. Authorized read-only checks in the existing
+Edge/D365 session found no Details container but a valid model Date, incident
+identity and matching visible full record number. The compiled model function
+returned success in 8ms with UTC shape and identity equality; no record value,
+date, GUID or customer text was exported. Installed/local SW and bridge bundle
+SHA-256 matched. This establishes model availability in that inspected scope, not
+the browser's loaded isolated-context identity or successful message transport.
+The existing proxy could not inspect isolated execution contexts; no reconnect
+loop, record edit, Details opening, API network request or browser reload followed.
+
+After the user approved source diagnostics, added fixed console.debug codes at
+actual worker/content/scan/UI decisions. Page-side numeric generation correlates
+request and application; it is not a cross-Worker wire ID. No wire/schema, MAIN
+model, timeout, identity rule, edit protection, telemetry or storage behavior was
+changed. `result_unavailable` intentionally does not guess a MAIN failure reason.
+The developer guide documents Verbose console visibility and diagnostic meaning.
+
+Verification used existing installed Vitest, explicit three-file/name selection,
+file isolation and one worker. Reviewed project closure includes the complete
+test files, setup/chrome mocks, imported utilities/components and runner configs;
+MAIN model tests with dynamic execution were neither imported nor selected.
+Third-party runner/fork/esbuild execution and cache writes remain trust boundaries,
+not a sandbox or Python scanner qualification. Each run recorded full tracked-file
+raw hashes before/after and explicit arguments under the approved Temp directory.
+
+- Initial focused run: 81/81 passed, 100 unrelated cases filtered out, exit 0;
+  initial TypeScript check passed. No installer tests or full suites ran.
+- Break-and-fail: temporarily disabled only the diagnostic logger; three selected
+  bridge/scan/UI diagnostic assertions failed as expected, exit 1. Mutation removed.
+- Review added missing terminal/context-menu discard diagnostics. A misplaced
+  context-menu patch was caught by TypeScript (out-of-scope `scan`), then corrected;
+  the intermediate green test run alone did not certify type correctness.
+- Final verification: 81/81 passed, 100 filtered out, exit 0; final `tsc --noEmit`
+  passed. Final monitor PID `36820`, Node PID `74956`, start
+  `2026-09-10T00:19:20.3576527+08:00`, 20.57 seconds, 180-second timeout unused;
+  recorded tracked source bytes unchanged during the run.
+- Evidence: `C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-created-on-final-20260909`;
+  sibling `focused`, `types`, `red`, `green` directories retain earlier results.
+  The dated directory suffix is retained although execution crossed midnight.
+
+The user subsequently approved continuing with diagnostic Extension build/load.
+The existing Edge source was user-confirmed as
+`C:\Users\zhaobo\AppData\Local\DynamicsHelper\extension`, ID
+`fkemelmlolmdnldpofiahmnhngmhonno`. No installed product files were overwritten.
+The Extension-only build passed menu 5/5, TypeScript/Vite and copy validation:
+monitor PID `76416`, child `65996`, start `2026-09-10T00:23:03.4407409+08:00`,
+61.34 seconds, exit 0, no timeout. Evidence:
+`C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-created-on-build-20260910`.
+Bridge bundle is now `analyzeRequest-BBpn_jGd.js`, Worker
+`serviceWorker.ts-D2INBmqX.js`, content `index.tsx-BF6dl4vv.js`; version remains
+`2.0.76`. The user confirmed loading canonical `extension/dist` with the same ID.
+Do not overwrite the installed product or assume its integrity inventory describes
+this temporary developer source. No Host rebuild, installer, ZIP replacement or
+publication was performed for diagnostics.
+
+After instructions to refresh only without unsaved edits, keep Details closed and
+open DH without Analyze, the user supplied screenshots: Worker `sender_rejected`
+on three requests; page scan 1 was not requested/missing, scan 2 started content
+transport, received `result_unavailable` in 83ms, had no Created On and applied the
+remaining scan. This rules out content timeout or edit-protection suppression for
+that observed scan. MAIN injection was never reached on the rejected requests;
+do not infer which sender property failed from the combined code.
+
+The sender gate now assigns fixed codes for extension, tab, top frame, origin,
+URL, missing document and document-format checks, preserving every existing
+predicate and outputting no values. Existing bridge tests: 62/62 pass, exit 0,
+tracked sources unchanged. Evidence:
+`C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-created-on-sender-20260909`.
+Refined Extension build passed menu 5/5, TypeScript/Vite/copy: monitor `51748`,
+child `61172`, start `2026-09-10T00:37:58.9785989+08:00`, 47.3 seconds, exit 0.
+Evidence: `C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-created-on-sender-build-20260910`.
+New bridge bundle: `analyzeRequest-DulmVHHr.js`. Await extension reload and safe
+D365 refresh by the user, then only the refined Worker fixed-code lines. No
+security guard has been relaxed, and no defect fix is claimed.
+
+Subsequent screenshot showed `sender_document_format_rejected` on three requests.
+The browser supplied a non-empty documentId that failed our hyphenated-UUID regex;
+its actual token/format was not collected. Official runtime docs call documentId
+an optional string/document UUID without promising hyphenated text; scripting
+accepts documentIds as strings and returns documentId as a string. Removed only
+the unsupported representation restriction. Continue requiring a browser sender
+from this extension, allowed origin/URL, top frame, valid tab and non-empty string
+documentId. Pass that token unchanged and require exact returned document equality;
+no trim/case conversion/UUID conversion or frame-target fallback is used.
+
+Two synthetic regressions (uppercase 32-hex and an opaque non-UUID-shaped token)
+failed against the old gate, then passed with the correction, including rejecting
+different returned tokens. Complete bridge selection: 64/64 passed, exit 0, raw
+tracked hashes unchanged; evidence under Temp `dh-created-on-document-red-20260909`
+and `dh-created-on-document-green-20260909`. No real token was added to fixtures.
+Extension rebuild passed menu 5/5, TypeScript/Vite/copy, exit 0: monitor `70356`,
+child `40308`, start `2026-09-10T01:14:57.2376617+08:00`, 104.32 seconds, no timeout.
+Build evidence: `C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-created-on-document-build-20260910`.
+Current bridge bundle: `analyzeRequest-BmWFicff.js`. Following the request to reload
+the repository extension, safely refresh D365 and leave Details closed, the user
+confirmed success and supplied Created On output in ISO format with `Z (UTC)`.
+The actual date is deliberately not retained in this record. This is user-reported
+live confirmation of the local fix, not automated installation/full-product testing.
+Existing ZIP and installed tree remain unchanged and do not contain this correction.
+Edge remains on the repository extension unless the user changes it; no source
+switch was performed during closeout. Switching back to the unchanged installed
+extension would restore the faulty code, so do not do so automatically. A later
+complete package/deployment and source restoration require their own agreed scope;
+preserve extension configuration and never advise uninstalling it. Source changes
+are being checkpointed under the user's commit/push request; nothing has yet been
+pushed or published. Do not confuse that request with release authorization.
+
+### Current Cleanup And Build Readiness Continuation
+
+On 2026-09-09, the old `opencode.exe` PID `9316` and `powershell.exe` PID `67960`
+were initially still alive. The current tool parent chain was `opencode.exe`
+PID `12148` -> `powershell.exe` PID `25804` -> `herdr.exe` PID `25360`.
+After the user said the old window could not be identified, further read-only
+queries showed both old PIDs absent. The assistant terminated no process.
+
+One `Move-Item` from the source to
+`C:\MyWorkbench\Repository\_archive\Dynamics-Helper-retired-checkouts\Dynamics-Helper-prompt-scope-spec`
+then failed: `The process cannot access the file because it is being used by another process.`
+Source/destination existence and Git state were rechecked afterward. Common tool
+locations had no existing Handle/Process Explorer utility; nothing was downloaded.
+The user reported no Resource Monitor match for the source directory name.
+Neither observation identifies the cause or proves the absence of a directory lock.
+At that pause, no copy/delete workaround, permission change, Git metadata rewrite
+or archive content change had been made.
+
+The user subsequently supplied a File Locksmith screenshot identifying `node.exe`
+PID `31376`. Read-only inspection found the exact command
+`"C:\Program Files\nodejs\node.exe" C:\Users\zhaobo\.config\opencode\skills\web-access\scripts\cdp-proxy.mjs --browser edge`,
+created `2026-09-03T09:56:32.6485490+08:00`; its parent was absent and no direct
+children were found. The user explicitly approved terminating this proxy and
+continuing cleanup, without building. The initial stop guard refused because
+the earlier displayed timestamp omitted fractional seconds; it stopped nothing.
+After reading and verifying the full timestamp and exact command, only that
+process was stopped and its exit confirmed. Edge itself was not terminated.
+
+The subsequent same-volume source move succeeded. `git worktree repair` from the
+archived source repaired alignment's `.git` pointer; the source's backlink and
+`git worktree list --porcelain` both resolve the archived paths correctly. Both
+HEADs remain unchanged and both worktrees are clean. Only Git link metadata and
+the external archive README were intentionally edited in the archived area;
+no full-tree content hashing was performed. Canonical HEAD and master are unchanged.
+
+Initial read-only readiness below is the pre-build observation at canonical HEAD
+`0d1c6ee`, not the final environment/artifacts or the old source's environment:
+
+- Host and Extension source versions match `2.0.76`. Canonical root `dist` is absent,
+  `releases` contains no ZIP, and existing Extension dist is stale `2.0.74`.
+- All 14 pinned Host packages have installed metadata: 13 match; only
+  `github-copilot-sdk` differs (`1.0.8` installed, `1.0.5` required). PyInstaller is
+  separately missing. Metadata inspection is not interpreter/runtime validation.
+- `host/venv/pyvenv.cfg` records Python `3.13.15` and the retired canonical-staging
+  creation path. The venv was not launched or certified relocatable.
+- Actual `node --version` / `npm --version`: `v24.11.0` / `11.6.1`. Node satisfies
+  the locked Vite engine range; complete node_modules/lock agreement is unverified.
+  The lockfile root version still says `2.0.70-beta.5`; that alone does not establish
+  dependency invalidity and was not changed.
+- `host/config.json` is tracked, unchanged from HEAD and reviewed as product seed,
+  with no private paths, identities, URLs or credentials found. Do not substitute
+  the unclassified private backup in the archive.
+
+The bounded execution proposed before the user's start instruction: preserve
+version `2.0.76`, run the existing Extension build (including its default-items
+test and source/dist copy check, not installer simulations or full suites), then
+`release_helper.build_host()`, then `create_zip()` with a fresh independent output
+directory. Use existing manifest/archive validation and record source identity,
+tool versions and final ZIP SHA-256. Stop at the ZIP; do not execute the frozen
+Host, probe, register, reload a browser or run either installer. Do not invoke the
+normal release CLI, clean historical releases, bump versions, commit or tag.
+
+The proposed environment scope was to align the build environment
+to the existing SDK `1.0.5` pin and required PyInstaller `6.22.2`, not an SDK upgrade
+or a change to requirements. The user's subsequent start instruction authorized
+this stated scope; execution and its limits are recorded below.
+
+### Local Build And Package Result
+
+The user said to start after the cleanup closeout proposed restoring SDK `1.0.5`,
+adding PyInstaller `6.22.2`, then building/packaging locally to ZIP without product
+installation or publication. No product source, dependency pin or version changed.
+The Node build gate was clarified in `docs/test-safety.md` after reviewing the
+five menu tests, public input and copy check; this is not a Python named-profile
+pass or permission for broad test discovery. All 32 direct frontend dependencies
+matched lockfile versions/declarations; no npm install was needed.
+
+Canonical venv Python `3.13.15` was verified runnable. Wheel-only pip installation
+used the existing configured package feed, aligned SDK to the existing pin and
+installed PyInstaller plus its dependencies; `pip check` passed. Installed
+distribution versions are captured in the package's `build-record.json`.
+
+Execution used a plain physical PowerShell launcher with `Start-Process`, separate
+stdout/stderr, PID/start-time records, bounded waits and cancellation limited to
+the owned phase tree. It adapted the existing simple build mechanism, not a test
+framework. The first launcher invocation (PID `40892`) failed at an unfilled
+placeholder because an edit had not landed; it never started pip or a build.
+The corrected on-disk script passed parsing before use. That failure log remains.
+Terminal transport reported its own 10-second timeout on subsequent asynchronous
+launches; inspection confirmed the monitors continued and recorded real exits.
+No phase was restarted because of a transport timeout and no cancellation ran.
+
+| Phase | Monitor / child PID | Start (+08:00) | Seconds | Result |
+| --- | --- | --- | --- | --- |
+| Dependency alignment | 41244 / 27684 | 23:03:08 | 77.62 | Exit 0; pip check passed |
+| Extension | 56572 / 40012 | 23:07:05 | 101.07 | Exit 0; menu 5/5, type/build/copy PASS |
+| Frozen Host | 60136 / 59424 | 23:09:22 | 50.48 | Exit 0; PyInstaller onedir complete |
+| Package and extraction validation | 37156 / 49288 | 23:12:59 | 10.34 | Exit 0; 55 manifest entries verified |
+
+Evidence: `C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-local-build-20260909`
+contains each phase's process/result JSON and logs, plus `source-before.json`.
+The plain build/package invocation scripts remain in its approved Temp parent.
+Timeouts were 600 seconds per phase except Host at 1200 seconds. Final process
+inspection found no recorded monitor/phase PID or direct child still present.
+
+The package record binds HEAD `0d1c6ee346b95acd3e3607d63726387438d13040` plus raw
+hashes of tracked working files, including the then-uncommitted documentation.
+All recorded tracked bytes were unchanged between pre-install capture and
+packaging; this handoff was updated afterward for closeout. Full ZIP extraction
+through `stage_and_validate_archive` passed version, file-set, metadata and hash
+checks. Packaged installer scripts, EXE and menu also matched current inputs by
+byte comparison; the final ZIP SHA-256 was independently rechecked.
+
+Residual warnings: Browserslist data is old and was not updated. PyInstaller
+reported missing optional `tzdata`; no direct product `ZoneInfo` use was found,
+but named-IANA-zone availability is not qualified. Analysis contains all 17
+required product hidden imports and SDK modules, and no collected setuptools or
+Pydantic mypy plugins. Other missing-module warnings were platform/optional/dynamic
+imports. Static inspection and successful packaging do not prove frozen runtime,
+optional dependency features, real installation or security-product compatibility.
 
 ## Historical Session Record
 

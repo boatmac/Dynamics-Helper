@@ -1,5 +1,5 @@
 import { getReactProps } from './reactFiber';
-import { requestCreatedOn } from './createdOnBridge';
+import { logCreatedOn, requestCreatedOn } from './createdOnBridge';
 
 export interface ScrapedData {
     errorText?: string;
@@ -294,7 +294,7 @@ export class PageReader {
      * Prioritizes Fluent UI specific selectors and React Props.
      * Async to prevent blocking the UI thread.
      */
-    static async scanForErrors(): Promise<ScrapedData | null> {
+    static async scanForErrors(generation?: number): Promise<ScrapedData | null> {
         const data: ScrapedData = {};
         
         // Define a Context Node to limit searches (Performance)
@@ -556,13 +556,24 @@ export class PageReader {
 
         if (data.caseNumber && /^\d{16}(?:\d{3})?$/.test(data.caseNumber)) {
             const before = this.readLiveRecordNumber();
-            if (before === null || (before !== undefined && before !== data.caseNumber)) return null;
+            if (before === null || (before !== undefined && before !== data.caseNumber)) {
+                logCreatedOn('scan', 'identity_rejected', generation);
+                return null;
+            }
             // Unsupported legacy identity keeps DOM data without starting an unbound wait.
             if (before !== undefined) {
-                const createdOn = await requestCreatedOn(data.caseNumber);
-                if (this.readLiveRecordNumber() !== before) return null;
+                const createdOn = await requestCreatedOn(data.caseNumber, generation);
+                if (this.readLiveRecordNumber() !== before) {
+                    logCreatedOn('scan', 'identity_changed', generation);
+                    return null;
+                }
                 if (createdOn) data.createdOn = createdOn;
+                logCreatedOn('scan', createdOn ? 'success' : data.createdOn ? 'dom_fallback' : 'missing', generation);
+            } else {
+                logCreatedOn('scan', 'not_requested', generation);
             }
+        } else {
+            logCreatedOn('scan', 'not_requested', generation);
         }
 
         // Return data if we found *something* useful

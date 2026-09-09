@@ -237,7 +237,12 @@ describe('FAB live page identity during Analyze', () => {
     })
 
     it.each(['08/09/2026 9:07 PM', '2031-04-17T10:23:00.123Z (UTC)'])('includes Created On %s and Customer Name in the existing textarea and outgoing context', async createdOn => {
+        const diagnostic = vi.spyOn(console, 'debug').mockImplementation(() => {})
         await renderOpenFab({ ...A, createdOn, customerName: 'Synthetic Account' })
+        expect(diagnostic).toHaveBeenCalledWith('[DH] Created On', 'ui', 'applied', expect.any(Number), null)
+        expect(JSON.stringify(diagnostic.mock.calls)).not.toContain(createdOn)
+        expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('Synthetic Account')
+        diagnostic.mockRestore()
         const text = expandContext().value
         expect(screen.getAllByRole('textbox')).toHaveLength(1)
         expect(text).toMatch(/^## Case Number\n\nA/)
@@ -252,6 +257,7 @@ describe('FAB live page identity during Analyze', () => {
     })
 
     it('protects edited metadata from changed and shorter same-case scans until explicit refresh', async () => {
+        const diagnostic = vi.spyOn(console, 'debug').mockImplementation(() => {})
         await renderOpenFab({ ...A, createdOn: 'Original date', customerName: 'Original Account' })
         const textarea = expandContext()
         expect(textarea.value).toContain('## Customer Name\n\nOriginal Account')
@@ -275,11 +281,16 @@ describe('FAB live page identity during Analyze', () => {
         openFab()
         await flushReact()
         state.scanValue = { ...A, createdOn: 'Refreshed date', customerName: 'Refreshed Account' }
+        expect(diagnostic).toHaveBeenCalledWith('[DH] Created On', 'ui', 'edited_context', expect.any(Number), null)
+        diagnostic.mockClear()
         fireEvent.click(screen.getByTitle('Refresh Context (Re-scan page)'))
         await flushReact()
         expect(expandContext().value).toContain('## Created On\n\nRefreshed date')
         expect(expandContext().value).toContain('## Customer Name\n\nRefreshed Account')
         expect(expandContext().value).not.toContain('Edited Account')
+        expect(diagnostic).toHaveBeenCalledWith('[DH] Created On', 'ui', 'applied', expect.any(Number), null)
+        expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('Refreshed')
+        diagnostic.mockRestore()
     })
 
     it('does not carry metadata or edits from A into a B scan with unloaded fields', async () => {

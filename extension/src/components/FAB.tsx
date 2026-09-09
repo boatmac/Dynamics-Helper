@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PageReader, ScrapedData } from '../utils/pageReader';
+import { logCreatedOn } from '../utils/createdOnBridge';
 import { useMenuLogic, MenuItem, resolveDynamicUrl } from './MenuLogic';
 import { useTranslation } from '../utils/i18n';
 import { usePrefs } from '../utils/prefs';
@@ -670,6 +671,7 @@ const FAB: React.FC = () => {
         onStarted?: (generation: number, completion: Promise<T>) => void,
     ): Promise<T> {
         const generation = ++pageScanGenerationRef.current;
+        logCreatedOn('scan', 'started', generation);
         pendingPageScanGenerationsRef.current.add(generation);
         setPendingPageScanCount(pendingPageScanGenerationsRef.current.size);
         const localPage = localAnalyzePageRef.current;
@@ -688,10 +690,12 @@ const FAB: React.FC = () => {
             try {
                 let fresh: unknown = null;
                 try {
-                    fresh = await PageReader.scanForErrors();
+                    fresh = await PageReader.scanForErrors(generation);
                 } catch {
+                    logCreatedOn('scan', 'scan_failed', generation);
                     console.warn(failureMessage);
                 }
+                logCreatedOn('scan', fresh ? 'scan_returned' : 'missing', generation);
                 return await consume({ generation, fresh });
             } finally {
                 pendingPageScanGenerationsRef.current.delete(generation);
@@ -746,11 +750,14 @@ const FAB: React.FC = () => {
         generation = pageScanGenerationRef.current,
         forceReplace = false,
     ): typeof acceptedContextSnapshotRef.current {
-        if (hasPendingPageScanNewerThan(generation)) return null;
+        if (hasPendingPageScanNewerThan(generation)) {
+            logCreatedOn('ui', 'stale_scan', generation);
+            return null;
+        }
         const plain = parseScrapedDataSnapshot(fresh);
-        if (!plain) return null;
+        if (!plain) { logCreatedOn('ui', 'invalid_snapshot', generation); return null; }
         const parsed = parsePageIdentitySnapshot(plain);
-        if (!parsed) return null;
+        if (!parsed) { logCreatedOn('ui', 'invalid_snapshot', generation); return null; }
         const nextIdentity = parsed.identity;
         const previousContextIdentity = editableContextIdentityRef.current;
         const accepted = { generation, identity: nextIdentity, data: plain };
@@ -771,16 +778,19 @@ const FAB: React.FC = () => {
             editableContextIdentityRef.current = nextIdentity;
             editableAnalyzeContextRef.current = { accepted, data: plain };
             setScrapedData(plain);
+            logCreatedOn('ui', 'applied', generation);
             return accepted;
         }
         const editableContext = editableAnalyzeContextRef.current;
         editableContext.accepted = accepted;
         if (isUserEdited.current) {
+            logCreatedOn('ui', 'edited_context', generation);
             return accepted;
         }
         editableContextIdentityRef.current = nextIdentity;
         editableContext.data = plain;
         setScrapedData(plain);
+        logCreatedOn('ui', 'applied', generation);
         return accepted;
     }
 
@@ -824,6 +834,9 @@ const FAB: React.FC = () => {
                     || scan.generation !== pageScanGenerationRef.current
                     || !scan.fresh
                 ) {
+                    logCreatedOn('ui', !scan.fresh ? 'missing'
+                        : scan.generation !== pageScanGenerationRef.current ? 'stale_scan'
+                        : 'ownership_rejected', scan.generation);
                     return { generation: scan.generation, accepted: null };
                 }
                 return {
@@ -998,8 +1011,14 @@ const FAB: React.FC = () => {
                      if (
                          initialScan.generation !== pageScanGenerationRef.current
                          || !initialScan.fresh
-                     ) return;
-                     if (localAnalyzeRequestIdRef.current) applyIdentityScan(initialScan.fresh);
+                     ) {
+                         logCreatedOn('ui', initialScan.fresh ? 'stale_scan' : 'missing', initialScan.generation);
+                         return;
+                     }
+                     if (localAnalyzeRequestIdRef.current) {
+                         logCreatedOn('ui', 'identity_only', initialScan.generation);
+                         applyIdentityScan(initialScan.fresh);
+                     }
                      else applyFullScan(initialScan.fresh, null, false, initialScan.generation);
                  });
              }
@@ -1017,8 +1036,14 @@ const FAB: React.FC = () => {
                      if (
                          openScan.generation !== pageScanGenerationRef.current
                          || !openScan.fresh
-                     ) return;
-                     if (localAnalyzeRequestIdRef.current) applyIdentityScan(openScan.fresh);
+                     ) {
+                         logCreatedOn('ui', openScan.fresh ? 'stale_scan' : 'missing', openScan.generation);
+                         return;
+                     }
+                     if (localAnalyzeRequestIdRef.current) {
+                         logCreatedOn('ui', 'identity_only', openScan.generation);
+                         applyIdentityScan(openScan.fresh);
+                     }
                      else applyFullScan(openScan.fresh, null, false, openScan.generation);
                  });
              }
@@ -1056,10 +1081,13 @@ const FAB: React.FC = () => {
                         pageSnapshot = await runPageScan(
                             '[DH] Page scan failed',
                             scan => {
-                                if (
-                                    scan.generation !== pageScanGenerationRef.current
-                                    || !scan.fresh
-                                ) return null;
+                                 if (
+                                     scan.generation !== pageScanGenerationRef.current
+                                     || !scan.fresh
+                                 ) {
+                                     logCreatedOn('ui', scan.fresh ? 'stale_scan' : 'missing', scan.generation);
+                                     return null;
+                                 }
                                 return applyFullScan(
                                     scan.fresh,
                                     null,
@@ -1112,7 +1140,7 @@ const FAB: React.FC = () => {
 
         const runScan = async () => {
             // 1. Performance Check: Don't scan if tab is hidden/inactive
-            if (document.hidden) return;
+            if (document.hidden) { logCreatedOn('scan', 'hidden'); return; }
 
             // console.log("[DH] Running Lazy Scan..."); 
             const terminalRequestId = activeTerminalRevalidationRequestId();
@@ -1128,8 +1156,12 @@ const FAB: React.FC = () => {
                 if (
                     scan.generation !== pageScanGenerationRef.current
                     || !scan.fresh
-                ) return;
+                ) {
+                    logCreatedOn('ui', scan.fresh ? 'stale_scan' : 'missing', scan.generation);
+                    return;
+                }
                 if (localAnalyzeRequestIdRef.current || isOpen) {
+                    logCreatedOn('ui', localAnalyzeRequestIdRef.current ? 'identity_only' : 'menu_open', scan.generation);
                     if (localAnalyzeRequestIdRef.current) {
                         applyIdentityScan(scan.fresh);
                     }
@@ -1263,8 +1295,12 @@ const FAB: React.FC = () => {
             return;
         }
         await runPageScan('[DH] Page scan failed', scan => {
-            if (scan.generation !== pageScanGenerationRef.current || !scan.fresh) return;
+            if (scan.generation !== pageScanGenerationRef.current || !scan.fresh) {
+                logCreatedOn('ui', scan.fresh ? 'stale_scan' : 'missing', scan.generation);
+                return;
+            }
             if (localAnalyzeRequestIdRef.current) {
+                logCreatedOn('ui', 'identity_only', scan.generation);
                 applyIdentityScan(scan.fresh);
             } else {
                 // Explicit refresh replaces edits only after the scrape validates.

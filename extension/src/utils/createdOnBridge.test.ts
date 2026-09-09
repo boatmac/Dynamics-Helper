@@ -18,6 +18,7 @@ const executeScript = vi.fn()
 const sendMessage = vi.fn()
 
 beforeEach(() => {
+    vi.spyOn(console, 'debug').mockImplementation(() => {})
     vi.useFakeTimers()
     executeScript.mockReset().mockResolvedValue([{ frameId: 0, documentId: DOC, result }])
     sendMessage.mockReset().mockResolvedValue(result)
@@ -25,12 +26,30 @@ beforeEach(() => {
     vi.stubGlobal('chrome', { runtime: { id: 'test-extension', sendMessage }, scripting: { executeScript } })
 })
 afterEach(() => {
+    for (const call of vi.mocked(console.debug).mock.calls) {
+        expect(call).toEqual(['[DH] Created On', expect.stringMatching(/^(worker|content)$/), expect.stringMatching(/^[a-z_]+$/), null, expect.toSatisfy((value: unknown) => value === null || typeof value === 'number')])
+        for (const secret of [CASE, TASK, DOC, ISO, ORIGIN, 'private']) expect(JSON.stringify(call)).not.toContain(secret)
+    }
     expect(vi.getTimerCount()).toBe(0)
     vi.useRealTimers()
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
 })
 
 describe('document-scoped Created On bridge', () => {
+    it.each(['AABBCCDD11223344556677889900AABB', 'browser-document-token'])('preserves browser-issued document tokens without format assumptions (%#)', async documentId => {
+        executeScript.mockResolvedValue([{ frameId: 0, documentId, result }])
+        expect(await handleReadCreatedOn(message, { ...sender, documentId })).toEqual(result)
+        expect(executeScript).toHaveBeenCalledExactlyOnceWith({
+            target: { tabId: 42, documentIds: [documentId] }, world: 'MAIN',
+            func: readCurrentRecordCreatedOn, args: [TASK],
+        })
+        executeScript.mockResolvedValue([{ frameId: 0, documentId: `${documentId}-other`, result }])
+        expect(await handleReadCreatedOn(message, { ...sender, documentId })).toEqual(unavailable)
+        expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'worker', 'envelope_rejected', null, expect.any(Number))
+        expect(JSON.stringify(vi.mocked(console.debug).mock.calls)).not.toContain(documentId)
+    })
+
     it('injects only the sender document in MAIN with one full-ID argument', async () => {
         expect(await handleReadCreatedOn(message, sender)).toEqual(result)
         expect(executeScript).toHaveBeenCalledExactlyOnceWith({
@@ -38,6 +57,7 @@ describe('document-scoped Created On bridge', () => {
             func: readCurrentRecordCreatedOn, args: [TASK],
         })
         expect(sendMessage).not.toHaveBeenCalled()
+        expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'worker', 'success', null, expect.any(Number))
     })
 
     it.each([
@@ -47,10 +67,17 @@ describe('document-scoped Created On bridge', () => {
         { origin: 'https://onesupport.crm.dynamics.com.evil.invalid' },
         { origin: 'http://onesupport.crm.dynamics.com' },
         { url: 'https://example.invalid/' }, { url: 'not a url' }, { url: undefined },
-        { documentId: undefined }, { documentId: '' }, { documentId: 'not-a-uuid' },
+        { documentId: undefined }, { documentId: '' }, { documentId: 123 },
     ])('rejects untrusted sender metadata (%#)', async patch => {
         expect(await handleReadCreatedOn(message, { ...sender, ...patch } as chrome.runtime.MessageSender)).toEqual(unavailable)
         expect(executeScript).not.toHaveBeenCalled()
+        const code = 'id' in patch ? 'sender_extension_rejected'
+            : 'tab' in patch ? 'sender_tab_rejected'
+            : 'frameId' in patch ? 'sender_frame_rejected'
+            : 'origin' in patch ? 'sender_origin_rejected'
+            : 'url' in patch ? 'sender_url_rejected'
+            : 'sender_document_missing'
+        expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'worker', code, null, expect.any(Number))
     })
 
     it.each([
@@ -96,6 +123,7 @@ describe('document-scoped Created On bridge', () => {
         const pending = handleReadCreatedOn(message, sender)
         await vi.advanceTimersByTimeAsync(5000)
         expect(await pending).toEqual(unavailable)
+        expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'worker', 'injection_timeout', null, expect.any(Number))
         resolve([{ frameId: 0, documentId: DOC, result }])
         await Promise.resolve()
         expect(sendMessage).not.toHaveBeenCalled()
@@ -104,8 +132,10 @@ describe('document-scoped Created On bridge', () => {
     it('returns a fixed failure for thrown injections and missing scripting', async () => {
         executeScript.mockRejectedValue(new Error('private URL / GUID'))
         expect(await handleReadCreatedOn(message, sender)).toEqual(unavailable)
+        expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'worker', 'injection_failed', null, expect.any(Number))
         vi.stubGlobal('chrome', { runtime: { id: 'test-extension' } })
         expect(await handleReadCreatedOn(message, sender)).toEqual(unavailable)
+        expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'worker', 'api_unavailable', null, expect.any(Number))
     })
 })
 
@@ -142,8 +172,10 @@ describe('strict UTC response parsing and content transport', () => {
         const pending = requestCreatedOn(TASK)
         await vi.advanceTimersByTimeAsync(1500)
         expect(await pending).toBeUndefined()
+        expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'content', 'request_timeout', null, expect.any(Number))
         resolve(result)
         await Promise.resolve()
+        expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'content', 'request_timeout', null, expect.any(Number))
     })
 
     it('bails before send on invalid ID, wrong origin, or missing Chrome API', async () => {
@@ -159,10 +191,12 @@ describe('strict UTC response parsing and content transport', () => {
     it('rejects transport exceptions and origin changes during the wait', async () => {
         sendMessage.mockRejectedValue(new Error('private'))
         expect(await requestCreatedOn(TASK)).toBeUndefined()
+        expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'content', 'transport_failed', null, expect.any(Number))
         sendMessage.mockImplementation(async () => {
             vi.stubGlobal('location', { origin: 'https://example.invalid' })
             return result
         })
         expect(await requestCreatedOn(TASK)).toBeUndefined()
+        expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'content', 'origin_changed', null, expect.any(Number))
     })
 })

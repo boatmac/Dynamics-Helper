@@ -42,6 +42,30 @@ The project consists of three main components:
   no invented offset. Ambiguity/errors/timeouts fail closed. PageReader rechecks
   live identity for every bridge outcome and discards a stale whole scan; FAB's
   existing generation and user-edit protections remain authoritative.
+  Created On diagnostics use `console.debug('[DH] Created On', stage, outcome,
+  generation, elapsedMs)`; enable Verbose in DevTools to see them. Page console
+  stages are `content`, `scan`, and `ui`; `worker` is in the extension Service
+  Worker console. Only fixed codes and numeric/null fields are logged, never
+  record identifiers, dates, URLs, content or caught errors. Page-side generation
+  links one scan's request/result/application, not separate Worker lifetimes.
+  `request_timeout` (1500ms) and `injection_timeout` (5000ms) are distinct;
+  `sender_*_rejected` (extension/tab/frame/origin/url),
+  `sender_document_missing`, `injection_failed` and `envelope_rejected` locate bridge
+  failures. `result_unavailable` does not identify a particular MAIN model guard.
+  `scan/success` means a model value was selected, not displayed; `ui/applied`
+  means the editable snapshot setter ran, not a confirmed React paint. Same-scan
+  `edited_context`, `menu_open`, `identity_only`, `stale_scan` or
+  `ownership_rejected` explains why it was not applied. `dom_fallback` retains
+  raw display text without an inferred timezone. Diagnostics do not persist or
+  send telemetry, and do not change identities, timeouts or edit protection.
+  Treat the browser-provided non-empty `sender.documentId` as an opaque string:
+  forward it unchanged in `target.documentIds` and require exact equality with
+  the returned documentId. Do not require a hyphenated UUID, normalize its case,
+  or fall back to a frame target. The runtime API describes a document UUID but
+  does not promise a specific textual representation; browser scripting remains
+  responsible for resolving the exact token. See the official
+  [MessageSender](https://developer.chrome.com/docs/extensions/reference/api/runtime#type-MessageSender)
+  and [InjectionTarget](https://developer.chrome.com/docs/extensions/reference/api/scripting#type-InjectionTarget) contracts.
 * **`src/background/serviceWorker.ts`**: Service worker handling telemetry, native messaging relay, analysis-result persistence, and the sole production update coordinator. Native-message logging is metadata-only; it must not log prompt-bearing payloads.
 * **`src/background/updateRuntime.ts`**: Strict update parsers and serialized durable state machine for `dh_update_state`, restart resume, alarms, detached status polling, terminal reload, and receipt-backed finalization.
 * **`src/background/teamManifestSync.ts`**: Team sync response boundary. Manifest-only fetches re-read `dh_prefs` after every fetch result, including failure/null/304. Selected-team responses preserve `committed|unchanged|failed|skipped|stale` plus captured identity.

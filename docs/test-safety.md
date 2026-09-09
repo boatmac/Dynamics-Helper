@@ -65,6 +65,22 @@ validation status. Choose the entry appropriate to the requested verification:
   retain evidence and account for actual child processes and profile changes.
 - Checker/runner self-validation scripts have their own reviewed bootstrap scope;
   passing those fixtures does not approve product test execution.
+- The fixed Extension build gate uses `npm run build` from `extension/package.json`:
+  `node --test test/defaultItems.test.mjs`, TypeScript/Vite build, then
+  `node scripts/verifyDefaultItemsCopy.mjs`. With applicable build authorization,
+  review the explicit test, `items.json`, copy check and build configuration and
+  bind their raw-byte hashes in the build record before execution. This is a
+  separate Node build gate, not a Python named-profile pass or permission for
+  Vitest/discovery. The five tests read public menu data; Node may create a test
+  child process. Vite/plugins execute build code and write dist/cache files.
+- Focused Extension Vitest checks use the installed runner with explicit test
+  files and name filters after reviewing each complete file, setup/mocks and
+  local import closure. Record raw-byte hashes and the exact selection before
+  execution, then verify unchanged inputs afterward. Preserve file isolation;
+  account for Node forks, esbuild helpers and cache writes. This is a separate
+  frontend review entry, not Python scanner coverage; unreviewed dynamic execution
+  or live dependencies still block it. Do not use broad discovery or `test:run`
+  when its additional default-items step is outside the selected scope.
 
 An unavailable profile is not permission to route arbitrary tests through a
 dedicated supervisor. Do not bypass review with an ad hoc loader, mechanical hash

@@ -253,6 +253,7 @@ describe('current-record Created On bridge in a page scan', () => {
   const createdOnUtc = '2031-04-17T10:23:00.123Z'
   const sendMessage = vi.fn()
   beforeEach(() => {
+    vi.spyOn(console, 'debug').mockImplementation(() => {})
     vi.stubGlobal('location', { origin: 'https://onesupport.crm.dynamics.com' })
     vi.stubGlobal('chrome', { runtime: { sendMessage } })
     sendMessage.mockReset().mockResolvedValue({ status: 'ok', caseNumber, createdOnUtc })
@@ -266,10 +267,13 @@ describe('current-record Created On bridge in a page scan', () => {
   })
 
   it('reads once without Details and preserves UTC in the existing snapshot field', async () => {
-    const data = await PageReader.scanForErrors()
+    const data = await PageReader.scanForErrors(7)
     expect(data).toMatchObject({ caseNumber, createdOn: `${createdOnUtc} (UTC)` })
     expect(parseScrapedDataSnapshot(data)).toMatchObject({ caseNumber, createdOn: `${createdOnUtc} (UTC)` })
     expect(sendMessage).toHaveBeenCalledExactlyOnceWith({ type: 'DH_READ_CREATED_ON', caseNumber })
+    expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'scan', 'success', 7, null)
+    expect(JSON.stringify(vi.mocked(console.debug).mock.calls)).not.toContain(caseNumber)
+    expect(JSON.stringify(vi.mocked(console.debug).mock.calls)).not.toContain(createdOnUtc)
   })
 
   it.each(['unavailable', 'parent', 'accessor', 'unsupported', 'success'])('preserves raw DOM fallback unless a valid model UTC is available: %s', async mode => {
@@ -293,6 +297,7 @@ describe('current-record Created On bridge in a page scan', () => {
     const pending = PageReader.scanForErrors()
     await vi.runAllTimersAsync()
     expect(await pending).toBeNull()
+    expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'scan', 'identity_changed', null, null)
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -315,6 +320,7 @@ describe('current-record Created On bridge in a page scan', () => {
     expect(await pending).toBeNull()
     expect(sendMessage).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
+    expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'scan', 'identity_rejected', null, null)
   })
 
   it('reads live slots rather than identity captured before a post-bridge traversal yield', async () => {
@@ -362,6 +368,7 @@ describe('current-record Created On bridge in a page scan', () => {
     const pending = PageReader.scanForErrors()
     await vi.runAllTimersAsync()
     expect(await pending).toMatchObject({ caseNumber, createdOn: 'Raw date' })
+    expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'scan', 'dom_fallback', null, null)
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -369,6 +376,7 @@ describe('current-record Created On bridge in a page scan', () => {
     document.querySelector('[slot="value"]')!.textContent = 'WO-12345'
     expect((await PageReader.scanForErrors())?.caseNumber).toBe('WO-12345')
     expect(sendMessage).not.toHaveBeenCalled()
+    expect(console.debug).toHaveBeenLastCalledWith('[DH] Created On', 'scan', 'not_requested', null, null)
   })
 })
 
