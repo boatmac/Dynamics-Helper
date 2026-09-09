@@ -1,11 +1,16 @@
 # Copilot SDK 1.0.13 Upgrade Assessment
 
-## Status
+## Assessment Context
 
-Read-only follow-up after stable v2.0.76 publication. Product dependency remains
-github-copilot-sdk==1.0.5; no SDK install, runtime download, real session or SDK
-upgrade implementation occurred. Findings use official v1.0.13 tagged sources,
-not moving main. This is not approval to change the working environment.
+Research and qualification evidence recorded on 2026-09-09 after stable v2.0.76
+publication, followed by an explicitly approved
+isolated SDK installation and mock qualification. Product dependency and project
+venv remain github-copilot-sdk==1.0.5. No runtime download, real CLI/model session,
+production upgrade or frozen build occurred. Initial findings use official
+v1.0.13 tagged sources; qualification uses the hash-verified published wheel.
+This is a dated technical assessment, not a live task queue. The
+[handoff](session-handoff-2026-07-15.md) alone records active authorization and
+scheduling; [test safety](test-safety.md) governs any authorized verification.
 
 ## Compatibility
 
@@ -47,17 +52,66 @@ a runtime. Do not add runtime.node/FFI libraries merely because the SDK imports
 its FFI host module; native loading is lazy for that transport. Keep the current
 onedir and mypy-plugin exclusions; no required hidden-import change is established.
 
-## Next Bounded Stage
+## Remaining Qualification Questions
 
-Requires approval for installing1.0.13 into a new disposable environment, not
-host/venv, and executing mocked compatibility tests there. No actual CLI/runtime
-download, user credentials, browser, model call, registry or installation access.
+The findings below require managed-denial handling and fail-closed negative options
+acknowledgment to be verified against actual SDK serializers before adoption.
+Retain the failing cases and isolated qualification evidence. A mock adaptation
+does not qualify frozen packaging, live runtime behavior or a production pin change.
+The handoff, not this assessment, determines whether and when further work runs;
+these technical requirements do not authorize another installation or test attempt.
 
-Verify imports, signatures, concrete managed-denial serialization, create/resume
-options and retry isolation, assistant/model event handling, and cleanup failure
-behavior. Pin/hash the exact wheel. Then report whether dependency/code changes
-are justified. Frozen build and live runtime qualification are later stages;
-do not automatically publish another version or mix these changes into v2.0.76.
+## Isolated Qualification Results
+
+- Environment: local Temp `dh-sdk-1013-qualification-20260909`, separate venv.
+- SDK wheel SHA-256:
+  `941dd5b55cf32ba55c73c651052a4a52b259b470c68bf6a6ac3d240c235402c9`, matched
+  official PyPI metadata previously retrieved by the agent, not a user-supplied hash.
+- All 13 transitive pins retained; 14 binary wheels downloaded from the official
+  index, then hash-required offline installation. `pip check` passed.
+- 27/27 mock cases executed: 25 passed, 2 failed, no errors. Two passing cases
+  intentionally establish current DH safety gaps, not qualification success.
+- Used imports, explicit CLI-path precedence, create/resume serialization,
+  deterministic IDs, cwd/instructions/skills/MCP, assistant/model events, and
+  current Host fallback/retry handling passed their stated mock scopes.
+- All existing tracked hashes and project venv SDK1.0.5 remained unchanged through
+  installation/testing. The subsequent edits here document the findings only.
+
+### Negative Options Acknowledgment
+
+The installed SDK's generated `SessionUpdateOptionsResult.success` boolean
+explicitly indicates whether the patch applied. With a synthetic real-wire
+response `{"success":false}`, `_apply_post_create_options_patch` ignores that
+result and returns the session. An RPC exception does trigger cleanup and failure.
+Independent static review confirmed this is a valid negative-response contract,
+not an invented fixture shape. It is relevant to `skip_custom_instructions=True`:
+DH must not accept the session/fingerprint if the requested isolation failed.
+
+Required qualification work: treat the negative result as failure at the patch
+boundary, including create/resume and existing fallback paths, and preserve the
+SDK cleanup path. No production shim or package edit has been implemented. This
+does not prove real CLI leakage or a regression from1.0.5.
+
+### Managed Approval And Cleanup
+
+An actual typed managed-required permission request received approve-once from
+unmodified DH on the mock wire. The pre-tool hook also unconditionally allowed.
+A TEMP-only proposed handler serialized user-not-available successfully. The
+production handler is unchanged; actual enterprise-policy enforcement was not
+tested and no live bypass is claimed.
+
+The other failing test left an actual JSON-RPC task unanswered when stop was
+called, but supplied no reader thread or owned CLI process. It establishes only
+a synthetic-seam limitation, not a proven live process/task leak. Do not patch
+production cleanup based solely on it. Test cleanup canceled/awaited the task;
+final async tasks and all owned processes were zero.
+
+Evidence and test code are retained in the isolated environment's
+`qualification-report.md`, `test-results.json`, `wire-frames.json`, and wheel/
+installation reports. Initial dateutil timezone registry access was blocked;
+only the TEMP fixture was corrected to use synthetic handles. No actual registry
+or product installation changes, runtime download, browser operation, model
+request, or SDK session occurred.
 
 ## Official Sources
 

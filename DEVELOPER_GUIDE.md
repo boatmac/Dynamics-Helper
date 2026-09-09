@@ -622,7 +622,16 @@ same-state `visibilitychange`, and manually invoke stale callbacks after hide,
 replacement, and departure. Every new invariant requires one externally
 observable break-and-fail mutation.
 
-`installer_core.ps1` removes the old `_internal` tree before copying the
+The installer test boundary in `installer_core.ps1`
+defines `Invoke-InstallerWorkflow` with an explicit operations table. Dot-sourcing
+defines functions without constructing production adapters; the normal entry
+uses `New-InstallerOperations`. The plain `-File` harness supplies recording fakes
+instead of evaluating transformed/encoded installer strings. Package-root files
+and validator schema remain unchanged. See [test safety](docs/test-safety.md) for
+execution policy and the [handoff](docs/session-handoff-2026-07-15.md) for validation
+readiness. Architecture descriptions do not certify an unverified working tree.
+
+The intended production flow still removes the old `_internal` tree before copying the
 packaged runtime. This exact-tree repair is required because installation
 verification rejects both missing and extra runtime files. It first creates a
 temporary combined product view and runs the packaged Host `--update-probe`
@@ -756,8 +765,10 @@ The five literal ownership modes are installed, legacy, fresh-seeded,
 fresh-preexisting, and fresh-post-plan-user-creation. The matrix freezes 216
 operation-label cases across before-operation fault, after-operation crash, and
 synthesized post-operation state (648 cases), plus 67 journal-transition crash
-cases. Run all Plan B focused tests with `PYTHONPATH=host` and isolated values
-for `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HOME`, `TEMP`, and `TMP`.
+cases. Execution requires a separately reviewed Plan B profile under
+`docs/test-safety.md`. The isolated runner supplies import paths from the selected
+closure and fresh profile directories; do not rely on inherited `PYTHONPATH` or
+bypass the gate with direct discovery.
 
 ### Plan C Detached Recovery API
 
@@ -843,30 +854,44 @@ B transaction creation at both coordinator `DH_UPDATE_START` and Host
 must close the check-to-create race; two unrelated sequential checks are not
 atomic. Ordinary Analyze/config/health actions remain available.
 
-Use fresh existing directories for all six profile/temp variables before every
-Python or Node verification process. Focused Host imports set `PYTHONPATH=host`;
-discovery removes it. The plan's `Invoke-IsolatedPython` and
-`Invoke-IsolatedCommand` helpers are the canonical harness.
+### Verification Scope And Entry
 
-Frozen build and probe commands are side-effect-free with respect to product
-installation, but they must still use the fresh six-variable helper:
+Follow [test execution safety](docs/test-safety.md). Use the maintained
+`scripts/check_test_safety.py`, `scripts/run_safe_tests.py`, and
+`tests/test-safety-manifest.json`, not ad hoc wrappers or historical launchers.
+The [handoff](docs/session-handoff-2026-07-15.md) records readiness and active
+authorization; this guide does not grant either.
 
-```powershell
-Invoke-IsolatedPython -PythonArgs @("-m", "PyInstaller", "--version")
-Invoke-IsolatedPython -PythonArgs @(
-  "-c", "import release_helper; release_helper.build_host()"
-)
-$env:DH_PLAN_C_FROZEN_ONEDIR = (Resolve-Path "dist/dh_native_host").Path
-try {
-  Invoke-IsolatedPython -PythonArgs @(
-    "-m", "unittest",
-    "host.test_update_recovery.FrozenStagedProbeIntegrationTests.test_complete_built_runtime_starts_and_matches_target_without_live_mutation",
-    "-v"
-  )
-} finally {
-  Remove-Item Env:DH_PLAN_C_FROZEN_ONEDIR -ErrorAction SilentlyContinue
-}
-```
+An approved work package includes reversible source/documentation changes,
+necessary tooling repairs, and its agreed tests without per-command approval.
+Do not expand a pure-Python scope into PowerShell, SDK, browser, installation,
+dependency provisioning or Git writes. Honor explicit once-only effect budgets.
+When a rule blocks work, quote it exactly, explain the interpretation and concrete
+conflict, and report the smallest remedy instead of adding another wrapper.
+
+Separate full-inventory audit from named-profile execution. Profiles must identify
+meaningful behavior, exact selected tests, imported dependencies and their review
+closure, not simply rename one bootstrap fixture. Complete raw-byte SHA-256 review
+includes CRLF/LF differences; a changed test or dependency invalidates the affected
+review. A full audit finding is not a reason to silently broaden a focused run.
+Conversely, a focused PASS is not evidence that the whole inventory is qualified.
+
+Create six fresh profile/temp directories before discovery/import. Record actual
+processes and filesystem effects separately from mocked adapters. Use checked-in
+plain physical scripts with bounded arguments, time/output limits, progress and
+owned-process cancellation. These controls are not an OS sandbox. Preserve original
+logs and failed results; exact allowed baseline deltas never mean no changes.
+
+Use focused regression and required break-and-fail checks for behavior edits,
+affected-profile checks for tooling changes, and diff/link/state checks for docs.
+Run full suites/builds at agreed milestones or when scope requires them, not after
+every minor review fix. Apply the three-round review ceiling in `AGENTS.md`.
+Report outcomes and gaps before evidence paths; distinguish source review, mocked
+tests, real subprocess validation, and live integration in every completion claim.
+
+Frozen-build/probe work needs the applicable integration scope. Builds and probes
+execute code and create files/processes even when installed product bytes stay
+untouched. Never revive encoded command launchers from historical plans.
 
 The current version command must report exactly `6.22.2`. Historical Plan C
 evidence at its fixed commit remains `6.18.0`; do not relabel that chronology.

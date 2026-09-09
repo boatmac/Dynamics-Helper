@@ -5,22 +5,24 @@ This file defines the operational rules, development workflows, and coding stand
 ## Development Entry And Execution Rules
 
 - Read `docs/session-handoff-2026-07-15.md` first for the current branch, product
-  state, authorization boundary, and next action. Beta3 basic use was restored
-  through an approved Cloud PC product install; development remains local. Read
-  Current Milestone Summary and Next Single Action, not historical pause points.
-  Development-checkout migration remains deferred.
-- Current work is documentation closeout; no new product operations, tests,
-  builds or Git writes are authorized by that task. Commands below are reference,
-  not instructions to install dependencies, test, build, register, or release
-  automatically. Verify the checkout before acting; installed product state is
-  separate from Git state and does not migrate with the repository.
-- User instructions override workflow templates. No coding-agent plugin or skill
-  is required to work on this project. In historical plans, Superpowers/OpenCode
-  tool names and unchecked boxes are not current execution requirements.
-- The user explicitly applied the global OpenCode Superpowers removal decision
-  to this project on 2026-09-07. Do not reload it, repeat its uninstall, change
-  other tools' skills, or install replacements. Restart OpenCode with a new
-  session to discard already injected instructions; see the recovery entry.
+  state, authorization boundary, and next action. Keep session dates, completed
+  attempts, process IDs, evidence locations, and pending work in that handoff,
+  not evergreen policy. Historical records are evidence, not execution authority.
+- Verify the checkout before acting. Installed product state is separate from Git
+  state and does not migrate with the repository. Commands below are reference,
+  not automatic instructions to install, test, build, register, or release.
+- Follow system/developer instructions first, then applicable user instructions;
+  skills and workflow templates do not create extra authority or override them.
+  No project-specific coding-agent plugin is required. Historical tool names and
+  unchecked plan boxes are not requirements to install or revive tooling.
+- An approved work package covers its reversible source/documentation edits,
+  necessary tooling fixes, and agreed verification. Do not ask for approval for
+  each command within that scope. Seek approval for a new external effect or
+  expanded scope, not merely a different implementation of the approved work.
+- Respect explicit once-only attempts and effect/time budgets; failure does not
+  renew them. If blocked, quote the exact applicable rule and distinguish its
+  wording from your interpretation, state the concrete conflict, and propose the
+  smallest in-scope remedy. Do not build endless wrappers to avoid a boundary.
 - Keep one bounded task active. Do not turn a finding into a new requirement or
   architecture project without user approval. Preserve complete working units;
   an acceptable limitation is not permission to leave a half-applied feature.
@@ -34,6 +36,9 @@ This file defines the operational rules, development workflows, and coding stand
   time for long cases. If progress stops, inspect the owned process/log rather
   than waiting silently or restarting the entire suite. Report interruptions and
   surviving processes; a stored task status is not proof of a live process.
+- Progress and closeout reports lead with the meaningful outcome, remaining gap,
+  and next action. Evidence paths and temporary-file details support that result;
+  creating more logs or wrappers is not itself completion.
 - Use focused tests for behavior edits. Run full suites at agreed milestones or
   when the changed scope justifies them, not after every review comment. Pure
   documentation cleanup uses diff/link/state checks, not product tests/builds.
@@ -69,6 +74,34 @@ This file defines the operational rules, development workflows, and coding stand
   * **Production:** The installer uses the compiled `dh_native_host.exe`.
 
 ## 2. Build, Test, and Lint Commands
+
+### Test Execution Safety (Required)
+
+Read `docs/test-safety.md` before test execution. Never generate and
+execute encoded/compressed code, use Invoke-Expression or reconstruct scriptblocks
+from strings. No alternate encoding, policy bypass, AV exclusions or sample uploads.
+Negative assertions and ordinary encoded data are not executable payloads.
+
+`scripts/run_safe_tests.py` gates explicit test selection through
+`scripts/check_test_safety.py` and `tests/test-safety-manifest.json` before test
+imports. Use a meaningful reviewed profile with explicit test and dependency
+closure; distinguish full-inventory audit from selected-profile execution. Bind
+reviews to complete raw file bytes, including line endings. Missing classification,
+pending hashes or changed dependencies block the affected scope; do not bypass
+the gate with broad unittest/pytest discovery or infer approval from a flag.
+Use actual base Python for the reviewed runner, not a Windows venv redirector;
+direct handles do not provide general descendant confinement. Source review is
+not runtime verification. Read the handoff for readiness and approved test scope.
+
+PowerShell fixture tests use the checked-in plain `tests/harnesses/installer_safety.ps1`
+with `-File` and explicit recording operations. They execute a real child process;
+mocked product operations do not make that process an OS sandbox. Fresh profile
+directories must exist before discovery/import, not only in test setUp. Record
+actual child processes and file operations separately from mocked integrations.
+Compare exact reviewed profile-directory baselines; reject files, extra paths,
+aliases and reparse points. An allowed directory delta is not an unchanged profile.
+Preserve evidence on alerts or uncertain outcomes, including passing tests that
+may alert later. Never modify original private incident evidence during remediation.
 
 ### Extension (`extension/`)
 
@@ -151,23 +184,11 @@ This file defines the operational rules, development workflows, and coding stand
     toolchain requires separate user approval.
 
 * **Run Tests:**
-  * **Run All Tests:**
-
-        ```bash
-        python -m unittest discover host
-        ```
-
-  * **Run Single Test File:**
-
-        ```bash
-        python -m unittest host/test_pii_scrubber.py
-        ```
-
-  * **Run Single Test Case:**
-
-        ```bash
-        python -m unittest host.test_pii_scrubber.TestPiiScrubber.test_email_redaction
-        ```
+  * Use the named-profile gate described in `docs/test-safety.md`, with explicit
+    reviewed tests, test IDs, dependencies and raw-byte hashes. Direct unittest
+    invocation and broad discovery are not substitutes for the gate.
+  * Check the active handoff for approved scope and profile readiness before
+    execution. A profile definition alone is not execution approval.
 
   * **Test Files:**
     * `host/test_pii_scrubber.py` — PII redaction tests.

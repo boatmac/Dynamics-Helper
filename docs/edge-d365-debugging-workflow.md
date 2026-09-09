@@ -13,11 +13,17 @@ Installed extension state is separate from source state; do not silently switch 
 - Respect current pauses and narrower user instructions over this procedure.
 - Browser access, configuration changes, dependency installation, tests, builds,
   deployment, and Git writes each require authorization applicable to that work.
+- Approval is for a bounded work package, not repeated permission for each read
+  or command. Included reversible source/docs changes, tooling fixes, and agreed
+  tests may proceed within that scope; new effects and once-only budgets remain
+  boundaries. Follow [test safety](test-safety.md) for test selection and execution.
 - No automatic commit, release, plugin installation, or workflow replacement.
 - This is developer tooling, not a Dynamics Helper runtime/product dependency.
 - Never copy private temporary probes into the repository: they may contain global
   paths, endpoint identifiers, customer data, or credentials.
 - Stop on user refusal or policy denial. Do not bypass policy or guess field values.
+  Quote the blocking rule, separate its wording from interpretation, and explain
+  the smallest remedy. Do not create extra wrappers or reconnect to evade a limit.
 
 ## Prepare Existing Edge Access
 
@@ -40,8 +46,8 @@ Installed extension state is separate from source state; do not silently switch 
 OpenCode uses an `mcp` wrapper, a named entry with `type: "local"`, and a `command`
 array containing the executable and individual arguments. Do not paste VS Code's
 `servers` configuration or split executable/arguments into its different schema.
-An optional pinned package argument is `chrome-devtools-mcp@1.8.0`, the tested
-version in this investigation. An approved `npx` invocation can use that argument;
+An optional historical pinned package argument is `chrome-devtools-mcp@1.8.0`.
+Check compatibility before selecting it. An approved `npx` invocation can use it;
 neither a global package install nor any coding-agent plugin is required.
 `npx` may download a package, so its use is not exempt from installation approval.
 
@@ -78,8 +84,8 @@ Never collect cookies, authorization headers, query payloads, or network bodies.
 
 ## Diagnose Attachment Once
 
-`Network.enable` timeouts occurred even after the user approved remote debugging.
-They are not proof of an authentication failure. Record the failing operation,
+`Network.enable` can time out despite remote-debugging approval.
+That is not proof of an authentication failure. Record the failing operation,
 elapsed time, and sanitized error category; ask whether approval or a paused-script
 indicator is visible if needed. Do not prescribe repeated sign-ins or Allow clicks.
 
@@ -186,7 +192,11 @@ For each new field, define source ownership and source age before implementation
    cannot apply stale results to another case. Do not introduce cross-case caching;
    this workflow does not implement a cache or imply one already exists.
 5. Record exact test scope and skipped checks. Build, reload, installation, and
-   release are separate authorized steps, not automatic consequences of GREEN.
+   release need applicable approval, not automatic consequences of GREEN. Do not
+   repeat approval checks for effects already included in the work package.
+   Use focused tests; reserve full suites for agreed milestones and observe the
+   three-round review ceiling. Report the field result and remaining gap before
+   temporary evidence paths. Keep validation chronology in the handoff/history.
 
 ## Completion Checklist
 
