@@ -4,9 +4,10 @@
 
 This evergreen policy replaces historical automatic testing recipes. It is not
 permission to run tests, install dependencies, change security policy or operate
-the product. Read the [handoff](session-handoff-2026-07-15.md) for active scope and
-readiness. Validation chronology belongs there or in linked historical evidence,
-not here. A source description or a successful fixture does not qualify a suite.
+the product. Determine scope from the user's request and applicable instructions;
+when resuming a task, consult its relevant evidence and verify current readiness.
+Validation chronology belongs in task records, not here. Records do not grant
+authority. A source description or a successful fixture does not qualify a suite.
 
 Follow system/developer instructions, then applicable user instructions; skills
 and workflow templates cannot override them or grant additional authority. An
@@ -17,8 +18,8 @@ once-only attempts and effect/time budgets remain binding after failure.
 
 If blocked, quote the exact rule, distinguish wording from interpretation, state
 the concrete conflict and propose the smallest in-scope remedy. Do not add endless
-wrappers or restart review counts. At most three review rounds, then report
-unresolved findings and stop. Lead progress reports with outcomes and remaining
+wrappers or restart agreed review budgets. Repeat checks only for new changes,
+failures or unresolved concerns. Lead progress reports with outcomes and remaining
 gaps, not temporary paths or the number of scripts created.
 
 ## Non-Negotiable Boundaries
@@ -52,10 +53,22 @@ gaps, not temporary paths or the number of scripts created.
 | `tests/validate_installer_harness.py` | Bounded supervisor for one plain installer scenario per invocation; no arguments selects success, `--scenario <known name>` selects a specific case. Real process execution; expected child failure is validation success only when assertions pass. |
 | `tests/validate_powershell_startup.py` | Minimal startup comparison without installer operations; real process execution. |
 
-These responsibilities describe the maintained entry points, not their validation
-status. Confirm the selected profile, supported interface and reviewed source
-before execution; the handoff records readiness. Do not bypass an unavailable
-profile with an ad hoc loader or mechanical hash filling.
+These responsibilities describe maintained entry points, not approval or current
+validation status. Choose the entry appropriate to the requested verification:
+
+- Test modules use `scripts/run_safe_tests.py` with a reviewed named profile and
+  its complete dependency closure. Direct unittest/discovery is not a substitute.
+- Dedicated installer/startup supervisors run their documented scenarios under
+  separate source/dependency review and applicable process authorization. They do
+  not use the named-profile loader and do not require a wrapper or invented profile.
+  Bind reviewed raw bytes before launch and compare recorded before/after hashes;
+  retain evidence and account for actual child processes and profile changes.
+- Checker/runner self-validation scripts have their own reviewed bootstrap scope;
+  passing those fixtures does not approve product test execution.
+
+An unavailable profile is not permission to route arbitrary tests through a
+dedicated supervisor. Do not bypass review with an ad hoc loader, mechanical hash
+filling or broad discovery. Explicit attempt budgets still apply to the chosen entry.
 
 `installer_core.ps1` keeps the package path and definitions-only dot-source
 boundary. `Invoke-InstallerWorkflow` requires a complete explicit operations table;
@@ -131,8 +144,9 @@ identity. Establish fresh existing `LOCALAPPDATA`, `APPDATA`, `USERPROFILE`, `HO
 `TEMP` and `TMP` before workers start. Supply minimal system environment, not
 inherited credentials, integration flags, PYTHONPATH or SDK settings.
 
-Record reviewed script/source identity, process identity/start time, expected
-output, timeout, output budget, cancellation method, active test and cumulative
+Before launch, bind reviewed source identity and determine expected output, timeout,
+output budget and observation/cancellation method. After launch, record the PID or
+task handle and start time provided by the tool. Report active test and cumulative
 `N/total`. Inspect owned progress/logs if stalled; do not silently wait or rerun
 the entire suite. Duration alone does not add an approval gate to approved work.
 Preserve evidence on success, failure, interruption and alerts, including partial

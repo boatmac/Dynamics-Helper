@@ -4,10 +4,11 @@ This file defines the operational rules, development workflows, and coding stand
 
 ## Development Entry And Execution Rules
 
-- Read `docs/session-handoff-2026-07-15.md` first for the current branch, product
-  state, authorization boundary, and next action. Keep session dates, completed
-  attempts, process IDs, evidence locations, and pending work in that handoff,
-  not evergreen policy. Historical records are evidence, not execution authority.
+- Keep this file limited to durable project guidance. Session progress, dates,
+  process IDs, one-time approvals and pending work belong in task records, not here.
+  When continuing a prior task, consult its relevant record and verify actual state.
+  Records and assistant summaries provide context; they do not grant authority or
+  override the user's instructions. Do not route unrelated tasks through a handoff.
 - Verify the checkout before acting. Installed product state is separate from Git
   state and does not migrate with the repository. Commands below are reference,
   not automatic instructions to install, test, build, register, or release.
@@ -26,12 +27,13 @@ This file defines the operational rules, development workflows, and coding stand
 - Keep one bounded task active. Do not turn a finding into a new requirement or
   architecture project without user approval. Preserve complete working units;
   an acceptable limitation is not permission to leave a half-applied feature.
-- At most three review rounds, then report unresolved findings and stop. Do not
-  silently restart the count with another reviewer, subtask, or exception loop.
-- Estimate long commands, but duration over five minutes is not an additional
-  approval gate for already authorized work. Record PID/start time, log path,
-  expected output, timeout, and a means to inspect/cancel owned work before launch.
-  Do not delegate long work to tools that cannot expose intermediate progress.
+- Do not repeat reviews without a new change, failure or unresolved concern.
+  Respect review budgets explicitly agreed for the task; do not reset them by
+  changing reviewers or subtasks.
+- Before long commands, determine the expected duration, output, timeout and a
+  way to observe/cancel owned work. After launch, record the PID or task handle
+  and start time actually supplied by the tool. Duration alone does not require
+  reapproval. Report a concrete tool limitation rather than inventing wrappers.
 - Full suites must report cumulative `N/total`; give the active test and elapsed
   time for long cases. If progress stops, inspect the owned process/log rather
   than waiting silently or restarting the entire suite. Report interruptions and
@@ -46,9 +48,9 @@ This file defines the operational rules, development workflows, and coding stand
   instructions, and synthetic/compact summaries. Prior approvals are scoped;
   commit, push, tag, publication, cloud/product/security mutations and dependency
   installation need applicable explicit authorization.
-- Before compaction or stopping, update the authorized recovery entry with the
-  exact pause point. After compaction or a new session, reread it; never resume
-  product work from a summary or old plan alone.
+- When ongoing work needs a handoff, record its results and pause point separately
+  from these rules. On resumption, verify that record against the current request
+  and checkout; do not treat historical plans as instructions for unrelated work.
 - Reply in the user's language. User-facing shell commands must be independently
   copyable in fenced blocks, one physical line per command or explicit continuation.
 
@@ -91,7 +93,8 @@ pending hashes or changed dependencies block the affected scope; do not bypass
 the gate with broad unittest/pytest discovery or infer approval from a flag.
 Use actual base Python for the reviewed runner, not a Windows venv redirector;
 direct handles do not provide general descendant confinement. Source review is
-not runtime verification. Read the handoff for readiness and approved test scope.
+not runtime verification. Select the applicable entry under `docs/test-safety.md`
+and confirm that its reviewed scope covers the requested verification.
 
 PowerShell fixture tests use the checked-in plain `tests/harnesses/installer_safety.ps1`
 with `-File` and explicit recording operations. They execute a real child process;
@@ -184,11 +187,11 @@ may alert later. Never modify original private incident evidence during remediat
     toolchain requires separate user approval.
 
 * **Run Tests:**
-  * Use the named-profile gate described in `docs/test-safety.md`, with explicit
-    reviewed tests, test IDs, dependencies and raw-byte hashes. Direct unittest
-    invocation and broad discovery are not substitutes for the gate.
-  * Check the active handoff for approved scope and profile readiness before
-    execution. A profile definition alone is not execution approval.
+  * Use the entry-selection rules in `docs/test-safety.md`: named-profile gating
+    for test modules, or the separately reviewed dedicated supervisor for its
+    documented scenario. Direct unittest and broad discovery cannot bypass a gate.
+  * Verify source/dependency review and applicable task scope before execution.
+    A profile definition or historical result alone is not execution approval.
 
   * **Test Files:**
     * `host/test_pii_scrubber.py` — PII redaction tests.
@@ -221,8 +224,8 @@ may alert later. Never modify original private incident evidence during remediat
     * **Text / number / color inputs** (buttonText, primaryColor, offsetBottom, offsetRight, rootPath, skillDirectories, mcpConfigPath, userInstructions, userPrompt): persist on `onBlur` via `handlePrefBlur()`. onChange only mutates React state (avoids storage / host RPC storms during typing or color-picker drag).
     * **Team manifest URL**: also onBlur, with `new URL(...)` format validation before triggering a fetch (avoids burning a 404 on half-typed input).
     * **Bookmark editor items (`dh_items`)**: every personal add/edit/delete/move/import/collapse and Reset intent increments one bookmark generation through `mutatePersonalItems`. Writes and Reset removal share one serialized storage queue; do not add raw personal `setItems` or direct `dh_items` mutation sites. A failed set/remove retains the newest complete intent for a later mutation retry, keeps a localized persistence warning visible, and clears that warning only after a later successful mutation.
-    * **Reset button**: still exists. A normal click intentionally creates a fresh `ResetTransaction`, applies `DEFAULT_PREFS`, and starts a new Host phase. The transaction stores one token, default Team identity, request/bookmark generations, retry action, and phase (`host-pending|host-committed|sw-pending|local-cleanup-pending|complete`) independently of preference-mirror actions. The matching Host `update_config` must durably acknowledge before `RESET_EXTENSION_STATE`; `config_saved: true` with refresh failure counts as Host commit while retaining its current warning. Once committed, that token never resends Host or rewrites defaults. The incomplete warning's **Retry cleanup** control resumes only the stored SW/local phase; the normal Reset button does not. SW clears shared state only while default identity is safe, and local team/bookmark cleanup is generation-scoped so newer preference/bookmark edits survive.
-    * The single entry point for all prefs writes is `persistPrefs(nextPrefs, opts?)` in `Options.tsx`. It writes the ordered `dh_prefs` mirror, then sends an immutable `update_config` intent after Host hydration and **inspects the structured result**. `update_config` is not universally fire-and-forget: `config_saved: true` acknowledges the values sent even when active-session refresh failed, while unsaved/transport failures remain pending for retry and surface a warning. With `opts.fetchManifest=true`, the latest matching intent triggers a manifest fetch unless that URL is already in flight or is the last `committed`/`unchanged` URL. Failed/stale/skipped/transport outcomes remain retryable.
+    * **Reset ownership:** Each normal Reset creates a transaction; cleanup retry resumes that transaction, not a new Host write. Persist durable Host acknowledgment before SW cleanup, never resend acknowledged defaults, and preserve newer edits through generation-scoped cleanup. Keep Reset ownership separate from preference-mirror actions. See `DEVELOPER_GUIDE.md` under "Source Errors and Config Health" for phases and callback ordering.
+    * **Preference persistence:** Route writes through `persistPrefs` and the single-flight, coalescing `dh_prefs` queue. No Host send or carried action runs before the latest mirror commits; inspect storage and Host results, retain failed intents visibly, and distinguish saved config from session-refresh success. Carry compatible team actions, cancel identity changes, and settle before dispatch. See `DEVELOPER_GUIDE.md` under "Source Errors and Config Health" and "Writing prefs" before changing this flow.
     * **Sparse prompt-file writes:** Explicit empty `user_instructions` or top-level `user_prompt` truncates its canonical markdown file; omitted means no write. Unrelated preference updates omit both fields. Options attaches immutable revision/value tokens to explicit edit, clear, and Reset intents; acknowledgements and retries advance only the matching saved revision.
     * **Hydration guard (v2.0.70-beta.4+):** Before Host hydration completes, `persistPrefs` still updates the local `dh_prefs` mirror, but it does not send DEFAULT_PREFS-derived values to the Host or fetch a manifest. User-touched fields are caught up through one immutable intent routed through the same single-flight `writePrefsMirror` queue; its inspected Host send runs only from the successful latest-commit callback (including host-down/non-success fallback handling). **Do not bypass the Host-RPC gate or write from a React state-updater closure.** See `DEVELOPER_GUIDE.md` § "Hydration guard (v2.0.70-beta.4+)" for the failure mode and ordering contract.
   * **Default rule:** New Options fields are mirrored to `extension_preferences` in `config.json` unless explicitly excluded.
@@ -297,7 +300,7 @@ may alert later. Never modify original private incident evidence during remediat
 
 ### 3. PII Redaction
 
-* **Scrubber:** All text sent to the LLM must pass through `PiiScrubber` (`host/pii_scrubber.py`).
+* **Scrubber:** Analyze payload text and context, including the composed Custom User Prompt, pass through `PiiScrubber` (`host/pii_scrubber.py`) before sending. The system-instruction snapshot follows the separate exact-source contract below. Expanding redaction to that snapshot is a product behavior change, not a documentation correction.
 * **Tests:** Ensure `host/test_pii_scrubber.py` passes after any changes to redaction logic.
 
 ### 4. Path Handling
@@ -346,9 +349,6 @@ may alert later. Never modify original private incident evidence during remediat
 | `repository_instructions_missing` | Selected Root instructions are missing | Block Analyze; add file or disable Repository ONLY |
 | `repository_instructions_unreadable` | Selected Root instructions cannot be read/decoded | Block Analyze; repair file or disable Repository ONLY |
 | `user_prompt_unreadable` | Custom User Prompt cannot be read/decoded | Block Analyze; `get_config` omits `user_prompt`; explicit edit/clear repairs |
-* **Preference mirror actions:** Team sync, cache clear, and manifest fetch are user-intent actions, not storage-callback closures. Carry an unsettled action into compatible newer `dh_prefs` snapshots, settle it before dispatch so repair recursion cannot duplicate it, and cancel team actions when enabled/URL/team identity changes. Reset uses a mirror action only for its initial default-mirror/Host dispatch; its phased transaction and cleanup retry ownership are stored separately and must never be carried or canceled as an ordinary preference action.
-* **Preference mirror durability:** `dh_prefs` writes, including hydration catch-up, are single-flight and coalescing. Inspect `chrome.runtime.lastError`; no Host update or carried action may run until the latest intended snapshot commits. Failed writes remain visibly pending with unsettled actions for later user-driven retry.
-* **Reset truth:** Reset requests carry immutable default identity, request/bookmark generations, one token, phase, and retry action. Persist durable Host acknowledgment into the transaction before checking whether a newer preference callback superseded UI/local continuation. Never dispatch SW cleanup before Host acknowledgment (`success: true` or `config_saved: true`), and never resend Host/default preferences after it. Matching SW `committed` truth advances to scoped local cleanup; stale/failed/transport callbacks retain same-token SW retry. Superseded local continuation retains local-only retry. Retry may skip unsafe newer-owned state but must never clear or revert newer preferences/bookmarks.
 * **String-only error fallback:** `safeErrorText(candidates, fallback)` is the single extension selector for reviewed Host/SW error display and persistence paths. It accepts only non-empty strings and never invokes `String`, `toString`, interpolation, or serialization on candidate objects, arrays, functions, symbols, or null. Analyze inner/outer/rejection persistence, Native response normalization, config-update inner/outer results, Options health/immediate warnings, FAB nested/outer/catch display, and Service Worker immediate normalization use it. Preserve normalized `error_code`, string `errorKind`, finite numeric `httpStatus`, and unchanged success `data`; unknown/malformed values use fixed/localized safe fallbacks.
 * **Manifest retry truth:** Options keeps last successful manifest URL separate from tokenized in-flight URL and normalizes optional team identity as `(team || '')` in current checks and response matching. Only current identity-matching `committed`/`unchanged` callbacks mark success, including no-team requests; every failure/stale/skipped/transport callback releases its own in-flight token, and an old URL callback cannot release or complete a newer URL.
 * **Async team UI reads:** Options and `useMenuLogic()` must generation-gate initial and storage-change cache reads. Capture enabled/manifest URL/team identity before each read and revalidate it before applying manifest list, items, timestamp, or navigation state.
@@ -576,7 +576,7 @@ Since you cannot see the browser or console:
 2. **Check Telemetry:** Look for `trackEvent` calls in `FAB.tsx` to verify frontend flow.
 3. **Mocking:** When adding new "Skills" or SDK features, verify they work in `dh_native_host.py` using `logging` before hooking them up to the UI.
 
-`host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` are retained historical probes and are not supported SDK 1.0.5 diagnostics: they still use removed constructor/import/message shapes. Their session calls keep `skip_custom_instructions=True`, but do not rely on these scripts until they are separately migrated. Use the SDK 1.0.5 probe in the wire-drift playbook below instead.
+`host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` are retained historical probes and are not supported SDK 1.0.5 diagnostics: they still use removed constructor/import/message shapes. Their session calls keep `skip_custom_instructions=True`, but do not rely on these scripts until they are separately migrated. Follow the wire-drift diagnosis guidance below before choosing a supported probe.
 
 ## 6. DH-Specific Instruction Source
 
@@ -688,7 +688,7 @@ This error means the Host process crashed during startup or failed to establish 
 ### 2. Changes not reflecting
 
 * **Runtime Source:** The extension loads from `extension/dist` (dev) or `%LOCALAPPDATA%\DynamicsHelper\extension` (prod).
-* **Fix:** After building (`npm run build`), reload the extension in `chrome://extensions`. For production, run the installer or `release_helper.py`.
+* **Fix:** After an approved development build, reload the extension in `chrome://extensions`. For production repair, use the approved complete installer for the matching release. `release_helper.py` is a release orchestrator, not an installation-refresh shortcut.
 
 ### 3. Update requires recovery or a matching installer
 
@@ -713,20 +713,13 @@ The SDK has **no version pin on the CLI** in its package metadata. The only runt
 
 **Why this matters for DH.** DH's `requirements.txt` pins the SDK version, but Copilot CLI is whatever the user has installed (and `copilot.cmd` auto-updates itself by re-extracting newer versions into `%LOCALAPPDATA%\copilot\pkg\<version>\` on each invocation). So DH ships with `SDK pinned + CLI wildcard`. Any field-level wire change in the CLI between DH's released SDK version and the user's current CLI will surface as a crash inside `CopilotClient.start()` or `create_session()`.
 
-**Known incident (2026-05-20, RESOLVED by 1.0.5 upgrade):** CLI 1.0.46+ changed `PingResponse.timestamp` from `int` (epoch ms) to ISO 8601 string. SDK 0.3.0 did `int(timestamp)` and crashed with `ValueError: invalid literal for int() with base 10: '2026-05-20T...Z'`. The original fix was a monkey-patch of `copilot.client.PingResponse.from_dict` at SDK-import time (commit `b4bb6ab`). **That shim was DELETED on 2026-07-03 during the SDK 0.3.0 → 1.0.5 upgrade** — 1.0.5's `from_dict` handles ISO timestamps natively (`isinstance(int,float) ? epoch : from_datetime()`), verified by a live `client.start()` on clean 1.0.5 + CLI 1.0.69. This incident is the canonical example of the shim pattern below, kept for reference even though the specific shim is gone.
+**Historical wire-drift example:** CLI 1.0.46+ changed `PingResponse.timestamp` from epoch milliseconds to an ISO 8601 string, breaking SDK 0.3.0. SDK 1.0.5 handles the new format, so DH removed its temporary compatibility shim. Details are retained in `docs/sdk-upgrade-2026-07-1.0.5.md`; this incident does not prescribe the remedy for a new failure.
 
 **Response playbook when this recurs:**
 
-1. Reproduce in dev mode with a 5-line probe (**SDK 1.0.5+ API** — note `RuntimeConnection`, NOT the removed `SubprocessConfig`):
-   ```python
-   import asyncio
-   from copilot import CopilotClient, RuntimeConnection
-   conn = RuntimeConnection.for_stdio(path=r"C:\Users\<u>\AppData\Roaming\npm\copilot.cmd")
-   asyncio.run(CopilotClient(connection=conn).start())
-   ```
-2. Grep the traceback for the SDK file and line: `from_dict`, `int(...)`, `str(...)` casts on RPC dict fields are the usual suspects.
-3. Add a startup-time monkey-patch in `dh_native_host.py` mirroring the (now-deleted) PingResponse shim pattern (read raw obj, normalise, fall through to original). The deleted shim's git history (`b4bb6ab` .. the 1.0.5-upgrade commit) is the reference implementation.
-4. Verify with `& "host/venv/Scripts/python.exe" -c "..."` before rebuilding.
-5. Record the patch in `docs/sdk-upgrade-*.md` follow-ups so the shim gets deleted when the SDK release catches up (as was done for the PingResponse one).
+1. Identify the affected versions and failing contract from safe diagnostics; consult current official SDK/CLI documentation and supported fixes before choosing a remedy.
+2. Reproduce only within the agreed verification scope. Prefer a focused regression fixture; a live SDK probe is a separate runtime operation, not an automatic diagnosis step.
+3. Use a narrow compatibility shim only when the confirmed defect requires it and a supported fix is unsuitable. Verify the affected behavior and record the shim's removal condition.
+4. Consult `docs/sdk-upgrade-2026-07-1.0.5.md` for the historical PingResponse shim removal. Historical examples are evidence, not a requirement to repeat the implementation.
 
 **Do NOT pin the user's CLI version.** Bundling a CLI binary inside DH (~100 MB), pinning npm install version (CLI auto-updates anyway by extracting into `%LOCALAPPDATA%\copilot\pkg\`), or wrapping `copilot.cmd` are all worse than per-incident shims. The Copilot CLI is a moving target by design.

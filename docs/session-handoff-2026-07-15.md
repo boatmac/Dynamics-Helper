@@ -1,11 +1,38 @@
 # Dynamics Helper Development Handoff
 
-Updated: 2026-09-09. This is the single active task and authorization record.
+## Current Status
+
+Updated: 2026-09-09.
+
+- Canonical checkout: `C:\MyWorkbench\Repository\Dynamics-Helper`;
+  branch `hardening/plan-d-runtime-installer`, last observed HEAD `9ed6d89`.
+  `master` remains at `bfedc9f`. Use Git for the current commit and worktree status.
+- Latest work: requested documentation corrections are complete in `AGENTS.md`,
+  `docs/test-safety.md` and this record. All eight review findings were checked;
+  referenced files/headings exist and diff whitespace checks passed. No product
+  code or tests changed, and no tests/builds were run for this documentation fix.
+- Directory cleanup is paused. The old source checkout remains at its original
+  path after an occupied-directory move failure; the lock owner is unconfirmed.
+  The archived alignment worktree still depends on that source's Git store.
+- The current user request defines this correction's scope, not assistant
+  summaries. Historical records do not independently grant execution authority.
+- The user requested a local commit of these documentation changes and retained
+  cleanup records. Directory cleanup remains paused as described above; this record
+  does not automatically resume it or a product build.
+
+## Historical Session Record
+
+Everything below preserves earlier session facts, permissions, procedures, and
+proposals. Statements inside this section are historical records, not operating
+instructions. References to current or active authority, next actions, approval,
+or supersession describe their original session context.
+
+Historical record updated: 2026-09-09.
 Read [AGENTS.md](../AGENTS.md) for evergreen rules and
 [test safety](test-safety.md) for execution policy. Historical permissions below
 are evidence only; the current user instruction and its limits control this work.
 
-## Repository Identity
+### Historical Repository Identity
 
 - Canonical development entry: `C:\MyWorkbench\Repository\Dynamics-Helper`.
 - Migration source/reference: `C:\MyWorkbench\Repository\Dynamics-Helper-prompt-scope-spec`.
@@ -16,11 +43,12 @@ are evidence only; the current user instruction and its limits control this work
   do not continue parallel development there after the canonical import.
 - Installed product state is independent of source state; development remains local.
 
-## Canonical Entry Migration
+### Historical Canonical Entry Migration
 
 The user approved the local import/switch plan and confirmed no other session is
-operating these repositories. This section supersedes historical checkout/next-step
-directions below. Product builds and qualification are paused for this migration.
+operating these repositories. At that time, this section superseded earlier
+checkout/next-step directions below. Product builds and qualification were paused
+for this migration.
 
 Execution sequence: save the source handoff in a local commit, fetch only the
 hardening branch from the local source into the canonical repository, verify the
@@ -33,8 +61,8 @@ Migration completed: source handoff saved as `0e86787`, that exact branch tip
 imported using a local-only fetch with no tag auto-follow, and canonical switched
 normally to `hardening/plan-d-runtime-installer`. No merge/rebase or directory rename.
 Canonical `master` remains at `bfedc9f`. The source checkout stays at `0e86787` as a
-clean reference; alignment remains attached to its original Git store. Continue
-development only in canonical; this file here is the ongoing status authority.
+clean reference; alignment remains attached to its original Git store. Canonical
+was designated the development entry, with this file as its status record.
 
 Source adoption does not refresh either repository's virtual environment, node
 dependencies or built artifacts. Installed Chrome/Edge native-host registration
@@ -57,6 +85,43 @@ Next directory task, if requested, is grouping historical staging/evidence folde
 outside the project-root listing while preserving contents and Git worktree links.
 Do not resume product builds automatically or run historical migration scripts.
 
+#### Historical Parent Directory Cleanup
+
+User-approved cleanup removed the two redundant canonical-staging checkouts.
+The 106 lineage/helper/status entries were moved under
+`C:\MyWorkbench\Repository\_archive\Dynamics-Helper-lineage-20260804`;
+all 1,213 original file SHA-256 values matched before/after. Five related Python
+cache files subsequently moved into its `python-cache` subdirectory, hash-verified.
+
+Six source/legacy branches are now retained locally under `archive/prompt-scope/*`
+and `archive/legacy/*`, plus five previously missing annotated tags. Existing refs
+were preserved; no merge or push. Legacy and alignment checkouts moved under
+`C:\MyWorkbench\Repository\_archive\Dynamics-Helper-retired-checkouts`.
+The old ZIP and unclassified private config moved into `loose-files`, hash-verified.
+
+Partial relocation: Windows refused to move `Dynamics-Helper-prompt-scope-spec`
+because it was in use. It remains at its original path and still owns alignment's
+Git store. The initial hashing command timed out before moving anything; a later
+same-volume move command continued after that one rename failed and moved the other
+two directories. Its full metadata comparison did not finish. The alignment link
+was then repaired against the still-original source location; both moved checkouts
+retain original HEADs and clean Git status. Do not claim complete byte verification
+for those moved trees. No processes were forcibly ended or permissions changed.
+
+Remaining cleanup is only the occupied source checkout. Identify/release the lock
+before moving it, then repair the archived alignment worktree again. Do not retry
+blindly, copy/delete as a workaround, or delete the source's Git directory. Other
+projects and the shared parent `__pycache__` directory were not removed.
+
+The user confirmed no other window is using the old directory; only this session
+remains. Read-only process inspection on 2026-09-09 found the tool-shell parent
+chain `opencode.exe` PID 9316 -> `powershell.exe` PID 67960 -> `herdr.exe` PID 25360.
+No separate process command line named the old directory. This is not an open-handle
+or process-cwd inspection and does not prove which process holds the lock. No process
+was terminated. Normal exit of this OpenCode instance and its launching shell, then
+opening canonical anew, is the smallest next release attempt; no need to investigate
+imagined other windows or forcibly stop generic Python/PowerShell processes.
+
 Canonical verification: `safety-core` passed 55/55 with zero failures/errors/skips
 using base Python and the imported reviewed hashes. Evidence:
 `C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-safe-tests-wgqrhv4s`.
@@ -66,7 +131,7 @@ environments, installed product behavior or the relocated installer supervisor.
 The manifest target and all four supervisor source paths were checked for existence;
 only their path edits were statically reviewed. No installer was run.
 
-## Current Task
+### Historical Test-Safety Task
 
 Implement the user's explicit stages 1-3 for test-safety source/tooling and docs,
 with only the agreed pure-Python verification. Keep one bounded work package.
@@ -75,7 +140,7 @@ Source integration, limited Python validation and the subsequent user-requested
 `safety-core` review/binding/gated execution are complete. Results and remaining
 qualification gaps are recorded below.
 
-## Active Authorization
+### Historical Authorization Record
 
 - Approved: scoped source/docs changes and the parent's agreed pure-Python checks.
 - Subsequent continuation: focused `safety-core` source/dependency review, hash
@@ -98,7 +163,7 @@ qualification gaps are recorded below.
 - Approved tooling fixes and agreed tests do not need per-command reapproval.
   New effects or expanded scope do. Follow higher-priority instructions throughout.
 
-## Current Milestone Summary
+### Historical Milestone Summary
 
 - Published stable product: `v2.0.76`; project/runtime SDK remains `1.0.5`.
 - Isolated SDK `1.0.13` qualification executed 27 mock cases: 25 passed, 2 failed.
@@ -120,15 +185,15 @@ qualification gaps are recorded below.
   `pii-core` still uses whole-module selection and has pending test/helper hashes;
   it is not qualified. Full inventory review remains incomplete.
 
-## Documentation Delivery
+### Historical Documentation Delivery
 
 - Evergreen policy: `AGENTS.md`, `DEVELOPER_GUIDE.md`, `docs/test-safety.md`.
 - Workflow integration: `docs/edge-d365-debugging-workflow.md`.
 - Dated technical evidence: `docs/sdk-1.0.13-upgrade-assessment.md`; no live schedule.
-- This short handoff is the only active authorization/status record.
+- This handoff was designated the authorization/status record for that work.
 - Preserve pre-existing dirty changes outside this assigned documentation scope.
 
-## Historical Archive
+### Historical Archive
 
 The full pre-cleanup handoff is preserved byte-identically at
 [Historical handoff through test safety](history/session-handoff-through-test-safety-2026-09-09.md).
@@ -148,7 +213,7 @@ Its original header and superseded instructions remain unchanged for byte identi
   release/incident decisions remain there; do not run its retired procedures.
 - Original incident scripts/logs were not changed or used for this archival copy.
 
-## Verification And Remaining Gaps
+### Historical Verification And Remaining Gaps
 
 - `tests/validate_test_safety.py`: 26 checker, 12 profile and 17 runner mocked tests
   passed, zero failures/errors/skips. It also parsed 17 Python sources and the
@@ -180,7 +245,7 @@ Its original header and superseded instructions remain unchanged for byte identi
   corrected PowerShell harness, installer production-path qualification or release
   was performed. No Git writes occurred.
 
-## Safety-Core Gated Qualification
+### Historical Safety-Core Gated Qualification
 
 - Source review corrected the earlier summary: the initial profile had 38 tests,
   no explicit IDs, and omitted runner mocks. It now selects exactly 26 checker,
@@ -207,7 +272,7 @@ Its original header and superseded instructions remain unchanged for byte identi
   it does not cover untracked files. No source changes followed the bound run.
   Keep archive raw-byte preservation in mind before any future authorized commit.
 
-## Local Checkpoint
+### Historical Local Checkpoint
 
 - User requested logically split local commits and a clean handoff for a new session.
   Code/tooling and documentation are separate checkpoint units, not a release.
@@ -230,9 +295,9 @@ Its original header and superseded instructions remain unchanged for byte identi
   preserved value above. The archive was not edited. Tracked diff whitespace checks
   passed with line-ending warnings for existing text files.
 
-## Next Single Action
+### Historical Installer Qualification And Follow-Up
 
-### Authorized Failure-Scenario Package
+#### Historical Failure-Scenario Authorization And Results
 
 The next user continuation approves the 14 remaining fake refusal/failure scenarios,
 once each, stopping at the first unexpected outcome without automatic retry. The
@@ -288,7 +353,7 @@ last Python launch was `2026-09-09T12:58:46.4114242Z`. Success was not rerun.
 Supervisor execution behavior and bytes remain at the reviewed hash above;
 post-validation documentation describes its scenario interface separately.
 
-### Authorized Success Attempt
+#### Historical Success-Attempt Authorization And Results
 
 The user's subsequent "continue" authorized one corrected success attempt via the
 existing dedicated supervisor. It completed and passed; authorization is consumed.
@@ -375,7 +440,7 @@ installer or live product. Real installation, packaged runtime and product
 integration execution remain separate scopes; no push or release is authorized.
 No real installation has been performed.
 
-### Post-Commit Product Readiness
+#### Historical Post-Commit Product Readiness
 
 The follow-up was committed as `7280454` (`test: qualify plain installer refusal and
 failure scenarios`); the worktree was clean immediately after that commit. No push.
