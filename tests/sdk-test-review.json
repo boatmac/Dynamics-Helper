@@ -32,8 +32,8 @@
     "scripts/run_safe_tests.py": "a3f6aeed580a95e95f98a635df996b483d494d66754ad0ff4704f3a437f8cfa1",
     "host/test_sdk_compat.py": "36ca9f70313f7a0d99c64b5f7b50337c4c05606cb7bb80b32e17b095783837c0",
     "host/sdk_client.py": "c109b021bf96151b30f561f1cedcc67e99aa568efbfa3ee42ea80040530b5fea",
-    "host/dh_native_host.py": "5eabd7338dc59a94dda805076bee735b7906155c0bb453e1d45f2adcb498d53b",
-    "host/requirements.txt": "d4fac809c93d3d4bfa7ba15806d8315cc7fe27a0e9a5955e2ba3df905e890bff"
+    "host/dh_native_host.py": "febf2aa4fb4c57830bbb3b0955f5f9e12fd4b7b3aa94cecf2a92fce6fab9ad18",
+    "host/requirements.txt": "9bcd0e08a79027a8d385baf523c18386027cba34d52c11d098265f3670f78417"
   },
   "test_ids": [
     "host.test_sdk_compat.TestSdkCompatibility.test_imports_and_sdk_version",

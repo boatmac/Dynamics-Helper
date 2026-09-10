@@ -2,10 +2,10 @@
 
 ## Scope And Authority
 
-Use this guide for a future, explicitly authorized investigation of a new D365
+Use this guide for an explicitly authorized investigation of a new D365
 field or a missing extraction result. It is a workflow, not permission to execute.
-Read `AGENTS.md` and the current handoff's Current Milestone Summary and Next
-Single Action first. Verify the development checkout, not just the repository name.
+Read `AGENTS.md` and confirm the current request's scope first. Verify the
+development checkout, not just the repository name.
 Keep every read, edit, verification, and later command in that approved checkout.
 Installed extension state is separate from source state; do not silently switch it.
 
@@ -29,7 +29,7 @@ Installed extension state is separate from source state; do not silently switch 
 
 1. Start with Microsoft's official Edge DevTools MCP article linked below.
 2. Check the selected package's official requirements and help before setup.
-   Node compatibility is version-dependent; do not reuse a historical minimum.
+   Node compatibility is version-dependent; verify the selected package's minimum.
 3. Have the user enable remote debugging through `edge://inspect` if permitted.
    The user owns browser approval prompts; never auto-accept them or alter policy.
 4. Prefer Windows `--autoConnect` with `--user-data-dir` pointing to the user's
@@ -46,8 +46,7 @@ Installed extension state is separate from source state; do not silently switch 
 OpenCode uses an `mcp` wrapper, a named entry with `type: "local"`, and a `command`
 array containing the executable and individual arguments. Do not paste VS Code's
 `servers` configuration or split executable/arguments into its different schema.
-An optional historical pinned package argument is `chrome-devtools-mcp@1.8.0`.
-Check compatibility before selecting it. An approved `npx` invocation can use it;
+Select a compatible package version explicitly for an approved `npx` invocation;
 neither a global package install nor any coding-agent plugin is required.
 `npx` may download a package, so its use is not exempt from installation approval.
 
@@ -107,8 +106,8 @@ If authorized, use exactly one maintained direct CDP connection for the fallback
    `Page.getFrameTree`, `Runtime.enable`, and `Runtime.evaluate` only as needed.
    Never enable `Network` or add a general event/payload logger.
 4. Map approved frame execution contexts, then batch bounded structural questions
-   over that same connection. Avoid one process/connection per question: repeated
-   new helper processes caused repeated browser authorization prompts.
+   over that same connection. Avoid one process/connection per question, which can
+   trigger repeated browser authorization prompts.
 5. Enforce both operation deadlines and the total budget, including connection
    setup. Record the exact timed-out method rather than guessing its cause.
 6. Detach selected sessions, close the socket, cancel pending work/timers, and exit
@@ -136,8 +135,8 @@ If authorized, use exactly one maintained direct CDP connection for the fallback
 Created On provides a concrete regression model, not a universal D365 schema:
 
 - Proven container: `[data-id="createdon.fieldControl-datetime-description_container"]`.
-- Its readonly text inputs had no `id`/`data-id`, with observed nesting depths of
-  nine and five levels. The label's `for` did not reference either input.
+- Readonly text inputs may lack `id`/`data-id` and be deeply nested; the label's
+  `for` need not reference either input.
 - Inspect bounded descendants inside the exact container, not only siblings or
   direct children. Read input `.value` for extraction; `textContent` is insufficient.
 - Preserve structural DOM order for date/time controls. Exclude nested foreign
@@ -195,8 +194,10 @@ For each new field, define source ownership and source age before implementation
    release need applicable approval, not automatic consequences of GREEN. Do not
    repeat approval checks for effects already included in the work package.
    Use focused tests; reserve full suites for agreed milestones and observe the
-   three-round review ceiling. Report the field result and remaining gap before
-   temporary evidence paths. Keep validation chronology in the handoff/history.
+   actual review/attempt budget agreed for the task, not a fixed round count.
+   Do not reset that budget by changing reviewers or subtasks.
+   Report the field result and remaining gap before temporary evidence paths.
+   Track current limitations and planned work in [TODO.md](../TODO.md).
 
 ## Completion Checklist
 
@@ -206,8 +207,8 @@ For each new field, define source ownership and source age before implementation
 - [ ] Evidence uses sanitized structure; fixtures contain invented values only.
 - [ ] Source ownership, age, timezone, and unresolved semantics stated explicitly.
 - [ ] Capabilities labeled proven, observed failure, or untested, with versions.
-- [ ] Historical `1.8.0` initialization and direct-CDP DOM success are not reported
-  as MCP attachment success or as a guarantee for newer Edge/package versions.
+- [ ] Initialization or direct-CDP success is not reported as MCP attachment success
+  or as a guarantee for other Edge/package versions.
 - [ ] Any authorized RED/GREEN/break-fail results recorded; no automatic Git writes.
 
 ## Official References

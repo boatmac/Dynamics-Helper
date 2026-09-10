@@ -1,7 +1,7 @@
 // Tests for useAnalysisHydration — FAB re-hydration on mount.
 //
 // Maps to spec invariants R-I1..R-I5 in
-// docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md § 5.
+// docs/specs/analysis-result-persistence.md § 5.
 //
 // Strategy: the hook owns the read side of analysisStore. Testing it in
 // isolation via renderHook (instead of rendering full FAB) avoids the

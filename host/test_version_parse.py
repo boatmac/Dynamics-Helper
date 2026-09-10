@@ -1,6 +1,6 @@
 """Tests for the semver-style version parser used by the updater.
 
-Spec: docs/superpowers/specs/2026-05-11-beta-channel-toggle-design.md § 3.5
+Spec: docs/specs/beta-channel-preference.md § 3.5
 Implementation: _parse_version() and _version_gt() in dh_native_host.py.
 """
 

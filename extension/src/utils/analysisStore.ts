@@ -1,6 +1,6 @@
 // Analysis result persistence — wrapper over chrome.storage.local for the
 // C2a+ result, pending, and per-identity acknowledgement keys (see
-// docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md).
+// docs/specs/analysis-result-persistence.md).
 //
 // Why a dedicated module:
 // - Single source of truth for the storage shape. Both the Service Worker
@@ -394,7 +394,7 @@ export async function clearPendingAnalysis(): Promise<void> {
 //
 // The helpers are split out into named functions (vs inlined in the SW
 // handler) so each invariant in
-// docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md § 5
+// docs/specs/analysis-result-persistence.md § 5
 // can be tested without spinning up the full Service Worker module (which
 // has top-level side effects: native port connect, App Insights init, etc).
 // ---------------------------------------------------------------------------

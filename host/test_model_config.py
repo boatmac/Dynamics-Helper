@@ -1,5 +1,5 @@
 """Tests for the configurable model + performance feature
-(spec docs/superpowers/specs/2026-07-03-configurable-model-performance-design.md).
+(spec docs/specs/model-performance-configuration.md).
 
 Covers:
   - _classify_list_models_error: failure classification for the Options UI.

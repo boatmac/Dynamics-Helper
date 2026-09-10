@@ -184,7 +184,7 @@ const FAB: React.FC = () => {
     }>({ isOpen: false, title: '', content: '' });
     // NOTE: legacy `errorMsg` state was removed in v2.0.71 (C2a+). It had
     // 9 setters and 0 readers — confirmed dead in
-    // docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md
+    // docs/specs/analysis-result-persistence.md
     // § 1. All error surfacing now flows through `setResultPopover` so the
     // user sees a persistent popover instead of a 4-second bubble flash.
     const [updateState, setUpdateState] = useState<UpdateState>({ kind: 'idle' });
@@ -345,7 +345,7 @@ const FAB: React.FC = () => {
     const reportedCases = React.useRef<Set<string>>(new Set());
 
     // C2a+: re-hydrate persisted analysis result on mount and on case change.
-    // See docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md
+    // See docs/specs/analysis-result-persistence.md
     // The hook reads dh_last_analysis / dh_pending_analysis /
     // dh_seen_analysis from
     // chrome.storage.local and tells us whether to auto-open the popover

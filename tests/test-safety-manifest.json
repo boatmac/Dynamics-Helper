@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "status": "safety_core_source_reviewed_results_in_handoff",
+  "status": "safety_core_source_reviewed_execution_requires_current_scope",
   "policy": {
     "roots": ["host/test*.py", "tests/test*.py", "tests/harnesses/*.ps1"],
     "optional_root": "scripts/maintenance/Test*.cjs",
@@ -14,7 +14,7 @@
     "roles": "test is runnable only for pure_mock/process classes; dependency/data/bootstrap use class support and are never selected. Dependencies are scanned and raw-byte hash-bound. Data is hash-bound only and cannot use a recognized source extension.",
     "bootstrap_trust_boundary": "Only scripts/check_test_safety.py and scripts/run_safe_tests.py may use role bootstrap, review_kind bootstrap. They require separately reviewed full-file SHA256 and purpose, and are NOT scanned recursively or proven safe by this checker. The parent must review/import its bootstrap independently and bind manifest plus all closure bytes across gate/run; lstat checks are not atomic against concurrent mutation.",
     "runner_interface": "check_repository(root, profile=None, process_tests=False, include_maintenance=False) returns (diagnostics, selected_test_paths), empty selection on any diagnostic. resolve_profile(manifest, name) is pure global schema validation returning copied tests/dependencies/test_ids lists; load_execution_profile(root, name) reads the validated manifest and returns the same metadata, NOT execution approval. Gate first, then bind the same snapshot; test_ids absent means all tests in the explicit files, present means exact module.Class.test_method IDs statically present in those modules. No discovery fallback.",
-    "pending_review": "The six safety-core source files and 31 exact callsite exceptions are source-reviewed and raw-byte hash-bound for that profile only; execution evidence is recorded in the active handoff. Remaining inventory reviews are pending. Shared bootstrap hashes do not approve pii-core. No global inventory or process-test qualification is supplied. installer-success is intentionally absent until separately qualified."
+    "pending_review": "The six safety-core source files and 31 exact callsite exceptions are source-reviewed and raw-byte hash-bound for that profile only; source review does not establish an executed result. Remaining inventory reviews are pending. Shared bootstrap hashes do not approve pii-core. No global inventory or process-test qualification is supplied. installer-success is intentionally absent until separately qualified."
   },
   "profiles": {
     "safety-core": {
@@ -99,10 +99,7 @@
     {"path": "tests/harnesses/installer_safety.ps1", "role": "test", "class": "process", "source_kind": "powershell", "sha256": null, "purpose": "Installer safety harness; no execution or callsite approval supplied."},
     {"path": "host/test_analyzer.py", "role": "test", "class": "live_probe", "source_kind": "python", "sha256": null, "purpose": "Starts host and requests real analysis; never a default unit test."},
     {"path": "host/test_analyze_full.py", "role": "test", "class": "live_probe", "source_kind": "python", "sha256": null, "purpose": "Live analysis probe excluded from automatic test selection."},
-    {"path": "host/test_analyze_flow.py", "role": "test", "class": "live_probe", "source_kind": "python", "sha256": null, "purpose": "Live analysis flow probe excluded from automatic test selection."},
-    {"path": "scripts/read-only/Test-Beta3InstalledState.ps1", "role": "test", "class": "observational_helper", "source_kind": "powershell", "sha256": null, "purpose": "Explicit observation inventory only; outside test roots, never autodiscover."},
-    {"path": "scripts/read-only/Test-OriginalCloudPcUpdateState.ps1", "role": "test", "class": "observational_helper", "source_kind": "powershell", "sha256": null, "purpose": "Explicit observation inventory only; outside test roots, never autodiscover."},
-    {"path": "scripts/maintenance/Test-B2CandidateMaintenance.cjs", "role": "test", "class": "pure_mock", "source_kind": "javascript", "sha256": null, "purpose": "Optional offline VM harness; generated JavaScript needs separate manual source review."}
+    {"path": "host/test_analyze_flow.py", "role": "test", "class": "live_probe", "source_kind": "python", "sha256": null, "purpose": "Live analysis flow probe excluded from automatic test selection."}
   ],
   "exceptions": [
     {

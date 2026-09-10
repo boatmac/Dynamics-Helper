@@ -333,7 +333,7 @@ try:
     # from_datetime()). Verified 2026-07-03 by a live client.start() on
     # clean 1.0.5 + CLI 1.0.69 with no shim — handshake succeeded, no
     # ValueError. Do not reintroduce the shim unless a future SDK/CLI pair
-    # regresses; see docs/sdk-upgrade-2026-07-1.0.5.md § 4.1.
+    # regresses; see docs/sdk-integration.md.
 
     logger.info("Successfully imported copilot SDK.")
     log_emergency("Successfully imported copilot SDK.")
@@ -1053,7 +1053,7 @@ class NativeHost:
     #
     # DO NOT log plaintext URLs inside these methods.
     #
-    # Spec: docs/superpowers/specs/2026-05-25-team-manifest-url-encryption-design.md
+    # Spec: docs/specs/team-manifest-url-encryption.md
 
     def _decrypt_secrets_in_memory(self, config: dict) -> None:
         """Replace on-disk encrypted secret fields with in-memory plaintext.
@@ -1344,8 +1344,8 @@ class NativeHost:
         session_config["_effective_root"] = current_root
         session_config["_use_workspace_only"] = bool(use_workspace_only)
 
-        # Model / performance selection (spec 2026-07-03-configurable-model-
-        # performance). Surface as TOP-LEVEL session_config keys (like
+        # Model / performance selection (docs/specs/model-performance-configuration.md).
+        # Surface as TOP-LEVEL session_config keys (like
         # working_directory) so _refresh_session can add them to sdk_kwargs.
         # Empty / absent / invalid → key left empty → session inherits the
         # Copilot CLI's own default (~/.copilot/settings.json). Validate the
@@ -1399,7 +1399,7 @@ class NativeHost:
             # The user's mcp.json may still carry the legacy values; the SDK
             # silently accepts them on 0.3.0 but behaviour is undefined.
             # Migrate in-memory only — do NOT mutate the user's config file.
-            # See docs/sdk-upgrade-2026-05-0.3.0.md § 7 (B-4).
+            # See docs/sdk-integration.md.
             _MCP_TYPE_MIGRATION = {"local": "stdio", "remote": "http"}
             remapped = []
             for srv_name, srv_cfg in mcp_servers.items():
@@ -1414,8 +1414,7 @@ class NativeHost:
                     logger.warning(
                         "MCP server '%s' uses legacy type=%r; remapping "
                         "in-memory to %r. Update your mcp.json to silence "
-                        "this warning. See docs/sdk-upgrade-2026-05-0.3.0.md "
-                        "(B-4).",
+                        "this warning. See docs/sdk-integration.md.",
                         srv_name, old_type, new_type,
                     )
             session_config["mcp_servers"] = mcp_servers
@@ -1477,7 +1476,7 @@ class NativeHost:
         disabling it: automatic background compaction lets a long, complex
         analysis keep going past the context ceiling instead of failing —
         directly relevant to the C2b-lite long-analysis-timeout work
-        (docs/sdk-upgrade-2026-07-1.0.5.md § 4.2). This log makes the
+        (docs/sdk-integration.md). This log makes the
         adoption observable rather than blind: it surfaces the session-state
         workspace path (where compaction checkpoints + persisted state live)
         so beta testing can confirm behaviour and spot runaway disk use.
@@ -1703,7 +1702,7 @@ class NativeHost:
         if "skill_directories" in full_config:
             sdk_kwargs["skill_directories"] = full_config["skill_directories"]
 
-        # Model / performance (spec 2026-07-03-configurable-model-performance).
+        # Model / performance (docs/specs/model-performance-configuration.md).
         # Only pass when set to a non-empty value — empty means "inherit the
         # Copilot CLI's own default from ~/.copilot/settings.json" (the prior
         # behaviour). _get_session_config has already validated the values.
@@ -2245,7 +2244,7 @@ class NativeHost:
         """Fetch available Copilot models via the SDK for the Options model
         dropdown. Returns a CLASSIFIED error on failure — never a silent
         empty list — so the extension can surface auth/connectivity problems
-        (spec 2026-07-03-configurable-model-performance-design.md § 5).
+        (docs/specs/model-performance-configuration.md § 5).
 
         Returns one of:
           {"status": "success", "data": {"models": [{id, name,

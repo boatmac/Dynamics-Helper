@@ -805,7 +805,7 @@ const OptionsInner: React.FC = () => {
     // hydration COMPLETE: post-hydration edits don't need merge protection
     // (no more merges) but keeping them in the set is harmless.
     //
-    // See docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md
+    // See docs/specs/options-hydration.md
     const userTouchedFieldsRef = useRef<Set<keyof Preferences>>(new Set());
 
     // Status toast helpers - centralize timer cleanup and type tagging.
@@ -902,7 +902,7 @@ const OptionsInner: React.FC = () => {
     // happened. Cleared on next onChange (any keystroke = user is fixing
     // it) and on successful blur paths (empty / valid).
     const [manifestUrlInvalid, setManifestUrlInvalid] = useState<boolean>(false);
-    // Model & Performance (spec 2026-07-03-configurable-model-performance).
+    // Model & Performance (docs/specs/model-performance-configuration.md).
     // Dynamically fetched model list from the host's list_models RPC, cached
     // in chrome.storage.local. modelList holds the last-known-good models;
     // modelFetchError surfaces a classified fetch failure (never silent) while
@@ -926,7 +926,7 @@ const OptionsInner: React.FC = () => {
     const modelFetchGenerationRef = useRef(0);
     const modelFetchInFlightRef = useRef<number | null>(null);
     const modelForceRefreshPendingRef = useRef(false);
-    // Sidebar-nav layout (spec 2026-07-03-options-sidebar-nav-layout). The
+    // Sidebar-nav layout (docs/specs/options-navigation.md). The
     // Options page is a left nav + wide content pane; only the active section
     // renders. This is a pure shell change — every field's JSX/state/persist
     // wiring is unchanged, just re-parented under a section gate.
@@ -1992,7 +1992,7 @@ const OptionsInner: React.FC = () => {
         //
         // The pre-hydration warn that used to live here was removed because
         // hitting it during normal cold start is expected, not exceptional.
-        // See docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md
+        // See docs/specs/options-hydration.md
         const hostUpdateAllowed = prefsHydratedRef.current;
         const intent = createIntent(nextPrefs);
         const manifestAction = opts?.fetchManifest
@@ -3488,7 +3488,7 @@ const OptionsInner: React.FC = () => {
                     )}
 
                     <div className="flex min-h-[600px]">
-                        {/* Left sidebar navigation (spec 2026-07-03-options-sidebar-nav) */}
+                        {/* Left sidebar navigation (docs/specs/options-navigation.md) */}
                         <nav className="w-52 shrink-0 p-4 border-r border-slate-100 bg-slate-50/50">
                             {([
                                 ['general', <Maximize2 size={16} />, t('behavior')],

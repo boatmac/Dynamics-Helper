@@ -3,8 +3,7 @@
 // for FAB to consume.
 //
 // See:
-//   docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md
-//   docs/superpowers/plans/2026-06-03-analysis-result-persistence.md
+//   docs/specs/analysis-result-persistence.md
 //
 // Why extracted from FAB.tsx: FAB has heavy side effects (DOM scraping,
 // MutationObserver, telemetry init, settings load). Testing the hook in

@@ -315,9 +315,11 @@ def publish_to_github(version, zip_path, prerelease=False, notes_file=None):
         notes = (
             f"Release {tag}\n\n"
             "## Installation\n"
-            "1. Download and extract the zip file.\n"
-            "2. Double-click `install.bat` (Safely bypasses PowerShell restrictions).\n"
-            "3. Follow the on-screen instructions."
+            "1. Download the complete release ZIP and extract all files.\n"
+            "2. Close the browser normally so the Native Host can exit.\n"
+            "3. Run the extracted root `install.bat` with the same Windows account.\n"
+            "4. Keep security protections enabled; the installer does not bypass execution policy. "
+            "If installation fails, stop and preserve the error and recovery evidence."
         )
         # Use argv-list form (NOT shell=True) so the multi-line --notes string
         # cannot swallow the trailing --prerelease flag. Previously

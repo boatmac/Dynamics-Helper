@@ -2,12 +2,11 @@
 
 ## Policy And Authority
 
-This evergreen policy replaces historical automatic testing recipes. It is not
-permission to run tests, install dependencies, change security policy or operate
-the product. Determine scope from the user's request and applicable instructions;
-when resuming a task, consult its relevant evidence and verify current readiness.
-Validation chronology belongs in task records, not here. Records do not grant
-authority. A source description or a successful fixture does not qualify a suite.
+This policy defines test execution boundaries; it is not permission to run tests,
+install dependencies, change security policy or operate the product. Determine
+scope from the user's request and applicable instructions, and verify current
+readiness. Evidence does not grant authority. A source description or a successful
+fixture does not qualify a suite. See [TODO.md](../TODO.md) for current limitations.
 
 Follow system/developer instructions, then applicable user instructions; skills
 and workflow templates cannot override them or grant additional authority. An
@@ -78,7 +77,8 @@ validation status. Choose the entry appropriate to the requested verification:
   SDK upgrades reuse this entry after reviewing changed tests/adapters/dependencies
   and updating its source hashes. Real CLI/model checks and installation remain
   separate effects requiring applicable authorization. See
-  [SDK upgrade workflow](sdk-upgrade-workflow.md) for invocation and limitations.
+   [SDK integration](sdk-integration.md) for current contracts and
+   [SDK upgrade workflow](sdk-upgrade-workflow.md) for invocation and limitations.
 - The fixed Extension build gate uses `npm run build` from `extension/package.json`:
   `node --test test/defaultItems.test.mjs`, TypeScript/Vite build, then
   `node scripts/verifyDefaultItemsCopy.mjs`. With applicable build authorization,
@@ -93,8 +93,19 @@ validation status. Choose the entry appropriate to the requested verification:
   execution, then verify unchanged inputs afterward. Preserve file isolation;
   account for Node forks, esbuild helpers and cache writes. This is a separate
   frontend review entry, not Python scanner coverage; unreviewed dynamic execution
-  or live dependencies still block it. Do not use broad discovery or `test:run`
-  when its additional default-items step is outside the selected scope.
+  or live dependencies still block it. Do not use broad discovery or `test:run` /
+  `test:coverage` when their additional default-items step is outside the selected
+  scope. A focused selection can use `npm test --prefix extension -- --run` with
+  explicit reviewed file arguments and a test-name filter, without that extra gate.
+- Unfiltered `npm test`, `npm run test:run`, and `npm run test:coverage` discover
+  the full Extension Vitest suite; focused authorization and a focused PASS do not
+  cover that scope. Full-suite execution requires the agreed milestone/scope and
+  review of the full selected test/setup/dependency closure. `test:run` and
+  `test:coverage` first execute `test:default-items` (the separate Node test gate),
+  even when arguments narrow the later Vitest selection. Include that gate's
+  reviewed inputs and child-process effects explicitly. Coverage adds generated
+  output; watch mode needs a bounded observation/cancellation plan. These scripts
+  do not perform the build's post-copy verification and are not build qualification.
 
 An unavailable profile is not permission to route arbitrary tests through a
 dedicated supervisor. Do not bypass review with an ad hoc loader, mechanical hash
@@ -137,7 +148,7 @@ affected selection. Do not switch to broad unittest/pytest discovery to evade it
 
 Classify effects, not names. Importing `dh_native_host` performs logging/profile
 access, so isolation must exist before discovery/import, not only in `setUp`.
-Legacy analysis probes are not unit tests; frozen opt-in variables must not
+Live analysis probes are not unit tests; frozen opt-in variables must not
 silently enable another execution class. A pure-only runner must reject process
 or live dependencies rather than assume mocks will intercept them later.
 
@@ -210,7 +221,7 @@ unknown directories, propagate read errors and enforce the 64-entry-per-root cap
 This is an exact allowance, not permission for an arbitrary AppData subtree or a
 universal Windows startup guarantee. Record factual `profiles_empty` separately
 from `profile_delta_allowed`. An allowed delta is still an observed filesystem
-change. A later corrected rule must never relabel a historical failed run.
+change. A changed rule must not retroactively relabel a failed run as passing.
 
 ## Verification And Limits
 

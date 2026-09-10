@@ -1,0 +1,1605 @@
+{
+  "schema": 1,
+  "startedUtc": "2026-09-10T12:44:46.0821171Z",
+  "workspace": "C:\\MyWorkbench\\Repository\\Dynamics-Helper",
+  "destination": "C:\\MyWorkbench\\Repository\\_archive\\Dynamics-Helper-builds-pre-EMU-20260910",
+  "algorithm": "SHA256",
+  "files": 184,
+  "bytes": 132139721,
+  "sources": [
+    {
+      "relative": "build",
+      "path": "C:\\MyWorkbench\\Repository\\Dynamics-Helper\\build",
+      "directory": true
+    },
+    {
+      "relative": "dist",
+      "path": "C:\\MyWorkbench\\Repository\\Dynamics-Helper\\dist",
+      "directory": true
+    },
+    {
+      "relative": "host/__pycache__",
+      "path": "C:\\MyWorkbench\\Repository\\Dynamics-Helper\\host\\__pycache__",
+      "directory": true
+    },
+    {
+      "relative": "releases/local-20260909-0d1c6ee",
+      "path": "C:\\MyWorkbench\\Repository\\Dynamics-Helper\\releases\\local-20260909-0d1c6ee",
+      "directory": true
+    },
+    {
+      "relative": "releases/local-2.0.77-20260910",
+      "path": "C:\\MyWorkbench\\Repository\\Dynamics-Helper\\releases\\local-2.0.77-20260910",
+      "directory": true
+    },
+    {
+      "relative": "dh_native_host.spec",
+      "path": "C:\\MyWorkbench\\Repository\\Dynamics-Helper\\dh_native_host.spec",
+      "directory": false
+    }
+  ],
+  "absent": [],
+  "entries": [
+    {
+      "source": "build",
+      "relative": "build",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/xref-dh_native_host.html",
+      "directory": false,
+      "bytes": 912036,
+      "sha256": "778e9e4c6139a0509bf75805edab128dfbca72b69f4c41f1b7c7f837952aef6e"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/warn-dh_native_host.txt",
+      "directory": false,
+      "bytes": 12697,
+      "sha256": "a3e89aeb765825b1cff63819a88a0be914e244fde4ab2b2b3b13c26655fb4897"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/PYZ-00.toc",
+      "directory": false,
+      "bytes": 71561,
+      "sha256": "7ed77dbf732ed85b06826273b52ecb863a8cc5e4663cb7191bbcf020d01791ba"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/PYZ-00.pyz",
+      "directory": false,
+      "bytes": 5218535,
+      "sha256": "8baff21223a8c2d71a059a36a20d249b92f0d3cb952883b1c7d084b1bd93251d"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/PKG-00.toc",
+      "directory": false,
+      "bytes": 2073,
+      "sha256": "c95e81b658cd6c48df1e240237a35597ae7c27ebd02acf71e813b17617427a43"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/EXE-00.toc",
+      "directory": false,
+      "bytes": 3860,
+      "sha256": "23286741be4c0f8cfd493a2b0447721f09bb00e1e13b7835ea20e93a70e362f1"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/dh_native_host.pkg",
+      "directory": false,
+      "bytes": 5298262,
+      "sha256": "51e19935c8d9e933fde91675224ce6cc77865a0b0ca1c11c0aa06e3e1daf8cee"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/dh_native_host.exe",
+      "directory": false,
+      "bytes": 5646934,
+      "sha256": "535f7c7485f9230a801a1efb5cbc9c6db33ce93d34997f9e5338588cd0218532"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/COLLECT-00.toc",
+      "directory": false,
+      "bytes": 4953,
+      "sha256": "d3e3bcb4b388c6ea06a99781b96e3dc2d759a1fc4968f8c737493353a0973b0b"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/base_library.zip",
+      "directory": false,
+      "bytes": 1409168,
+      "sha256": "25184522ea859f6a0fa593e08edf1b5e9e758ca5a686696bdd4e01505d9c6df8"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/Analysis-00.toc",
+      "directory": false,
+      "bytes": 99148,
+      "sha256": "7563bd78b5c374e0b468209c5aae5a4dc7d003ce172ef0786f70c715a9d5b827"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/localpycs",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/localpycs/struct.pyc",
+      "directory": false,
+      "bytes": 305,
+      "sha256": "dc46cdfab7ea5bfd78e20ce81838a7a17666060827028564b0a2de0198aca964"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/localpycs/pyimod04_pywin32.pyc",
+      "directory": false,
+      "bytes": 1679,
+      "sha256": "8956b968293913eaeb67654b56b65a955a4fa06e6179579738c6a460b6e6debb"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/localpycs/pyimod03_ctypes.pyc",
+      "directory": false,
+      "bytes": 6450,
+      "sha256": "e6017d5cef7ecb021c243170082978de1d699d1d0c27d2bd1ef221a9a169c69e"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/localpycs/pyimod02_importers.pyc",
+      "directory": false,
+      "bytes": 31802,
+      "sha256": "cc024a23c19a0ec13491f67cc7bf4a33c6947439f965d3154b03d46708da0801"
+    },
+    {
+      "source": "build",
+      "relative": "build/dh_native_host/localpycs/pyimod01_archive.pyc",
+      "directory": false,
+      "bytes": 4930,
+      "sha256": "95bc75fb1815443c6a51c4470dc254f44e2de2b66bb7dfd0c13541ff789c69e1"
+    },
+    {
+      "source": "dist",
+      "relative": "dist",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/dh_native_host.exe",
+      "directory": false,
+      "bytes": 5646934,
+      "sha256": "535f7c7485f9230a801a1efb5cbc9c6db33ce93d34997f9e5338588cd0218532"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/VCRUNTIME140.dll",
+      "directory": false,
+      "bytes": 178616,
+      "sha256": "d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/VCRUNTIME140_1.dll",
+      "directory": false,
+      "bytes": 50112,
+      "sha256": "a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/unicodedata.pyd",
+      "directory": false,
+      "bytes": 712928,
+      "sha256": "111e0fdfeef9887c04f6ebf1972ce1ccbec55b226012e4a288c2d4a0b17b216b"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/select.pyd",
+      "directory": false,
+      "bytes": 32992,
+      "sha256": "024f955349fe46cf1bb2c22c6b57fcf38cf5755d46166fbf63e7e5b92433b111"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/python313.dll",
+      "directory": false,
+      "bytes": 6135008,
+      "sha256": "e820bf024efd2b56bb2b82791e6b6ddc7303f070f8e72cba7637482a8a906238"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/pyexpat.pyd",
+      "directory": false,
+      "bytes": 221920,
+      "sha256": "b9c9c5a9f52af559a7eb4e8ddfd60558185bfc7794f32840bed1747d1ec9026a"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/libssl-3.dll",
+      "directory": false,
+      "bytes": 794872,
+      "sha256": "28c395290279fa4f4f54a57b85cd66d853895f925fefb8f6fdebc0d8b1cdd07c"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/libffi-8.dll",
+      "directory": false,
+      "bytes": 39696,
+      "sha256": "eff52743773eb550fcc6ce3efc37c85724502233b6b002a35496d828bd7b280a"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/libcrypto-3.dll",
+      "directory": false,
+      "bytes": 5238520,
+      "sha256": "09499e186cf0e434ffa17ad153aa9a66d6048c54a2c03b823e2a06c49d9affe4"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/base_library.zip",
+      "directory": false,
+      "bytes": 1409168,
+      "sha256": "25184522ea859f6a0fa593e08edf1b5e9e758ca5a686696bdd4e01505d9c6df8"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_zoneinfo.pyd",
+      "directory": false,
+      "bytes": 50912,
+      "sha256": "6650db91accc05e625d3c5d8a40e15127a040ea1135e40e875fd78d8a7665a84"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_wmi.pyd",
+      "directory": false,
+      "bytes": 39648,
+      "sha256": "db45362354fd4965329cb14bd974e60b26525045d09fb4fdfb1674a93b79d60c"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_uuid.pyd",
+      "directory": false,
+      "bytes": 27872,
+      "sha256": "b93832742a2348d6659fd62e8a8aff061594693fc537da74c7d2d1cdf83a8475"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_ssl.pyd",
+      "directory": false,
+      "bytes": 181984,
+      "sha256": "8d2f51fa1dc929073a2ad8d1c7c0c911e8f695870dcf4dda2846f4b75a7f77fb"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_socket.pyd",
+      "directory": false,
+      "bytes": 86752,
+      "sha256": "ccbd0f83df3784da08147b8e8765e28c978de28b5c0eddcfba5567b59d43fef9"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_queue.pyd",
+      "directory": false,
+      "bytes": 35552,
+      "sha256": "4404c2569443ffb54e7cfffdca8ddf58c9a609175305970728ec12bc1c147b43"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_overlapped.pyd",
+      "directory": false,
+      "bytes": 57568,
+      "sha256": "9db08b5449e18088754ce57e315657d00b46575e0151cd379efef8847488a606"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_multiprocessing.pyd",
+      "directory": false,
+      "bytes": 38112,
+      "sha256": "db19972cf033b598f5826f8219bc2608412b84061d294f5972b43c2ab95f7af5"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_lzma.pyd",
+      "directory": false,
+      "bytes": 159456,
+      "sha256": "ee224aacf5cf9c9974a1b842aac8d89d5d9b7eeebbf4d76619ae0ce4da8ecd96"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_hashlib.pyd",
+      "directory": false,
+      "bytes": 69344,
+      "sha256": "79a26289aef0d92545a082507c7021f10e219621d137cb726c4d0fbbfd4b46ae"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_decimal.pyd",
+      "directory": false,
+      "bytes": 286944,
+      "sha256": "1e6a5707163d3c103e0eb4695eefedbea4b855fb227c61cc265b168970d6c6f0"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_ctypes.pyd",
+      "directory": false,
+      "bytes": 134368,
+      "sha256": "9d6dccb4cd84a44a107f9b06b91c0a44e85766d9bf4debb6abbde8fda7494c2c"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_bz2.pyd",
+      "directory": false,
+      "bytes": 86752,
+      "sha256": "261545bd24f15a783fc0c82568b766a4ab569dde14507a81701cccf5293e6e54"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/_asyncio.pyd",
+      "directory": false,
+      "bytes": 72928,
+      "sha256": "6941e2aeed3aad1a4658774ecb60309170066a040c2118a5efd16458ac3bed00"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/pydantic-2.12.5.dist-info",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/pydantic-2.12.5.dist-info/WHEEL",
+      "directory": false,
+      "bytes": 87,
+      "sha256": "aad0b0a12256807936d52d4a6f88a1773236ae527564a688bab4e3fe780e8724"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/pydantic-2.12.5.dist-info/REQUESTED",
+      "directory": false,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/pydantic-2.12.5.dist-info/RECORD",
+      "directory": false,
+      "bytes": 15545,
+      "sha256": "455694c6971c7f4304035e7709d36fe5ac3bc7740f6ea15542328d57acc652a5"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/pydantic-2.12.5.dist-info/METADATA",
+      "directory": false,
+      "bytes": 90587,
+      "sha256": "a3ba23e895191fed69b8323cbcbcdc82984ca0b6a3cdc62c48a2341886a9c08d"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/pydantic-2.12.5.dist-info/INSTALLER",
+      "directory": false,
+      "bytes": 4,
+      "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/pydantic-2.12.5.dist-info/licenses",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/pydantic-2.12.5.dist-info/licenses/LICENSE",
+      "directory": false,
+      "bytes": 1129,
+      "sha256": "a9e186f3ca16b5eef84318e7a701721351a00cb7b8ae3a4394b67b49e3529ef3"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/pydantic_core",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/pydantic_core/_pydantic_core.cp313-win_amd64.pyd",
+      "directory": false,
+      "bytes": 5437440,
+      "sha256": "77077f8f3b7dfbd9f6d4386f5ce424f72085e5fbfcd1593759fcfa1849f586e4"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/dateutil",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/dateutil/zoneinfo",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/dateutil/zoneinfo/dateutil-zoneinfo.tar.gz",
+      "directory": false,
+      "bytes": 156400,
+      "sha256": "d3ea52e7b6e968de0d884df1288193596fa95b803db4f92a18279a7398004475"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/certifi",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/certifi/py.typed",
+      "directory": false,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "dist",
+      "relative": "dist/dh_native_host/_internal/certifi/cacert.pem",
+      "directory": false,
+      "bytes": 270954,
+      "sha256": "4f3975ff30abbf35443b486064ae8bcb41dff707ffdf576c76d292fb458aa0a9"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/updater.cpython-313.pyc",
+      "directory": false,
+      "bytes": 12438,
+      "sha256": "6936a13c5a8daebf9234fb7a9e6720504d3eb6a62d8eda6cd2033eff68236484"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_version_parse.cpython-313.pyc",
+      "directory": false,
+      "bytes": 4924,
+      "sha256": "77f8d211f9a83c17e4deced0520873ca4709eedb23eb60ce3f4efd227522a71d"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_session_workspace.cpython-313.pyc",
+      "directory": false,
+      "bytes": 32724,
+      "sha256": "d6786354c401fde6ed8cdb89f11d403bfbf5de68c6a615e6e1199772ec469865"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_secret_store.cpython-313.pyc",
+      "directory": false,
+      "bytes": 5177,
+      "sha256": "f5ac95c027b5b9afcfc2ad90609083ccef899b2145bcc26598c7db192f811bab"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_sdk_compat.cpython-313.pyc",
+      "directory": false,
+      "bytes": 9792,
+      "sha256": "b9898f9155c5be21dc19b4263715ca02bc1a1d56c755895e3d6a88799e10ca50"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_pii_scrubber.cpython-313.pyc",
+      "directory": false,
+      "bytes": 7904,
+      "sha256": "475272ed8f8f62d8db9ecc2f76ffa441ab0e0f3efd0fda7b2cfc02af8f5dabfd"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_model_config.cpython-313.pyc",
+      "directory": false,
+      "bytes": 5175,
+      "sha256": "e0cf4dc7234fea111ca09dfd71e1daf0513e8b1a2a1fcbfc6b209d7fcfa86d21"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_config_secrets.cpython-313.pyc",
+      "directory": false,
+      "bytes": 9443,
+      "sha256": "fb08b8905347e76f6307bc8c3a015eb71d7dd01c34174da9b7220d564defc4f4"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_case_id.cpython-313.pyc",
+      "directory": false,
+      "bytes": 12048,
+      "sha256": "351fb8b2d2270b1d3998279e67eab7b11be4098ef2a987ac5d8bb21842818540"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_analyzer.cpython-313.pyc",
+      "directory": false,
+      "bytes": 3317,
+      "sha256": "77731347e9c3129a31b70b71e31a12debb966359f862d1e34686661d53a25ea6"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_analyze_timeout.cpython-313.pyc",
+      "directory": false,
+      "bytes": 6497,
+      "sha256": "08ee4ddac56f12c4ff92ec3af3dfdc9b254a50ec5049cdf882d207836dfdcdaf"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_analyze_full.cpython-313.pyc",
+      "directory": false,
+      "bytes": 4158,
+      "sha256": "82bfa7de0c3002708d21ba8e5e4c68584394ae3947123bc2ec07b65b0b07527c"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/test_analyze_flow.cpython-313.pyc",
+      "directory": false,
+      "bytes": 5993,
+      "sha256": "8ea3e0a45904c59e2fb2931f86c58e1cec5dddd41004a4c15cc82cd35ea72c0e"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/secret_store.cpython-313.pyc",
+      "directory": false,
+      "bytes": 6643,
+      "sha256": "499cc8a9df313db13897446de0586ea89b5a430cd24b8b80a7ae357e90594010"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/pii_scrubber.cpython-313.pyc",
+      "directory": false,
+      "bytes": 2485,
+      "sha256": "34376f321d7d8749ef8d89a17bc490f1d3a1a7536e15b21e603c642d46a1642b"
+    },
+    {
+      "source": "host/__pycache__",
+      "relative": "host/__pycache__/dh_native_host.cpython-313.pyc",
+      "directory": false,
+      "bytes": 97597,
+      "sha256": "96ff18b5aec5bd2a5569255d51f92834e14458c5bed86f858db3c25e75fe2afd"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/DynamicsHelper_v2.0.76.zip",
+      "directory": false,
+      "bytes": 14010577,
+      "sha256": "92873a415d7bdecb07ebdf1e6227f6cccdd844ef37e5b166d7e4627354ff4320"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/build-record.json",
+      "directory": false,
+      "bytes": 38341,
+      "sha256": "d0f553900edd28138914de0db87e2ffbfc941932aaee498fa1e4cc9c9bc404b9"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/update-manifest.json",
+      "directory": false,
+      "bytes": 8851,
+      "sha256": "1a91a847ba601d0cf0fec855fddc0638e6852b8b8c87d76c6d1cdb2860456077"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/installer_core.ps1",
+      "directory": false,
+      "bytes": 11436,
+      "sha256": "bd3b422031979b46fd3f9f58960ceda31e143fd407acab39737b017e1c270356"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/install.bat",
+      "directory": false,
+      "bytes": 228,
+      "sha256": "69b6ddb379d6969c7bc71924999641d440d69babf640d7e7f16bfbda9eb60f3d"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/system_prompt.md",
+      "directory": false,
+      "bytes": 4297,
+      "sha256": "2db41d349b56da520651a80758b89fc020d75c37b33b0b216eeb7acb49b6e687"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/release-integrity.json",
+      "directory": false,
+      "bytes": 5996,
+      "sha256": "be12ef1c61f16f36a647a1dcecd0bcaf5d51484035be5c8979bb96687714de9a"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/register.py",
+      "directory": false,
+      "bytes": 500,
+      "sha256": "82dbdfc1dbe68db58508181cf583429298dc7244849b3eaf09ae3038ad0defb4"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/installed-product.json",
+      "directory": false,
+      "bytes": 314,
+      "sha256": "1d605f288ab5efba6e43443b2ef2c3a77d14826cc3bfb1f4265a27765b626b29"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/dh_native_host.exe",
+      "directory": false,
+      "bytes": 5295372,
+      "sha256": "c732a4e1d9f2dffbe8d2c925c87984b1b0b268cae210ab3ac69a34e9d3f1480c"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/config.json",
+      "directory": false,
+      "bytes": 188,
+      "sha256": "064ee6eee4cfd8d0034e4ebcefc1d27ad07d4b5549e5612df9ce65807fe2e46e"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/VCRUNTIME140.dll",
+      "directory": false,
+      "bytes": 178616,
+      "sha256": "d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/VCRUNTIME140_1.dll",
+      "directory": false,
+      "bytes": 50112,
+      "sha256": "a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/unicodedata.pyd",
+      "directory": false,
+      "bytes": 712928,
+      "sha256": "111e0fdfeef9887c04f6ebf1972ce1ccbec55b226012e4a288c2d4a0b17b216b"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/select.pyd",
+      "directory": false,
+      "bytes": 32992,
+      "sha256": "024f955349fe46cf1bb2c22c6b57fcf38cf5755d46166fbf63e7e5b92433b111"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/python313.dll",
+      "directory": false,
+      "bytes": 6135008,
+      "sha256": "e820bf024efd2b56bb2b82791e6b6ddc7303f070f8e72cba7637482a8a906238"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/pyexpat.pyd",
+      "directory": false,
+      "bytes": 221920,
+      "sha256": "b9c9c5a9f52af559a7eb4e8ddfd60558185bfc7794f32840bed1747d1ec9026a"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/libssl-3.dll",
+      "directory": false,
+      "bytes": 794872,
+      "sha256": "28c395290279fa4f4f54a57b85cd66d853895f925fefb8f6fdebc0d8b1cdd07c"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/libffi-8.dll",
+      "directory": false,
+      "bytes": 39696,
+      "sha256": "eff52743773eb550fcc6ce3efc37c85724502233b6b002a35496d828bd7b280a"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/libcrypto-3.dll",
+      "directory": false,
+      "bytes": 5238520,
+      "sha256": "09499e186cf0e434ffa17ad153aa9a66d6048c54a2c03b823e2a06c49d9affe4"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/base_library.zip",
+      "directory": false,
+      "bytes": 1409168,
+      "sha256": "b5ca04c20374cede77ae130e8f18a66d88abfcf3921b4a38296e39a4190daf07"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_zoneinfo.pyd",
+      "directory": false,
+      "bytes": 50912,
+      "sha256": "6650db91accc05e625d3c5d8a40e15127a040ea1135e40e875fd78d8a7665a84"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_wmi.pyd",
+      "directory": false,
+      "bytes": 39648,
+      "sha256": "db45362354fd4965329cb14bd974e60b26525045d09fb4fdfb1674a93b79d60c"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_uuid.pyd",
+      "directory": false,
+      "bytes": 27872,
+      "sha256": "b93832742a2348d6659fd62e8a8aff061594693fc537da74c7d2d1cdf83a8475"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_ssl.pyd",
+      "directory": false,
+      "bytes": 181984,
+      "sha256": "8d2f51fa1dc929073a2ad8d1c7c0c911e8f695870dcf4dda2846f4b75a7f77fb"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_socket.pyd",
+      "directory": false,
+      "bytes": 86752,
+      "sha256": "ccbd0f83df3784da08147b8e8765e28c978de28b5c0eddcfba5567b59d43fef9"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_queue.pyd",
+      "directory": false,
+      "bytes": 35552,
+      "sha256": "4404c2569443ffb54e7cfffdca8ddf58c9a609175305970728ec12bc1c147b43"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_overlapped.pyd",
+      "directory": false,
+      "bytes": 57568,
+      "sha256": "9db08b5449e18088754ce57e315657d00b46575e0151cd379efef8847488a606"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_multiprocessing.pyd",
+      "directory": false,
+      "bytes": 38112,
+      "sha256": "db19972cf033b598f5826f8219bc2608412b84061d294f5972b43c2ab95f7af5"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_lzma.pyd",
+      "directory": false,
+      "bytes": 159456,
+      "sha256": "ee224aacf5cf9c9974a1b842aac8d89d5d9b7eeebbf4d76619ae0ce4da8ecd96"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_hashlib.pyd",
+      "directory": false,
+      "bytes": 69344,
+      "sha256": "79a26289aef0d92545a082507c7021f10e219621d137cb726c4d0fbbfd4b46ae"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_decimal.pyd",
+      "directory": false,
+      "bytes": 286944,
+      "sha256": "1e6a5707163d3c103e0eb4695eefedbea4b855fb227c61cc265b168970d6c6f0"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_ctypes.pyd",
+      "directory": false,
+      "bytes": 134368,
+      "sha256": "9d6dccb4cd84a44a107f9b06b91c0a44e85766d9bf4debb6abbde8fda7494c2c"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_bz2.pyd",
+      "directory": false,
+      "bytes": 86752,
+      "sha256": "261545bd24f15a783fc0c82568b766a4ab569dde14507a81701cccf5293e6e54"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/_asyncio.pyd",
+      "directory": false,
+      "bytes": 72928,
+      "sha256": "6941e2aeed3aad1a4658774ecb60309170066a040c2118a5efd16458ac3bed00"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/pydantic-2.12.5.dist-info",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/pydantic-2.12.5.dist-info/WHEEL",
+      "directory": false,
+      "bytes": 87,
+      "sha256": "aad0b0a12256807936d52d4a6f88a1773236ae527564a688bab4e3fe780e8724"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/pydantic-2.12.5.dist-info/REQUESTED",
+      "directory": false,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/pydantic-2.12.5.dist-info/RECORD",
+      "directory": false,
+      "bytes": 15545,
+      "sha256": "455694c6971c7f4304035e7709d36fe5ac3bc7740f6ea15542328d57acc652a5"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/pydantic-2.12.5.dist-info/METADATA",
+      "directory": false,
+      "bytes": 90587,
+      "sha256": "a3ba23e895191fed69b8323cbcbcdc82984ca0b6a3cdc62c48a2341886a9c08d"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/pydantic-2.12.5.dist-info/INSTALLER",
+      "directory": false,
+      "bytes": 4,
+      "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/pydantic-2.12.5.dist-info/licenses",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/pydantic-2.12.5.dist-info/licenses/LICENSE",
+      "directory": false,
+      "bytes": 1129,
+      "sha256": "a9e186f3ca16b5eef84318e7a701721351a00cb7b8ae3a4394b67b49e3529ef3"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/pydantic_core",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/pydantic_core/_pydantic_core.cp313-win_amd64.pyd",
+      "directory": false,
+      "bytes": 5437440,
+      "sha256": "77077f8f3b7dfbd9f6d4386f5ce424f72085e5fbfcd1593759fcfa1849f586e4"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/dateutil",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/dateutil/zoneinfo",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/dateutil/zoneinfo/dateutil-zoneinfo.tar.gz",
+      "directory": false,
+      "bytes": 156400,
+      "sha256": "d3ea52e7b6e968de0d884df1288193596fa95b803db4f92a18279a7398004475"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/certifi",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/certifi/py.typed",
+      "directory": false,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/host/_internal/certifi/cacert.pem",
+      "directory": false,
+      "bytes": 270954,
+      "sha256": "4f3975ff30abbf35443b486064ae8bcb41dff707ffdf576c76d292fb458aa0a9"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/service-worker-loader.js",
+      "directory": false,
+      "bytes": 48,
+      "sha256": "abd7a8fe17994a31b552fddd2cd3d01cdbe1fd72541ad69667dfe438918e3371"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/manifest.json",
+      "directory": false,
+      "bytes": 1688,
+      "sha256": "3677028366c214461645f3ab8ebdf489e956f4f036c18be26120ed7172787324"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/items.json",
+      "directory": false,
+      "bytes": 692,
+      "sha256": "839ef34acce528efff3a64a563070942fc228326730d390aa7d467c3df83ce25"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/index.html",
+      "directory": false,
+      "bytes": 590,
+      "sha256": "9a3e9057fde46e62204e84f74a4227c1e59a392fe3c4dfdaa068a4cd3812eb94"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/assets",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/assets/updateRuntime-OYYVarkO.js",
+      "directory": false,
+      "bytes": 214754,
+      "sha256": "8879e982de47087eb2862ecff040d929d01f1596bd7bd290166de459224c7d89"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/assets/serviceWorker.ts-qYh6pHr6.js",
+      "directory": false,
+      "bytes": 26324,
+      "sha256": "5e22d0b0e109ad602c4173c48862a3b8d9d023e72147da9e8c7ee980aa4d775a"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/assets/index.tsx-loader-CfZd6Fly.js",
+      "directory": false,
+      "bytes": 342,
+      "sha256": "cc64701fc74cb5799550aaa445c6039775feb13347722e90de6d2c35d2617455"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/assets/index.tsx-DlGJVbwz.js",
+      "directory": false,
+      "bytes": 56198,
+      "sha256": "755ffccf6cead839b1d4e8172b47dd18534fab25e3ae1553791fa1f1313daa63"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/assets/index.html-C2gaw5vc.js",
+      "directory": false,
+      "bytes": 131497,
+      "sha256": "dcf57d3baa615d6fb2bd5dada8c81882718f4397b8961a2bd2f0987df43159c9"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/assets/index-DiFHu2zg.css",
+      "directory": false,
+      "bytes": 27842,
+      "sha256": "8e88a1d37ea9fbbf0a08f5e65c294fe94c1243e7f60f83bf01aed596d0ae3089"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/assets/bundle-mjs-tIsKJRA_.js",
+      "directory": false,
+      "bytes": 388169,
+      "sha256": "6cc7e06aebf657018d2b5a16156f4a00f75c6e2f4365273f731bd3bcb3cafae2"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/assets/analyzeRequest-540LcplQ.js",
+      "directory": false,
+      "bytes": 22523,
+      "sha256": "938569e802549e124bda933c24fc3858616c74388a4fbbdbe48f91c316135bf0"
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/.vite",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-20260909-0d1c6ee",
+      "relative": "releases/local-20260909-0d1c6ee/verified-package/extension/.vite/manifest.json",
+      "directory": false,
+      "bytes": 1636,
+      "sha256": "655dee333b91708343a4978648e67de795557702b7e9fa40612f2d4587756ee0"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/DynamicsHelper_v2.0.77.zip",
+      "directory": false,
+      "bytes": 14357834,
+      "sha256": "9dde6e68f46dc8423e3f220fea414384ea40d819aa146cb4f6b8faeadea2e3eb"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/build-record.json",
+      "directory": false,
+      "bytes": 39141,
+      "sha256": "bf53c228fdd0e9e72914e6833a6a4c372ed92e3c3aeba7a5268ef19ace8fb046"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/update-manifest.json",
+      "directory": false,
+      "bytes": 8847,
+      "sha256": "1d5f20d5aab675451d19e1f6a27583df7a345b08e6588b27aa82a039015e561c"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/installer_core.ps1",
+      "directory": false,
+      "bytes": 11436,
+      "sha256": "bd3b422031979b46fd3f9f58960ceda31e143fd407acab39737b017e1c270356"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/install.bat",
+      "directory": false,
+      "bytes": 228,
+      "sha256": "69b6ddb379d6969c7bc71924999641d440d69babf640d7e7f16bfbda9eb60f3d"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/system_prompt.md",
+      "directory": false,
+      "bytes": 4297,
+      "sha256": "2db41d349b56da520651a80758b89fc020d75c37b33b0b216eeb7acb49b6e687"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/release-integrity.json",
+      "directory": false,
+      "bytes": 5992,
+      "sha256": "d0651331eb40b2e97e40b8eb1920812645e68ed14cbaa41ee87da2770d8bf3ff"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/register.py",
+      "directory": false,
+      "bytes": 500,
+      "sha256": "82dbdfc1dbe68db58508181cf583429298dc7244849b3eaf09ae3038ad0defb4"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/installed-product.json",
+      "directory": false,
+      "bytes": 314,
+      "sha256": "b70fa8cd0dec85d1c0e7c1c6faaa240e655841f81fd30ca25d3dd8953461f07c"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/dh_native_host.exe",
+      "directory": false,
+      "bytes": 5646934,
+      "sha256": "535f7c7485f9230a801a1efb5cbc9c6db33ce93d34997f9e5338588cd0218532"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/config.json",
+      "directory": false,
+      "bytes": 188,
+      "sha256": "064ee6eee4cfd8d0034e4ebcefc1d27ad07d4b5549e5612df9ce65807fe2e46e"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/VCRUNTIME140.dll",
+      "directory": false,
+      "bytes": 178616,
+      "sha256": "d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/VCRUNTIME140_1.dll",
+      "directory": false,
+      "bytes": 50112,
+      "sha256": "a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/unicodedata.pyd",
+      "directory": false,
+      "bytes": 712928,
+      "sha256": "111e0fdfeef9887c04f6ebf1972ce1ccbec55b226012e4a288c2d4a0b17b216b"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/select.pyd",
+      "directory": false,
+      "bytes": 32992,
+      "sha256": "024f955349fe46cf1bb2c22c6b57fcf38cf5755d46166fbf63e7e5b92433b111"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/python313.dll",
+      "directory": false,
+      "bytes": 6135008,
+      "sha256": "e820bf024efd2b56bb2b82791e6b6ddc7303f070f8e72cba7637482a8a906238"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/pyexpat.pyd",
+      "directory": false,
+      "bytes": 221920,
+      "sha256": "b9c9c5a9f52af559a7eb4e8ddfd60558185bfc7794f32840bed1747d1ec9026a"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/libssl-3.dll",
+      "directory": false,
+      "bytes": 794872,
+      "sha256": "28c395290279fa4f4f54a57b85cd66d853895f925fefb8f6fdebc0d8b1cdd07c"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/libffi-8.dll",
+      "directory": false,
+      "bytes": 39696,
+      "sha256": "eff52743773eb550fcc6ce3efc37c85724502233b6b002a35496d828bd7b280a"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/libcrypto-3.dll",
+      "directory": false,
+      "bytes": 5238520,
+      "sha256": "09499e186cf0e434ffa17ad153aa9a66d6048c54a2c03b823e2a06c49d9affe4"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/base_library.zip",
+      "directory": false,
+      "bytes": 1409168,
+      "sha256": "25184522ea859f6a0fa593e08edf1b5e9e758ca5a686696bdd4e01505d9c6df8"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_zoneinfo.pyd",
+      "directory": false,
+      "bytes": 50912,
+      "sha256": "6650db91accc05e625d3c5d8a40e15127a040ea1135e40e875fd78d8a7665a84"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_wmi.pyd",
+      "directory": false,
+      "bytes": 39648,
+      "sha256": "db45362354fd4965329cb14bd974e60b26525045d09fb4fdfb1674a93b79d60c"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_uuid.pyd",
+      "directory": false,
+      "bytes": 27872,
+      "sha256": "b93832742a2348d6659fd62e8a8aff061594693fc537da74c7d2d1cdf83a8475"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_ssl.pyd",
+      "directory": false,
+      "bytes": 181984,
+      "sha256": "8d2f51fa1dc929073a2ad8d1c7c0c911e8f695870dcf4dda2846f4b75a7f77fb"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_socket.pyd",
+      "directory": false,
+      "bytes": 86752,
+      "sha256": "ccbd0f83df3784da08147b8e8765e28c978de28b5c0eddcfba5567b59d43fef9"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_queue.pyd",
+      "directory": false,
+      "bytes": 35552,
+      "sha256": "4404c2569443ffb54e7cfffdca8ddf58c9a609175305970728ec12bc1c147b43"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_overlapped.pyd",
+      "directory": false,
+      "bytes": 57568,
+      "sha256": "9db08b5449e18088754ce57e315657d00b46575e0151cd379efef8847488a606"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_multiprocessing.pyd",
+      "directory": false,
+      "bytes": 38112,
+      "sha256": "db19972cf033b598f5826f8219bc2608412b84061d294f5972b43c2ab95f7af5"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_lzma.pyd",
+      "directory": false,
+      "bytes": 159456,
+      "sha256": "ee224aacf5cf9c9974a1b842aac8d89d5d9b7eeebbf4d76619ae0ce4da8ecd96"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_hashlib.pyd",
+      "directory": false,
+      "bytes": 69344,
+      "sha256": "79a26289aef0d92545a082507c7021f10e219621d137cb726c4d0fbbfd4b46ae"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_decimal.pyd",
+      "directory": false,
+      "bytes": 286944,
+      "sha256": "1e6a5707163d3c103e0eb4695eefedbea4b855fb227c61cc265b168970d6c6f0"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_ctypes.pyd",
+      "directory": false,
+      "bytes": 134368,
+      "sha256": "9d6dccb4cd84a44a107f9b06b91c0a44e85766d9bf4debb6abbde8fda7494c2c"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_bz2.pyd",
+      "directory": false,
+      "bytes": 86752,
+      "sha256": "261545bd24f15a783fc0c82568b766a4ab569dde14507a81701cccf5293e6e54"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/_asyncio.pyd",
+      "directory": false,
+      "bytes": 72928,
+      "sha256": "6941e2aeed3aad1a4658774ecb60309170066a040c2118a5efd16458ac3bed00"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/pydantic-2.12.5.dist-info",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/pydantic-2.12.5.dist-info/WHEEL",
+      "directory": false,
+      "bytes": 87,
+      "sha256": "aad0b0a12256807936d52d4a6f88a1773236ae527564a688bab4e3fe780e8724"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/pydantic-2.12.5.dist-info/REQUESTED",
+      "directory": false,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/pydantic-2.12.5.dist-info/RECORD",
+      "directory": false,
+      "bytes": 15545,
+      "sha256": "455694c6971c7f4304035e7709d36fe5ac3bc7740f6ea15542328d57acc652a5"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/pydantic-2.12.5.dist-info/METADATA",
+      "directory": false,
+      "bytes": 90587,
+      "sha256": "a3ba23e895191fed69b8323cbcbcdc82984ca0b6a3cdc62c48a2341886a9c08d"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/pydantic-2.12.5.dist-info/INSTALLER",
+      "directory": false,
+      "bytes": 4,
+      "sha256": "ceebae7b8927a3227e5303cf5e0f1f7b34bb542ad7250ac03fbcde36ec2f1508"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/pydantic-2.12.5.dist-info/licenses",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/pydantic-2.12.5.dist-info/licenses/LICENSE",
+      "directory": false,
+      "bytes": 1129,
+      "sha256": "a9e186f3ca16b5eef84318e7a701721351a00cb7b8ae3a4394b67b49e3529ef3"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/pydantic_core",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/pydantic_core/_pydantic_core.cp313-win_amd64.pyd",
+      "directory": false,
+      "bytes": 5437440,
+      "sha256": "77077f8f3b7dfbd9f6d4386f5ce424f72085e5fbfcd1593759fcfa1849f586e4"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/dateutil",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/dateutil/zoneinfo",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/dateutil/zoneinfo/dateutil-zoneinfo.tar.gz",
+      "directory": false,
+      "bytes": 156400,
+      "sha256": "d3ea52e7b6e968de0d884df1288193596fa95b803db4f92a18279a7398004475"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/certifi",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/certifi/py.typed",
+      "directory": false,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/host/_internal/certifi/cacert.pem",
+      "directory": false,
+      "bytes": 270954,
+      "sha256": "4f3975ff30abbf35443b486064ae8bcb41dff707ffdf576c76d292fb458aa0a9"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/service-worker-loader.js",
+      "directory": false,
+      "bytes": 48,
+      "sha256": "85e33d1dfd5f2d2a7885935e36e12472db41b4f9fa760308da3289f4fadb452c"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/manifest.json",
+      "directory": false,
+      "bytes": 1660,
+      "sha256": "d17f1491958749e7dae702786cd78e4374b27f0728fca9ee2a1a40a0688fc7ca"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/items.json",
+      "directory": false,
+      "bytes": 692,
+      "sha256": "839ef34acce528efff3a64a563070942fc228326730d390aa7d467c3df83ce25"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/index.html",
+      "directory": false,
+      "bytes": 590,
+      "sha256": "9a3e9057fde46e62204e84f74a4227c1e59a392fe3c4dfdaa068a4cd3812eb94"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/assets",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/assets/updateRuntime-OYYVarkO.js",
+      "directory": false,
+      "bytes": 214754,
+      "sha256": "8879e982de47087eb2862ecff040d929d01f1596bd7bd290166de459224c7d89"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/assets/serviceWorker.ts-hdhq5T4l.js",
+      "directory": false,
+      "bytes": 26324,
+      "sha256": "00b3a1a1d1cf2dd9e5b00c43672fa209d42347b7c70d5edc416b0ebf545c8d2c"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/assets/index.tsx-loader-Cpe_Gx9U.js",
+      "directory": false,
+      "bytes": 342,
+      "sha256": "3ddb137c5bff74b7fab0c21a5d0a5f9767dcdbf6ee2bdbe1021036c81db5cd44"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/assets/index.tsx-D01txJwi.js",
+      "directory": false,
+      "bytes": 57231,
+      "sha256": "944398a9191b057b81ae2c40e63439c4c0483300391f5403f4e59b7604e2e66a"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/assets/index.html-C2gaw5vc.js",
+      "directory": false,
+      "bytes": 131497,
+      "sha256": "dcf57d3baa615d6fb2bd5dada8c81882718f4397b8961a2bd2f0987df43159c9"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/assets/index-DiFHu2zg.css",
+      "directory": false,
+      "bytes": 27842,
+      "sha256": "8e88a1d37ea9fbbf0a08f5e65c294fe94c1243e7f60f83bf01aed596d0ae3089"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/assets/bundle-mjs-tIsKJRA_.js",
+      "directory": false,
+      "bytes": 388169,
+      "sha256": "6cc7e06aebf657018d2b5a16156f4a00f75c6e2f4365273f731bd3bcb3cafae2"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/assets/analyzeRequest-BmWFicff.js",
+      "directory": false,
+      "bytes": 23413,
+      "sha256": "5e45b2d9aee244599355dcd0a1148eaa4dd97721d910e6a15fc40feaec83102e"
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/.vite",
+      "directory": true,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "source": "releases/local-2.0.77-20260910",
+      "relative": "releases/local-2.0.77-20260910/verified-package/extension/.vite/manifest.json",
+      "directory": false,
+      "bytes": 1636,
+      "sha256": "ff3a4178cc64c0584bd9944967a8a49bec1d57c34ad8b821f4c079173f635638"
+    },
+    {
+      "source": "dh_native_host.spec",
+      "relative": "dh_native_host.spec",
+      "directory": false,
+      "bytes": 1257,
+      "sha256": "1e90f5f967c02e0ee0670431508d9fffb042bacee8c89ef100dddd217c01d261"
+    }
+  ]
+}

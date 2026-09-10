@@ -1,0 +1,433 @@
+{
+  "schemaVersion": 1,
+  "createdUtc": "2026-09-10T15:38:10.5353741Z",
+  "canonicalSourceRoot": "C:\\MyWorkbench\\Repository\\Dynamics-Helper",
+  "archiveRoot": "C:\\MyWorkbench\\Repository\\_archive\\Dynamics-Helper-fresh-start-records-20260910",
+  "classification": "Local private historical records; not for export or execution.",
+  "snapshot": "Exact current source bytes; no normalization; specs excluded.",
+  "count": 28,
+  "totalBytes": 160629.0,
+  "copyHashPass": true,
+  "entries": [
+    {
+      "path": "docs/sdk-upgrade-2026-05-0.3.0.md",
+      "sourceBefore": {
+        "sha256": "a3c1fabf98213ff1504d590977927064436e91b61bc5c1b33918e19fe5365c7a",
+        "bytes": 9608
+      },
+      "sourceAfter": {
+        "sha256": "a3c1fabf98213ff1504d590977927064436e91b61bc5c1b33918e19fe5365c7a",
+        "bytes": 9608
+      },
+      "archive": {
+        "sha256": "a3c1fabf98213ff1504d590977927064436e91b61bc5c1b33918e19fe5365c7a",
+        "bytes": 9608
+      }
+    },
+    {
+      "path": "docs/sdk-upgrade-2026-07-1.0.5.md",
+      "sourceBefore": {
+        "sha256": "34a3655299565c7c890f942c1996602569fb5dd8e11a536f66e337b3532f39e8",
+        "bytes": 8073
+      },
+      "sourceAfter": {
+        "sha256": "34a3655299565c7c890f942c1996602569fb5dd8e11a536f66e337b3532f39e8",
+        "bytes": 8073
+      },
+      "archive": {
+        "sha256": "34a3655299565c7c890f942c1996602569fb5dd8e11a536f66e337b3532f39e8",
+        "bytes": 8073
+      }
+    },
+    {
+      "path": "docs/sdk-upgrade-1.0.13.md",
+      "sourceBefore": {
+        "sha256": "d6c75f032798bdcf76da8974e100b80451ab7b333367ae9744a7999663fb23de",
+        "bytes": 7036
+      },
+      "sourceAfter": {
+        "sha256": "d6c75f032798bdcf76da8974e100b80451ab7b333367ae9744a7999663fb23de",
+        "bytes": 7036
+      },
+      "archive": {
+        "sha256": "d6c75f032798bdcf76da8974e100b80451ab7b333367ae9744a7999663fb23de",
+        "bytes": 7036
+      }
+    },
+    {
+      "path": "docs/plan-d-pragmatic-cloud-pc-results.md",
+      "sourceBefore": {
+        "sha256": "622d482f70297be5856c2db6acb6029054e1b415d46e85ad6e1a5e5d9dd0b4d8",
+        "bytes": 6709
+      },
+      "sourceAfter": {
+        "sha256": "622d482f70297be5856c2db6acb6029054e1b415d46e85ad6e1a5e5d9dd0b4d8",
+        "bytes": 6709
+      },
+      "archive": {
+        "sha256": "622d482f70297be5856c2db6acb6029054e1b415d46e85ad6e1a5e5d9dd0b4d8",
+        "bytes": 6709
+      }
+    },
+    {
+      "path": "docs/plan-d-pragmatic-cloud-pc-runbook.md",
+      "sourceBefore": {
+        "sha256": "c94b19351e4fb91b5e7d18c88aaed55fc4b70190fe3563b8f7d6c13fe77fd2c3",
+        "bytes": 2295
+      },
+      "sourceAfter": {
+        "sha256": "c94b19351e4fb91b5e7d18c88aaed55fc4b70190fe3563b8f7d6c13fe77fd2c3",
+        "bytes": 2295
+      },
+      "archive": {
+        "sha256": "c94b19351e4fb91b5e7d18c88aaed55fc4b70190fe3563b8f7d6c13fe77fd2c3",
+        "bytes": 2295
+      }
+    },
+    {
+      "path": "docs/session-handoff-2026-07-15.md",
+      "sourceBefore": {
+        "sha256": "477f94e81212940595411791603001fd30a6d35fc9b574789411dd6ed2041bae",
+        "bytes": 5206
+      },
+      "sourceAfter": {
+        "sha256": "477f94e81212940595411791603001fd30a6d35fc9b574789411dd6ed2041bae",
+        "bytes": 5206
+      },
+      "archive": {
+        "sha256": "477f94e81212940595411791603001fd30a6d35fc9b574789411dd6ed2041bae",
+        "bytes": 5206
+      }
+    },
+    {
+      "path": "docs/documentation-cleanup.md",
+      "sourceBefore": {
+        "sha256": "d699dcf572aae0e699af2ed80c83c4cfcb7d32f8aeda4c5409571f39ae11b7e2",
+        "bytes": 9543
+      },
+      "sourceAfter": {
+        "sha256": "d699dcf572aae0e699af2ed80c83c4cfcb7d32f8aeda4c5409571f39ae11b7e2",
+        "bytes": 9543
+      },
+      "archive": {
+        "sha256": "d699dcf572aae0e699af2ed80c83c4cfcb7d32f8aeda4c5409571f39ae11b7e2",
+        "bytes": 9543
+      }
+    },
+    {
+      "path": "docs/rust-sdk-spec.md",
+      "sourceBefore": {
+        "sha256": "0f4b0ecedcba50668e02a4c34f0eed9f12a52ad552ec12a7d3576895daf69db9",
+        "bytes": 8191
+      },
+      "sourceAfter": {
+        "sha256": "0f4b0ecedcba50668e02a4c34f0eed9f12a52ad552ec12a7d3576895daf69db9",
+        "bytes": 8191
+      },
+      "archive": {
+        "sha256": "0f4b0ecedcba50668e02a4c34f0eed9f12a52ad552ec12a7d3576895daf69db9",
+        "bytes": 8191
+      }
+    },
+    {
+      "path": "releases/notes-prompt-scope-cleanup-draft.md",
+      "sourceBefore": {
+        "sha256": "e288d5aa5157a8e32807137379c1f31cbf8bca6c77e83b158b675c461708a4a8",
+        "bytes": 16047
+      },
+      "sourceAfter": {
+        "sha256": "e288d5aa5157a8e32807137379c1f31cbf8bca6c77e83b158b675c461708a4a8",
+        "bytes": 16047
+      },
+      "archive": {
+        "sha256": "e288d5aa5157a8e32807137379c1f31cbf8bca6c77e83b158b675c461708a4a8",
+        "bytes": 16047
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.70-beta.5.md",
+      "sourceBefore": {
+        "sha256": "f7909f12a8b4623929fd0dac569771513f11d6a7019543f873419d6e15c3487b",
+        "bytes": 7957
+      },
+      "sourceAfter": {
+        "sha256": "f7909f12a8b4623929fd0dac569771513f11d6a7019543f873419d6e15c3487b",
+        "bytes": 7957
+      },
+      "archive": {
+        "sha256": "f7909f12a8b4623929fd0dac569771513f11d6a7019543f873419d6e15c3487b",
+        "bytes": 7957
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.71-beta.1.md",
+      "sourceBefore": {
+        "sha256": "fed02300344c7c4b13b71a49ba0734b6be435c37c4fce88bf7d11432bc9b74c6",
+        "bytes": 5704
+      },
+      "sourceAfter": {
+        "sha256": "fed02300344c7c4b13b71a49ba0734b6be435c37c4fce88bf7d11432bc9b74c6",
+        "bytes": 5704
+      },
+      "archive": {
+        "sha256": "fed02300344c7c4b13b71a49ba0734b6be435c37c4fce88bf7d11432bc9b74c6",
+        "bytes": 5704
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.71-beta.2.md",
+      "sourceBefore": {
+        "sha256": "c710e6547fe93f054310197e7e5a47d4235874f563e9d80aac62011d1480e608",
+        "bytes": 6460
+      },
+      "sourceAfter": {
+        "sha256": "c710e6547fe93f054310197e7e5a47d4235874f563e9d80aac62011d1480e608",
+        "bytes": 6460
+      },
+      "archive": {
+        "sha256": "c710e6547fe93f054310197e7e5a47d4235874f563e9d80aac62011d1480e608",
+        "bytes": 6460
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.71.md",
+      "sourceBefore": {
+        "sha256": "aca77d0081767f0a6aea1378799d2def62ed3b9e5ce371b0d95c0a4f8bab6477",
+        "bytes": 8322
+      },
+      "sourceAfter": {
+        "sha256": "aca77d0081767f0a6aea1378799d2def62ed3b9e5ce371b0d95c0a4f8bab6477",
+        "bytes": 8322
+      },
+      "archive": {
+        "sha256": "aca77d0081767f0a6aea1378799d2def62ed3b9e5ce371b0d95c0a4f8bab6477",
+        "bytes": 8322
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.72-beta.1.md",
+      "sourceBefore": {
+        "sha256": "6162fe9f5adf2616ce40ddd72d2da6aa40eaf2169b3cae7115706b57965890b5",
+        "bytes": 5939
+      },
+      "sourceAfter": {
+        "sha256": "6162fe9f5adf2616ce40ddd72d2da6aa40eaf2169b3cae7115706b57965890b5",
+        "bytes": 5939
+      },
+      "archive": {
+        "sha256": "6162fe9f5adf2616ce40ddd72d2da6aa40eaf2169b3cae7115706b57965890b5",
+        "bytes": 5939
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.72-beta.2.md",
+      "sourceBefore": {
+        "sha256": "5fcabfb127c7e36ad1ff41ce9e0b1f9dc0f3ad1ba12cf3632015398e2f231b6e",
+        "bytes": 3926
+      },
+      "sourceAfter": {
+        "sha256": "5fcabfb127c7e36ad1ff41ce9e0b1f9dc0f3ad1ba12cf3632015398e2f231b6e",
+        "bytes": 3926
+      },
+      "archive": {
+        "sha256": "5fcabfb127c7e36ad1ff41ce9e0b1f9dc0f3ad1ba12cf3632015398e2f231b6e",
+        "bytes": 3926
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.72.md",
+      "sourceBefore": {
+        "sha256": "c04e8afb5e25fd201a4bd1e7bd4be9033cb9833e0f0e096f1be9191a6eaf63ca",
+        "bytes": 6096
+      },
+      "sourceAfter": {
+        "sha256": "c04e8afb5e25fd201a4bd1e7bd4be9033cb9833e0f0e096f1be9191a6eaf63ca",
+        "bytes": 6096
+      },
+      "archive": {
+        "sha256": "c04e8afb5e25fd201a4bd1e7bd4be9033cb9833e0f0e096f1be9191a6eaf63ca",
+        "bytes": 6096
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.73-beta.1.md",
+      "sourceBefore": {
+        "sha256": "38723a62fca8cdcaecf5fba3740ecce9d6d6abb7d923973ab8ca52ba5a125412",
+        "bytes": 4844
+      },
+      "sourceAfter": {
+        "sha256": "38723a62fca8cdcaecf5fba3740ecce9d6d6abb7d923973ab8ca52ba5a125412",
+        "bytes": 4844
+      },
+      "archive": {
+        "sha256": "38723a62fca8cdcaecf5fba3740ecce9d6d6abb7d923973ab8ca52ba5a125412",
+        "bytes": 4844
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.73-beta.2.md",
+      "sourceBefore": {
+        "sha256": "a46a4245270d0c1ff43ac8e7b934bb37f075621fb82416c35df3a45ae6d8abac",
+        "bytes": 3533
+      },
+      "sourceAfter": {
+        "sha256": "a46a4245270d0c1ff43ac8e7b934bb37f075621fb82416c35df3a45ae6d8abac",
+        "bytes": 3533
+      },
+      "archive": {
+        "sha256": "a46a4245270d0c1ff43ac8e7b934bb37f075621fb82416c35df3a45ae6d8abac",
+        "bytes": 3533
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.73.md",
+      "sourceBefore": {
+        "sha256": "08fc2649efe69a34b46429396a2b1647c1726b84096ad73112ff0b6714cbd7ba",
+        "bytes": 5095
+      },
+      "sourceAfter": {
+        "sha256": "08fc2649efe69a34b46429396a2b1647c1726b84096ad73112ff0b6714cbd7ba",
+        "bytes": 5095
+      },
+      "archive": {
+        "sha256": "08fc2649efe69a34b46429396a2b1647c1726b84096ad73112ff0b6714cbd7ba",
+        "bytes": 5095
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.74-beta.1.md",
+      "sourceBefore": {
+        "sha256": "35e5344b18627cb416bb624da89f961c90adcea9e2fa36cc47e85636839fafc3",
+        "bytes": 3328
+      },
+      "sourceAfter": {
+        "sha256": "35e5344b18627cb416bb624da89f961c90adcea9e2fa36cc47e85636839fafc3",
+        "bytes": 3328
+      },
+      "archive": {
+        "sha256": "35e5344b18627cb416bb624da89f961c90adcea9e2fa36cc47e85636839fafc3",
+        "bytes": 3328
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.74-beta.2.md",
+      "sourceBefore": {
+        "sha256": "ae7de797790bcdf508b12df05c5a1ee9d6eeb706a0ec9b00f75c3c7ced666175",
+        "bytes": 2743
+      },
+      "sourceAfter": {
+        "sha256": "ae7de797790bcdf508b12df05c5a1ee9d6eeb706a0ec9b00f75c3c7ced666175",
+        "bytes": 2743
+      },
+      "archive": {
+        "sha256": "ae7de797790bcdf508b12df05c5a1ee9d6eeb706a0ec9b00f75c3c7ced666175",
+        "bytes": 2743
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.74-beta.3.md",
+      "sourceBefore": {
+        "sha256": "287b7d7d413299a31d3da2927c43517136d1303818ef0afb4d5d26391ae6141a",
+        "bytes": 2916
+      },
+      "sourceAfter": {
+        "sha256": "287b7d7d413299a31d3da2927c43517136d1303818ef0afb4d5d26391ae6141a",
+        "bytes": 2916
+      },
+      "archive": {
+        "sha256": "287b7d7d413299a31d3da2927c43517136d1303818ef0afb4d5d26391ae6141a",
+        "bytes": 2916
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.74-beta.4.md",
+      "sourceBefore": {
+        "sha256": "df3aa1be1b758fe3168bb30c75ccaeb1ccaa0ce5bf1a81e26888c3046d62b511",
+        "bytes": 3546
+      },
+      "sourceAfter": {
+        "sha256": "df3aa1be1b758fe3168bb30c75ccaeb1ccaa0ce5bf1a81e26888c3046d62b511",
+        "bytes": 3546
+      },
+      "archive": {
+        "sha256": "df3aa1be1b758fe3168bb30c75ccaeb1ccaa0ce5bf1a81e26888c3046d62b511",
+        "bytes": 3546
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.76-beta.3.md",
+      "sourceBefore": {
+        "sha256": "2942694602deb745bc056623732286d501c1d2f8da938336dd244d75cbb21e29",
+        "bytes": 3925
+      },
+      "sourceAfter": {
+        "sha256": "2942694602deb745bc056623732286d501c1d2f8da938336dd244d75cbb21e29",
+        "bytes": 3925
+      },
+      "archive": {
+        "sha256": "2942694602deb745bc056623732286d501c1d2f8da938336dd244d75cbb21e29",
+        "bytes": 3925
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.76-beta.4.md",
+      "sourceBefore": {
+        "sha256": "c12c0904df794055dbe65e0e4622502f29e13a65bec9d9d0e2eded58b10252b4",
+        "bytes": 3725
+      },
+      "sourceAfter": {
+        "sha256": "c12c0904df794055dbe65e0e4622502f29e13a65bec9d9d0e2eded58b10252b4",
+        "bytes": 3725
+      },
+      "archive": {
+        "sha256": "c12c0904df794055dbe65e0e4622502f29e13a65bec9d9d0e2eded58b10252b4",
+        "bytes": 3725
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.76-beta.5.md",
+      "sourceBefore": {
+        "sha256": "b5e5699c5be5f62455db0c134e572c1390bed3bdd6bb0ecf3e51585db7ee6ec5",
+        "bytes": 2823
+      },
+      "sourceAfter": {
+        "sha256": "b5e5699c5be5f62455db0c134e572c1390bed3bdd6bb0ecf3e51585db7ee6ec5",
+        "bytes": 2823
+      },
+      "archive": {
+        "sha256": "b5e5699c5be5f62455db0c134e572c1390bed3bdd6bb0ecf3e51585db7ee6ec5",
+        "bytes": 2823
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.76.md",
+      "sourceBefore": {
+        "sha256": "9325ce2a905e527d8557ecab0ad7dac20dc9ca3fa460ee9f6899124983f19bb5",
+        "bytes": 4114
+      },
+      "sourceAfter": {
+        "sha256": "9325ce2a905e527d8557ecab0ad7dac20dc9ca3fa460ee9f6899124983f19bb5",
+        "bytes": 4114
+      },
+      "archive": {
+        "sha256": "9325ce2a905e527d8557ecab0ad7dac20dc9ca3fa460ee9f6899124983f19bb5",
+        "bytes": 4114
+      }
+    },
+    {
+      "path": "releases/notes-v2.0.77.md",
+      "sourceBefore": {
+        "sha256": "01867ef74298d97a9797e4303f78375836ff8f21d9b7fb992b42f3e2d77263d8",
+        "bytes": 2925
+      },
+      "sourceAfter": {
+        "sha256": "01867ef74298d97a9797e4303f78375836ff8f21d9b7fb992b42f3e2d77263d8",
+        "bytes": 2925
+      },
+      "archive": {
+        "sha256": "01867ef74298d97a9797e4303f78375836ff8f21d9b7fb992b42f3e2d77263d8",
+        "bytes": 2925
+      }
+    }
+  ]
+}

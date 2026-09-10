@@ -6,77 +6,37 @@ Dynamics Helper is a browser extension for Technical Support Engineers. It bridg
 
 ## Prerequisites
 
-Before installing, ensure you have the following software installed on your Windows machine:
+Use Windows with Edge or Chrome and an organizational policy that permits unpacked extensions. GitHub Copilot CLI must be installed and authenticated under the same Windows account as the browser, with Copilot access. An npm-based CLI installation also needs Node.js LTS.
 
-1. **Python 3.10+**: [Download Here](https://www.python.org/downloads/) (Ensure "Add Python to PATH" is checked during install).
-2. **Node.js (LTS)**: [Download Here](https://nodejs.org/).
-3. **GitHub Copilot CLI**:
-    * Open PowerShell or Command Prompt.
-    * Run: `npm install -g @github/copilot`
-    * Authenticate: `copilot auth` (Follow the login prompt in your browser).
+The complete release ZIP includes the compiled Host and its runtime; **end users do not need to install Python separately**. Python **3.11+** is required only for source development.
 
 ## Installation
 
-### Quick Install (Recommended)
+### Complete Release ZIP
 
-Open PowerShell and run:
+The configured release source is [boatmac/Dynamics-Helper Releases](https://github.com/boatmac/Dynamics-Helper/releases).
 
-```powershell
-irm https://aka.ms/mcdyhelper | iex
-```
+1. Download the complete release ZIP asset, not the GitHub source-code archive. Extract the entire package to a folder before running anything.
+2. Close the browser and Dynamics Helper normally and allow the Host to exit. The installer refuses a running Host; it does not restart or force-terminate it.
+3. Double-click the extracted package's root `install.bat` using the same Windows account as the browser. The package installs both Host and Extension to `%LOCALAPPDATA%\DynamicsHelper` and registers Native Messaging in **HKCU**. Do not choose **Run as administrator**.
+4. After installation succeeds, open `chrome://extensions` or `edge://extensions`, enable **Developer Mode**, and choose **Load unpacked**.
+5. Select `%LOCALAPPDATA%\DynamicsHelper\extension`. Keep the packaged key and fixed Extension ID unchanged. An unexpected ID means the loaded folder/package needs checking, not that `allowed_origins` should be edited and an arbitrary ID registered.
 
-This command downloads the latest release and runs the installer automatically.
+For Beta installation, select the desired pre-release ZIP on the same Releases page. Future Beta checks are controlled separately by **Options > General > Receive beta updates**, which saves automatically.
 
-To install the latest **Beta** instead of stable, run:
-
-```powershell
-& ([scriptblock]::Create((irm https://aka.ms/mcdyhelper))) -Beta
-```
-
-This also enables the Beta channel in your host config, so future automatic update checks continue to consider Beta releases. You can disable Beta updates at any time from **Options → General → Receive beta updates** (saves automatically).
-
-### Manual Install
-
-1. **Download the Release:**
-    * Go to the [Releases Page](../../releases) and download the latest `.zip` file.
-    * Extract the contents to a folder.
-
-2. **Run the Installer:**
-    * Double-click `install.bat`.
-    * This will:
-        * Install the Native Host and Extension to `%LOCALAPPDATA%\DynamicsHelper`.
-        * Register the Native Host in the Windows Registry.
-        * Restart the host if it's running.
-
-3. **Load in Edge/Chrome:**
-    * Open `chrome://extensions` or `edge://extensions`.
-    * Enable **Developer Mode** (toggle in the top right).
-    * Click **Load unpacked**.
-    * Navigate to `%LOCALAPPDATA%\DynamicsHelper\extension` (you can paste this path into the folder selector) and select it.
+If the installer refuses legacy Roaming data, preserve both locations and resolve the legacy installation with your administrator. If policy or antivirus blocks the package, stop and preserve the error; do not bypass execution policy, add exclusions, or restore/allow a detected file. Never mix individual Host/Extension files or delete `updates/**` recovery evidence.
 
 ### For Developers (Build from Source)
 
-1. **Build the Extension:**
+Source development requires Python **3.11+** and separately provisioned frontend/Host dependencies. Within an approved development scope, build from the repository root:
 
-    ```bash
-    cd extension
-    npm install
-    npm run build
-    ```
+```powershell
+npm run build --prefix extension
+```
 
-2. **Install the Host:**
-    * Navigate to `host/`
-    * Run `install.bat` (Run as Administrator is recommended for Registry changes).
-    * Ensure you have the GitHub Copilot CLI installed (`npm install -g @github/copilot`) and authenticated (`copilot auth`).
+Load **`extension/dist`**, not the source `extension/` folder, and verify that the browser ID matches the fixed source/product identity. Preserve the source manifest's `key` and expected Native Messaging origins.
 
-3. **Load in Edge/Chrome:**
-    * Go to `chrome://extensions`.
-    * Click "Load unpacked" and select the `extension/dist` folder in this repo.
-    * **Copy the Extension ID** generated by the browser.
-
-4. **Register Host with ID:**
-    * Open `host/host_manifest.json` and add your ID to `allowed_origins`.
-    * Run `host/install.bat` again to update the registry keys.
+See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for runtime and verification details. The legacy `host/install.bat` creates a venv, installs `host/requirements.txt`, and registers the source Host; it is not the release ZIP installer. Dependency installation, registration, and mode switching require their own applicable scope, not automatic execution of this example.
 
 ---
 
@@ -103,7 +63,7 @@ Open the Options page from the extension icon or the FAB menu. Settings are orga
 * **Bookmark Manager** — your personal bookmark menu editor.
 * **About & Help** — version info, links (User Guide, GitHub, report a bug), a log-collection helper, and troubleshooting tips.
 
-All changes save automatically — there is no Save button. The only manual actions are the **Reset** button (restores defaults) and the **Refresh** buttons for the model list and team catalog.
+There is no Save button. Selects and toggles persist on change; text, number, and color inputs persist when they lose focus. Check visible save/refresh warnings: saving configuration and refreshing the active session are separate outcomes. Manual controls include **Reset**, model/team **Refresh**, and update checks/actions.
 
 ### Log Level
 
@@ -138,7 +98,7 @@ invisible prompt or hanging. This does not bypass managed-approval requirements.
 
 Under **Settings → Model & Performance**, you can choose the model, reasoning effort, and context tier DH uses for analyze sessions — independent of the model your Copilot CLI uses interactively.
 
-* **Why it exists**: DH used to inherit your Copilot CLI's global settings (`~/.copilot/settings.json`). If you set the CLI to a large model (e.g. Claude Opus at max reasoning effort) for interactive use, DH's analyses inherited it and were slow. Now DH has its own selection.
+* **Independent selection**: DH can use a different model and performance configuration from your interactive Copilot CLI (`~/.copilot/settings.json`).
 * **Model**: a dropdown of the models your GitHub account offers (fetched live from Copilot; click **Refresh** to re-fetch). Pick a lighter model (e.g. Claude Sonnet) to speed analyses up. Leave it on **Use CLI default** to keep inheriting your CLI setting.
 * **Reasoning effort**: only shown for models that support it. Some models (e.g. Claude Sonnet 4.5) have no reasoning-effort setting — the dropdown will say so and only offer *Use CLI default*.
 * **Context tier**: `default` or `long_context`, or *Use CLI default*.
@@ -189,7 +149,7 @@ You can configure Dynamics Helper to use specific Skills, MCP servers, and instr
 
 ### Repository ONLY Mode
 
-In the extension settings, **Use repository SKILLS, MCP, and instructions ONLY** extends the existing Repository ONLY behavior to instruction selection. DH Core is always active, and Custom User Prompt is always included with Analyze.
+In the extension settings, **Use repository SKILLS, MCP, and instructions ONLY** selects repository capabilities and instructions. DH Core is always active, and Custom User Prompt is always included with Analyze.
 
 The exact instruction-source matrix is:
 
@@ -211,9 +171,8 @@ Important behavior:
 * DH explicitly disables Copilot CLI automatic custom-instruction discovery for every DH session. CLI-global `~/.copilot/copilot-instructions.md`, `AGENTS.md`, `.github/instructions/**/*.instructions.md`, and other automatically discovered files do not enter DH analyses.
 * Only the Root-level `.github/copilot-instructions.md` is supported. DH does not walk parent directories or reproduce the CLI's broader discovery rules.
 * An existing empty or whitespace-only Repository Instructions file is valid and produces a Core-only system layer. A missing DH-specific Instructions file is also valid empty content. An existing unreadable/invalid-UTF-8 selected DH-specific file, a missing or unreadable/invalid-UTF-8 selected Repository file, or missing/unreadable DH Core blocks Analyze; DH does not fall back to another instruction source.
-* Existing saved Repository ONLY values of `true` immediately gain this instruction-selection meaning when Root Path is non-empty. If that Root lacks `.github/copilot-instructions.md`, add the file or turn Repository ONLY off before Analyze.
 * No instruction text is moved automatically. Keep DH-only preferences in DH-specific Instructions, repository workflow in the Root file, and CLI-wide preferences in the CLI global file, understanding that DH intentionally excludes the latter.
-* This setting is generic to any repository. It does not detect or integrate with MyCases, initialize MyCases files, or implement Stage 0/1 orchestration.
+* This setting is generic to any repository; it does not initialize repository workflows or files. See [TODO.md](TODO.md) for current limitations and planned work.
 
 ---
 
@@ -221,8 +180,8 @@ Important behavior:
 
 ### Analyzing a Case
 
-1. **Open a Ticket:** Navigate to a support ticket in Dynamics 365 or Azure Portal.
-2. **Open Dynamics Helper:** Click the "DH" floating button or the extension icon.
+1. **Open a Ticket:** Navigate to a support ticket on `https://onesupport.crm.dynamics.com/`. The current content script is limited to this D365 domain, not Azure Portal or arbitrary pages.
+2. **Open Dynamics Helper:** Click the "DH" floating button on the supported page. The extension icon opens configuration, not the case-analysis panel.
 3. **Review Context:** Expand the "Case Context" section to see what was scraped from the page.
    The template also includes **Created On** (the current open record's creation
    time, whether a case or a task) and **Customer Name** (the Summary Customer
@@ -248,7 +207,7 @@ Important behavior:
 
 ### Right-Click Analysis
 
-You can select text on any page, right-click, and choose "Analyze with Dynamics Helper" to analyze specific error messages or log snippets without opening the FAB menu.
+On a supported D365 page where the extension content script is already loaded, select text and choose "Analyze with Dynamics Helper" from the right-click menu. This does not inject support into arbitrary websites or Azure Portal; a context-menu entry alone does not mean the current page can receive the action.
 
 ### Auto-Analyze
 
@@ -268,7 +227,7 @@ Each analysis creates a persistent Copilot session tied to your case number. Aft
 
 * The report includes a **Session Name** (a deterministic UUID that identifies the case session).
 * Copy the complete resume command from the report. With Root Path configured it has the form `copilot -C '<root>' --resume=<uuid>`; `-C` applies the workspace before the interactive CLI continuation resolves workspace capabilities.
-* This restores conversation history, tool state, planning context, and the configured workspace root. It does not change the explicit instruction source DH used when creating or refreshing the session. Prefer the report command over entering `/resume` inside a CLI started elsewhere, especially for sessions created by older DH versions whose saved cwd may be stale.
+* This restores conversation history, tool state, planning context, and the configured workspace root. It does not change the explicit instruction source DH used when creating or refreshing the session. Prefer the report command over entering `/resume` inside a CLI started elsewhere: the explicit Root overrides stale saved working-directory metadata.
 
 ### Team Bookmark Catalog
 
@@ -352,8 +311,7 @@ Worker update-state broadcast changes it. There is no same-epoch ACK retry;
 hide/show or close/reopen the last qualifying surface to start a fresh interval.
 After a committed update is acknowledged, the updater returns to idle with no
 private candidate address. After rollback, acknowledgment restores the same
-candidate as the ordinary **Retry** action only in versions supporting this
-completion protocol. Older B1 is not qualified for this rollback/Retry behavior.
+candidate as the ordinary **Retry** action.
 
 If the installed Host and Extension do not match, guidance to run the matching
 full installer remains visible until the complete product is repaired. An
@@ -364,15 +322,18 @@ the installer instead of reporting false success.
 
 ### Manual Update
 
-Re-run the Quick Install command or download and run the complete matching
-release from the Releases page. Do not mix individual Host/Extension files.
+Download the complete matching release ZIP from
+[boatmac/Dynamics-Helper Releases](https://github.com/boatmac/Dynamics-Helper/releases),
+extract it fully, close the browser/Host normally, and run the package's root
+`install.bat` under the same Windows account. Follow the [installation steps](#installation).
+Do not mix individual Host/Extension files or delete preserved update evidence.
 
 ### Beta Channel
 
 By default, Dynamics Helper only receives **stable** releases. To opt in to pre-release (Beta) versions ahead of stable:
 
 1. Open the extension **Options** page → **General** tab.
-2. Tick **"Receive beta updates"**. The change is saved automatically — there is no Save button (instant persistence since v2.0.70).
+2. Tick **"Receive beta updates"**. The change is saved automatically; there is no Save button.
 
 Beta versions include new features and fixes before they ship to stable, but may also be less tested. The setting takes effect on the next update check.
 
@@ -386,13 +347,18 @@ This extension is designed with "Privacy First" principles for handling support 
 
 ### Data Flow
 
-1. **Browser (Local)**: The extension scrapes case details from your active tab.
-2. **Native Host (Local)**: Data is passed to the Python Host running on your machine.
-3. **PII Scrubbing (Local)**: Before leaving your machine, the Host attempts to redact sensitive entities (see below).
-4. **GitHub Copilot (Cloud)**: The *sanitized* text is sent to the GitHub Copilot API (Microsoft) for analysis.
+1. **Browser (Local)**: The extension scrapes case details from the supported D365 page where its content script is loaded.
+2. **Native Host (Local)**: Data is passed to the local Host (a compiled executable with bundled runtime in release installations).
+3. **PII Scrubbing (Local)**: The Host applies selected redaction patterns to Analyze text and context, including the composed Custom User Prompt (see below).
+4. **GitHub Copilot (Cloud)**: The processed Analyze content and the separately selected system instructions are sent through Copilot for analysis.
 5. **Return**: The AI response is sent back to your local machine.
 
 ### Automatic Redaction
+
+DH Core and the selected DH-specific or Repository Instructions are sent as an
+exact system-instruction snapshot; they do **not** pass through the PII scrubber.
+Review those instruction files separately. Redaction of request text also does
+not guarantee that the model response or generated report contains no PII.
 
 The tool includes a built-in "PII Scrubber" that attempts to remove the following before sending data to the AI:
 
@@ -428,10 +394,7 @@ If the tool isn't working, follow these steps to collect information for the dev
 
 * **"Analysis Timed Out"**: The Agent is taking too long. This usually means it's doing a lot of work (good!) but hit the analyze-timeout budget (default 20 minutes; configurable under **Options → General → Analyze Timeout**). Raise the timeout or narrow your request, and check the logs.
 * **"Repository Instructions are missing/cannot be read"**: Repository ONLY selected `<Root>/.github/copilot-instructions.md`, but DH could not obtain strict UTF-8 content. Add/repair the file, or disable Repository ONLY. An empty existing file is valid.
-* **"Host error" / "Native host disconnected"**: The Host may be missing, blocked, or unable to start.
-  * Use the complete matching installer under the same Windows account; elevation is not a remedy for a blocked executable.
-  * Verify your Extension ID is correct in the host manifest.
-  * Restart your browser.
+* **"Host error" / "Native host disconnected"**: The Host may be missing, blocked, or unable to start. Check the loaded extension folder and fixed product ID without editing the key or `allowed_origins`. For repair, close the browser/Host normally and use the complete matching installer under the same Windows account, then reopen the browser after success. Elevation is not a remedy for a blocked executable.
 * **Update requires recovery / matching installer**: Automatic restart recovery
   and rollback resume ordinary interruptions. If matching-installer guidance
   persists, or diagnostics show `manual_recovery_required`, run the complete
@@ -451,5 +414,4 @@ If you need to report a bug, please provide the **Native Host Log**.
 1. Open File Explorer.
 2. In the address bar, type `%LOCALAPPDATA%\DynamicsHelper` and press Enter.
 3. Find the file named **`native_host.log`** (and any rotated copies: `.log.1`, `.log.2`, `.log.3`).
-4. Send this file to the developer.
-    * *Warning: This log contains details about what the AI analyzed. Please check for sensitive info before sharing if dealing with highly confidential cases.*
+4. Review and redact sensitive operational details before sharing logs through an approved support channel. Logs are diagnostics, not a transcript of case or prompt contents; review generated reports separately.

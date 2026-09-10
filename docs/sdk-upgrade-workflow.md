@@ -4,15 +4,14 @@
 
 SDK upgrades reuse a fixed offline contract entry, not a fresh test framework or
 one-time testing exemption. Source pinning, offline checks, frozen builds, live
-CLI checks and installed product qualification are distinct results. Historical
-upgrade records are evidence, not instructions to rerun old temporary scripts or
-installer scenarios. Keep version-specific contracts, workarounds, dependency
-baselines and results in the corresponding version record, not this workflow.
+CLI checks and installed product qualification are distinct results. Maintain the
+current contracts and workarounds in [SDK integration](sdk-integration.md), and
+current limitations and planned work in [TODO.md](../TODO.md).
 
 ## Upgrade Steps
 
 1. Review the target SDK's official release/API changes against DH's actual calls.
-   Establish the target version and compatibility questions in its version record.
+   Establish the target version and compatibility questions for the approved work.
    A bundled runtime baseline is not necessarily an external CLI minimum, and a
    protocol handshake alone does not prove field-level compatibility.
 2. Approve dependency alignment, acquire the pinned distribution from the intended
@@ -33,15 +32,16 @@ baselines and results in the corresponding version record, not this workflow.
    validate auth/handshake/create/resume; model calls and actual installation need
    their own applicable scope. Neither is implied by an offline PASS.
 7. Record exact source/artifact identity, SDK/dependency/CLI versions, test selection,
-   results and remaining limitations in the version record or task handoff. Keep
-   installed product state separate from source and local build results.
+   results and remaining limitations in the verification evidence. Update the
+   current integration contract; keep installed state separate from local results.
 
 ## Execution Entry
 
 Use `scripts/run_sdk_tests.py` from the repository root with the reviewed base
-interpreter. Pass `--temp-base` with an existing approved evidence directory and
-`--timeout` with the agreed worker budget. Choose the interpreter path for the
-machine; do not assume a specific Python installation version or user directory.
+interpreter. Pass `--temp-base` with an existing approved evidence directory
+outside the repository and `--timeout` with the agreed worker budget. Do not use
+a checkout subdirectory for profiles or evidence. Choose the interpreter path
+for the machine; do not assume a specific Python installation version or user directory.
 
 Dependency-only verification uses the same entry with `--check-dependencies`,
 without `--temp-base`; it does not import SDK or execute tests. Fixed selections

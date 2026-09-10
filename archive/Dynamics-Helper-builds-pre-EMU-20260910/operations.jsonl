@@ -1,0 +1,26 @@
+{"utc":"2026-09-10T12:45:26.7782203Z","kind":"manifest-persisted","data":{"files":184,"bytes":132139721,"sha256":"f31ab39b561403ca975cc9362e141f3ac3da6c5f59e090de905c20e3ec94d586"}}
+{"utc":"2026-09-10T12:45:26.9988735Z","kind":"rename-start","data":{"source":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\build","destination":"C:\\MyWorkbench\\Repository\\_archive\\Dynamics-Helper-builds-pre-EMU-20260910\\build"}}
+{"utc":"2026-09-10T12:45:27.0149963Z","kind":"renamed","data":{"relative":"build"}}
+{"utc":"2026-09-10T12:45:27.4622929Z","kind":"verified","data":{"bytes":18724393,"relative":"build","files":16}}
+{"utc":"2026-09-10T12:45:27.6198839Z","kind":"rename-start","data":{"source":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\dist","destination":"C:\\MyWorkbench\\Repository\\_archive\\Dynamics-Helper-builds-pre-EMU-20260910\\dist"}}
+{"utc":"2026-09-10T12:45:27.6271981Z","kind":"renamed","data":{"relative":"dist"}}
+{"utc":"2026-09-10T12:45:28.1283860Z","kind":"verified","data":{"bytes":27761104,"relative":"dist","files":35}}
+{"utc":"2026-09-10T12:45:28.1964791Z","kind":"rename-start","data":{"source":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\host\\__pycache__","destination":"C:\\MyWorkbench\\Repository\\_archive\\Dynamics-Helper-builds-pre-EMU-20260910\\host\\__pycache__"}}
+{"utc":"2026-09-10T12:45:28.2040403Z","kind":"renamed","data":{"relative":"host/__pycache__"}}
+{"utc":"2026-09-10T12:45:28.3240669Z","kind":"verified","data":{"bytes":226315,"relative":"host/__pycache__","files":16}}
+{"utc":"2026-09-10T12:45:28.5722870Z","kind":"rename-start","data":{"source":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\releases\\local-20260909-0d1c6ee","destination":"C:\\MyWorkbench\\Repository\\_archive\\Dynamics-Helper-builds-pre-EMU-20260910\\releases\\local-20260909-0d1c6ee"}}
+{"utc":"2026-09-10T12:45:28.5904384Z","kind":"renamed","data":{"relative":"releases/local-20260909-0d1c6ee"}}
+{"utc":"2026-09-10T12:45:29.2139088Z","kind":"verified","data":{"bytes":42362573,"relative":"releases/local-20260909-0d1c6ee","files":58}}
+{"utc":"2026-09-10T12:45:29.4326893Z","kind":"rename-start","data":{"source":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\releases\\local-2.0.77-20260910","destination":"C:\\MyWorkbench\\Repository\\_archive\\Dynamics-Helper-builds-pre-EMU-20260910\\releases\\local-2.0.77-20260910"}}
+{"utc":"2026-09-10T12:45:29.4455757Z","kind":"renamed","data":{"relative":"releases/local-2.0.77-20260910"}}
+{"utc":"2026-09-10T12:45:30.2753534Z","kind":"verified","data":{"bytes":43064079,"relative":"releases/local-2.0.77-20260910","files":58}}
+{"utc":"2026-09-10T12:45:30.3111835Z","kind":"rename-start","data":{"source":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\dh_native_host.spec","destination":"C:\\MyWorkbench\\Repository\\_archive\\Dynamics-Helper-builds-pre-EMU-20260910\\dh_native_host.spec"}}
+{"utc":"2026-09-10T12:45:30.3210259Z","kind":"renamed","data":{"relative":"dh_native_host.spec"}}
+{"utc":"2026-09-10T12:45:30.3459284Z","kind":"verified","data":{"bytes":1257,"relative":"dh_native_host.spec","files":1}}
+{"utc":"2026-09-10T12:45:30.4134729Z","kind":"empty-removed","data":{"path":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\.superpowers\\sdd"}}
+{"utc":"2026-09-10T12:45:30.4506582Z","kind":"empty-removed","data":{"path":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\.superpowers"}}
+{"utc":"2026-09-10T12:45:30.4970428Z","kind":"empty-removed","data":{"path":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\docs\\superpowers\\research"}}
+{"utc":"2026-09-10T12:45:30.5374737Z","kind":"empty-removed","data":{"path":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\docs\\superpowers\\plans"}}
+{"utc":"2026-09-10T12:45:30.5783910Z","kind":"empty-removed","data":{"path":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\docs\\superpowers\\specs"}}
+{"utc":"2026-09-10T12:45:30.6151105Z","kind":"empty-removed","data":{"path":"C:\\MyWorkbench\\Repository\\Dynamics-Helper\\docs\\superpowers"}}
+{"utc":"2026-09-10T12:45:31.2511842Z","kind":"completed","data":{"outcome":"success","target":"C:\\MyWorkbench\\Repository\\_archive\\Dynamics-Helper-builds-pre-EMU-20260910","moves":["build","dist","host/__pycache__","releases/local-20260909-0d1c6ee","releases/local-2.0.77-20260910","dh_native_host.spec"],"files":184,"bytes":132139721,"hash":"SHA256: all files matched","manifestSha256":"f31ab39b561403ca975cc9362e141f3ac3da6c5f59e090de905c20e3ec94d586","errors":0,"emptyRemoved":[".superpowers/sdd",".superpowers","docs/superpowers/research","docs/superpowers/plans","docs/superpowers/specs","docs/superpowers"],"nonemptyPreserved":[],"sourceAbsent":[],"gitStatusUnchanged":true,"gitRefsUnchanged":true,"elapsedSeconds":45.145}}

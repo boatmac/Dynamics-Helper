@@ -69,7 +69,7 @@ import Options from './Options'
  * Spec-aligned regression suite for the Options hydration window.
  *
  * Each test maps 1:1 to an invariant in
- *   docs/superpowers/specs/2026-05-21-options-hydration-window-edits-design.md
+ *   docs/specs/options-hydration.md
  * § 4 (behavioral changes) and § 5 (test matrix).
  *
  * "Hydration window" = the time between Options mounting and the host's
@@ -662,7 +662,7 @@ describe('Options hydration window — Inv6: Reset during window survives merge'
   })
 })
 
-// ---------- About & Help tab (spec 2026-07-08) ----------
+// ---------- About & Help tab (docs/specs/options-about-help.md) ----------
 
 describe('Options About & Help tab', () => {
   beforeEach(() => {

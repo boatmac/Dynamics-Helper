@@ -191,7 +191,7 @@ async function loadTeamItems(): Promise<MenuItem[]> {
             );
             // Respect the team-catalog toggle: when disabled, do not surface
             // cached team data in the FAB even if dh_team_items still exists.
-            // Spec 2026-05-20-team-catalog-user-config-design.md § 3.7.
+            // Spec docs/specs/team-catalog-configuration.md § 3.7.
             if (
                 parsedItems
                 && teamCacheIsCurrent(

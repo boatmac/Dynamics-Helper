@@ -2,7 +2,7 @@
 
 ## 1. The Dual-Mode Deployment Strategy
 
-To prevent "Split Brain" (developing on source while running the installed exe), the system supports two mutually exclusive modes.
+The browser's Native Messaging registration selects a source or installed Host. Git checkout state, registered Host state, and the loaded Extension are separate; a mode label alone does not prevent a mismatched runtime.
 
 | Feature | **DEV Mode** (Source Code) | **PROD Mode** (End User / Release) |
 | :--- | :--- | :--- |
@@ -10,16 +10,23 @@ To prevent "Split Brain" (developing on source while running the installed exe),
 | **Executable** | `host/launch_host.bat` (Wrapper) | `dh_native_host.exe` (Compiled) |
 | **Manifest File** | `host/host_manifest.json` | `%LOCALAPPDATA%/DynamicsHelper/manifest.json` |
 | **Path Strategy** | **ABSOLUTE** (e.g., `C:\Repo\host\launch_host.bat`) | **RELATIVE** (e.g., `dh_native_host.exe`) |
-| **Why?** | Browser needs full path to find the repo. | Bypass encoding bugs (e.g., `Jose`) by keeping path local. |
+| **Why?** | Browser needs full path to find the repo. | Resolve the executable relative to the installed manifest. |
+
+Source development requires Python **3.11+**. Production uses the complete
+compiled Host and bundled runtime, with no separate user Python installation.
+The development Extension is built before loading `extension/dist`; production
+loads `%LOCALAPPDATA%\DynamicsHelper\extension`. Preserve the source manifest's
+fixed `key` and verify the browser ID against the product identity. Do not edit
+`allowed_origins` to register an arbitrary replacement ID.
 
 ## 2. Critical Technical Constraints
 
-### A. Manifest Encoding (The "Jose" Rule)
+### A. Manifest Encoding
 
 * **Rule:** The `manifest.json` MUST be written as **UTF-8 WITHOUT BOM**.
 * **Reason:** Chrome/Edge Native Messaging hosts fail to parse JSON if a Byte Order Mark (BOM) is present.
 * **Implementation:**
-  * **PowerShell:** Do NOT use `Out-File -Encoding UTF8` (Adds BOM). Use `[System.IO.File]::WriteAllText`.
+  * **PowerShell:** Windows PowerShell's `Out-File -Encoding UTF8` adds a BOM. The installer delegates manifest generation to the Host rather than relying on shell encoding defaults.
   * **Python:** Use `open(path, 'w', encoding='utf-8')` (Default is No-BOM).
 
 ### B. Registry Keys
@@ -30,6 +37,10 @@ The browser looks up the Host ID (`com.dynamics.helper.native`) in the Registry.
 * **Value:** The **Absolute Path** to the Manifest File.
   * **Dev:** Points to `.../Repository/host/host_manifest.json`
   * **Prod:** Points to `%LOCALAPPDATA%/DynamicsHelper/manifest.json`
+
+Registration is per-user in **HKCU**, under the Windows account that runs the
+browser. Administrator elevation is neither required nor a fix for identity,
+policy, or installation-integrity failures.
 
 ### C. Stdout Protection
 
@@ -49,16 +60,24 @@ The browser looks up the Host ID (`com.dynamics.helper.native`) in the Registry.
 
 ### `installer_core.ps1` (Prod Installation)
 
-* Copies host files (exe + `_internal/` runtime from `--onedir` build) to `%LOCALAPPDATA%/DynamicsHelper`.
-* Writes `manifest.json` with `"path": "dh_native_host.exe"` (Relative).
-* **CRITICAL:** Uses `[System.IO.File]::WriteAllText` to ensure No-BOM.
-* Updates Registry to point to `%LOCALAPPDATA%/DynamicsHelper/manifest.json`.
-* **Preserves user data:** `copilot-instructions.md` and `config.json` are NEVER deleted or overwritten by the installer.
+* Entered through the complete extracted release package's root `install.bat`, not the source-development helper under `host/`.
+* Refuses a running Host or legacy Roaming data before installation mutation. Users close the browser/Host normally; installation does not restart or force-terminate it, migrate Roaming data, or bypass security policy.
+* Probes a temporary combined Host/Extension product against the exact package inventory before changing the live installation.
+* Copies the complete Host and Extension under `%LOCALAPPDATA%/DynamicsHelper`, replacing the old `_internal/` runtime tree and Extension tree rather than overlaying stale files.
+* Preserves existing `config.json`, `copilot-instructions.md`, `user_prompt.md`, and update recovery evidence. Missing user files may be seeded from the package.
+* Probes the live product and invokes frozen-only `--settle-installer-repair`; contradictory preserved authority stops installation.
+* Delegates UTF-8 No-BOM `manifest.json` generation and same-user HKCU registration to `dh_native_host.exe --register`. The manifest uses relative `"path": "dh_native_host.exe"`; registration failure is an installation failure, not success.
 
 ### `dev_switch.py` (Mode Toggler)
 
 * Does NOT modify files.
 * Only updates the **Registry Key** to toggle between the Dev Manifest path and the Prod Manifest path.
+* `status` reports registry paths, not a verified running Host, loaded Extension, or installation. Its Dev path is derived from the current working directory, so interpretation assumes the repository root.
+* Before an authorized switch, verify that the target manifest exists, its `path` resolves to the intended existing launcher/executable, and its origins match the fixed Extension ID. The switch does not perform those checks for the operator.
+* Does not build, install, validate product bytes/identity, reload the Extension, or stop an existing Host. The Prod switch can write a path even when the manifest is absent. Switching requires separate authorization for registration changes; it is not a safety or qualification gate.
+
+The configured complete-ZIP distribution is
+[boatmac/Dynamics-Helper Releases](https://github.com/boatmac/Dynamics-Helper/releases).
 
 ## 4. Self-Update Architecture
 
@@ -74,12 +93,12 @@ transaction with durable restart recovery and automatic rollback.
    candidate.
 3. **Prepare:** A payload-free UI `DH_UPDATE_START` makes the Service Worker
    persist one transaction ID, then call `UpdateService.prepare()` through the
-   strict `perform_update` Host action. Plan A validates the archive and Plan B
-   prepares the complete staged product without mutating live files.
+   strict `perform_update` Host action. Package validation and the transaction
+   engine prepare the complete staged product without mutating live files.
 4. **Activate:** After persisting `activating`, the Worker calls
-   `activate_update`. Plan C launches the detached runner and the main Host exits.
+   `activate_update`. Recovery launches the detached runner and the main Host exits.
 5. **Recover or roll back:** The Worker polls the read-only status Host. The
-   runner resumes after interruption and Plan B restores the complete prior
+   runner resumes after interruption and the transaction engine restores the complete prior
    product on ordinary forward failure.
 6. **Reload:** Only terminal `committed` or `rolled-back` status permits the
    coordinator to persist `reload-pending` and reload the Extension.
@@ -92,9 +111,7 @@ transaction with durable restart recovery and automatic rollback.
    `{type:'DH_UPDATE_ACK_COMPLETE',transactionId}`. Hidden/closed time is
    discarded. The Worker serializes and persists the matching transition before
     broadcasting it: committed becomes `idle` with no candidate URL; rolled-back
-    becomes `available` with the same candidate and ordinary Retry in versions
-    supporting this completion protocol. Older B1 is not qualified for this
-    rollback/Retry behavior.
+    becomes `available` with the same candidate and ordinary Retry.
 
 ### Key Files
 
@@ -103,11 +120,11 @@ transaction with durable restart recovery and automatic rollback.
   finalization.
 * **`extension/src/background/serviceWorker.ts`**: Native transport, coordinator
   wiring, capability/integrity verification, suppression, and broadcasts.
-* **`host/update_service.py`**: Production Plan A/B/C orchestration.
-* **`host/update_engine.py`** and related Plan B modules: Exclusive transaction
+* **`host/update_service.py`**: Package, transaction, and recovery orchestration.
+* **`host/update_engine.py`** and related transaction modules: Exclusive transaction
   mutation and rollback.
-* **`host/update_operation.py`**: Distinct cross-process Plan D operation mutex;
-  serializes complete prepare/activate/finalize/ack scopes above the Plan B/C
+* **`host/update_operation.py`**: Distinct cross-process operation mutex;
+  serializes complete prepare/activate/finalize/ack scopes above the installation
   mutation mutex.
 * **`host/update_recovery.py`, `update_status_host.py`, and
   `update_entrypoint.py`**: Detached recovery, status, and early startup modes.
@@ -115,7 +132,7 @@ transaction with durable restart recovery and automatic rollback.
   timer, and ACK-transport boundary used by FAB and Options.
 * **`FAB.tsx` / `Options.tsx`**: Projection-only UI clients.
 
-### Release Integrity Metadata (Plan A)
+### Release Integrity Metadata
 
 Release staging generates three canonical documents consumed by the active
 transactional update flow:
@@ -135,15 +152,14 @@ entries, missing/extra files, and hash/link mismatches. The Host exposes
 metadata disagree. `--update-probe` runs before logging, config, updater, or SDK
 initialization and emits only an allowlisted JSON result.
 
-Plan A introduced package hardening, Plan B the standard-library transaction
-engine, and Plan C frozen-tested detached recovery. Plan D now composes all
-three in production and advertises `transactional-update-v1`.
+The production updater composes package validation, the standard-library
+transaction engine, and detached recovery, advertising `transactional-update-v1`.
 
-### Transaction Engine (Plan B, activated by Plan D)
+### Transaction Engine
 
 `update_journal.py` owns strict canonical journal/active schemas, transaction-ID
 generation, transitions, and terminal-version projection. `update_ownership.py`
-filters Plan A `UpdateManifest.entries` into exact fresh, installed, or
+filters `UpdateManifest.entries` into exact fresh, installed, or
 legacy-v1 ownership. N accepts an internally consistent N+1 only when it matches
 the caller's `expected_version`; manifest/integrity package capabilities,
 Chrome `version`/`version_name`, product bijections, metadata hashes, and old
@@ -175,16 +191,17 @@ is preserved. `reason_code` reports current status, while
 `original_failure_code` and `rollback_from` retain the first forward failure.
 Unsafe mismatch yields `manual_recovery_required`; ordinary reverse failure
 yields `rollback_failed`, with all workspace/backup/failed-new evidence retained.
-Terminal `committed`/`rolled-back` evidence remains until Plan C durably writes
+Terminal `committed`/`rolled-back` evidence remains until recovery durably writes
 its receipt and calls `finalize_terminal_evidence`, which removes active before
 the matching workspace. `terminal_version` projects committed target, rolled
 back prior, or `{fresh_install:true, version:null}` for fresh rollback.
 
-### Detached Recovery (Plan C, activated by Plan D)
+### Detached Recovery
 
-Plan C is frozen-tested and is the active post-activation runtime for Plan D.
 The Service Worker switches from the main Host to this detached status/recovery
 topology until commit, rollback, or manual-recovery disposition.
+Source review, frozen-build verification, and installed-product verification are
+separate scopes. See [TODO.md](TODO.md) for current limitations and planned work.
 
 The stable topology is:
 
@@ -210,7 +227,7 @@ sibling copy of one preflighted PyInstaller executable beside one byte-exact
 Early dispatch classifies the canonical entrypoint and complete argv before
 constructing dependencies. Normal main classification depends only on the exact
 `dh_native_host.exe`/`dh_native_host.py` role and Chrome argv; missing or partial
-historical metadata proceeds to normal Plan A installation verification.
+installation metadata proceeds to normal installation verification.
 
 | Mode | Allowed executable role |
 |---|---|
@@ -230,12 +247,12 @@ relative `dh_native_host.exe`. Browser and status registration share the same
 registry service.
 
 Before recovery-tree installation and again immediately before activation,
-`RecoveryController` strict-loads Plan B authority, materializes a temporary
+`RecoveryController` strict-loads transaction authority, materializes a temporary
 combined staged Host/Extension/metadata root outside the install and transaction
-trees, and invokes its copied `dh_native_host.exe --update-probe` against Plan
-B's read-only probe manifest. Any copy, process, identity, capability,
+trees, and invokes its copied `dh_native_host.exe --update-probe` against the
+transaction's read-only probe manifest. Any copy, process, identity, capability,
 revalidation, or cleanup fault is `staged_probe_failed` and leaves `PREPARED`
-inert. Plan B's installed-product probe still runs after live mutation and is
+inert. The engine's installed-product probe runs after live mutation and is
 the only commit gate.
 
 Browser activation opens one immutable `{pid, creation_token}` identity and
@@ -255,7 +272,7 @@ remains uncapped on input and both reader/writer use explicit little-endian
 
 Finalization reserves one durable cursor in `reserved`, writes its matching
 canonical receipt, then advances that same cursor to `receipt-ready` before
-status unregister and Plan B cleanup. Acknowledgment atomically moves the exact
+status unregister and transaction-engine cleanup. Acknowledgment atomically moves the exact
 receipt bytes to the one fixed ack slot with `os.replace`, fsyncs the moved file
 and parents where supported, then removes the cursor. A crash before the move
 replays from the receipt; a crash after it replays from the fixed slot. The old
@@ -263,7 +280,7 @@ slot remains read-only replay proof until a later transaction's acknowledgment
 replaces it. A cursor or cursor scratch blocks every newer update start, while
 an ack slot alone does not.
 
-### Production Coordination and Recovery (Plan D)
+### Production Coordination and Recovery
 
 The Service Worker exclusively owns `dh_update_state`. FAB and Options request
 the current projection with payload-free `DH_UPDATE_GET_STATE`, consume
@@ -297,7 +314,7 @@ versions, and verified product integrity. After activation, ordinary main-Host
 traffic is suppressed until terminal verification/finalization or a confirmed
 safe pre-mutation failure.
 
-Both mixed first-upgrade directions persist matching-full-installer guidance.
+Mixed Host/Extension installations persist matching-full-installer guidance.
 A transactionless marker clears only after startup verifies matching versions,
 capability, and integrity; transaction-backed recovery evidence is retained.
 Frozen startup recovery runs before stdout protection, logging, config, SDK, or
@@ -317,8 +334,7 @@ Main update leases have bounded cancellation deadlines. Finalize/ack failures
 retain their exact persisted phase for idempotent retry. A per-Worker instance
 token requires a newly loaded Worker before `reload-pending` finalization.
 
-The current frozen toolchain pin is PyInstaller `6.22.2`; Plan C's `6.18.0`
-results remain historical evidence. Standalone bootstrap and per-write
+The frozen toolchain pin is PyInstaller `6.22.2`. Standalone bootstrap and per-write
 power-loss guarantees are deferred, so extreme interruption may require the
 matching full installer. Backups and `updates/**` evidence must be preserved.
 
@@ -341,7 +357,7 @@ The host maintains Copilot sessions so users can continue analysis in the Copilo
 2. **Subsequent analyses for same case:** Session is reused only when `current_case_id` and `current_session_root_path` still match and the client/session are available.
 3. **Case or root change:** The client is restarted when its process cwd differs from the configured root; the deterministic session is then resumed with explicit `working_directory=root` (or created under that root). Analyze payloads with missing/empty `rootPath` use host `config.json`; only `update_config` can clear the canonical root.
 4. **SDK compatibility:** `AttributeError` is caught gracefully if the SDK version doesn't support `resume_session()`.
-5. **Shell resume:** Reports print `copilot -C '<root>' --resume=<uuid>`, applying the Root before the interactive CLI continuation resolves workspace capabilities and overriding stale cwd metadata in sessions created by older DH versions. DH SDK sessions separately disable CLI automatic custom-instruction discovery and supply their selected instructions explicitly.
+5. **Shell resume:** Reports print `copilot -C '<root>' --resume=<uuid>`, applying the Root before the interactive CLI continuation resolves workspace capabilities and overriding stale saved cwd metadata. DH SDK sessions separately disable CLI automatic custom-instruction discovery and supply their selected instructions explicitly.
 
 ### Storage
 
@@ -351,6 +367,11 @@ The host maintains Copilot sessions so users can continue analysis in the Copilo
 ## 6. Case ID Pipeline
 
 How case numbers flow from the browser to the host:
+
+The current content script matches only `https://onesupport.crm.dynamics.com/*`.
+Azure Portal and arbitrary pages are not supported. Right-click analysis relies
+on an already-loaded content script on a supported page; the menu itself does
+not grant broader extraction coverage.
 
 1. **PageReader** (`pageReader.ts`): Scrapes case numbers using a 4-strategy cascade (header controls, label search, header container regex, ticket title fallback). Regex: `/(\b\d{16}\b)|(\b[A-Z]{2,10}-?\d{3,}[-\w]*\b)/`.
 2. **FAB.tsx**: Passes `caseNumber` in the analyze payload to the service worker.
@@ -447,4 +468,4 @@ pending identity rather than a boolean mirror.
 
 ### Product Scope
 
-Repository ONLY selects repository Skills, MCP, and the single Root instruction file while DH Core and Custom User Prompt remain active. This architecture is generic to any absolute Root. It does not implement MyCases detection, Stage 0 coordination, Stage 1 persistence, MyCases file writes, or an Auto/Standalone/Integrated mode.
+Repository ONLY selects repository Skills, MCP, and the single Root instruction file while DH Core and Custom User Prompt remain active. This architecture is generic to any absolute Root; it does not detect or initialize repository-specific workflows or files. See [TODO.md](TODO.md) for current limitations and planned work.

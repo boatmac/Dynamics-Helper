@@ -1,6 +1,6 @@
 extension/items.json text eol=lf
 
-# Preserve raw-byte review hashes and historical evidence across checkouts.
+# Preserve raw-byte test review identities across checkouts.
 scripts/check_test_safety.py -text
 scripts/run_safe_tests.py -text
 scripts/run_sdk_tests.py -text
@@ -26,4 +26,7 @@ tests/fixtures/test_safety_runner/waiting_case.py -text
 tests/fixtures/test_safety_runner/noisy_case.py -text
 tests/fixtures/test_safety_runner/scope_one_case.py -text
 tests/fixtures/test_safety_runner/scope_two_case.py -text
-docs/history/session-handoff-through-test-safety-2026-09-09.md -text
+
+# Old-repository records retain exact bytes and are excluded from Git exports.
+/archive export-ignore
+/archive/** -text export-ignore

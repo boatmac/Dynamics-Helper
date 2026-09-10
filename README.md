@@ -6,89 +6,51 @@ A productivity tool for Technical Support Engineers (TSEs) to analyze support ti
 
 * **AI-Powered Analysis:** Uses GitHub Copilot SDK to analyze error logs, ticket descriptions, and telemetry.
 * **Native Host Integration:** Securely communicates with a local Python backend via Chrome Native Messaging.
-* **Privacy Focused:** Selected PII patterns are redacted locally before sanitized content is sent to GitHub Copilot. Review and edit Case Context before Analyze.
-* **Fluent UI Support:** Automatically scrapes error context from Microsoft Dynamics 365 and Azure Portal.
+* **Privacy Focused:** Selected PII patterns are redacted from Analyze content locally. System instructions follow a separate exact-source path without redaction; review those files and Case Context before Analyze.
+* **Dynamics 365 Context:** Scrapes case context on `https://onesupport.crm.dynamics.com/*`. Azure Portal and arbitrary websites are not supported.
 * **Session Persistence:** Continue investigations with the root-bound Copilot CLI command written into each report; conversation history and tool state are preserved.
 * **Reliable Self-Updating:** One-click transactional updates verify the whole
   Host/Extension product, survive restarts, and automatically roll back ordinary
   failures.
 * **Team Bookmark Catalog:** Shared bookmark collections synced via Azure Blob, with personal bookmarks and drag-and-drop support.
-* **Right-Click Analysis:** Select text on any page and analyze it directly from the context menu.
+* **Right-Click Analysis:** Analyze selected text on supported pages where the extension content script is already loaded.
 * **Auto-Analyze:** Optionally trigger analysis automatically when navigating to a new case.
 
 ## Installation
 
-### Quick Install (Recommended)
-
-Open PowerShell and run:
-
-```powershell
-irm https://aka.ms/mcdyhelper | iex
-```
-
-This command downloads the latest release and runs the installer automatically.
-
-#### Opt in to Beta releases at install time
-
-To install the latest **Beta** (pre-release) build instead of stable, run:
-
-```powershell
-& ([scriptblock]::Create((irm https://aka.ms/mcdyhelper))) -Beta
-```
-
-This pre-seeds the host config so future automatic update checks also consider Beta releases. You can change your mind any time from the Options page; **Receive beta updates** saves automatically.
-
-### Manual Install
-
-1. **Download the Release:**
-    * Go to the [Releases Page](../../releases) and download the latest `.zip` file.
-    * Extract the contents to a folder.
-
-2. **Run the Installer:**
-    * Double-click `install.bat`.
-    * This will:
-        * Install the Native Host and Extension to `%LOCALAPPDATA%\DynamicsHelper`.
-        * Register the Native Host in the Windows Registry.
-        * Restart the host if it's running.
-
-3. **Load in Edge/Chrome:**
-    * Open `chrome://extensions` or `edge://extensions`.
-    * Enable **Developer Mode** (toggle in the top right).
-    * Click **Load unpacked**.
-    * Navigate to `%LOCALAPPDATA%\DynamicsHelper\extension` (you can paste this path into the folder selector) and select it.
-
 ### Prerequisites
 
-* **Python 3.10+**: [Download Here](https://www.python.org/downloads/) (Ensure "Add Python to PATH" is checked).
-* **Node.js (LTS)**: [Download Here](https://nodejs.org/).
-* **GitHub Copilot CLI**: `npm install -g @github/copilot` then `copilot auth`.
+* **Windows and Edge/Chrome**, with unpacked extensions permitted by your organization.
+* **GitHub Copilot CLI**, installed and authenticated under the same Windows account that runs the browser, with Copilot access. Node.js LTS is needed when using the npm-based CLI installation.
+* **No separate Python installation is required for the release ZIP**; the compiled Host includes its runtime. Source development requires Python **3.11+**.
+
+### Complete Release ZIP
+
+Download releases from [boatmac/Dynamics-Helper Releases](https://github.com/boatmac/Dynamics-Helper/releases), the configured product distribution source.
+
+1. Download the complete release ZIP asset, not the GitHub source-code archive, and extract the entire package to a folder.
+2. Close the browser and Dynamics Helper normally so the Host can exit. The installer refuses a running Host; it does not restart or force-terminate it.
+3. Double-click the extracted package's root `install.bat` under the same Windows account used by the browser. It installs the Host and Extension under `%LOCALAPPDATA%\DynamicsHelper` and registers the Host in **HKCU**; do not use **Run as administrator**.
+4. After successful installation, open `chrome://extensions` or `edge://extensions`, enable **Developer Mode**, and choose **Load unpacked** for `%LOCALAPPDATA%\DynamicsHelper\extension`.
+5. Keep the packaged extension key and fixed Extension ID unchanged. If the browser ID differs from the product's expected identity, stop and check the loaded folder/package; do not hand-edit `allowed_origins` or re-register an arbitrary ID.
+
+For Beta builds, choose the desired pre-release ZIP from the same Releases page. **Options > General > Receive beta updates** controls future update checks and saves automatically. See the [User Guide](USER_GUIDE.md#installation) for installation and recovery boundaries.
 
 ### For Developers (Build from Source)
 
-1. **Build the Extension:**
+Development is separate from release installation. After dependencies have been provisioned within an approved development scope, build from the repository root:
 
-    ```bash
-    cd extension
-    npm install
-    npm run build
-    ```
+```powershell
+npm run build --prefix extension
+```
 
-2. **Install the Host:**
-    * Navigate to `host/`
-    * Run `install.bat` (Run as Administrator is recommended for Registry changes).
+Then load **`extension/dist`**, not `extension/`, in the browser and verify that its ID matches the fixed source/product identity. Preserve `extension/manifest.json`'s `key`; do not customize Native Messaging origins to accommodate a different ID.
 
-3. **Load in Edge/Chrome:**
-    * Go to `chrome://extensions`.
-    * Click "Load unpacked" and select the `extension/dist` folder in this repo.
-    * **Copy the Extension ID** generated by the browser.
-
-4. **Register Host with ID:**
-    * Open `host/host_manifest.json` and add your ID to `allowed_origins`.
-    * Run `host/install.bat` again to update the registry keys.
+See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for runtime and verification guidance. `host/install.bat` is a legacy development helper that creates a venv, installs `host/requirements.txt`, and registers the source Host. It is not the complete release installer or an automatic approval to install dependencies or change registration. Source registration and mode switching need their own applicable scope.
 
 ## Usage
 
-1. Open a support ticket in Dynamics 365 or Azure Portal.
+1. Open a support ticket on `https://onesupport.crm.dynamics.com/`.
 2. Click the **DH** Floating Action Button (FAB) in the bottom right.
 3. Review the scraped Case Context and remove anything you do not want sent.
 4. Click **Analyze** to get an AI-generated Root Cause Analysis.
@@ -104,16 +66,15 @@ an open FAB terminal menu, its exact transaction-bound completion Status bubble,
 or foreground Options. Switching tabs or closing the only qualifying surface
 starts the full interval over; the closed-FAB red dot and unrelated messages do
 not count, and Status bubble is never forced on. A rollback then returns to the
-ordinary Retry action only in versions supporting this completion protocol;
-older B1 is not qualified for this rollback/Retry behavior. Mixed or unrecoverable
+ordinary Retry action. Mixed or unrecoverable
 installations show persistent guidance to run the matching full installer.
 Standalone bootstrap and per-write power-loss guarantees remain deferred, so an
-extreme interruption may still require that installer.
+extreme interruption may still require that installer. See [TODO.md](TODO.md) for current limitations and planned work.
 
 ## Development
 
 * **Frontend:** React 19, Vite, TypeScript, Tailwind CSS.
-* **Backend:** Python 3.x, Native Messaging API, asyncio, PyInstaller.
+* **Backend:** Python 3.11+, Native Messaging API, asyncio, PyInstaller; releases bundle the Host runtime.
 * **Telemetry:** Azure Application Insights receives operational events, not Case Context or prompt content.
 
 See [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for internal architecture details, and [AGENTS.md](AGENTS.md) for AI agent coding standards.
