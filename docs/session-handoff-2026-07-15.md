@@ -5,10 +5,11 @@
 Updated: 2026-09-10.
 
 - Canonical checkout: `C:\MyWorkbench\Repository\Dynamics-Helper`;
-  branch `hardening/plan-d-runtime-installer`, verified HEAD
-  `fce8d03a2319f3efb0607ae59c9614fb00deb01d`, pushed to origin. `master` remains
-  at `bfedc9f`. Created On and SDK upgrade changes are committed/pushed. Current
-  uncommitted changes prepare local 2.0.77 version carriers, notes and this record.
+  branch `hardening/plan-d-runtime-installer`, verified release commit
+  `8cf6e6607ce29e1cc203a33a8a85071d234c950c`, pushed to origin and
+  tagged `v2.0.77`. `master` remains at `bfedc9f`. Created On, SDK upgrade and
+  version preparation are committed/pushed; this post-release record follows
+  the tag without moving it. Verify the current branch tip with Git.
 - Completed preceding request: after authorized read-only Edge diagnosis, add minimal safe
   Created On diagnostics. Implementation, focused verification and the diagnostic
   Extension build are complete. The user confirmed switching Edge's unpacked
@@ -40,10 +41,12 @@ Updated: 2026-09-10.
   Candidate: `releases/local-2.0.77-20260910/DynamicsHelper_v2.0.77.zip`,
   14,357,834 bytes, SHA-256
   `9dde6e68f46dc8423e3f220fea414384ea40d819aa146cb4f6b8faeadea2e3eb`.
-- Release authorization: the user requested push and release of 2.0.77. Reuse
-  the verified candidate bytes, commit version carriers and final notes, and push
-  only the current branch and exact v2.0.77 tag. Publication is pending execution;
-  do not interpret this record as evidence it already succeeded.
+- Release COMPLETE: https://github.com/boatmac/Dynamics-Helper/releases/tag/v2.0.77
+  is published as stable/latest, not draft/prerelease. Remote tag resolves to
+  `8cf6e66`. Exactly one ZIP asset is uploaded, size 14,357,834 bytes; GitHub's
+  asset SHA-256 matches the verified local candidate above. No rebuild occurred.
+  Final release notes raw SHA-256:
+  `01867ef74298d97a9797e4303f78375836ff8f21d9b7fb992b42f3e2d77263d8`.
 - Local preparation boundary: no frozen EXE execution, installer, installed Host update,
   browser reload, version commit, tag or release was performed for this candidate.
   Earlier ZIPs remain unchanged and obsolete for this delivery. Existing installed
