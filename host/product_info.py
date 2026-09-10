@@ -8,7 +8,7 @@ class HostCapabilities:
     provided: tuple[str, ...]
 
 
-VERSION = "2.0.76"
+VERSION = "2.0.77"
 REQUIRED_PROTOCOL_CAPABILITIES = ("prompt-scope-v1",)
 PROVIDED_PROTOCOL_CAPABILITIES = (
     "prompt-scope-v1",

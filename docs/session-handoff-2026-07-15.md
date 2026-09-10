@@ -5,12 +5,10 @@
 Updated: 2026-09-10.
 
 - Canonical checkout: `C:\MyWorkbench\Repository\Dynamics-Helper`;
-  branch `hardening/plan-d-runtime-installer`, pre-checkpoint verified HEAD
-  `ee7d427e954fd3e12d4491a0afab5f2806cacc00`, pushed to origin. `master` remains
-  at `bfedc9f`. Created On correction and prior local checkpoints are committed
-  and pushed. The user approved committing and pushing the SDK 1.0.13 adapter,
-  offline tests/entry/review and related documentation. This record is prepared
-  before that checkpoint; verify its actual commit/remote status with Git.
+  branch `hardening/plan-d-runtime-installer`, verified HEAD
+  `fce8d03a2319f3efb0607ae59c9614fb00deb01d`, pushed to origin. `master` remains
+  at `bfedc9f`. Created On and SDK upgrade changes are committed/pushed. Current
+  uncommitted changes prepare local 2.0.77 version carriers, notes and this record.
 - Completed preceding request: after authorized read-only Edge diagnosis, add minimal safe
   Created On diagnostics. Implementation, focused verification and the diagnostic
   Extension build are complete. The user confirmed switching Edge's unpacked
@@ -36,11 +34,49 @@ Updated: 2026-09-10.
   Owned session deleted, directory absent, CLI exit 0, no recorded process/direct
   child remains, source/dependency/CLI bytes unchanged. Earlier failed/incomplete
   attempts remain evidence, not retroactively marked PASS.
-- Remaining boundary: no frozen EXE execution, installer,
-  installed Host replacement or new ZIP. Existing ZIP and installed Host still
-  predate the SDK change. Current product version remains 2.0.76. SDK commit/push
-  is approved; version bump, new packaging, installation and release are not part
-  of this checkpoint.
+- Latest delivery: user selected 2.0.77 and approved a local complete candidate.
+  Extension and Host rebuilt successfully; ZIP extraction/integrity validation
+  passed 55 manifest entries. Source version carriers and lockfile are 2.0.77.
+  Candidate: `releases/local-2.0.77-20260910/DynamicsHelper_v2.0.77.zip`,
+  14,357,834 bytes, SHA-256
+  `9dde6e68f46dc8423e3f220fea414384ea40d819aa146cb4f6b8faeadea2e3eb`.
+- Release authorization: the user requested push and release of 2.0.77. Reuse
+  the verified candidate bytes, commit version carriers and final notes, and push
+  only the current branch and exact v2.0.77 tag. Publication is pending execution;
+  do not interpret this record as evidence it already succeeded.
+- Local preparation boundary: no frozen EXE execution, installer, installed Host update,
+  browser reload, version commit, tag or release was performed for this candidate.
+  Earlier ZIPs remain unchanged and obsolete for this delivery. Existing installed
+  product state is not refreshed by these local builds. No SDK/installer full
+  suites or live model probes were repeated for the version-only preparation.
+
+### Local 2.0.77 Candidate
+
+Built from HEAD fce8d03 plus version-only edits to Host product_info, Extension
+package/lock/manifest and new `releases/notes-v2.0.77.md`; no tag or release script.
+Stable manifest version_name was removed rather than retaining the old version.
+SDK remains 1.0.13 with unchanged requirements; all six reviewed SDK source hashes,
+32 direct Node dependency versions/declarations and pip check passed before build.
+No dependency installation was needed. Notes distinguish prior behavior evidence
+from current package verification and do not claim installed-product qualification.
+
+| Phase | Monitor / child PID | Start (+08:00) | Seconds | Outcome |
+| --- | --- | --- | --- | --- |
+| Extension | 13620 / 23880 | 18:58:28 | 80.23 | Exit 0; menu 5/5, tsc/Vite/copy PASS |
+| Host | 30284 / 25848 | 19:00:21 | 47.27 | Exit 0; PyInstaller 6.22.2 onedir |
+| Package and validation | 34728 / 50948 | 19:01:46 | 11.22 | Exit 0; 55 manifest entries |
+
+Evidence: `C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-package-2077-20260910`.
+All recorded tracked source bytes stayed unchanged through build/package; this
+handoff was updated afterward. `build-record.json` beside the ZIP binds source
+hashes, HEAD, release-notes digest, tool distributions and final archive identity.
+`verified-package` retains the independently extracted complete package. Existing
+archive validator checked file sets, metadata links, versions and SHA-256; extra
+byte comparisons covered installer scripts, EXE, public menu and config seed.
+Final archive SHA-256 was independently checked. No owned monitor/phase PID or
+direct child remained. Timeouts unused. Existing optional tzdata and Browserslist
+warnings persist. The original build record retains the pre-package notes digest;
+notes were subsequently finalized for publication without changing ZIP bytes.
 
 ### SDK 1.0.13 Delivery
 
