@@ -317,22 +317,13 @@ logger.info(f"Python Executable: {sys.executable}")
 # Import the SDK from the correct package name we discovered: 'copilot'
 try:
     log_emergency("Attempting to import copilot SDK...")
-    # SDK 1.0.5 import map (upgraded from 0.3.0 on 2026-07-03, see
-    # docs/sdk-upgrade-2026-07-1.0.5.md):
-    #   - SubprocessConfig was REMOVED; the stdio connection is now expressed
-    #     via `RuntimeConnection.for_stdio(path=...)`.
-    #   - PermissionRequestResult is now a Union type (annotation-only, not a
-    #     constructor). The headless auto-approve handler returns the concrete
-    #     `PermissionDecisionApproveOnce()` variant instead.
-    #   - PreToolUseHookOutput stays a TypedDict accepting permissionDecision.
-    # WARNING: `copilot.generated.rpc.PermissionRequestResult` is a different
-    # internal RPC type (success: bool); always import from `copilot.session`.
-    from copilot import CopilotClient, RuntimeConnection
+    from copilot import RuntimeConnection
     from copilot._jsonrpc import ProcessExitedError
-    from copilot.session import (
-        PermissionRequestResult,
-        PreToolUseHookOutput,
-        PermissionDecisionApproveOnce,
+    from copilot.session import PermissionRequestResult
+    from sdk_client import (
+        CopilotClient,
+        SessionOptionsPatchError,
+        headless_permission_handler,
     )
 
     # NOTE (2026-07-03): the PingResponse ISO-timestamp monkey-patch shim
@@ -1475,26 +1466,8 @@ class NativeHost:
         return session_config
 
     def _permission_handler(self, request, context) -> PermissionRequestResult:
-        """
-        Auto-approves permissions to prevent headless hangs.
-        Fallback safety net — if pre_tool_use hook doesn't catch it.
-        """
-        logger.info("Permission requested (fallback handler); auto-approving.")
-        # SDK 1.0.5: PermissionRequestResult is a Union (annotation-only);
-        # the concrete approval variant is PermissionDecisionApproveOnce().
-        # (0.3.0 used PermissionRequestResult(kind="approve-once"), removed
-        # in 1.0.5 — see docs/sdk-upgrade-2026-07-1.0.5.md § 3 B2.)
-        return PermissionDecisionApproveOnce()
-
-    @staticmethod
-    def _pre_tool_use_hook(hook_input, context) -> PreToolUseHookOutput:
-        """
-        Auto-approves all tool calls BEFORE they reach the permission request stage.
-        This eliminates the permission request overhead entirely, improving speed.
-        The _permission_handler above serves as a fallback safety net.
-        """
-        logger.info("Pre-tool-use hook: auto-allowing tool request.")
-        return PreToolUseHookOutput(permissionDecision="allow")
+        """Resolve headless permissions without approving managed requests."""
+        return headless_permission_handler(request, context)
 
     @staticmethod
     def _log_session_observability(session, origin: str) -> None:
@@ -1618,6 +1591,20 @@ class NativeHost:
         logger.error(summary)
         return summary
 
+    async def _reject_session_options(self) -> bool:
+        self.last_session_error = "Copilot session options patch failed."
+        logger.error(self.last_session_error)
+        rejected_client = self.client
+        self._invalidate_active_session(clear_client=True)
+        if rejected_client is not None:
+            try:
+                await asyncio.wait_for(rejected_client.stop(), timeout=10)
+            except Exception:
+                logger.warning(
+                    "Copilot client options cleanup failed; process exit is unconfirmed."
+                )
+        return False
+
     async def _refresh_session(
         self,
         session_id: str | None = None,
@@ -1704,7 +1691,6 @@ class NativeHost:
         # to the SDK, which now uses strict keyword-only arguments.
         sdk_kwargs = {
             "on_permission_request": self._permission_handler,
-            "hooks": {"on_pre_tool_use": self._pre_tool_use_hook},
             "skip_custom_instructions": True,
             "system_message": self._build_system_message(snapshot, session_id),
         }
@@ -1751,6 +1737,12 @@ class NativeHost:
                 )
                 self._log_session_observability(self.session, "resumed")
                 return True
+            except SessionOptionsPatchError:
+                return await self._reject_session_options()
+            except asyncio.CancelledError:
+                self._invalidate_active_session(clear_client=True)
+                logger.warning("Copilot session refresh cancelled; cleanup is unconfirmed.")
+                raise
             except AttributeError:
                 logger.info(
                     "SDK does not support resume_session. Will create new session."
@@ -1798,6 +1790,12 @@ class NativeHost:
             )
             self._log_session_observability(self.session, "created")
             return True
+        except SessionOptionsPatchError:
+            return await self._reject_session_options()
+        except asyncio.CancelledError:
+            self._invalidate_active_session(clear_client=True)
+            logger.warning("Copilot session refresh cancelled; cleanup is unconfirmed.")
+            raise
         except (OSError, ProcessExitedError) as error:
             self._safe_sdk_error("create Copilot session transport", error)
             broken_client = self.client
@@ -1847,6 +1845,12 @@ class NativeHost:
                 )
                 self._log_session_observability(self.session, "created-after-retry")
                 return True
+            except SessionOptionsPatchError:
+                return await self._reject_session_options()
+            except asyncio.CancelledError:
+                self._invalidate_active_session(clear_client=True)
+                logger.warning("Copilot session refresh cancelled; cleanup is unconfirmed.")
+                raise
             except (OSError, ProcessExitedError) as retry_err:
                 self.last_session_error = self._safe_sdk_error(
                     "retry Copilot session", retry_err

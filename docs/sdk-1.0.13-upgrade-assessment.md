@@ -2,6 +2,11 @@
 
 ## Assessment Context
 
+Historical assessment: the later source adaptation and fixed offline entry are
+documented in [SDK 1.0.13 upgrade record](sdk-upgrade-1.0.13.md). The environment and
+failed qualification results below describe the original assessment, not the
+current source pin or a mandate to rerun its temporary scripts.
+
 Research and qualification evidence recorded on 2026-09-09 after stable v2.0.76
 publication, followed by an explicitly approved
 isolated SDK installation and mock qualification. Product dependency and project

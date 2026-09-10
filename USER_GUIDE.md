@@ -127,6 +127,13 @@ Controls how long the host waits for Copilot to finish analyzing a case before g
 
 Changes take effect immediately on the next analyze — no host restart required.
 
+### Headless Tool Permissions
+
+DH runs without an interactive approval window. Ordinary tool permission requests
+continue to be approved automatically. Tools that require managed approval are
+explicitly denied with a user-unavailable decision rather than waiting for an
+invisible prompt or hanging. This does not bypass managed-approval requirements.
+
 ### Model & Performance
 
 Under **Settings → Model & Performance**, you can choose the model, reasoning effort, and context tier DH uses for analyze sessions — independent of the model your Copilot CLI uses interactively.

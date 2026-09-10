@@ -5,12 +5,13 @@
 Updated: 2026-09-10.
 
 - Canonical checkout: `C:\MyWorkbench\Repository\Dynamics-Helper`;
-  branch `hardening/plan-d-runtime-installer`, verified HEAD
-  `0d1c6ee346b95acd3e3607d63726387438d13040`. `master` remains at `bfedc9f`.
-  Current uncommitted changes include Created On diagnostics in bridge/PageReader/
-  FAB, assertions in three existing tests, this record, `DEVELOPER_GUIDE.md` and
-  frontend entry clarifications in `docs/test-safety.md`.
-- Current request: after authorized read-only Edge diagnosis, add minimal safe
+  branch `hardening/plan-d-runtime-installer`, pre-checkpoint verified HEAD
+  `ee7d427e954fd3e12d4491a0afab5f2806cacc00`, pushed to origin. `master` remains
+  at `bfedc9f`. Created On correction and prior local checkpoints are committed
+  and pushed. The user approved committing and pushing the SDK 1.0.13 adapter,
+  offline tests/entry/review and related documentation. This record is prepared
+  before that checkpoint; verify its actual commit/remote status with Git.
+- Completed preceding request: after authorized read-only Edge diagnosis, add minimal safe
   Created On diagnostics. Implementation, focused verification and the diagnostic
   Extension build are complete. The user confirmed switching Edge's unpacked
   extension source to canonical `extension/dist` and subsequently seeing diagnostic
@@ -20,10 +21,260 @@ Updated: 2026-09-10.
   rebuilt. The user has now confirmed successful Created On output with explicit
   UTC after the requested reload/verification. The reported local defect is resolved;
   this is not release/package or full product qualification.
-  The user subsequently requested commit and push. Local checkpointing is authorized;
-  public push scope is awaiting clarification because the remote branch is at
-  `70fcdbd` and six additional local commits include previously local-only private
-  session/security history. No release publication is requested.
+  The user subsequently requested commit/push and confirmed using the sole
+  canonical checkout. After scoped sensitive-content inspection, origin advanced
+  from `70fcdbd` to `ee7d427`; no tag or release was created.
+- Latest work: the user approved SDK 1.0.13 adaptation, a durable fixed offline
+  test entry, dependency alignment and local freeze after verification. Source
+  and canonical venv are now SDK 1.0.13. Final fixed contracts passed 25/25 with
+  unchanged reviewed source/dependency bytes; local frozen Host build passed.
+- Live follow-up COMPLETE for the agreed synthetic scope: SDK 1.0.13 / CLI 1.0.83 /
+  protocol 3 passed 9/9 stages after the user separately approved one model turn.
+  Process/session auth, create and first options acknowledgment, response matching
+  OK, disconnect, persisted-session resume/options and resumed auth all passed.
+  Exactly one turn was sent; no permission requests or business/case content.
+  Owned session deleted, directory absent, CLI exit 0, no recorded process/direct
+  child remains, source/dependency/CLI bytes unchanged. Earlier failed/incomplete
+  attempts remain evidence, not retroactively marked PASS.
+- Remaining boundary: no frozen EXE execution, installer,
+  installed Host replacement or new ZIP. Existing ZIP and installed Host still
+  predate the SDK change. Current product version remains 2.0.76. SDK commit/push
+  is approved; version bump, new packaging, installation and release are not part
+  of this checkpoint.
+
+### SDK 1.0.13 Delivery
+
+#### Live Compatibility Attempt
+
+Final successful attempt: the user approved one minimal model turn to generate
+real synthetic history; the probe requires explicit `--single-model-turn` and
+existing-profile mode. It writes send intent before the single send_and_wait call,
+never retries it, exposes no tools, disables discovery/hooks/skills and denies
+permissions. Response content is not logged; only presence/exact-OK booleans.
+This is a scoped model-call approval, not permission to run case analysis.
+
+Evidence: `C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-sdk-live-turn-20260910`.
+Monitor 15852, worker 13180, CLI 39500; worker start
+`2026-09-10T18:39:46.9140063+08:00`. Total 256.04 seconds, 1200-second supervisor
+allowance unused; model response took about 8.31 seconds within its 120-second
+budget. All 9/9 stages completed. Both initial and resumed session options were
+confirmed by the DH adapter. The owned events.jsonl existed before resume, unlike
+the previous no-turn scenario. Process/created/resumed authentication all true;
+model_turns_sent=1, response matched OK, permission_requests=0.
+
+Runtime and final result records report overall_success=true, all cleanup steps
+successful, CLI exit 0 and source/dependency/CLI bytes unchanged. Independent
+closeout confirmed the owned session directory absent and no recorded PID/direct
+child remaining. Probe hash:
+`43fe734870c71cedd1765f96e492aaebdea7429bed317bd930a31e09eba6dc8a`.
+No frozen executable, installed Host, real case or installer was executed; no
+commit/push or replacement ZIP followed. Current remaining work is packaging /
+deployment or Git checkpointing only when requested, not more blind live retries.
+
+Earlier outcomes retained below: continued within the already
+approved work package rather than repeatedly requesting approval for probe fixes.
+CLI source showed session creation has its own auth-resolution path, so the probe
+now records process auth and session auth separately; it does not mistake session
+creation alone for authenticated success. A first session-path attempt still had
+auth=false, but created/detached successfully and failed resume; cleanup succeeded.
+Evidence: `dh-sdk-live-session-20260910` in approved Temp, 581.38 seconds. No model
+turns or tool requests. This added concrete session-path evidence, not a full PASS.
+
+The next probe preserved a fixed list of ordinary Windows environment variables
+(ComSpec/PATHEXT and OS/user-directory related metadata) for CLI only. It continued
+to exclude token variables, retain Python isolation, disable file hooks/config
+discovery/skills, expose no tools and deny unexpected permission requests. Only
+fixed auth/error categories, RPC numeric code and owned event-file existence were
+recorded, not raw error messages, credentials or configuration contents.
+
+This run passed authentication at both process and session levels, creation,
+first options update and disconnect (6/8 stages). Resume returned JsonRpcError
+-32603 with fixed categories not-found/session/events; the owned session directory
+was present but events.jsonl absent before resume. These observations establish a
+no-turn persistence limitation for this attempt, not a claim that every empty
+session can never persist or that populated-session resume is broken.
+Evidence: `C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-sdk-live-windows-20260910`.
+Monitor 3816, worker 54200, CLI 42820; start
+`2026-09-10T18:17:23.7178898+08:00`. Runtime/cleanup result was durably recorded
+before post-hashing: delete_owned_session=true, owned_session_path_absent=true,
+client_stop=true, cli_exited=true, cli_exit_code=0. Supervisor reached 600 seconds
+during post-verification and terminated worker/then-child 54020; it did not produce
+the normal final result.json. Preserve that interruption, not an overall PASS.
+Probe hash: `e0f1654cdff23f7736e97cb7ca682dedac9d1708fa4785689de5514886913a16`.
+
+A separate stdlib-only read/hash comparison completed post-verification without
+running CLI: 4,847 unique source/dependency/CLI/probe files unchanged and the site
+file set unchanged. Result: `post-run-byte-verification.json` in the same evidence
+directory. The owned session path was independently confirmed absent; recorded
+processes/direct children were absent. Existing user config/logs may have changed
+as permitted; no claim of an unchanged real profile is made. Authentication failure
+was a probe-environment defect, not evidence the user needed to log in again.
+
+Remaining gap is successful resume of persisted history. No synthetic transcript
+was fabricated, no real case session was reused, and no model message was sent.
+A model-turn verification is a new effect beyond the approved no-turn package;
+leave it explicitly pending rather than endlessly rerun the same empty-session
+scenario. Offline 25/25 and frozen-build results remain separate valid evidence.
+
+The user explicitly approved a bounded real CLI handshake/auth and synthetic
+create/disconnect/resume/options check, with no model turns, business tools,
+case access or installation. New plain `scripts/probe_sdk_live.py` imports the
+adapter, not Host; it uses explicit external copilot.exe, independent COPILOT_HOME,
+fresh profile/workspace directories, no inherited token variables and explicit
+`--no-auto-login`. All unexpected permission requests are denied. The attempt
+stops on isolated auth failure without login, credential copying or retry.
+This live entry is not the offline scanner or contract-test gate.
+
+One attempt on 2026-09-10: monitor PID 37664, base-Python worker 23276, owned CLI
+38596. Worker start `2026-09-10T14:56:49.7303730+08:00`; outer budget 210 seconds.
+Stages 3/6 completed: start/handshake, status, authentication. CLI reports 1.0.83
+and protocol 3, authenticated=false. No synthetic session was created, no model
+turn sent, no permission requested. `overall_success=false`, reason
+`isolated_auth_unavailable`; worker exit 1, SDK stop succeeded and CLI exited 0.
+No recorded process or direct child remained at final inspection. The full probe
+including before/after byte verification took 184.46 seconds; no timeout occurred.
+
+Evidence retained under
+`C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-sdk-live-20260910`
+and sibling identity/process/stdout/stderr/monitor files. Reviewed source, installed
+dependency and CLI executable bytes were unchanged. CLI SHA-256:
+`d3f3bb7b8bbf68357ad29f514a179d09f76135483d8bfb643131b8600f671ee2`.
+Probe SHA-256: `ddbe756dfd6a71884be3a49183f6c84cf506027da0d9e8632143c18865b0df34`.
+The CLI did write inside the disposable profile: LOCALAPPDATA contains 223 files
+(152,265,653 bytes), TEMP one file (2,140,676 bytes), and COPILOT_HOME a config.json
+(131 bytes). No config contents were read. Structure indicates CLI unpack/cache
+activity, not proof of a network download. Workspace and other profile roots
+contained no files; this is not an unchanged-profile claim or an OS sandbox.
+
+The user subsequently authorized using the existing CLI login configuration,
+including its real user directory and possible logs/metadata writes, with a
+temporary working directory and only an owned synthetic session. The probe gained
+an explicit `--use-existing-profile` mode: original profile paths go only to the
+CLI env; Python retains isolated profiles, no token variables are copied, and
+session configuration discovery/file hooks/skills are disabled. Cleanup covers
+attempted creation even if the first options confirmation fails.
+
+Second attempt: monitor 47160, worker 8704, CLI 18204; worker start
+`2026-09-10T15:31:57.6584980+08:00`, 300-second budget, 187.66 seconds elapsed.
+Again completed handshake/status/auth only, CLI 1.0.83/protocol 3, auth=false;
+no session or model turn, stop succeeded, CLI exit 0 and no recorded process/direct
+child remained. Sources/dependencies/CLI bytes unchanged. Evidence is retained at
+`C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-sdk-live-existing-20260910`
+plus its sibling logs/identity records. Probe SHA-256 for that attempt:
+`2b3f5ec09d9db9be81b8bbbf1a23d08ae7b39bfb0913684fe6edc0942b2f8be2`.
+
+Diagnosis correction: the assistant misinterpreted `--no-auto-login` as merely
+preventing an interactive login prompt. Official SDK authentication documentation
+states it disables automatic stored credentials and gh authentication too.
+Both probes explicitly passed that flag; `use_logged_in_user=True` does not undo
+an explicit CLI argument. Thus the earlier attribution to profile isolation alone
+was unsupported. Do not ask the user to reauthenticate based on these outcomes.
+The normal Host does not pass the flag. Its preferred npm entry was checked absent,
+so the discovered Winget entry is consistent with its PATH fallback here.
+
+The user subsequently approved one corrected attempt. The probe omits
+`--no-auto-login` in explicitly selected existing-profile mode. Third attempt:
+monitor 51644, worker 50156, CLI 50540; worker start
+`2026-09-10T15:58:16.9724496+08:00`, budget 300 seconds, 217.23 seconds elapsed.
+Handshake/status/auth completed (3/6), CLI 1.0.83/protocol 3, auth=false again.
+No session creation, permission request or model turn; stop succeeded, CLI exit 0,
+and no recorded PID/direct child remained. Source/dependency/CLI hashes unchanged.
+Evidence: `C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-sdk-live-corrected-20260910`
+plus sibling logs and identity files. Probe SHA-256:
+`d1f840307898634998f59e0da0865724b3388a4fc12c5cb077e1f404da98fb2c`.
+
+Removing the flag was necessary but did not resolve authentication; the earlier
+claim that it explained both failures completely was not established. Read-only
+command discovery then confirmed gh.exe is installed but absent from the probe's
+restricted CLI PATH. Copilot's gh authentication fallback may therefore differ
+from normal product execution. No token environment variables were present among
+GITHUB_TOKEN, GH_TOKEN, COPILOT_GITHUB_TOKEN; values were never read or exported.
+Do not label the missing gh PATH a confirmed cause without evidence. No fourth
+attempt was launched. The user subsequently confirmed ordinary terminal Copilot
+works. Read-only inspection established that the normal PATH includes gh.exe's
+directory while the probe's restricted PATH did not. Existing-profile mode now
+passes the launching environment's PATH to CLI only; Python retains its restricted
+PATH and isolated profiles. No token variables or whole environment are copied.
+Syntax parsing passed without SDK/CLI execution. The user clarified that the
+existing work-package approval includes necessary probe fixes and verification;
+assistant self-imposed once-only wording must not be mistaken for a user attempt
+limit. No account changes or reauthentication are indicated.
+
+Fourth attempt with corrected PATH: monitor 41780, worker 46776, CLI 12284,
+worker start `2026-09-10T17:11:56.0211383+08:00`, outer budget 300 seconds. Preflight
+file verification took 215.82 seconds; startup/status passed, then auth began.
+The supervisor timed out before final result evidence and terminated the worker
+and its then-child 52864. No recorded process/direct child remained. Its auth
+result is unknown: the probe originally wrote outcomes only after post-run hashing.
+Evidence `dh-sdk-live-path-20260910` remains incomplete, not a PASS or auth-false proof.
+
+The probe was corrected to emit completed stages/auth boolean immediately and
+save `runtime-result.json` before post-run hashes. The total supervisor allowance
+became 600 seconds for observed hash latency; RPC deadlines stayed unchanged.
+Fifth attempt: monitor 8900, worker 48852, CLI 47844; start
+`2026-09-10T17:22:00.9728703+08:00`, total 382.79 seconds. Runtime start at 226.30s,
+handshake/status/auth completed by 233.96s. Auth=false was immediate, not a hanging
+RPC. SDK stop and CLI exit 0 confirmed; no session/permission/model activity.
+Source/dependency/CLI hashes unchanged. Evidence:
+`C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-sdk-live-observed-20260910`.
+Probe SHA-256 `7a5c0cd2c00e80ff0e214a15cdb6e0182f77455468a8c01abfe8c447be57aee9`.
+
+Targeted official-source inspection confirms start -> get_auth_status is a
+supported SDK call sequence; it does not require a model turn or session warm-up.
+The CLI auth implementation is partly native, so readable JS alone does not
+establish the reason for this false result. Filtered `gh auth status --active
+--json hosts` returned success with one active keyring account; login/token values
+were not printed. No sixth probe or token handoff was attempted. Next work should
+resolve headless authentication behavior from concrete evidence, not change SDK
+product auth policy or bypass the probe's auth check to obtain a nominal PASS.
+
+#### Offline And Frozen Results
+
+The user approved replacing per-upgrade test exceptions with a durable SDK-only
+offline entry. `scripts/run_sdk_tests.py` binds 25 fixed unittest IDs and six
+project inputs through `tests/sdk-test-review.json`, verifies the exact reviewed
+22-distribution environment and all RECORD payload hashes, and snapshots actual
+installed bytes before/after. It reuses the existing safe worker/supervisor and
+fresh profiles, not the Python scanner gate, and installs pre-import effect guards.
+Third-party/native code remains a declared trust boundary, not an OS sandbox.
+Future upgrades reuse this entry after affected source/dependency review.
+
+Changes: SDK 1.0.13 pin with thirteen existing transitive pins retained; one narrow
+private client adapter accepts only literal success from the first options RPC;
+negative/malformed/error results terminate resume/create/retry and clear active
+state/fingerprint. Cleanup is cooperative and failures stay explicitly unconfirmed.
+Ordinary permissions approve; managed-required/invalid/unreadable requests deny
+with user-not-available. Removed unconditional pre-tool allow. Auth/model/event
+contracts used by DH remain supported. No new CLI fallback or feature expansion.
+
+The existing SDK wheel was SHA-256 verified against the retained official digest
+`941dd5b55cf32ba55c73c651052a4a52b259b470c68bf6a6ac3d240c235402c9`
+then installed offline with no dependency downloads. `pip check` passed. The
+dependency-only entry verified 4,828 installed files without importing SDK.
+Initial verifier errors concerned nested vendored RECORD selection and were fixed;
+missing unhashed cache pyc is allowed, while missing hashed payloads still fail.
+
+Offline results: first 25/25 PASS at `dh-sdk-tests-fcvn9nad`; added entry-rejection,
+effect-guard and invalid-managed-field assertions passed at `dh-sdk-tests-ro7hylye`;
+after binding the complete allowed distribution set, final 25/25 PASS at
+`C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-sdk-tests-56sgfz7q`.
+Final `sdk-result.json`: overall_success=true, dependencies_unchanged=true;
+underlying result reports source identity unchanged, no cleanup/capture errors.
+Host integration is AST plus static source verification, not real Host import.
+The old 27-case assessment remains 25 PASS / 2 FAIL, not retroactively relabeled.
+
+Frozen build: monitor PID 38456, child 39468, start
+`2026-09-10T12:31:03.9822053+08:00`, 62.42 seconds, exit 0, no timeout.
+Evidence: `C:\Users\zhaobo\AppData\Local\Temp\opencode\dh-sdk-1013-build-20260910`.
+Output `dist/dh_native_host/dh_native_host.exe` SHA-256:
+`6a9851a39094219c69d140999d8735af2da443810a40d6dcd07d98db716bd4c4`.
+Analysis includes sdk_client, SDK and all 17 existing hidden imports; no collected
+setuptools or Pydantic mypy plugins. Optional tzdata warning remains. No EXE was
+executed. Recorded supervisor/build PIDs and direct children were absent at final
+inspection; no general descendant-confinement claim. See
+[SDK upgrade workflow](sdk-upgrade-workflow.md) for repeatable procedure and limits.
+
+### Prior Cleanup And Product Build Summary
 - Remaining directory cleanup is COMPLETE. File Locksmith identified the Edge
   CDP proxy `node.exe` PID `31376` as the occupant. With explicit user approval,
   that exact process was stopped after command-line/creation-time verification;

@@ -126,10 +126,32 @@ Understanding how a user request becomes an AI response.
     * Before every Analyze, the Host validates the effective Root and resolves an immutable prompt snapshot containing exact DH Core bytes plus exactly one selected editable source. Strict UTF-8 decode or source-availability failures stop before any model turn.
     * Smart refresh compares `current_case_id` plus `current_session_root_path` (the root actually applied to the active session), not just the desired `self.root_path` config value.
     * Smart refresh also compares `current_prompt_fingerprint` with the snapshot's versioned fingerprint. A changed source mode, Core bytes, or selected-source bytes resumes/creates the same UUIDv5 session before sending the turn.
-    * On session creation or refresh, `resume_session(uuid, ...)` is tried first and falls back to `create_session(session_id=uuid, ...)`. Resume, create fallback, and transport retry receive equivalent Root, prompt, isolation, Skills, MCP, hook, permission, and model/performance kwargs.
+    * On session creation or refresh, `resume_session(uuid, ...)` is tried first and ordinary failures fall back to `create_session(session_id=uuid, ...)`. `SessionOptionsPatchError` is terminal, with no create fallback or transport retry. Resume, create fallback, and transport retry receive equivalent Root, prompt, isolation, Skills, MCP, hook, permission, and model/performance kwargs.
     * The session UUID is injected into the `system_message` content as `## Session Info` / `Session Name: <uuid>`, making it available for `context.md` frontmatter `session_name:`.
 5. **SDK Execution (`send_and_wait`):**
-    * The backend sends the prompt as a plain string (SDK 0.2.0+, still applies in 1.0.5) with a **user-configurable timeout** (default 1200s, range 60–3600s, set via Options → Analyze Timeout). The FAB safety timeout is derived as `(value + 10) * 1000` ms so the host's truthful "Copilot did not finish within Ns" error always fires first.
+    * The backend sends the prompt as a plain string with a **user-configurable timeout** (default 1200s, range 60–3600s, set via Options → Analyze Timeout). The FAB safety timeout is derived as `(value + 10) * 1000` ms so the host's truthful "Copilot did not finish within Ns" error always fires first.
+
+#### SDK Adapter And Headless Permissions
+
+The source dependency is SDK 1.0.13. The Host imports `CopilotClient` from
+`host/sdk_client.py` via `sdk_client`, while `RuntimeConnection` comes from
+`copilot` and permission types come from `copilot.session`. This narrow wrapper
+uses the private `_apply_post_create_options_patch` hook to require literal
+`success is True` from the first options update, including instruction isolation.
+A negative/malformed result or exception raises `SessionOptionsPatchError`;
+the Host clears active session/client state and `current_prompt_fingerprint`,
+performs bounded cleanup, and stops without fallback, retry, or a model turn.
+Remove the adapter only after an upstream fix is confirmed to check that first
+update's success and the focused regression tests pass without the adapter.
+
+Ordinary permissions (`managed_approval_required` exactly `False` or `None`)
+return `PermissionDecisionApproveOnce()`. Managed-required (`True`), invalid,
+or unreadable values return `PermissionDecisionUserNotAvailable()` immediately.
+Do not add unconditional pre-tool `allow` or omit the permission handler on any
+create/resume path. See the [SDK 1.0.13 upgrade record](docs/sdk-upgrade-1.0.13.md)
+for the adapter contract and the [SDK upgrade workflow](docs/sdk-upgrade-workflow.md)
+for offline verification; source/offline results do not
+claim a frozen build or an installed production upgrade.
 
 ### 2. Session Persistence
 
@@ -268,7 +290,7 @@ without exposing arbitrary Host fields.
 
 Analysis pending and dismissal state is request scoped. Starts write `dh_pending_analysis:<encoded-requestId>`; completion removes only that key. The legacy singleton pending key remains readable. `seenAnalysisKey()` produces collision-safe request or exact legacy case/timestamp keys, so A/B acknowledgments coexist. Hydration performs one `get(null)`, selects the newest fresh pending matching the current case, observes pending storage changes/expiry, and derives matching seen state from the same snapshot. Reset removes both prefixes and legacy singletons.
 
-The standalone `host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` files are historical pre-1.0.5 probes. They retain `skip_custom_instructions=True` on session creation, but other imports, constructor arguments, and message shapes are obsolete; they are explicitly outside supported diagnostics until separately migrated. Use `host/venv` tests or the SDK 1.0.5 wire-drift probe documented in `AGENTS.md` instead.
+The standalone `host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` files are historical pre-1.0.5 probes. They retain `skip_custom_instructions=True` on session creation, but other imports, constructor arguments, and message shapes are obsolete; they are explicitly outside supported diagnostics until separately migrated. Use the fixed offline entry in [SDK upgrade workflow](docs/sdk-upgrade-workflow.md) for reviewed contracts; live CLI/model probes require separate authorization. The [2026-07-03 SDK 1.0.5 migration](docs/sdk-upgrade-2026-07-1.0.5.md) remains a historical record, not current diagnostic instructions.
 
 ### 4. Skills Configuration
 
@@ -883,6 +905,17 @@ atomic. Ordinary Analyze/config/health actions remain available.
 Follow [test execution safety](docs/test-safety.md). Use the maintained
 `scripts/check_test_safety.py`, `scripts/run_safe_tests.py`, and
 `tests/test-safety-manifest.json`, not ad hoc wrappers or historical launchers.
+For fixed offline SDK contracts, use `scripts/run_sdk_tests.py` and
+`tests/sdk-test-review.json` instead. This is a separately reviewed fixed unittest
+selection, not the Python scanner or a scanner-profile PASS. It reuses
+`run_safe_tests.py`'s `safe.worker` and `safe.supervise`, binds exact test IDs and
+project-source bytes, checks installed third-party versions and RECORD hashes,
+and compares dependency-byte snapshots before/after. Third-party/native code is
+an explicit trust boundary, not per-source scanner coverage or an OS sandbox.
+No CLI/model execution or dependency installation is part of this entry. Review
+changed tests, adapters, and dependencies before updating the review hashes;
+see [SDK upgrade workflow](docs/sdk-upgrade-workflow.md) for invocation and limits.
+
 The [handoff](docs/session-handoff-2026-07-15.md) records readiness and active
 authorization; this guide does not grant either.
 

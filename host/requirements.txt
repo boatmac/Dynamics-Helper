@@ -1,10 +1,9 @@
 # Direct dependency: the GitHub Copilot SDK (a JSON-RPC client for the
-# Copilot CLI — see AGENTS.md § 9.5). This release boundary is verified
-# against exact 1.0.5. Upgraded 0.3.0 → 1.0.5 on
-# 2026-07-03 (docs/sdk-upgrade-2026-07-1.0.5.md).
-github-copilot-sdk==1.0.5
+# Copilot CLI — see AGENTS.md § 9.5). SDK-specific compatibility handling
+# and offline qualification are documented in docs/sdk-upgrade-1.0.13.md.
+github-copilot-sdk==1.0.13
 
-# Transitive dependencies of github-copilot-sdk 1.0.5, pinned for
+# Transitive dependencies retained for github-copilot-sdk 1.0.13, pinned for
 # reproducible PyInstaller builds. Regenerate with `pip freeze` after
 # bumping the SDK pin. DH's own code uses only stdlib urllib.request, so
 # there is no direct `requests` dependency (the 0.3.0-era requests /

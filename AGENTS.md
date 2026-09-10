@@ -96,6 +96,17 @@ direct handles do not provide general descendant confinement. Source review is
 not runtime verification. Select the applicable entry under `docs/test-safety.md`
 and confirm that its reviewed scope covers the requested verification.
 
+Fixed offline SDK contracts use `scripts/run_sdk_tests.py` with
+`tests/sdk-test-review.json`, not the Python scanner or a scanner-profile PASS.
+The review binds fixed unittest IDs and complete project-source bytes; the entry
+reuses `run_safe_tests.py`'s `safe.worker` and `safe.supervise`. Review dependency
+versions and third-party RECORD hashes, and verify before/after dependency-byte
+snapshots. Third-party/native code remains an explicit trust boundary, not
+source-scanner coverage or an OS sandbox. This entry does not run the CLI/model
+or install dependencies. See [SDK upgrade workflow](docs/sdk-upgrade-workflow.md)
+and [test execution safety](docs/test-safety.md); live checks and frozen builds
+require their separate applicable scope.
+
 PowerShell fixture tests use the checked-in plain `tests/harnesses/installer_safety.ps1`
 with `-File` and explicit recording operations. They execute a real child process;
 mocked product operations do not make that process an OS sandbox. Fresh profile
@@ -261,7 +272,8 @@ may alert later. Never modify original private incident evidence during remediat
   * All I/O bound operations (SDK calls) must be `async`.
 * **Type Hinting:**
   * Use Python type hints extensively (e.g., `def func(a: int) -> str:`).
-  * Import types from `copilot` (top-level: `CopilotClient`, `RuntimeConnection`) and `copilot.session` (`PermissionRequestResult`, `PreToolUseHookOutput`, `PermissionDecisionApproveOnce`). **SDK 1.0.5 (2026-07-03):** `SubprocessConfig` was removed — the stdio connection is now `RuntimeConnection.for_stdio(path=...)` passed as `CopilotClient(connection=...)`. `PermissionRequestResult` became a Union (annotation-only, NOT constructible) — the headless auto-approve handler returns the concrete `PermissionDecisionApproveOnce()` variant. `copilot.types` was removed back in 0.3.0. WARNING: `copilot.generated.rpc.PermissionRequestResult` is a different internal RPC type (`success: bool`) — always import the session version. Full migration notes: `docs/sdk-upgrade-2026-07-1.0.5.md` (latest), `docs/sdk-upgrade-2026-05-0.3.0.md` (prior).
+  * **Current source SDK: 1.0.13.** Import `CopilotClient` through the DH wrapper in `host/sdk_client.py` (`from sdk_client import CopilotClient` in the Host), not directly from `copilot`. Import `RuntimeConnection` from `copilot`; use `RuntimeConnection.for_stdio(path=...)` with `CopilotClient(connection=...)`. Permission types come from `copilot.session`: `PermissionRequestResult` is annotation-only, while `PermissionDecisionApproveOnce` and `PermissionDecisionUserNotAvailable` are concrete result variants. Do not substitute the internal `copilot.generated.rpc.PermissionRequestResult`. See the [SDK 1.0.13 upgrade record](docs/sdk-upgrade-1.0.13.md) for version-specific contracts and the [SDK upgrade workflow](docs/sdk-upgrade-workflow.md) for the repeatable procedure; retain `docs/sdk-upgrade-2026-07-1.0.5.md` and `docs/sdk-upgrade-2026-05-0.3.0.md` as historical migration records.
+  * **Adapter boundary:** `host/sdk_client.py` narrowly adapts SDK 1.0.13's private `_apply_post_create_options_patch`. Require literal `success is True` from the first options update, including the isolation-setting update; a negative/malformed result or exception is terminal. Remove this private adapter only after confirming an upstream fix enforces that first-update success check and the focused regression tests pass without it. A source pin or offline PASS does not establish a frozen build or production upgrade.
 * **Logging:**
   * **CRITICAL:** Do NOT print to `stdout` (used for Native Messaging).
   * Use `logging.info()`, `logging.error()`, etc.
@@ -283,9 +295,10 @@ may alert later. Never modify original private incident evidence during remediat
 ### 1. Headless Operation & Permissions
 
 * **The Golden Rule:** The Native Host runs **headless** (no UI).
-* **Permission Handler:** You **MUST** maintain the `_permission_handler` in `dh_native_host.py` that auto-approves requests.
-* **Why?** If the Copilot SDK asks for permission (e.g., "Allow Read File?"), the process will hang indefinitely if not auto-approved, as the user cannot see the prompt.
-* **Do Not Modify:** `on_permission_request=self._permission_handler` is passed as a keyword argument to `create_session()` and `resume_session()`. This ensures all SDK permission prompts are auto-approved.
+* **Permission Handler:** Maintain `_permission_handler` in `dh_native_host.py`, delegating to `host/sdk_client.py`'s `headless_permission_handler`. Ordinary requests with `managed_approval_required` exactly `False` or `None` return `PermissionDecisionApproveOnce()`. `True`, invalid values, or an unreadable field explicitly return `PermissionDecisionUserNotAvailable()`; never wait for an invisible approval prompt.
+* **No Approval Bypass:** Never add unconditional pre-tool `allow`; it can bypass the managed-approval decision. Ordinary headless approval must remain in the permission handler.
+* **All Session Paths:** Keep `on_permission_request=self._permission_handler` on `create_session()` and `resume_session()`, including fallback/retry paths.
+* **Options Failure:** `SessionOptionsPatchError` is terminal for that refresh attempt, not a resume-to-create fallback or transport retry trigger. Invalidate the active session and client, clear `current_prompt_fingerprint`, and perform bounded cleanup. Do not send a model turn or claim confirmed cleanup when it failed.
 
 ### 2. Timeouts
 
@@ -318,7 +331,7 @@ may alert later. Never modify original private incident evidence during remediat
 
 * **Session Names:** The host derives a stable session-name string from each 16-digit case ID via `_case_to_session_id()`, returning a **deterministic UUIDv5**: `str(uuid.uuid5(_NAMESPACE_MYCASE, case_id))` where the input is the **bare** case number (no prefix/salt) and `_NAMESPACE_MYCASE = 816bee4e-8eee-4c0b-ae69-70879d032f4d`. E.g. case `2601190030003106` → `ce0ec286-26e6-5095-8b30-46143e9f437f`. This string is the `session_id` for both SDK `create_session()` and `resume_session()`, AND the shell-CLI handle for `copilot --resume <uuid>`. **Cross-repo contract:** MyCasesKit computes the IDENTICAL value from the same namespace + bare case number, so both repos agree with no handshake — `_NAMESPACE_MYCASE` and the bare-case input MUST stay byte-identical across repos forever (do NOT add a salt). Authoritative spec: MyCasesKit `docs/dh-uuid5-change-spec.md`. **Why UUID (reverted from `dhco-<case>` on 2026-07-03):** the session id is consumed by external validators DH doesn't control — notably AAD's `client_session` (20-50 chars); the `AADSTS901001` incident proved custom formats are exposed to such constraints. A 36-char UUID is always AAD-legal regardless of case-number length AND stays deterministic (resume works with no stored map). Golden values are locked in `host/test_case_id.py::TestCaseToSessionId.test_known_answer` — **if your computed value differs from a golden value, the namespace or input is wrong; fix the code, never the golden value.**
 * **Tracking:** `self.current_session_id` holds the UUIDv5 session id used in reports and `--resume`. `self.current_case_id` tracks which case the session belongs to. `self.current_session_root_path` tracks the root actually applied to the active session; do not substitute `self.root_path` (the desired config value) when deciding whether a refresh is required.
-* **Resume:** The host tries `resume_session(name, working_directory=root)` first (where `name` is the UUIDv5). The explicit root updates old session metadata whose cwd predates root-path support. If resume fails, the host falls back to `create_session(session_id=name, working_directory=root)`. Handles `AttributeError` gracefully if the SDK version doesn't support resume.
+* **Resume:** The host tries `resume_session(name, working_directory=root)` first (where `name` is the UUIDv5). The explicit root updates old session metadata whose cwd predates root-path support. Ordinary resume failures fall back to `create_session(session_id=name, working_directory=root)`; `SessionOptionsPatchError` is terminal and must never fall back. Handles `AttributeError` gracefully if the SDK version doesn't support resume.
 * **Client & Session Working Directory:** Load config before constructing `CopilotClient`, pass `working_directory=root` at both client and session levels, and restart the client when root changes. The client process otherwise inherits Chrome Native Messaging's Host install cwd, which can be persisted into a session and later restored by CLI `/resume`. An explicit empty root in `update_config` clears the configured root. A missing or empty Analyze `rootPath` falls back to host `config.json` (the extension may send its empty default before prefs hydrate); it MUST NOT clear the host root.
 * **Lazy Session Creation:** `initialize_sdk()` starts only the client. It MUST NOT create a generic session before Analyze provides a case identity. Options updates preserve the current deterministic case session; with no active case they clear/defer the session rather than creating a UUIDv4 generic session.
 * **Smart Refresh:** Sessions are recreated when `current_case_id`, active-session root, or session/client availability changes — not on every analyze request. A failed refresh must invalidate the old session and return an error; never analyze a new case through stale state.
@@ -576,7 +589,7 @@ Since you cannot see the browser or console:
 2. **Check Telemetry:** Look for `trackEvent` calls in `FAB.tsx` to verify frontend flow.
 3. **Mocking:** When adding new "Skills" or SDK features, verify they work in `dh_native_host.py` using `logging` before hooking them up to the UI.
 
-`host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` are retained historical probes and are not supported SDK 1.0.5 diagnostics: they still use removed constructor/import/message shapes. Their session calls keep `skip_custom_instructions=True`, but do not rely on these scripts until they are separately migrated. Follow the wire-drift diagnosis guidance below before choosing a supported probe.
+`host/debug_auth.py`, `host/debug_bisect.py`, and `host/debug_sdk_direct.py` are retained historical probes and are not supported SDK 1.0.13 diagnostics: they still use removed constructor/import/message shapes. Their session calls keep `skip_custom_instructions=True`, but do not rely on these scripts until they are separately migrated. Use the fixed offline entry in [SDK upgrade workflow](docs/sdk-upgrade-workflow.md) for reviewed contracts; a live probe requires separate scope. Follow the wire-drift diagnosis guidance below before choosing a supported probe.
 
 ## 6. DH-Specific Instruction Source
 

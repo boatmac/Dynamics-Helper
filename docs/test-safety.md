@@ -65,6 +65,20 @@ validation status. Choose the entry appropriate to the requested verification:
   retain evidence and account for actual child processes and profile changes.
 - Checker/runner self-validation scripts have their own reviewed bootstrap scope;
   passing those fixtures does not approve product test execution.
+- Fixed SDK offline contracts use `scripts/run_sdk_tests.py`, not broad unittest
+  discovery or the Python scanner profile. `tests/sdk-test-review.json` binds the
+  exact test IDs and reviewed project-source bytes. The entry checks canonical
+  installed dependency versions and RECORD hashes, snapshots actual dependency
+  bytes before/after, and reuses the existing base-Python worker supervisor. It
+  does not process `.pth` or execute cache bytecode. Third-party libraries and
+  native dependencies are a declared trust boundary, not source-scanner coverage
+  or an OS sandbox. Pre-import effect guards reject CLI/process/network/registry
+  operations except fixed synthetic dateutil registry handles; standard-library
+  asyncio loops are created before the guards. Test import never imports Host.
+  SDK upgrades reuse this entry after reviewing changed tests/adapters/dependencies
+  and updating its source hashes. Real CLI/model checks and installation remain
+  separate effects requiring applicable authorization. See
+  [SDK upgrade workflow](sdk-upgrade-workflow.md) for invocation and limitations.
 - The fixed Extension build gate uses `npm run build` from `extension/package.json`:
   `node --test test/defaultItems.test.mjs`, TypeScript/Vite build, then
   `node scripts/verifyDefaultItemsCopy.mjs`. With applicable build authorization,
