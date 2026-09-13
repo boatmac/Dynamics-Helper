@@ -4,29 +4,35 @@ import FAB from '../components/FAB';
 import { startClipboardListener, setupSapTextAreaWatcher } from '../utils/legacyFeatures';
 import { LEGACY_CSS } from '../components/LegacyStyles';
 import { forwardNativeUpdateErrorToWindow } from './updateErrorBridge';
+import { parseAnalyzeProgress, type AnalyzeProgressEvent } from '../utils/analyzeProgress';
+import { ownDataProperty } from '../utils/ownData';
+import { publishAnalyzeProgress } from '../utils/analyzeProgressChannel';
 
 function exactProgressMessage(value: unknown): Readonly<{
     requestId: string;
-    payload: string;
+    payload: AnalyzeProgressEvent | string;
 }> | null {
     try {
         if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+        const prototype = Object.getPrototypeOf(value);
+        if (prototype !== Object.prototype && prototype !== null) return null;
         const descriptors = Object.getOwnPropertyDescriptors(value);
         if (
             Reflect.ownKeys(descriptors).length !== 3
             || !['type', 'requestId', 'payload'].every(key => {
+                if (!Object.hasOwn(descriptors, key)) return false;
                 const descriptor = descriptors[key];
                 return descriptor?.enumerable && Object.hasOwn(descriptor, 'value');
             })
             || descriptors.type.value !== 'NATIVE_PROGRESS'
             || typeof descriptors.requestId.value !== 'string'
             || descriptors.requestId.value.length === 0
-            || typeof descriptors.payload.value !== 'string'
-            || descriptors.payload.value.length === 0
         ) return null;
+        const payload = parseAnalyzeProgress(descriptors.payload.value);
+        if (payload === null) return null;
         return Object.freeze({
             requestId: descriptors.requestId.value,
-            payload: descriptors.payload.value,
+            payload,
         });
     } catch {
         return null;
@@ -40,16 +46,12 @@ chrome.runtime.onMessage.addListener((msg) => {
     if (forwardNativeUpdateErrorToWindow(msg)) {
         return;
     }
-    const type = Reflect.getOwnPropertyDescriptor(msg, 'type')
-    if (!type || !Object.hasOwn(type, 'value') || typeof type.value !== 'string') return
+    const type = ownDataProperty(msg, 'type')
+    if (type.kind !== 'value' || typeof type.value !== 'string') return
     if (type.value === "NATIVE_PROGRESS") {
         const detail = exactProgressMessage(msg);
         if (!detail) return;
-        // Dispatch a custom DOM event so the React component (FAB) can listen to it
-        // We use window because the React app is in Shadow DOM, but the script runs in the main context (mostly)
-        // Actually, custom events on window are the easiest bridge.
-        const event = new CustomEvent("dh-native-progress", { detail });
-        window.dispatchEvent(event);
+        publishAnalyzeProgress(detail);
     }
     else if (type.value === "TRIGGER_ANALYZE") {
         console.log("[DH] Received TRIGGER_ANALYZE from Context Menu");

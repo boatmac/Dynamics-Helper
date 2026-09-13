@@ -45,7 +45,8 @@ vi.mock('../utils/prefs', () => ({
 }))
 
 vi.mock('../utils/pageReader', () => ({
-  PageReader: { scanForErrors: state.scanForErrors },
+  CUSTOMER_LOOKUP_SELECTOR: '[data-id="customerid.fieldControl-LookupResultsDropdown_customerid_SelectedRecordList"]',
+  PageReader: { scanForErrors: state.scanForErrors, readLiveRecordNumber: () => undefined },
 }))
 
 vi.mock('../hooks/useAnalysisHydration', () => ({
@@ -108,6 +109,13 @@ describe('FAB analyzing source reconciliation', () => {
       ticketTitle: 'Fixture',
       errorText: 'Failure body',
     })
+  })
+
+  it('shows unavailable progress details for hydrated pending without inventing a phase', async () => {
+    await renderOpenFab()
+    expect(screen.getByRole('status')).toHaveTextContent('Progress details unavailable')
+    expect(screen.queryByRole('button', { name: /Recent activity/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Elapsed:/)).not.toBeInTheDocument()
   })
 
   it('renders hydrated durationSec zero as 0.0s', async () => {
@@ -571,7 +579,7 @@ describe('FAB analyzing source reconciliation', () => {
       expect(screen.queryByText('STALE REQUEST A')).toBeNull()
 
       await act(async () => {
-        vi.advanceTimersByTime(60_001)
+        vi.advanceTimersByTime(180_001)
         await Promise.resolve()
       })
       expect(analyze).toBeDisabled()

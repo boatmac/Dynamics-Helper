@@ -264,4 +264,58 @@ describe('read-only current record model Created On', () => {
         expect(await readCurrentRecordCreatedOn(CASE)).toMatchObject({ status: 'ok' })
         expect(shadow).not.toHaveBeenCalled()
     })
+
+    it('counts repeated traversal attempts through nested known roots against the node budget', async () => {
+        vi.useFakeTimers()
+        const { list } = header()
+        let parent = list
+        for (let i = 0; i < 19; i++) {
+            const nested = document.createElement('uci-header-control-list')
+            parent.append(nested)
+            parent = nested
+        }
+        parent.insertAdjacentHTML('beforeend', '<span></span>'.repeat(110))
+        model()
+        const style = vi.spyOn(window, 'getComputedStyle')
+        const pending = readCurrentRecordCreatedOn(CASE)
+        await vi.runAllTimersAsync()
+        expect(await pending).toEqual({ status: 'unavailable' })
+        expect(style).not.toHaveBeenCalled()
+    })
+
+    it.each(['label', 'value'])('bounds %s text before reading an aggregate subtree', async slot => {
+        const { list } = header()
+        const target = list.querySelector(`[slot="${slot}"]`)!
+        target.append(document.createTextNode('x'.repeat(10001)))
+        const aggregate = vi.spyOn(target, 'textContent', 'get')
+        model()
+        expect(await readCurrentRecordCreatedOn(CASE)).toEqual({ status: 'unavailable' })
+        expect(aggregate).not.toHaveBeenCalled()
+    })
+
+    it('bounds composed style ancestry outside the known header tree', async () => {
+        const { list } = header()
+        for (let i = 0; i < 65; i++) {
+            const wrapper = document.createElement('div')
+            list.replaceWith(wrapper)
+            wrapper.append(list)
+        }
+        model()
+        const style = vi.spyOn(window, 'getComputedStyle')
+        expect(await readCurrentRecordCreatedOn(CASE)).toEqual({ status: 'unavailable' })
+        expect(style.mock.calls.length).toBeLessThanOrEqual(65)
+    })
+
+    it('enforces the deadline during the final synchronous style phase without another yield', async () => {
+        vi.useFakeTimers()
+        header()
+        model()
+        const readStyle = getComputedStyle
+        vi.spyOn(window, 'getComputedStyle').mockImplementation(element => {
+            vi.setSystemTime(Date.now() + 1001)
+            return readStyle(element)
+        })
+        expect(await readCurrentRecordCreatedOn(CASE)).toEqual({ status: 'unavailable' })
+        expect(vi.getTimerCount()).toBe(0)
+    })
 })

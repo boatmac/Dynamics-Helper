@@ -88,7 +88,8 @@ export function guardNonAnalyzeNativeMessage(
         let requestIdPresent = false
         for (const key of keys) {
             if (typeof key !== 'string') return nonAnalyzeDenied()
-            if (key === '_persist' || key === 'extension_warnings' || key === 'toJSON') {
+            if (key === '_persist' || key === 'extension_warnings' || key === 'toJSON'
+                || key === 'attachments' || key === 'filePaths') {
                 return nonAnalyzeDenied()
             }
             const holder = Reflect.getOwnPropertyDescriptor(descriptors, key)
@@ -117,6 +118,7 @@ export function guardNonAnalyzeNativeMessage(
             !action
             || typeof action.value !== 'string'
             || action.value === 'analyze_error'
+            || action.value === 'analyze_with_attachments'
         ) return nonAnalyzeDenied()
         if (requestIdPresent && !Object.hasOwn(output, 'requestId')) {
             return nonAnalyzeDenied()

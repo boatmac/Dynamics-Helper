@@ -30,6 +30,7 @@ export interface HydratedPopover {
     content: string
     savedTo?: string
     errorCode?: string
+    attachmentNotice?: string
     durationSec?: number
     identity: LastAnalysisIdentity
 }
@@ -110,6 +111,9 @@ export function useAnalysisHydration(caseNumber: string): HydrationResult {
                     content: l.content,
                     savedTo: l.savedTo,
                     errorCode: l.errorCode,
+                    ...(l.attachmentNotice === undefined
+                        ? {}
+                        : { attachmentNotice: l.attachmentNotice }),
                     ...(l.durationSec === undefined
                         ? {}
                         : { durationSec: l.durationSec }),

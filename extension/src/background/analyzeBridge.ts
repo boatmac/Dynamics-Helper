@@ -2,6 +2,7 @@ import {
     ANALYSIS_PERSISTENCE_WARNING_ORDER,
     completeAnalyzePersistence,
     parseAnalyzePersistContextValue,
+    parseAttachmentNotice,
     recordAnalyzeStart,
     type AnalysisPersistenceWarning,
     type AnalyzeCompletion,
@@ -19,11 +20,13 @@ export type AnalyzeForwardResponse =
     | {
           status: 'success'
           data: { markdown: string; saved_to?: string }
+          attachmentNotice?: string
           extension_warnings?: AnalysisPersistenceWarning[]
       }
     | {
           status: 'error'
           error: string
+          attachmentNotice?: string
           error_code?: string
           errorKind?: string
           httpStatus?: number
@@ -38,6 +41,7 @@ export interface AnalyzeNativePayload {
     product?: string
     caseNumber?: string
     rootPathOverrideProvided?: true
+    progressVersion?: 1
 }
 
 export interface AnalyzeNativeAction extends Record<string, unknown> {
@@ -59,11 +63,12 @@ export interface AnalyzeForwardDeps {
 export interface ParsedAnalyzeSuccess {
     markdown: string
     savedTo?: string
+    attachmentNotice?: string
 }
 
 const ANALYZE_PAYLOAD_KEYS = new Set([
     'text', 'context', 'timestamp', 'rootPath',
-    'product', 'caseNumber', 'rootPathOverrideProvided',
+    'product', 'caseNumber', 'rootPathOverrideProvided', 'progressVersion',
 ])
 
 function malformedAnalyzeResponse(): AnalyzeForwardResponse {
@@ -199,6 +204,7 @@ function parseAnalyzeNativePayload(value: unknown): AnalyzeNativePayload | null 
 
         const product = descriptorField(descriptors, 'product')
         const caseNumber = descriptorField(descriptors, 'caseNumber')
+        const progressVersion = descriptorField(descriptors, 'progressVersion')
         const override = descriptorField(
             descriptors,
             'rootPathOverrideProvided',
@@ -212,6 +218,8 @@ function parseAnalyzeNativePayload(value: unknown): AnalyzeNativePayload | null 
                     || typeof caseNumber.value !== 'string'))
             || (override.kind !== 'absent'
                 && (override.kind !== 'value' || override.value !== true))
+            || (progressVersion.kind !== 'absent'
+                && (progressVersion.kind !== 'value' || progressVersion.value !== 1))
         ) return null
 
         const payload: Record<string, unknown> = {}
@@ -232,6 +240,10 @@ function parseAnalyzeNativePayload(value: unknown): AnalyzeNativePayload | null 
         if (
             override.kind === 'value'
             && !defineAnalyzeData(payload, 'rootPathOverrideProvided', true)
+        ) return null
+        if (
+            progressVersion.kind === 'value'
+            && !defineAnalyzeData(payload, 'progressVersion', 1)
         ) return null
         Object.defineProperty(payload, 'toJSON', {
             value: undefined,
@@ -302,6 +314,7 @@ export function isAnalyzePayload(payload: unknown): boolean {
 export function parseAnalyzeSuccess(value: unknown): ParsedAnalyzeSuccess | null {
     const markdown = ownDataProperty(value, 'markdown')
     const savedTo = ownDataProperty(value, 'saved_to')
+    const attachmentNotice = parseAttachmentNotice(value, 'attachment_notice')
     if (markdown.kind !== 'value' || typeof markdown.value !== 'string') {
         return null
     }
@@ -311,6 +324,7 @@ export function parseAnalyzeSuccess(value: unknown): ParsedAnalyzeSuccess | null
     ) return null
     return {
         markdown: markdown.value,
+        ...(attachmentNotice === undefined ? {} : { attachmentNotice }),
         ...(savedTo.kind === 'value'
             ? { savedTo: savedTo.value as string }
             : {}),
@@ -318,6 +332,8 @@ export function parseAnalyzeSuccess(value: unknown): ParsedAnalyzeSuccess | null
 }
 
 function normalizeAnalyzeError(value: unknown): AnalyzeForwardResponse | null {
+    const attachmentNotice = parseAttachmentNotice(value, 'attachment_notice')
+        ?? parseAttachmentNotice(value)
     const error = ownDataProperty(value, 'error')
     const message = ownDataProperty(value, 'message')
     const errorCode = ownDataProperty(value, 'error_code')
@@ -349,6 +365,7 @@ function normalizeAnalyzeError(value: unknown): AnalyzeForwardResponse | null {
             message.kind === 'value' ? message.value : undefined,
         ], 'Native Host error'),
         ...(normalizedCode ? { error_code: normalizedCode } : {}),
+        ...(attachmentNotice === undefined ? {} : { attachmentNotice }),
         ...(normalizedKind === undefined ? {} : { errorKind: normalizedKind }),
         ...(normalizedStatus === undefined ? {} : { httpStatus: normalizedStatus }),
     }
@@ -381,6 +398,7 @@ export function normalizeAnalyzeHostOutcome(value: unknown): AnalyzeForwardRespo
             markdown: parsed.markdown,
             ...(parsed.savedTo === undefined ? {} : { saved_to: parsed.savedTo }),
         },
+        ...(parsed.attachmentNotice === undefined ? {} : { attachmentNotice: parsed.attachmentNotice }),
     }
 }
 
@@ -439,6 +457,7 @@ function parseWarnings(
 
 export function parseAnalyzeForwardResult(value: unknown): AnalyzeForwardResponse {
     const status = ownDataProperty(value, 'status')
+    const attachmentNotice = parseAttachmentNotice(value)
     const parsedWarnings = parseWarnings(value)
     if (status.kind !== 'value' || !parsedWarnings.valid) {
         return malformedAnalyzeResponse()
@@ -458,6 +477,7 @@ export function parseAnalyzeForwardResult(value: unknown): AnalyzeForwardRespons
                 ...(parsed.savedTo === undefined ? {} : { saved_to: parsed.savedTo }),
             },
             ...warningField,
+            ...(attachmentNotice === undefined ? {} : { attachmentNotice }),
         }
     }
     if (status.value !== 'error') return malformedAnalyzeResponse()
@@ -485,6 +505,7 @@ export function parseAnalyzeForwardResult(value: unknown): AnalyzeForwardRespons
         ...(errorKind.kind === 'value' ? { errorKind: errorKind.value as string } : {}),
         ...(httpStatus.kind === 'value' ? { httpStatus: httpStatus.value as number } : {}),
         ...warningField,
+        ...(attachmentNotice === undefined ? {} : { attachmentNotice }),
     }
 }
 
@@ -531,6 +552,7 @@ export async function handleAnalyzeForward(
         ? {
               status: 'success',
               markdown: normalized.data.markdown,
+              ...(normalized.attachmentNotice === undefined ? {} : { attachmentNotice: normalized.attachmentNotice }),
               ...(normalized.data.saved_to === undefined
                   ? {}
                   : { savedTo: normalized.data.saved_to }),
@@ -538,6 +560,7 @@ export async function handleAnalyzeForward(
         : {
               status: 'error',
               error: normalized.error,
+              ...(normalized.attachmentNotice === undefined ? {} : { attachmentNotice: normalized.attachmentNotice }),
               ...(normalized.error_code === undefined
                   ? {}
                   : { errorCode: normalized.error_code }),

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   chromeMockSpies,
   deferNextStorageGet,
+  deferNextStorageSet,
   dispatchRuntimeMessage,
   emitStartup,
   getStorageSnapshot,
@@ -13,8 +14,12 @@ import {
   setManifestVersion,
 } from '../test/chromeMock'
 import { UPDATE_STATE_KEY } from './updateRuntime'
+import { LATEST_ANALYSIS_OWNER_KEY } from '../utils/analysisStore'
+import { prepareAttachments, type AttachmentPreparationResult } from './attachmentPreparation'
 
 vi.mock('./contextMenu', () => ({ setupContextMenu: vi.fn() }))
+// Never import or execute the live attachment observer in this Worker fixture.
+vi.mock('./attachmentPreparation', () => ({ prepareAttachments: vi.fn() }))
 vi.mock('@microsoft/applicationinsights-web', () => ({
   ApplicationInsights: class {
     context = { user: { id: '', authenticatedId: '' } }
@@ -51,6 +56,9 @@ beforeEach(() => {
   vi.resetModules()
   resetChromeMock()
   installChromeMock()
+  vi.mocked(prepareAttachments).mockReset().mockResolvedValue({
+    files: [], inventory: 'unknown', skipped: 0, reason: 'unavailable', language: 'en',
+  })
   setManifestVersion(currentVersion)
   seedStorage({
     telemetryUserId: 'stable-test-user',
@@ -109,6 +117,308 @@ async function loadWorkerWithCommittedCompletion() {
     },
   }
 }
+
+describe('Service Worker private attachment routing', () => {
+  const caseNumber = '1234567890123456'
+  const completed: AttachmentPreparationResult = {
+    files: [{ path: 'C:\\synthetic-downloads\\fixture.log', size: 12 }],
+    inventory: 'known', skipped: 0, reason: 'none', language: 'en',
+  }
+  const analysis = {
+    text: 'synthetic fixture', context: '', timestamp: 'fixture', rootPath: '',
+    caseNumber, progressVersion: 1,
+  }
+
+  function dispatchAnalyze(requestId: string) {
+    Object.assign(chrome.runtime, { id: 'test-extension' })
+    const sender = {
+      id: chrome.runtime.id, tab: { id: 42 } as chrome.tabs.Tab, frameId: 0,
+      documentId: 'source-document', origin: 'https://onesupport.crm.dynamics.com',
+      url: 'https://onesupport.crm.dynamics.com/main.aspx',
+    }
+    const sendResponse = vi.fn()
+    const listener = chromeMockSpies.runtimeOnMessageAddListener.mock.calls.at(-1)![0]
+    expect(listener({ type: 'NATIVE_MSG', payload: {
+      action: 'analyze_error', requestId, payload: { ...analysis },
+      _persist: { caseNumber, successTitle: 'Result', errorTitle: 'Failed' },
+    } }, sender, sendResponse)).toBe(true)
+    return { sender, sendResponse }
+  }
+
+  it('SW-ATT-01 denies caller-supplied private actions before authorization or preparation', async () => {
+    const worker = await loadWorker()
+    const acquire = vi.spyOn(worker.updateRuntime, 'ordinaryMainHostAllowed')
+    const authorize = vi.spyOn(worker.updateRuntime, 'beginOrdinaryMainHostRequest')
+    const baseline = getStorageSnapshot()
+    await expect(dispatchRuntimeMessage({ type: 'NATIVE_MSG', payload: {
+      action: 'analyze_with_attachments', requestId: 'forged-private',
+      payload: { analysis, attachments: completed },
+    } })).resolves.toEqual({
+      status: 'error', error: 'Invalid Extension Native message metadata.',
+      error_code: 'invalid_native_message_metadata',
+    })
+    expect(acquire).not.toHaveBeenCalled()
+    expect(authorize).not.toHaveBeenCalled()
+    expect(prepareAttachments).not.toHaveBeenCalled()
+    expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
+    expect(getStorageSnapshot()).toEqual(baseline)
+  })
+
+  it.each(['attachments', 'filePaths'])('rejects private outer %s metadata without changing nested config handling', async key => {
+    const worker = await loadWorker()
+    const authorize = vi.spyOn(worker.updateRuntime, 'beginOrdinaryMainHostRequest')
+    const baseline = getStorageSnapshot()
+    const payload = { [key]: ['synthetic-value'] }
+    await expect(dispatchRuntimeMessage({ type: 'NATIVE_MSG', payload: {
+      action: 'update_config', payload, [key]: ['synthetic-value'],
+    } })).resolves.toEqual({
+      status: 'error', error: 'Invalid Extension Native message metadata.',
+      error_code: 'invalid_native_message_metadata',
+    })
+    expect(authorize).not.toHaveBeenCalled()
+    expect(prepareAttachments).not.toHaveBeenCalled()
+    expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
+    expect(getStorageSnapshot()).toEqual(baseline)
+
+    const port = queueNativePort(MAIN_HOST)
+    const response = dispatchRuntimeMessage({ type: 'NATIVE_MSG', payload: {
+      action: 'update_config', payload,
+    } })
+    await vi.waitFor(() => expect(port.posted).toHaveLength(1))
+    expect(port.posted[0]).toMatchObject({ action: 'update_config', payload })
+    emitFinal(port, port.posted[0], { status: 'success' })
+    await response
+  })
+
+  it.each([true, false])('SW-ATT-02 prepares after durable owner and sends private paths only after update authorization %s', async allowed => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    let allowAcquire!: (value: boolean) => void
+    const acquire = vi.spyOn(worker.updateRuntime, 'ordinaryMainHostAllowed')
+      .mockReturnValue(new Promise(resolve => { allowAcquire = resolve }))
+    let allowSend!: () => void
+    const gate = new Promise<void>(resolve => { allowSend = resolve })
+    const authorize = vi.spyOn(worker.updateRuntime, 'beginOrdinaryMainHostRequest')
+      .mockImplementation(async start => {
+        await gate
+        return allowed ? { allowed: true as const, response: start() } : { allowed: false as const }
+      })
+    const ownerWrite = deferNextStorageSet(LATEST_ANALYSIS_OWNER_KEY)
+    vi.mocked(prepareAttachments).mockImplementationOnce(async (input, deps) => {
+      expect(getStorageSnapshot()[LATEST_ANALYSIS_OWNER_KEY]).toMatchObject({ caseNumber, requestId: input.requestId })
+      expect(await deps.isCurrent(input)).toBe(true)
+      await deps.notify?.('auth_wait')
+      return completed
+    })
+    const { sender, sendResponse } = dispatchAnalyze('private-order')
+    sender.tab.id = 99
+    sender.documentId = 'navigated-document'
+    setActiveTabs([{ id: 99 }])
+    await vi.waitFor(() => expect(acquire).toHaveBeenCalledOnce())
+    expect(getStorageSnapshot()).not.toHaveProperty(LATEST_ANALYSIS_OWNER_KEY)
+    expect(prepareAttachments).not.toHaveBeenCalled()
+    expect(port.posted).toHaveLength(0)
+    allowAcquire(true)
+    await vi.waitFor(() => expect(chromeMockSpies.storageSet).toHaveBeenCalledWith(
+      expect.objectContaining({ [LATEST_ANALYSIS_OWNER_KEY]: expect.objectContaining({ requestId: 'private-order' }) }),
+      expect.any(Function),
+    ))
+    expect(getStorageSnapshot()).not.toHaveProperty(LATEST_ANALYSIS_OWNER_KEY)
+    expect(prepareAttachments).not.toHaveBeenCalled()
+    expect(authorize).not.toHaveBeenCalled()
+    await ownerWrite.resolve(undefined)
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledOnce())
+    expect(prepareAttachments).toHaveBeenCalledExactlyOnceWith({
+      requestId: 'private-order', caseNumber, language: 'en',
+      sourceTarget: { tabId: 42, frameId: 0, documentId: 'source-document' },
+    }, expect.objectContaining({ browser: chrome, isCurrent: expect.any(Function), notify: expect.any(Function) }))
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledExactlyOnceWith(42, {
+      type: 'NATIVE_PROGRESS', requestId: 'private-order', payload: 'Waiting for DTM sign-in (30 seconds)...',
+    }, { frameId: 0, documentId: 'source-document' })
+    expect(port.posted).toHaveLength(0)
+    expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
+    allowSend()
+    if (allowed) {
+      await vi.waitFor(() => expect(port.posted).toHaveLength(1))
+      expect(port.posted[0]).toEqual({
+        action: 'analyze_with_attachments', requestId: 'private-order',
+        payload: { analysis, attachments: completed },
+      })
+      emitFinal(port, port.posted[0], { status: 'success', data: { markdown: '# Synthetic report' } })
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledExactlyOnceWith({
+        status: 'success', data: { markdown: '# Synthetic report' },
+      }))
+    } else {
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        status: 'error', error_code: 'update_temporarily_unavailable',
+      })))
+      expect(port.posted).toHaveLength(0)
+      expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
+    }
+    expect(chromeMockSpies.tabsQuery).not.toHaveBeenCalled()
+    for (const exposed of [getStorageSnapshot(), chromeMockSpies.storageSet.mock.calls,
+      chromeMockSpies.tabsSendMessage.mock.calls, chromeMockSpies.runtimeSendMessage.mock.calls, sendResponse.mock.calls]) {
+      expect(JSON.stringify(exposed)).not.toContain('synthetic-downloads')
+    }
+  })
+
+  it.each(['stale-result', 'replaced-owner'] as const)('SW-ATT-03 sends no Host request for stale preparation %s', async cause => {
+    const worker = await loadWorker()
+    const authorize = vi.spyOn(worker.updateRuntime, 'beginOrdinaryMainHostRequest')
+    let finish!: (result: AttachmentPreparationResult) => void
+    vi.mocked(prepareAttachments).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const { sendResponse } = dispatchAnalyze('stale-private')
+    await vi.waitFor(() => expect(prepareAttachments).toHaveBeenCalledOnce())
+    if (cause === 'replaced-owner') seedStorage({
+      [LATEST_ANALYSIS_OWNER_KEY]: { caseNumber, requestId: 'newer-request', startTime: Date.now() },
+    })
+    finish(cause === 'stale-result' ? { ...completed, reason: 'stale' } : completed)
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledExactlyOnceWith({
+      status: 'error', error: 'Attachment preparation was cancelled because this Analyze request is no longer current.',
+    }))
+    expect(authorize).not.toHaveBeenCalled()
+    expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
+    expect(chromeMockSpies.tabsSendMessage).not.toHaveBeenCalled()
+    if (cause === 'replaced-owner') {
+      expect(getStorageSnapshot()[LATEST_ANALYSIS_OWNER_KEY]).toMatchObject({ requestId: 'newer-request' })
+      expect(getStorageSnapshot()).not.toHaveProperty('dh_last_analysis')
+    }
+  })
+
+  it.each(['removed', 'replaced'] as const)('rechecks a durable owner %s after preparation while the final callback is queued', async change => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const authorize = vi.spyOn(worker.updateRuntime, 'beginOrdinaryMainHostRequest')
+      .mockImplementation(async start => {
+        await gate
+        return { allowed: true as const, response: start() }
+      })
+    try {
+      vi.mocked(prepareAttachments).mockResolvedValueOnce(completed)
+      const { sendResponse } = dispatchAnalyze('queued-private')
+      await vi.waitFor(() => expect(authorize).toHaveBeenCalledOnce())
+      expect(prepareAttachments).toHaveBeenCalledOnce()
+      expect(getStorageSnapshot()[LATEST_ANALYSIS_OWNER_KEY]).toMatchObject({ requestId: 'queued-private' })
+      if (change === 'removed') await chrome.storage.local.remove(LATEST_ANALYSIS_OWNER_KEY)
+      else seedStorage({
+        [LATEST_ANALYSIS_OWNER_KEY]: { caseNumber, requestId: 'newer-request', startTime: Date.now() },
+      })
+      release()
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledExactlyOnceWith({
+        status: 'error', error: 'Attachment preparation was cancelled because this Analyze request is no longer current.',
+      }))
+      expect(port.posted).toHaveLength(0)
+      expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
+      expect(getStorageSnapshot()).not.toHaveProperty('dh_last_analysis')
+    } finally {
+      release()
+      authorize.mockRestore()
+    }
+  })
+
+  it('invalidates the second queued attachment send when an already accepted Reset actually clears analysis', async () => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    seedStorage({ dh_prefs: { teamCatalogEnabled: false, teamManifestUrl: '', team: '' } })
+    const resetRead = deferNextStorageGet('dh_prefs')
+    // Accept Reset before Analyze so only the later actual-clear invalidation can cancel it.
+    const resetResponse = dispatchRuntimeMessage({ type: 'RESET_EXTENSION_STATE', payload: {
+      identity: { enabled: false, manifestUrl: '', teamId: '' },
+      requestGeneration: 1, resetToken: 1,
+    } })
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const authorize = vi.spyOn(worker.updateRuntime, 'beginOrdinaryMainHostRequest')
+      .mockImplementation(async start => {
+        await gate
+        return { allowed: true as const, response: start() }
+      })
+      .mockImplementationOnce(async start => ({ allowed: true as const, response: start() }))
+    try {
+      vi.mocked(prepareAttachments).mockResolvedValueOnce(completed)
+      const { sendResponse } = dispatchAnalyze('reset-second-queued-private')
+      await vi.waitFor(() => expect(authorize).toHaveBeenCalledTimes(2))
+      expect(getStorageSnapshot()[LATEST_ANALYSIS_OWNER_KEY]).toMatchObject({ requestId: 'reset-second-queued-private' })
+      expect(port.posted).toHaveLength(0)
+
+      await resetRead.resolve(undefined)
+      await expect(resetResponse).resolves.toMatchObject({ status: 'success', data: { syncStatus: 'committed' } })
+      expect(getStorageSnapshot()).not.toHaveProperty(LATEST_ANALYSIS_OWNER_KEY)
+      release()
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledExactlyOnceWith({
+        status: 'error', error: 'Attachment preparation was cancelled because this Analyze request is no longer current.',
+      }))
+      expect(authorize).toHaveBeenCalledTimes(2)
+      expect(port.posted).toHaveLength(0)
+      expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
+      expect(getStorageSnapshot()).not.toHaveProperty('dh_last_analysis')
+    } finally {
+      resetRead.resolve(undefined)
+      release()
+      authorize.mockRestore()
+    }
+  })
+
+  it('reauthorizes updater access after the queued ownership read before posting attachments', async () => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const authorize = vi.spyOn(worker.updateRuntime, 'beginOrdinaryMainHostRequest')
+      .mockResolvedValue({ allowed: false as const })
+      .mockImplementationOnce(async start => {
+        await gate
+        return { allowed: true as const, response: start() }
+      })
+    try {
+      vi.mocked(prepareAttachments).mockResolvedValueOnce(completed)
+      const { sendResponse } = dispatchAnalyze('update-queued-private')
+      await vi.waitFor(() => expect(authorize).toHaveBeenCalledOnce())
+      release()
+      await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        status: 'error', error_code: 'update_temporarily_unavailable',
+      })))
+      expect(authorize).toHaveBeenCalledTimes(2)
+      expect(port.posted).toHaveLength(0)
+      expect(chromeMockSpies.connectNative).not.toHaveBeenCalled()
+    } finally {
+      release()
+      authorize.mockRestore()
+    }
+  })
+
+  it.each([undefined, 1] as const)('SW-ATT-04 routes private Native progress to its document with nested opt-in %s', async progressVersion => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    setActiveTabs([{ id: 99 }])
+    const pending = worker.requestNativeMessage({
+      action: 'analyze_with_attachments', payload: {
+        analysis: { ...(progressVersion === 1 ? { progressVersion } : {}) }, attachments: completed,
+      },
+    }, { tabId: 42, frameId: 0, documentId: 'source-document' })
+    const baseline = getStorageSnapshot()
+    const progress = { version: 1, seq: 1, stage: 'agent', state: 'running', elapsedMs: 5 }
+    port.emitMessage({ requestId: pending.requestId, status: 'progress', data: progress })
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledTimes(progressVersion === 1 ? 1 : 0)
+    if (progressVersion === 1) expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledWith(42, {
+      type: 'NATIVE_PROGRESS', requestId: pending.requestId, payload: progress,
+    }, { frameId: 0, documentId: 'source-document' })
+    port.emitMessage({ requestId: pending.requestId, status: 'progress', data: 'Waiting for DTM sign-in (30 seconds)...' })
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenLastCalledWith(42, {
+      type: 'NATIVE_PROGRESS', requestId: pending.requestId, payload: 'Waiting for DTM sign-in (30 seconds)...',
+    }, { frameId: 0, documentId: 'source-document' })
+    expect(chromeMockSpies.tabsQuery).not.toHaveBeenCalled()
+    expect(getStorageSnapshot()).toEqual(baseline)
+    let settled = false
+    void pending.response.then(() => { settled = true }, () => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    emitFinal(port, port.posted[0], { markdown: '# Final' })
+    await expect(pending.response).resolves.toMatchObject({ status: 'success', data: { markdown: '# Final' } })
+  })
+})
 
 describe('Service Worker transactional update cutover', () => {
   it('routes Created On only to the sender document and replies without Host, storage, or broadcasts', async () => {
@@ -359,6 +669,124 @@ describe('Service Worker transactional update cutover', () => {
     expect(chromeMockSpies.runtimeSendMessage).toHaveBeenCalledTimes(baselines.runtimeSend)
     expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledTimes(baselines.tabSend)
     expect(port.posted).toHaveLength(2)
+  })
+
+  it('captures Analyze progress before authorization awaits and routes only to the originating document', async () => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    Object.assign(chrome.runtime, { id: 'test-extension' })
+    const sender = {
+      id: chrome.runtime.id, tab: { id: 42 } as chrome.tabs.Tab, frameId: 0, documentId: 'original-document',
+      origin: 'https://onesupport.crm.dynamics.com', url: 'https://onesupport.crm.dynamics.com/main.aspx',
+    }
+    let allow!: (value: boolean) => void
+    vi.spyOn(worker.updateRuntime, 'ordinaryMainHostAllowed').mockReturnValue(new Promise(resolve => { allow = resolve }))
+    const listener = chromeMockSpies.runtimeOnMessageAddListener.mock.calls.at(-1)![0]
+    const sendResponse = vi.fn()
+    listener({ type: 'NATIVE_MSG', payload: {
+      action: 'analyze_error', requestId: 'document-request',
+      payload: { text: 'fixture', context: '', timestamp: 'fixture', rootPath: '', progressVersion: 1 },
+      _persist: { caseNumber: '1234567890123456', successTitle: 'Result', errorTitle: 'Failed' },
+    } }, sender, sendResponse)
+    sender.tab.id = 99
+    sender.documentId = 'navigated-document'
+    setActiveTabs([{ id: 99 }])
+    allow(true)
+    await vi.waitFor(() => expect(port.posted).toHaveLength(1))
+    expect(port.posted[0]).toMatchObject({ payload: { progressVersion: 1 } })
+    expect(port.posted[0]).not.toHaveProperty('_persist')
+    const baseline = getStorageSnapshot()
+    const progress = { version: 1, seq: 1, stage: 'agent', state: 'running', elapsedMs: 5 }
+    port.emitMessage({ requestId: 'document-request', status: 'progress', data: progress })
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledExactlyOnceWith(42, {
+      type: 'NATIVE_PROGRESS', requestId: 'document-request', payload: progress,
+    }, { frameId: 0, documentId: 'original-document' })
+    expect(chromeMockSpies.tabsQuery).not.toHaveBeenCalled()
+    expect(sendResponse).not.toHaveBeenCalled()
+    expect(getStorageSnapshot()).toEqual(baseline)
+    emitFinal(port, port.posted[0], { status: 'success', data: { markdown: '# Report', saved_to: 'report.md' } })
+    await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledExactlyOnceWith({
+      status: 'success', data: { markdown: '# Report', saved_to: 'report.md' },
+    }))
+    port.emitMessage({ requestId: 'document-request', status: 'progress', data: progress })
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([undefined, 1] as const)('normalizes legacy Analyze progress and gates structured delivery by opt-in %s', async progressVersion => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    const target = Object.freeze({ tabId: 42, frameId: 0 as const, documentId: 'document-1' })
+    const pending = worker.requestNativeMessage({ action: 'analyze_error', payload: {
+      ...(progressVersion === 1 ? { progressVersion } : {}),
+    } }, target)
+    const emit = (data: unknown) => port.emitMessage({ requestId: pending.requestId, status: 'progress', data })
+    const progress = { version: 1, seq: 1, stage: 'prepare', state: 'running', elapsedMs: 0 }
+    emit(progress)
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledTimes(progressVersion === 1 ? 1 : 0)
+    emit('Checking authentication...')
+    emit('https://private.invalid/?sig=SECRET')
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenLastCalledWith(42, {
+      type: 'NATIVE_PROGRESS', requestId: pending.requestId, payload: 'Analysis in progress',
+    }, { frameId: 0, documentId: 'document-1' })
+    expect(chromeMockSpies.tabsSendMessage).toHaveBeenCalledWith(42, {
+      type: 'NATIVE_PROGRESS', requestId: pending.requestId, payload: 'Checking authentication...',
+    }, { frameId: 0, documentId: 'document-1' })
+    expect(chromeMockSpies.tabsQuery).not.toHaveBeenCalled()
+    emitFinal(port, port.posted[0], { markdown: '# Final' })
+    await expect(pending.response).resolves.toMatchObject({ status: 'success', data: { markdown: '# Final' } })
+  })
+
+  it('drops Analyze progress without a valid sender target and never queries the active tab', async () => {
+    await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    setActiveTabs([{ id: 99 }])
+    const response = dispatchRuntimeMessage({ type: 'NATIVE_MSG', payload: {
+      action: 'analyze_error', requestId: 'no-document-request',
+      payload: { text: 'fixture', context: '', timestamp: 'fixture', rootPath: '', progressVersion: 1 },
+      _persist: { caseNumber: '1234567890123456', successTitle: 'Result', errorTitle: 'Failed' },
+    } })
+    await vi.waitFor(() => expect(port.posted).toHaveLength(1))
+    for (const data of ['Preparing prompt...', { version: 1, seq: 1, stage: 'prepare', state: 'running', elapsedMs: 0 }]) {
+      port.emitMessage({ requestId: 'no-document-request', status: 'progress', data })
+    }
+    expect(chromeMockSpies.tabsQuery).not.toHaveBeenCalled()
+    expect(chromeMockSpies.tabsSendMessage).not.toHaveBeenCalled()
+    emitFinal(port, port.posted[0], { status: 'error', error: 'safe failure', error_code: 'user_prompt_unreadable' })
+    await expect(response).resolves.toMatchObject({ status: 'error', error: 'safe failure', error_code: 'user_prompt_unreadable' })
+  })
+
+  it.each(['reject', 'throw'] as const)('keeps Analyze pending through malformed progress and delivery %s', async failure => {
+    const worker = await loadWorker()
+    const port = queueNativePort(MAIN_HOST)
+    const pending = worker.requestNativeMessage({ action: 'analyze_error', payload: { progressVersion: 1 } },
+      Object.freeze({ tabId: 42, frameId: 0, documentId: 'document-1' }))
+    const progress = { version: 1, seq: 1, stage: 'prepare', state: 'running', elapsedMs: 0 }
+    const getter = vi.fn(() => 'secret')
+    const accessor = { ...progress }
+    Object.defineProperty(accessor, 'stage', { enumerable: true, get: getter })
+    for (const data of [null, '', 7, accessor, { ...progress, extra: 'secret' }, { ...progress, seq: 0 }]) {
+      port.emitMessage({ requestId: pending.requestId, status: 'progress', data })
+    }
+    port.emitMessage({ requestId: pending.requestId, status: 'progress', data: progress, extra: true })
+    const envelope = { requestId: pending.requestId, status: 'progress' }
+    Object.defineProperty(envelope, 'data', { enumerable: true, get: getter })
+    port.emitMessage(envelope)
+    expect(chromeMockSpies.tabsSendMessage).not.toHaveBeenCalled()
+    expect(getter).not.toHaveBeenCalled()
+    chromeMockSpies.tabsSendMessage.mockImplementationOnce(() => {
+      if (failure === 'throw') throw new Error('private delivery failure')
+      return Promise.reject(new Error('private delivery failure'))
+    })
+    port.emitMessage({ requestId: pending.requestId, status: 'progress', data: progress })
+    let settled = false
+    void pending.response.then(() => { settled = true }, () => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    expect(chromeMockSpies.tabsQuery).not.toHaveBeenCalled()
+    const data = { status: 'success', data: { markdown: '# Final' } }
+    emitFinal(port, port.posted[0], data)
+    const result = await pending.response as { data: unknown }
+    expect(result.data).toBe(data)
   })
 
   it('returns raw correlated Native handles and keeps progress pending', async () => {

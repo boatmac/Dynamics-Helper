@@ -185,7 +185,7 @@ describe('page identity snapshots', () => {
         expect(parseScrapedDataSnapshot({ createdOn: undefined, customerName: undefined })).toEqual({})
     })
 
-    it.each(['createdOn', 'customerName'])('rejects malformed %s without getter or coercion side effects', key => {
+    it.each(['createdOn', 'customerName', 'irSlaStatus', 'irSlaCapturedAt'])('rejects malformed %s without getter or coercion side effects', key => {
         const getter = vi.fn(() => 'SECRET')
         const toString = vi.fn(() => 'SECRET')
         expect(parseScrapedDataSnapshot(Object.defineProperty({ caseNumber: 'A' }, key, { get: getter }))).toBeNull()
@@ -194,5 +194,35 @@ describe('page identity snapshots', () => {
         }
         expect(getter).not.toHaveBeenCalled()
         expect(toString).not.toHaveBeenCalled()
+    })
+
+    it.each(['Succeeded', 'unknown'])('preserves the atomic IR %s pair without changing identity', irSlaStatus => {
+        const raw = { caseNumber: '2601190030003106001', irSlaStatus, irSlaCapturedAt: '2031-04-17T10:23:00.123Z' }
+        const snapshot = parseScrapedDataSnapshot(raw)
+        expect(snapshot).toEqual(raw)
+        expect(parsePageIdentity(snapshot)).toBe('case:2601190030003106001')
+        raw.irSlaStatus = 'Expired'
+        expect(snapshot?.irSlaStatus).toBe(irSlaStatus)
+        expect(parsePageIdentity({ irSlaStatus, irSlaCapturedAt: raw.irSlaCapturedAt })).toBeNull()
+    })
+
+    it('keeps legacy/absent pairs absent and never reads inherited IR data', () => {
+        expect(parseScrapedDataSnapshot({ caseNumber: 'A' })).toEqual({ caseNumber: 'A' })
+        expect(parseScrapedDataSnapshot({ irSlaStatus: undefined, irSlaCapturedAt: undefined })).toEqual({})
+        const getter = vi.fn(() => 'Succeeded')
+        const inherited = Object.defineProperty({}, 'irSlaStatus', { get: getter })
+        expect(parseScrapedDataSnapshot(Object.create(inherited))).toEqual({})
+        expect(parseScrapedDataSnapshot(Object.assign(Object.create(inherited), { irSlaCapturedAt: '2031-04-17T10:23:00.123Z' }))).toBeNull()
+        expect(getter).not.toHaveBeenCalled()
+    })
+
+    it.each([
+        { irSlaStatus: 'Succeeded' },
+        { irSlaCapturedAt: '2031-04-17T10:23:00.123Z' },
+        { irSlaStatus: 'Succeeded', irSlaCapturedAt: undefined },
+        ...['', 'succeeded', 'Unknown', 'Expired', ' Succeeded', 'Succeeded pending'].map(irSlaStatus => ({ irSlaStatus, irSlaCapturedAt: '2031-04-17T10:23:00.123Z' })),
+        ...['', 'not-a-date', '2031-04-17', '2031-04-17T10:23:00Z', '2031-04-17T10:23:00.123+00:00', '2031-04-17T10:23:00.123', '2031-02-30T10:23:00.123Z', 'Infinity'].map(irSlaCapturedAt => ({ irSlaStatus: 'unknown', irSlaCapturedAt })),
+    ])('rejects malformed IR pair %j as an entire invalid scrape', pair => {
+        expect(parseScrapedDataSnapshot({ caseNumber: 'A', ...pair })).toBeNull()
     })
 })

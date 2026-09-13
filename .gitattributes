@@ -7,6 +7,12 @@ scripts/run_sdk_tests.py -text
 host/sdk_client.py -text
 host/dh_native_host.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 host/test_sdk_compat.py -text
+host/repository_instructions.py -text
+host/test_repository_instructions.py -text
+host/analyze_progress.py -text
+host/test_analyze_progress.py -text
+host/analysis_attachments.py -text
+host/test_analysis_attachments.py -text
 host/requirements.txt -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 tests/sdk-test-review.json -text
 scripts/test_profile_state.py -text

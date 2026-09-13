@@ -8,19 +8,29 @@ persistent inventory and scoped offline results are in
 16 failed** is retained; affected files passed **247/247**, final readers
 **301/301**, and mutation restoration **19 passed, 472 skipped** with exact raw
 restoration. Final TypeScript `capture-final` exit **0**, sources unchanged, is
-confirmed from the existing result. **509 is aggregate inventory, not a full run**.
+confirmed from the existing result. The final milestone now confirms **10/10
+files, 509/509 tests passed, zero failures or skips, 112.30 seconds**, exit **0**
+and exact source bytes unchanged (`changedSources: []`), from existing evidence
+under `%LOCALAPPDATA%/Temp/opencode/dh-analyze-progress-capture-hardening-final-milestone/`.
+This is a **full selected 509-test run, not the whole Extension suite**; earlier
+overlapping executions remain distinct history. The review records full source
+SHA-256 values from `source-before.json`: FAB `D52BD10D...`, pageReader
+`FBD51EEA...`, createdOnModel `CB30DAFF...`, and irSla `574C2280...`.
 
 - [x] Record all ten addressed source issues and scoped offline verification.
-- [ ] Follow the user-approved broader sequence: fix prior-review findings, then
-  commit/push before confirming a Release version. This docs-only task performs
-  the now-authorized documentation commit/push, but no publication. No Release
-  version has been selected; user confirmation is still required.
+- [x] Record the final complete selected 509/509 run without rerunning tests.
+- [x] Prior documentation commit `b78afd5` was already pushed by the prior agent,
+  as reported by the user. This follow-up explicitly performs no staging, commit
+  or push, regardless of broader sequence approval.
+- [ ] Record build evidence separately through the main agent; it remains pending.
+- [ ] Confirm a Release version with the user; none has been selected or published.
 - [ ] Keep running Dev/source snapshot identity distinct from frozen artifacts.
   The production entry is quarantined. Runtime entry remains separately scoped;
   no automatic Prod restoration, installation, Host restart or registry change.
 
 This is not a completed unified-coordinator/full capture refactor, new API or
-OData migration. No benchmarks or real-performance gains are established. Preserve
+OData migration. No runtime benchmarks, real-performance gains or current-browser
+qualification are established; test duration is not a runtime benchmark. Preserve
 earlier source/build history and architecture changes; existing security records
 remain separate and customer details must not be replicated here.
 

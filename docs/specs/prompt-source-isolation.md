@@ -17,9 +17,9 @@ content, tools, and DH Session Info are separate from editable instructions.
 
 | Source | Location | Role and ownership |
 |---|---|---|
-| DH Core System Prompt | Installed `system_prompt.md`; development `host/system_prompt.md` | Product-managed system content |
+| DH Core System Prompt | Installed `system_prompt.md`; development `host/system_prompt.md` | Product-managed support-task scope, safety, evidence and output contract; no assumed tool set or repository workflow |
 | DH-specific Instructions | `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md` | User-managed system source |
-| Repository Instructions | `<Root>/.github/copilot-instructions.md` | Workspace-managed system source |
+| Repository Instructions | `<Root>/AGENTS.md` first; only if absent, `<Root>/.github/copilot-instructions.md` | One workspace-managed system source, never both entries |
 | Custom User Prompt | `%LOCALAPPDATA%\DynamicsHelper\user_prompt.md` | User-managed Analyze user content |
 
 Internal keys remain `userInstructions` / `user_instructions` and
@@ -32,7 +32,9 @@ AppData files are preserved.
 Every SDK create/resume path, including fallback/retry, sets
 `skip_custom_instructions=True`. CLI-global instructions, `AGENTS.md`, ancestor
 and path-specific instructions must not enter DH sessions through discovery.
-The only supported repository instruction path is the one in section 3.
+DH explicitly injects the one selected Root entry from section 3. It does not
+search parents or nested directories; disabling discovery does not prohibit
+explicit selection of `<Root>/AGENTS.md`.
 
 `effective_repository_only = bool(effective_root) and use_workspace_only`.
 Ordinary missing/empty Analyze `rootPath` falls back to canonical Host config;
@@ -46,10 +48,18 @@ selected Roots fail validation rather than silently changing source mode.
 | Non-empty | false | Core + DH-specific Instructions + Session Info |
 | Non-empty | true | Core + Repository Instructions + Session Info |
 
-Exactly one editable source is selected, never both. A missing DH-specific file
-means empty content; an existing unreadable/invalid-UTF-8 selected file fails.
-An existing empty Repository file is valid, but a missing selected Repository
-file fails without fallback. Missing/unreadable Core always blocks Analyze.
+Exactly one editable source is selected, never DH-specific plus Repository or
+both repository entries. In effective Repository ONLY mode, prefer
+`<Root>/AGENTS.md`; only its absence permits the legacy
+`<Root>/.github/copilot-instructions.md`. An existing empty `AGENTS.md` is valid
+and never triggers fallback. Both entries absent reports
+`repository_instructions_missing`. An unreadable/invalid-UTF-8 entry, directory,
+or broken link reports `repository_instructions_unreadable` and blocks Analyze
+without fallback. The same read/decode rules apply to the selected legacy entry.
+A missing DH-specific file means empty content; an existing unreadable/invalid-UTF-8
+selected file fails. Missing/unreadable Core always blocks Analyze. Empty Root
+or mode off retains DH-specific selection. Skills/MCP paths and selection rules,
+DH Core's role, and Custom User Prompt handling remain unchanged.
 
 ## 5. Prompt Snapshot and Assembly
 
@@ -92,7 +102,10 @@ presence, and length, never raw event/data/object representations.
 SHA-256 input consists, in order, of `dh-prompt-fingerprint-v1`, UTF-8 source
 mode, exact Core bytes, and exact selected bytes. Each component is prefixed by
 its eight-byte big-endian length. The stored fingerprint is `v1:<hex-digest>`.
-Root identity is an independent refresh condition.
+Root identity is an independent refresh condition. The selected filename is not
+a fingerprint input. Switching between repository entries with identical bytes
+does not itself require a refresh when mode, Core, case, Root, and session/client
+availability remain unchanged.
 
 Same case, applied Root, available session/client, and fingerprint permit reuse.
 Changed mode/selected bytes/Core bytes refresh the same deterministic UUIDv5
@@ -116,8 +129,9 @@ With no active case, initialization does not invent a generic session.
 An empty Root disables Repository ONLY without rewriting its stored value.
 Effective Repository-only disables but preserves the DH-specific editor; Custom
 User Prompt stays enabled. Labels, help, and known source errors support English
-and Chinese. A non-empty Root with Repository ONLY requires the exact repository
-file, not merely a valid workspace directory.
+and Chinese. A non-empty Root with Repository ONLY requires a valid selected
+repository entry under the priority/absence-only fallback rule, not merely a
+valid workspace directory.
 
 Editable writes are sparse: absent means no write, explicit empty truncates,
 and present null/non-string fails before persistent writes. Options captures
@@ -140,8 +154,8 @@ See [preference durability](configuration-storage-contract.md#hydration-catch-up
 | `dh_core_prompt_missing` | Core absent | Block Analyze; repair installation |
 | `dh_core_prompt_unreadable` | Core read/decode failure | Block Analyze; repair file/permissions |
 | `dh_specific_instructions_unreadable` | Selected DH-specific read/decode failure | Block Analyze; omit unreadable editor value in health |
-| `repository_instructions_missing` | Selected Repository file absent | Block Analyze; add file or disable Repository ONLY |
-| `repository_instructions_unreadable` | Selected Repository read/decode failure | Block Analyze; repair file or disable mode |
+| `repository_instructions_missing` | Both Root `AGENTS.md` and legacy `.github/copilot-instructions.md` absent | Block Analyze; add entry or disable Repository ONLY |
+| `repository_instructions_unreadable` | Repository entry read/decode failure, directory, or broken link | Block Analyze without fallback; repair entry or disable mode |
 | `user_prompt_unreadable` | User prompt read/decode failure | Block Analyze; omit unreadable health value; explicit edit/clear repairs |
 
 Analyze inner errors carry `{status:'error', error_code, error}` with a safe
@@ -170,11 +184,11 @@ preferences, writes config, or starts an update/health loop.
 | **PS-I1** | Every SDK create/resume path disables custom-instruction discovery. |
 | **PS-I2** | Empty effective Root makes Repository ONLY ineffective. |
 | **PS-I3** | DH-specific mode selects Core + DH-specific, not Root/global instructions. |
-| **PS-I4** | Repository-only mode selects Core + Root, not DH-specific/global instructions. |
-| **PS-I5** | Both editable system sources never coexist. |
+| **PS-I4** | Repository-only mode selects Core + Root `AGENTS.md`, or legacy `.github/copilot-instructions.md` only if `AGENTS.md` is absent; no DH-specific/global or parent/nested instructions. |
+| **PS-I5** | DH-specific and Repository sources never coexist; both repository entries are never injected together. |
 | **PS-I6** | Missing/unreadable Core blocks Analyze before a model turn. |
-| **PS-I7** | Missing/unreadable selected Root instructions blocks without fallback. |
-| **PS-I8** | Existing empty Root instructions are valid. |
+| **PS-I7** | Both Root entries absent reports missing; unreadable/invalid-UTF-8 entries, directories, and broken links fail closed without fallback. |
+| **PS-I8** | Existing empty Root instructions are valid; empty `AGENTS.md` does not trigger legacy fallback. |
 | **PS-I9** | Host reads canonical User Prompt every Analyze, replaces stale sections, sends it once in scrubbed user content, and fails closed on read/decode errors. |
 | **PS-I10** | Explicit empty `user_instructions` truncates and round-trips empty. |
 | **PS-I11** | Unreadable selected DH-specific content blocks rather than becoming empty. |
@@ -186,7 +200,7 @@ preferences, writes config, or starts an update/health loop.
 
 | ID | Invariant |
 |---|---|
-| **PF-I1** | Fingerprint covers mode and exact Core/selected bytes. |
+| **PF-I1** | Fingerprint covers mode and exact Core/selected bytes, not filename; identical repository-entry bytes alone do not require refresh. |
 | **PF-I2** | Unchanged fingerprint and same case/applied Root permit session reuse. |
 | **PF-I3** | Changed fingerprint refreshes the same UUIDv5 case session before Analyze. |
 | **PF-I4** | Only successful refresh commits a candidate; failure clears prior fingerprint. |
@@ -201,7 +215,7 @@ preferences, writes config, or starts an update/health loop.
 | **UI-I2** | Non-empty Root restores the persisted selection. |
 | **UI-I3** | Repository-only disables but preserves DH-specific editor content. |
 | **UI-I4** | User Prompt remains enabled. |
-| **UI-I5** | Labels/help/known errors are localized in English and Chinese. |
+| **UI-I5** | Labels/help/known errors are localized in English and Chinese, including `AGENTS.md` priority, absence-only legacy fallback, never-both selection, and both-absent missing guidance. |
 | **UI-I6** | Error code survives SW persistence and immediate/rehydrated display. |
 | **UI-I7** | Failed post-save refresh is visible without reverting saved config. |
 | **UI-I8** | Unreadable User Prompt health preserves the mirror; unrelated writes do not repair it, explicit revision-safe edit/clear does. |

@@ -135,6 +135,42 @@ describe('strict persisted analysis parser matrix', () => {
         seen: false,
     }
 
+    it('attachment notice validates stored and completion fields without losing the outcome', async () => {
+        const getter = vi.fn(() => 'unsafe')
+        const convert = vi.fn(() => 'unsafe')
+        const fields = [
+            {},
+            ...[undefined, null, '', ' \n ', [], {}, 42, false, 'x'.repeat(2049), { toString: convert }]
+                .map(attachmentNotice => ({ attachmentNotice })),
+            Object.defineProperty({}, 'attachmentNotice', { get: getter }),
+        ]
+        for (const status of ['success', 'error'] as const) {
+            const base = { ...lastBase, status }
+            const completion = status === 'success'
+                ? { status, markdown: 'Body' }
+                : { status, error: 'Body', errorCode: 'repository_instructions_missing' }
+            for (const extra of fields) {
+                const record = Object.defineProperties({ ...base }, Object.getOwnPropertyDescriptors(extra))
+                expect(analysisStoreModule.parseLastAnalysis(record)).toEqual(base)
+                await analysisStoreModule.recordAnalyzeStart(CTX)
+                await analysisStoreModule.completeAnalyzePersistence(CTX,
+                    Object.defineProperties({ ...completion }, Object.getOwnPropertyDescriptors(extra)))
+                expect(getStorageSnapshot().dh_last_analysis).toMatchObject({ status, content: 'Body' })
+                expect(getStorageSnapshot().dh_last_analysis).not.toHaveProperty('attachmentNotice')
+            }
+            const notice = 'x'.repeat(2048)
+            expect(analysisStoreModule.parseLastAnalysis({ ...base, attachmentNotice: notice }))
+                .toEqual({ ...base, attachmentNotice: notice })
+            expect(analysisStoreModule.parseLastAnalysis(Object.assign(Object.create({ attachmentNotice: notice }), base)))
+                .toEqual(base)
+            await analysisStoreModule.recordAnalyzeStart(CTX)
+            await analysisStoreModule.completeAnalyzePersistence(CTX, { ...completion, attachmentNotice: notice })
+            expect(await analysisStoreModule.getLastAnalysis()).toMatchObject({ status, attachmentNotice: notice })
+        }
+        expect(getter).not.toHaveBeenCalled()
+        expect(convert).not.toHaveBeenCalled()
+    })
+
     it('parses LastAnalysis snapshots and rejects malformed records', () => {
         const modern = {
             ...lastBase,

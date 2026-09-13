@@ -21,6 +21,39 @@ wrappers or restart agreed review budgets. Repeat checks only for new changes,
 failures or unresolved concerns. Lead progress reports with outcomes and remaining
 gaps, not temporary paths or the number of scripts created.
 
+## Live Feature Test Entry
+
+The authoritative [Testing Cycle](../AGENTS.md#native-host-mode-selection) selects
+the route; it does not authorize execution:
+
+- Published GitHub Release: test the real production upgrade only through the
+  Extension's own upgrade feature, never a full installer, Dev switch or copied
+  local files as a substitute. Publication itself still needs explicit approval.
+- Unreleased Extension only: approved local build, then browser **Load unpacked**
+  from this checkout's `extension/dist/`, keeping the production Host.
+- Unreleased Native Host only: keep the production Extension and select the source
+  Dev Host through registry-based Native Messaging using `python dev_switch.py dev`.
+- Unreleased both: combine the local unpacked Extension and source Dev Host routes.
+
+`switch_prod` in the user's terminology means the existing `dev_switch.py`, not
+a renamed script or new alias. Before an authorized switch, run read-only `status`
+from the repository root and verify the target manifest and its intended existing
+Host launcher/executable. Both Chrome/Edge HKCU writes require applicable work-package
+authorization; inspect both keys afterward. The script does not change the loaded
+Extension or terminate an old Host. Source Dev shares user configuration with Prod
+and is not a sandbox; registration status does not verify the active runtime.
+See [operator prerequisites](../DEVELOPER_GUIDE.md#2-native-host-mode-selection).
+
+Do not use a local complete installer or production-file copying for unreleased
+feature tests. The previous local installer cycle is superseded, with no automatic
+return-to-Prod or return-to-Dev step. Matching-full-installer repair remains a
+separate, explicitly approved user maintenance operation. Recovery/fault tests
+retain their existing disposable-VM gate and separately agreed environment/scope;
+normal upgrade success is not recovery qualification. These rules do not expand
+offline test, build, browser, live Analyze, registry or publication authorization,
+or reset any once-only attempt budget. The reviewed offline/fixture entries below
+remain distinct from live feature testing.
+
 ## Non-Negotiable Boundaries
 
 - No encoded/compressed executable payloads, Invoke-Expression, dynamically

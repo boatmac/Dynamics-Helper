@@ -23,7 +23,7 @@ The singleton is latest-started-owned, not a last-response-wins history.
 
 | Key | Value and owner |
 |---|---|
-| `dh_last_analysis` | SW-owned `LastAnalysis`: string case/title/content, `success` or `error`, finite timestamp, boolean legacy `seen`; optional request ID, duration, saved path, error code |
+| `dh_last_analysis` | SW-owned `LastAnalysis`: string case/title/content, `success` or `error`, finite timestamp, boolean legacy `seen`; optional request ID, duration, saved path, error code, separate `attachmentNotice` |
 | `dh_latest_analysis_owner` | SW-owned `{caseNumber, requestId, startTime}`; string identities and finite start time |
 | `dh_pending_analysis:<encoded-requestId>` | SW-owned request-scoped `{caseNumber, requestId, startTime}` |
 | `dh_seen_analysis:request:<encoded-case>:<encoded-requestId>` | Separate identity-only acknowledgment written by FAB |
@@ -77,6 +77,12 @@ read-modify-write of the singleton. Legacy `last.seen=true` and exact legacy or
 prefixed acknowledgment matches suppress replay. Preserve `popoverIsAnalyze`
 discrimination in the shared close handler.
 
+Analyze progress is separate request-local state, never pending/result storage.
+Hydration restores a spinner, not phase/activity/session-copy details; the panel
+reports details unavailable. Closing the menu retains local progress, but reload
+does not replay it. See the authoritative
+[progress contract](native-message-snapshot.md#analyze-progress-contract).
+
 ### 4.4 Ages
 
 | Constant | Meaning |
@@ -99,6 +105,65 @@ retain that path's fallback; immediate FAB text may include a safe prefix while
 hydration supplies the stored raw fallback. No rejected object is serialized for
 display. See the [prompt contract](prompt-source-isolation.md#8-error-contract).
 
+### 4.6 Attachment notices
+
+**Implemented-source; focused offline milestones passed, runtime UNVERIFIED:** Host notice output and Extension parsing,
+persistence, hydration and rendering of optional `attachmentNotice` exist.
+The initial 13-file frontend run passed 519/524, all five failures in
+`FAB.pageIdentity.test.tsx`. Premature progress settlement now waits for terminal
+page revalidation. The affected four complete files passed 98/98 with two new
+cases, making 526 selected tests in aggregate, not a full 526-test run. Both new
+cases failed under the expected early-settle mutation (2/2 RED); mutation removed,
+restored GREEN confirmed with 2 passed, 45 skipped, exit 0, and FAB's raw hash
+matching the pre-RED ownership-fixed bytes (prefix `D5DF`). Final TypeScript
+(`attachments-final`) exited 0 with sources unchanged. Pure-Host 21/21 used
+mocked filesystem/readers and SDK-shaped RPCs, not real attachment I/O or Host/SDK
+runtime. At that milestone, production was not built, installed or live-verified and no actual
+attachment model inputs were exercised. Historical standalone download completion
+does not qualify this path or production Analyze. See the
+[milestone results](../dtm-attachment-investigation.md#initial-verification-status).
+
+The wire contract uses `attachment_notice` in success `data` beside `markdown`,
+or beside the Analyze error fields. `analyzeBridge.ts` maps it to
+`attachmentNotice`. `parseAttachmentNotice` accepts only an own data property
+containing a nonblank primitive string of at most 2048 characters; malformed
+optional values are ignored without getter invocation or coercion. Legacy results
+without a notice remain valid. The same latest-owner gate applies to notice and
+result persistence; there is no separate notice writer or stale-write authority.
+
+FAB and `useAnalysisHydration` carry the separate field to `ResultPopover`, which
+renders it independently beside localized known prompt errors, so localization
+does not replace the notice. It is product-generated input-completeness text,
+not model-generated Markdown, transient progress, or an extension durability
+warning. Known omitted files warrant a skipped-input warning; unknown inventory
+must say completeness/existence cannot be confirmed, not assert attachments exist.
+
+The later UI-only precision fix is confined to `ResultPopover`: it translates
+exactly `> **Attachment status:** ` or `> **附件状态：** ` once at the start of
+the notice into a plain heading, preserving the remaining body. Rendering stays
+React text, not HTML or Markdown image/link nodes. Wire, stored and report text
+remain raw and unchanged; existing hydrated records receive the same display fix.
+This source change is not in `dist`; a future approved build/reload is required.
+See the [night offline follow-up](../dtm-attachment-investigation.md#night-offline-follow-up)
+for confirmed restored GREEN (6 passed, 214 skipped, actual exit 0, sources
+unchanged) and TypeScript (`attachment-night`: exit 0, `changedSources: []`).
+`ResultPopover` and `attachmentPortal` raw hashes exactly match first GREEN
+(prefixes `2368` and `F39F`, respectively), separate from the earlier milestone.
+
+Host now emits a nonempty `attachment_notice` in success `data` beside `markdown`
+or beside the inner Analyze error fields. `handle_attachment_analyze` no longer
+prefixes errors, and `handle_analyze_error` leaves returned `full_response`
+unprefixed. The saved report writes the notice in its own `## Attachment Status`
+section before `## AI Explanation`. This closes the source-level embedded-notice
+gap without relying on error-body localization to retain attachment status.
+
+Before each model send attempt, Host derives a fixed product input-status summary
+from frozen preparation and that attempt's qualified-image count, appending it
+when nonempty. The model is asked not to repeat the separately displayed status
+or claim omitted inputs were reviewed. Host does not itself duplicate the notice
+in returned Markdown/error text; model compliance and end-to-end delivery remain
+UNVERIFIED, not established by source inspection or the focused offline milestones.
+
 ## 5. Invariants
 
 P-I2..P-I4 include the common durable latest-owner gate in section 4.2. These
@@ -107,7 +172,7 @@ they do not authorize stale writes.
 
 | ID | Invariant |
 |---|---|
-| **P-I1** | Pending and latest owner commit together before SW forwards `analyze_error`; start-write failure sends nothing. |
+| **P-I1** | Pending and latest owner commit together before SW prepares/forwards Analyze, including private `analyze_with_attachments`; start-write failure sends nothing. |
 | **P-I2** | Host success writes `dh_last_analysis` only for the matching durable owner and cleans only its matching pending. |
 | **P-I3** | An owned Host error writes `status='error'`, the safe string error, and optional raw code; inner Analyze code takes precedence. Non-owner completion cannot replace the singleton. |
 | **P-I4** | An owned transport rejection writes a code-free safe error; every rejection cleans only its matching pending, never another request's state. |
@@ -131,6 +196,8 @@ is not promised.
 
 An accepted request may finish after its original FAB disappears. If it still
 owns the durable singleton, returning to its case can rehydrate the result.
+Progress is delivered only to the captured originating document and is not
+recovered with that result or redirected to the currently active tab.
 
 ### 6.3 A starts, then B starts
 
@@ -142,8 +209,10 @@ Reset removes ownership, so neither old response can resurrect reset state.
 ### 6.4 Privacy
 
 Stored output can contain sensitive analysis data. Host PII scrubbing applies to
-outbound Analyze inputs; it is not a guarantee that model output is PII-free.
-Do not log raw reports, errors containing rejected values, or prompt content.
+case text, context and canonical Custom User Prompt, not eligible raw attachment
+bytes. It is not a guarantee that model output is PII-free. Never persist private
+attachment download descriptors in result/progress storage or log raw attachment
+URLs, credentials, contents, reports, errors containing rejected values or prompts.
 
 ## 7. Implementation Boundaries
 

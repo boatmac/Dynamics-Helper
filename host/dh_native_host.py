@@ -87,6 +87,15 @@ except Exception as e:
     NATIVE_STDOUT = sys.stdout.buffer
 
 import asyncio
+from contextlib import nullcontext
+from contextvars import ContextVar
+from analyze_progress import AnalyzeProgress
+from analysis_attachments import (
+    AttachmentImportOwner,
+    PreparedAttachments,
+    qualify_images,
+    report_notice,
+)
 import copy
 import threading
 from native_messaging import read_native_message, write_message
@@ -104,6 +113,7 @@ import urllib.request
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+from repository_instructions import read_repository_instructions
 
 from install_integrity import InstallationVerification, InstallationVerifier
 from product_info import VERSION, get_host_capabilities
@@ -127,6 +137,7 @@ from update_journal import parse_transaction_id
 _NAMESPACE_MYCASE = uuid.UUID("816bee4e-8eee-4c0b-ae69-70879d032f4d")
 _WORKING_DIRECTORY_UNSET = object()
 _PAYLOAD_FIELD_UNSET = object()
+_ANALYZE_PROGRESS = ContextVar("analyze_progress", default=None)
 _UPDATE_ACTIONS = frozenset(
     {
         "perform_update",
@@ -160,7 +171,7 @@ _PROMPT_ERROR_MESSAGES = {
     ),
     "repository_instructions_missing": (
         "Repository Instructions are missing. Add "
-        ".github/copilot-instructions.md under Root Path or disable Repository ONLY."
+        "AGENTS.md or .github/copilot-instructions.md under Root Path, or disable Repository ONLY."
     ),
     "repository_instructions_unreadable": (
         "Repository Instructions cannot be read as UTF-8. "
@@ -530,6 +541,7 @@ class NativeHost:
         self.loop = None
         self.scrubber = PiiScrubber()
         self.current_request_id = None  # Track current request for progress updates
+        self._attachment_import = AttachmentImportOwner()
         self.root_path = None  # Store root path from config
         self.last_update_check = 0  # Track last update check time
         # C2b-lite: timeout is user-configurable via Options
@@ -712,6 +724,15 @@ class NativeHost:
             digest.update(part)
         return f"v1:{digest.hexdigest()}"
 
+    @staticmethod
+    def _read_repository_instructions(effective_root: str) -> tuple[bytes, str]:
+        try:
+            return read_repository_instructions(effective_root)
+        except FileNotFoundError as error:
+            raise PromptSourceError("repository_instructions_missing") from error
+        except (OSError, UnicodeDecodeError) as error:
+            raise PromptSourceError("repository_instructions_unreadable") from error
+
     def _resolve_prompt_snapshot(
         self,
         effective_root: str | None,
@@ -724,20 +745,13 @@ class NativeHost:
             unreadable_error_code="dh_core_prompt_unreadable",
         )
         if mode == "repository-only":
-            selected_path = os.path.join(
-                effective_root or "", ".github", "copilot-instructions.md"
-            )
-            missing_code = "repository_instructions_missing"
-            unreadable_code = "repository_instructions_unreadable"
+            selected_bytes, selected_text = self._read_repository_instructions(effective_root or "")
         else:
-            selected_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
-            missing_code = None
-            unreadable_code = "dh_specific_instructions_unreadable"
-        selected_bytes, selected_text = self._read_prompt_source(
-            selected_path,
-            missing_error_code=missing_code,
-            unreadable_error_code=unreadable_code,
-        )
+            selected_bytes, selected_text = self._read_prompt_source(
+                os.path.join(USER_DATA_DIR, "copilot-instructions.md"),
+                missing_error_code=None,
+                unreadable_error_code="dh_specific_instructions_unreadable",
+            )
         return PromptSnapshot(
             mode=mode,
             effective_root=effective_root,
@@ -791,15 +805,7 @@ class NativeHost:
         selected_error: PromptSourceError | None = None
         if effective_root and use_workspace_only:
             try:
-                self._read_prompt_source(
-                    os.path.join(
-                        effective_root,
-                        ".github",
-                        "copilot-instructions.md",
-                    ),
-                    missing_error_code="repository_instructions_missing",
-                    unreadable_error_code="repository_instructions_unreadable",
-                )
+                self._read_repository_instructions(effective_root)
             except PromptSourceError as error:
                 selected_error = error
 
@@ -1611,6 +1617,7 @@ class NativeHost:
         working_directory_override=_WORKING_DIRECTORY_UNSET,
         session_config: dict | None = None,
         prompt_snapshot: PromptSnapshot | None = None,
+        progress: AnalyzeProgress | None = None,
     ) -> bool:
         """Re-creates or resumes a Copilot session.
 
@@ -1628,6 +1635,8 @@ class NativeHost:
         # generic "session/client not initialized".
         self.last_session_error = None
         self.last_prompt_source_error = None
+
+        phase = progress.phase if progress is not None else lambda *args, **kwargs: None
 
         try:
             full_config = session_config or self._get_session_config(
@@ -1717,6 +1726,7 @@ class NativeHost:
 
         # If a session_id is provided, try to resume an existing session first
         if session_id:
+            phase("session_resuming", "running")
             try:
                 self.session = await self.client.resume_session(
                     session_id, **sdk_kwargs
@@ -1735,21 +1745,28 @@ class NativeHost:
                     f"Resumed existing session: {session_id} (Server ID: {self.current_session_id})"
                 )
                 self._log_session_observability(self.session, "resumed")
+                phase("session_resuming", "succeeded")
+                if progress is not None:
+                    progress.session_ready(self.session)
                 return True
             except SessionOptionsPatchError:
                 return await self._reject_session_options()
             except asyncio.CancelledError:
+                phase("session_resuming", "failed")
                 self._invalidate_active_session(clear_client=True)
                 logger.warning("Copilot session refresh cancelled; cleanup is unconfirmed.")
                 raise
             except AttributeError:
+                phase("session_resuming", "unavailable")
                 logger.info(
                     "SDK does not support resume_session. Will create new session."
                 )
             except (OSError, ProcessExitedError) as error:
+                phase("session_resuming", "failed")
                 transport_error = error
                 self._safe_sdk_error("resume Copilot session transport", error)
             except Exception as error:
+                phase("session_resuming", "failed")
                 self._safe_sdk_error("resume Copilot session", error)
 
         try:
@@ -1765,6 +1782,7 @@ class NativeHost:
             safe_keys = {k: type(v).__name__ for k, v in sdk_kwargs.items()}
             logger.info(f"create_session config keys: {safe_keys}")
 
+            phase("session_creating", "running")
             self.session = await self.client.create_session(**sdk_kwargs)
             # Capture the server-returned session ID
             server_session_id = getattr(self.session, "session_id", None)
@@ -1788,14 +1806,21 @@ class NativeHost:
                     f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
             )
             self._log_session_observability(self.session, "created")
+            phase("session_creating", "succeeded")
+            if progress is not None:
+                progress.session_ready(self.session)
             return True
         except SessionOptionsPatchError:
             return await self._reject_session_options()
         except asyncio.CancelledError:
+            phase("session_creating", "failed")
             self._invalidate_active_session(clear_client=True)
             logger.warning("Copilot session refresh cancelled; cleanup is unconfirmed.")
             raise
         except (OSError, ProcessExitedError) as error:
+            if transport_error is None:
+                phase("session_creating", "failed")
+            phase("session_reconnecting", "running")
             self._safe_sdk_error("create Copilot session transport", error)
             broken_client = self.client
             if broken_client:
@@ -1822,7 +1847,9 @@ class NativeHost:
                 )
                 await self.client.start()
                 logger.info("Client re-initialized after transport failure.")
+                phase("session_reconnecting", "succeeded")
             except Exception as retry_err:
+                phase("session_reconnecting", "failed")
                 self.last_session_error = self._safe_sdk_error(
                     "restart Copilot client", retry_err
                 )
@@ -1830,6 +1857,7 @@ class NativeHost:
                 return False
 
             try:
+                phase("session_creating", "running")
                 self.session = await self.client.create_session(**sdk_kwargs)
                 server_session_id = getattr(self.session, "session_id", None)
                 self.current_session_id = server_session_id
@@ -1843,14 +1871,19 @@ class NativeHost:
                 f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
                 )
                 self._log_session_observability(self.session, "created-after-retry")
+                phase("session_creating", "succeeded")
+                if progress is not None:
+                    progress.session_ready(self.session)
                 return True
             except SessionOptionsPatchError:
                 return await self._reject_session_options()
             except asyncio.CancelledError:
+                phase("session_creating", "failed")
                 self._invalidate_active_session(clear_client=True)
                 logger.warning("Copilot session refresh cancelled; cleanup is unconfirmed.")
                 raise
             except (OSError, ProcessExitedError) as retry_err:
+                phase("session_creating", "failed")
                 self.last_session_error = self._safe_sdk_error(
                     "retry Copilot session", retry_err
                 )
@@ -1863,12 +1896,14 @@ class NativeHost:
                 self._invalidate_active_session(clear_client=True)
                 return False
             except Exception as retry_err:
+                phase("session_creating", "failed")
                 self.last_session_error = self._safe_sdk_error(
                     "retry Copilot session", retry_err
                 )
                 self._invalidate_active_session()
                 return False
         except Exception as error:
+            phase("session_creating", "failed")
             self.last_session_error = self._safe_sdk_error(
                 "create Copilot session", error
             )
@@ -2208,8 +2243,13 @@ class NativeHost:
             raise UpdateServiceError("update_cleanup_failed")
         return {"transactionId": payload["transactionId"], "acknowledged": True}
 
+    def _get_analyze_progress(self):
+        return _ANALYZE_PROGRESS.get()
+
     def send_progress(self, message):
         """Sends a progress update to the client."""
+        if self._get_analyze_progress() is not None:
+            return
         if self.current_request_id:
             progress_msg = {
                 "requestId": self.current_request_id,
@@ -2297,8 +2337,62 @@ class NativeHost:
                 "errorKind": kind,
             }
 
-    async def handle_analyze_error(self, payload):
+    async def handle_attachment_analyze(self, payload):
+        """Accept attachment paths only from the private Service Worker action."""
+        invalid = {
+            "status": "error",
+            "error": "Invalid attachment metadata.",
+            "error_code": "invalid_attachment_metadata",
+        }
+        if type(payload) is not dict or payload.keys() != {"analysis", "attachments"}:
+            return invalid
+        analysis = payload["analysis"]
+        if (
+            type(analysis) is not dict
+            or not {"text", "context", "timestamp", "rootPath", "caseNumber"} <= analysis.keys()
+            or not analysis.keys() <= {
+                "text", "context", "timestamp", "rootPath", "product", "caseNumber",
+                "rootPathOverrideProvided", "progressVersion",
+            }
+            or any(type(analysis[key]) is not str for key in (
+                "text", "context", "timestamp", "rootPath", "caseNumber",
+            ))
+            or re.fullmatch(r"[0-9]{16}(?:[0-9]{3})?", analysis["caseNumber"]) is None
+            or ("product" in analysis and type(analysis["product"]) is not str)
+            or ("rootPathOverrideProvided" in analysis and analysis["rootPathOverrideProvided"] is not True)
+            or ("progressVersion" in analysis and (
+                type(analysis["progressVersion"]) is not int or analysis["progressVersion"] != 1
+            ))
+        ):
+            return invalid
+        try:
+            # Validate the entire metadata record before reading; freeze once for retries.
+            prepared = await self._attachment_import.prepare(payload["attachments"])
+        except Exception:
+            return invalid
+        try:
+            result = await self.handle_analyze_error(analysis, prepared=prepared)
+        except Exception as error:
+            result = {"status": "error", "error": self._safe_sdk_error("Copilot request", error)}
+        if result.get("status") == "error":
+            notice = report_notice(prepared, included_images=0)
+            if notice:
+                result = {**result, "attachment_notice": notice}
+        return result
+
+    async def handle_analyze_error(self, payload, *, prepared: PreparedAttachments | None = None):
         """Uses the Copilot SDK to analyze the error."""
+        if type(payload) is not dict or not payload.keys() <= {
+            "text", "context", "timestamp", "rootPath", "product", "caseNumber",
+            "rootPathOverrideProvided", "progressVersion",
+        }:
+            return {
+                "status": "error", "error": "Invalid analysis payload.",
+                "error_code": "invalid_analyze_request",
+            }
+        progress = self._get_analyze_progress()
+        phase = progress.phase if progress is not None else lambda *args, **kwargs: None
+        phase("prepare", "running")
         text = payload.get("text")
         context = payload.get("context", "Unknown")
         product = payload.get("product", "General")
@@ -2361,6 +2455,7 @@ class NativeHost:
         # (see _case_to_session_id + MyCasesKit docs/dh-uuid5-change-spec.md)
         valid_case_id = self._extract_case_id(case_number)
         session_id = self._case_to_session_id(valid_case_id) if valid_case_id else None
+        phase("prepare", "succeeded")
 
         # Determine if we need to refresh the session:
         # 1. Root path changed (workspace MCP/Skills config may differ)
@@ -2401,8 +2496,10 @@ class NativeHost:
                 case_id=valid_case_id,
                 session_config=full_config,
                 prompt_snapshot=snapshot,
+                progress=progress,
             )
             if not refreshed:
+                phase("session_ready", "failed")
                 detail = getattr(self, "last_session_error", None)
                 prompt_error = getattr(self, "last_prompt_source_error", None)
                 self._invalidate_active_session()
@@ -2412,11 +2509,17 @@ class NativeHost:
                     "status": "error",
                     "error": detail or "Copilot session refresh failed.",
                 }
+        else:
+            phase("session_reused", "succeeded")
+            if progress is not None:
+                progress.session_ready(self.session)
 
         if not text:
+            phase("prepare", "failed")
             return {"status": "error", "error": "No text provided for analysis."}
 
         if not self.session or not self.client:
+            phase("session_ready", "failed")
             return {
                 "status": "error",
                 "error": (
@@ -2426,6 +2529,7 @@ class NativeHost:
             }
 
         self.send_progress("Checking authentication...")
+        phase("auth", "running")
 
         # 1. Fast Fail: Check Authentication Status (with timeout to prevent hangs)
         try:
@@ -2433,7 +2537,8 @@ class NativeHost:
                 self.client.get_auth_status(), timeout=15.0
             )
             # SDK 0.2.0: get_auth_status() returns a GetAuthStatusResponse dataclass
-            is_auth = getattr(auth_status, "isAuthenticated", False)
+            is_auth = getattr(auth_status, "isAuthenticated", None)
+            phase("auth", "succeeded" if is_auth is True else "needs_auth" if is_auth is False else "unavailable")
             if not is_auth:
                 login_name = getattr(auth_status, "login", "Unknown")
                 status_msg = getattr(auth_status, "statusMessage", "Unknown")
@@ -2444,9 +2549,11 @@ class NativeHost:
                 }
             logger.info("Authentication check passed.")
         except asyncio.TimeoutError:
+            phase("auth", "unavailable")
             logger.warning("Auth status check timed out after 15s, continuing...")
             self.send_progress("Auth check timed out, continuing...")
         except Exception as error:
+            phase("auth", "unavailable")
             logger.error(
                 "Failed to check auth status (%s).",
                 type(error).__name__,
@@ -2455,6 +2562,7 @@ class NativeHost:
 
         try:
             self.send_progress("Preparing prompt...")
+            phase("prepare", "running")
             # Scrub PII from text and context
             scrubbed_text = self.scrubber.scrub(text)
             scrubbed_context = self.scrubber.scrub(context) if context else ""
@@ -2467,6 +2575,7 @@ class NativeHost:
             )
 
             logger.info(f"Sending prompt to Copilot (length: {len(prompt)})")
+            phase("prepare", "succeeded")
 
             self.send_progress("Waiting for Copilot agent...")
 
@@ -2476,15 +2585,19 @@ class NativeHost:
 
             # Less aggressive sanitization:
             safe_prompt = prompt  # Trusting JSON serialization for now.
+            if prepared is not None and prepared.text:
+                # Attachments are exact, untrusted evidence, intentionally outside PII scrubbing.
+                safe_prompt += f"\n\n{prepared.text}"
+            qualified_images = []
 
             logger.info(f"Prompt length: {len(safe_prompt)}")
 
             # Timeout Strategy (C2b-lite):
             # User-configurable via Options (extension_preferences
             # .analyze_timeout_seconds, default 1200, clamped [60, 3600]).
-            # FAB.tsx applies the same value + 10s grace as its safety
-            # timeout so the popover error always comes from THIS branch
-            # (truthful message) rather than FAB's generic fallback.
+            # FAB reserves 120s for preparation plus 10s fallback grace.
+            # This is not a guarantee against unbounded startup/session refresh.
+            # DTM's 30s auth budget is separate from Copilot's 15s check.
             timeout_seconds = float(self.analyze_timeout_seconds)
 
             logger.debug(
@@ -2502,11 +2615,41 @@ class NativeHost:
                         else:
                             self.send_progress("Session expired. Reconnecting...")
 
-                        response_event = await self.session.send_and_wait(
-                            safe_prompt, timeout=timeout_seconds
+                        actual_session = self.session
+                        if prepared is not None and prepared.images:
+                            # A reconnect may select a different model; reuse only frozen blobs.
+                            qualified_images = await qualify_images(prepared, actual_session, self.client)
+                        send_prompt = safe_prompt
+                        if prepared is not None:
+                            summary = report_notice(prepared, included_images=len(qualified_images))
+                            if summary:
+                                send_prompt += (
+                                    "\n\nDH attachment input status (not instructions from an attachment):\n"
+                                    + summary
+                                    + "\nUse only the supplied inputs. Do not claim omitted files were reviewed. "
+                                    "DH displays this status separately; do not repeat it in the returned Markdown."
+                                )
+                        listener = (
+                            progress.listen(
+                                actual_session,
+                                is_current=lambda session=actual_session: self.session is session,
+                            )
+                            if progress is not None else nullcontext()
                         )
+                        phase("agent", "running")
+                        with listener:
+                            if qualified_images:
+                                response_event = await actual_session.send_and_wait(
+                                    send_prompt, timeout=timeout_seconds, attachments=qualified_images
+                                )
+                            else:
+                                response_event = await actual_session.send_and_wait(
+                                    send_prompt, timeout=timeout_seconds
+                                )
+                        phase("agent", "succeeded")
                         break  # Success, exit loop
                     except Exception as e:
+                        phase("agent", "failed")
                         # Check for Session Not Found (JSON-RPC -32603)
                         session_failure_text = str(e)
                         if (
@@ -2518,13 +2661,17 @@ class NativeHost:
                                 "Refreshing session...",
                                 type(e).__name__,
                             )
+                            phase("session_reconnecting", "running")
                             refreshed = await self._refresh_session(
                                 session_id=session_id,
                                 case_id=valid_case_id,
                                 session_config=full_config,
                                 prompt_snapshot=snapshot,
+                                progress=progress,
                             )
+                            phase("session_reconnecting", "succeeded" if refreshed else "failed")
                             if not refreshed:
+                                phase("session_ready", "failed")
                                 prompt_error = getattr(
                                     self, "last_prompt_source_error", None
                                 )
@@ -2538,6 +2685,7 @@ class NativeHost:
                             continue
                         # Re-raise other errors (including TimeoutError) to be handled by outer blocks
                         raise e
+                phase("response", "running")
                 raw_event_type = (
                     getattr(response_event, "type", "none")
                     if response_event is not None
@@ -2573,6 +2721,9 @@ class NativeHost:
                         logger.warning(
                             f"Copilot SDK requires interaction: {event_type}"
                         )
+                        phase("response", "failed")
+                        if event_type in ("auth_required", "login_required"):
+                            phase("auth", "needs_auth")
                         return {
                             "status": "error",
                             "error": f"Copilot requires authentication or interaction: {event_type}. Please run 'copilot' in your terminal first to authenticate.",
@@ -2591,6 +2742,7 @@ class NativeHost:
                         logger.warning(f"Response event data missing content: {event_summary}")
                 else:
                     full_response = "No response event received (None)."
+                phase("response", "succeeded" if has_content else "unavailable")
 
             except asyncio.TimeoutError:
                 logger.error(
@@ -2620,6 +2772,8 @@ class NativeHost:
                 }
 
             logger.info("Received full response from Copilot.")
+            notice = report_notice(prepared, included_images=len(qualified_images)) if prepared is not None else ""
+            phase("report", "running")
 
             # Determine Save Location
             effective_root = full_config.get("_effective_root")
@@ -2705,14 +2859,18 @@ class NativeHost:
                 f.write(f"## Original Error\n{scrubbed_text}\n\n")
                 if scrubbed_context:
                     f.write(f"## Context\n{scrubbed_context}\n\n")
+                if notice:
+                    f.write(f"## Attachment Status\n{notice}\n\n")
                 f.write(f"## AI Explanation\n{full_response}\n")
 
+            phase("report", "succeeded")
             return {
                 "status": "success",
                 "data": {
                     "markdown": full_response,
                     "saved_to": output_file,
                     "session_name": self.current_session_id,
+                    **({"attachment_notice": notice} if notice else {}),
                 },
             }
 
@@ -2751,6 +2909,7 @@ class NativeHost:
         response = {"requestId": request_id, "status": "success", "data": None}
         response_sent = False
         activation_launched = False
+        progress = None
 
         if (
             action == "perform_update"
@@ -2766,6 +2925,7 @@ class NativeHost:
             self.send_message(response)
             return
 
+        progress_context = _ANALYZE_PROGRESS.set(None)
         try:
             if is_update_action:
                 if self._source_runtime:
@@ -2842,8 +3002,44 @@ class NativeHost:
                     self.loop.create_task(self.check_for_updates(force=True))
                 response["data"] = "Update check initiated"
 
-            elif action == "analyze_error":
-                response["data"] = await self.handle_analyze_error(payload)
+            elif action in ("analyze_error", "analyze_with_attachments"):
+                private = action == "analyze_with_attachments"
+                if (
+                    message.keys() != {"action", "requestId", "payload"}
+                    or type(request_id) is not str or not request_id.strip()
+                    or (private and len(request_id) > 512)
+                ):
+                    response["data"] = {
+                        "status": "error",
+                        "error": "Invalid attachment metadata." if private else "Invalid analysis request.",
+                        "error_code": "invalid_attachment_metadata" if private else "invalid_analyze_request",
+                    }
+                    self.current_request_id = None
+                    self.send_message(response)
+                    response_sent = True
+                    return
+                analysis = payload.get("analysis") if private and type(payload) is dict else payload
+                previous_progress = getattr(self, "_analyze_progress", None)
+                if previous_progress is not None:
+                    previous_progress.deactivate()
+                self._analyze_progress = None
+                if (
+                    type(analysis) is dict
+                    and type(analysis.get("progressVersion")) is int
+                    and analysis["progressVersion"] == 1
+                ):
+                    progress = AnalyzeProgress(
+                        lambda data: self.send_message({
+                            "requestId": request_id, "status": "progress", "data": data,
+                        }),
+                        is_owner=lambda: getattr(self, "_analyze_progress", None) is progress,
+                    )
+                    self._analyze_progress = progress
+                    _ANALYZE_PROGRESS.set(progress)
+                response["data"] = (
+                    await self.handle_attachment_analyze(payload)
+                    if private else await self.handle_analyze_error(payload)
+                )
 
             elif action == "update_config":
                 self.send_progress("Updating configuration...")
@@ -2904,6 +3100,16 @@ class NativeHost:
                     f"Host action failed ({type(e).__name__})."
                 )
         finally:
+            if progress is not None:
+                try:
+                    result = response.get("data")
+                    if response.get("status") != "success" or type(result) is not dict or result.get("status") != "success":
+                        progress.fail_running()
+                finally:
+                    progress.deactivate()
+                    if getattr(self, "_analyze_progress", None) is progress:
+                        self._analyze_progress = None
+            _ANALYZE_PROGRESS.reset(progress_context)
             if activation_launched:
                 self.running = False
 

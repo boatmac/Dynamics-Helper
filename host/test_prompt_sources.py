@@ -130,6 +130,27 @@ class PromptSourceFixture:
 
 
 class TestPromptSourceSelection(PromptSourceFixture, unittest.TestCase):
+    def test_repository_entry_priority_matches_health_and_snapshot(self):
+        agents = os.path.join(self.root, 'AGENTS.md')
+        legacy = self.host._resolve_prompt_snapshot(self.root, True)
+        for raw in (b'PRIMARY', b'', b'\xef\xbb\xbfPRIMARY\r\n'):
+            with self.subTest(raw=raw):
+                self._write(agents, raw)
+                with self._deny_open(self.repo_path):
+                    snapshot = self.host._resolve_prompt_snapshot(self.root, True)
+                    health = self.host._get_prompt_source_config_fields(self.root, True)
+                self.assertEqual(snapshot.selected_bytes, raw)
+                self.assertEqual(health['prompt_source_status'], {'status': 'ok'})
+        self._write(agents, b'REPOSITORY')
+        self.assertEqual(self.host._resolve_prompt_snapshot(self.root, True).fingerprint, legacy.fingerprint)
+        self._write(agents, b'\xff')
+        with self.assertRaises(PromptSourceError) as caught:
+            self.host._resolve_prompt_snapshot(self.root, True)
+        self.assertEqual(caught.exception.error_code, 'repository_instructions_unreadable')
+        self.assertEqual(self.host._get_prompt_source_config_fields(self.root, True)['prompt_source_status']['error_code'], 'repository_instructions_unreadable')
+        os.remove(agents)
+        self.assertEqual(self.host._resolve_prompt_snapshot(self.root, True).selected_bytes, b'REPOSITORY')
+
     def test_PS_I2_empty_root_makes_repository_only_ineffective(self):
         snapshot = self.host._resolve_prompt_snapshot(None, True)
         self.assertEqual(snapshot.mode, "dh-specific")

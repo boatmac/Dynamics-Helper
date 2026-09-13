@@ -10,9 +10,11 @@ refactor. No API was introduced and
 no OData migration was made. Work limits are defensive bounds, not benchmarks or
 evidence of real-world performance improvement.
 
-The user approved fixing the prior review findings, then commit/push before
-confirming a Release version. The current documentation commit/push is authorized;
-publication version still requires user confirmation and no release is published.
+The prior documentation commit `b78afd5` was pushed by a delegated assistant;
+the main assistant verified it against Git, not a user report. The user approved
+committing and pushing the reviewed fixes before API investigation. Documentation
+subtasks do not independently authorize Git operations. The publication version
+still requires user confirmation and no new release has been published.
 The running Dev state and the source snapshots under review are not a frozen
 Host build, nor proof that the current checkout is loaded in the browser. Do not
 restore Prod, install a package, restart Host or change registration automatically.
@@ -55,20 +57,49 @@ The supplied results retain the failure history and distinguish each execution:
   mutation/restoration evidence, not a complete selection rerun.
 - Final TypeScript `capture-final`: **exit 0**, `changedSources: []`, confirmed
   by reading `%LOCALAPPDATA%/Temp/opencode/dh-analyze-progress-types-capture-final/result.json`.
+- Final complete selected run: **10/10 files, 509/509 tests passed, zero failures
+  or skips, 112.30 seconds**, **exit 0**, `changedSources: []`. Existing evidence
+  was read from
+  `%LOCALAPPDATA%/Temp/opencode/dh-analyze-progress-capture-hardening-final-milestone/`:
+  `arguments.json` identifies the ten complete files, `stdout.log` records the
+  totals and duration, and `result.json` confirms exit and exact source-byte
+  stability against `source-before.json`.
 
-The initial **491** plus **18** new tests gives **509 in aggregate**, not an
-executed 509-test run or full-suite PASS. The 247/247, 301/301 and restored 19
-results have overlapping scopes and must not be summed as distinct coverage.
+The initial **491** plus **18** new tests was previously aggregate inventory;
+the final milestone now establishes an actual **full selected 509-test run**,
+not a whole-Extension-suite PASS. The initial 475/491, later 247/247, 301/301 and
+restored 19 results remain distinct historical executions with overlapping
+scopes and must not be summed as distinct coverage.
 Earlier source/build results remain historical, not qualification of these bytes.
+
+The final milestone's `source-before.json` records these raw source SHA-256 values;
+`changedSources: []` confirms they were unchanged through that run:
+
+| Source | SHA-256 |
+| --- | --- |
+| `extension/src/components/FAB.tsx` | `D52BD10D8D1D7CDCC6A8AEAA06FAF94172EC917A0762E7F98D7EF710E594B663` |
+| `extension/src/utils/pageReader.ts` | `FBD51EEA5B58E0845E9AF9D4D933A17AEFDAD313D52F10BA950635CB2350874B` |
+| `extension/src/utils/createdOnModel.ts` | `CB30DAFF6AB39D3ACA24AE5C7EF648CBEA2E65594907FBCA749910ABAD324B26` |
+| `extension/src/utils/irSla.ts` | `574C228035407F9FFA002B115450902EEC5CF8AC4B127A211DE80DF200879BD1` |
 
 - [x] Record all ten source fixes and the supplied scoped offline results.
 - [x] Read the existing final TypeScript result without rerunning verification.
+- [x] Record the existing final ten-file 509/509 execution and exact source identity.
+- [x] DTM wait-label localization passed 42/42 tests across three complete files.
+  The wire message remains fixed; English/Chinese rendering uses translations.
+- [x] Local Extension build passed five default-items tests, TypeScript, Vite and
+  source/dist menu identity checks. Evidence:
+  `dh-local-extension-2077-capture-hardening-20260913`. All 409 inventoried sources
+  and selected toolchain bytes were unchanged. Thirteen artifacts were recorded;
+  artifact inventory SHA-256 is
+  `E2823212B9AF8FCBA52570CF6836D94D376114F8274D56D66BE5957BFBF0EFA5`.
 - [ ] Qualify runtime only under a separately approved entry; no performance
-  measurement, frozen build or production qualification is established here.
+  measurement, current-browser, frozen build or production qualification is
+  established here. Test duration is not a runtime benchmark.
 - [ ] Confirm the Release version separately after that sequence; none is selected.
 
-No tests, builds, browser operations, model calls or runtime mutations
-were performed by this documentation update; commit/push is separately authorized.
+This document records the separately executed tests and build above. It does not
+grant authority for browser operations, model calls, installation or publication.
 Earlier source history and architecture
 changes remain intact. Existing security-investigation records remain separate;
 this record contains no customer data, private endpoints or copied incident details.

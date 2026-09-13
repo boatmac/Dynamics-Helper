@@ -43,20 +43,39 @@ export async function readCurrentRecordCreatedOn(expected: string): Promise<Crea
         const lists = new Set<Element>(headers)
         const items: Element[] = []
         let nodes = 0
+        let work = 0
+        let textSize = 0
         const deadline = Date.now() + 1000
+        const spend = () => ++work <= 12000 && Date.now() <= deadline
+        const text = (root: Element): string | undefined => {
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT)
+            let result = ''
+            let node: Node | null
+            while ((node = walker.nextNode())) {
+                if (++nodes > 2000 || !spend()) return undefined
+                if (node.nodeType !== Node.TEXT_NODE) continue
+                const leaf = node as Text
+                if (leaf.length > 10000 - textSize) return undefined
+                textSize += leaf.length
+                result += leaf.data
+            }
+            return result
+        }
         while (roots.length) {
             const root = roots.pop()!
+            if (++nodes > 2000 || !spend()) return undefined
             if (root instanceof Element && root.shadowRoot) roots.push(root.shadowRoot)
             const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT)
             let node: Element | null
             while ((node = walker.nextNode() as Element | null)) {
-                if (seen.has(node)) continue
-                seen.add(node)
-                if (++nodes > 2000 || Date.now() > deadline) return undefined
+                // Attempts through overlapping roots count even when already seen.
+                if (++nodes > 2000 || !spend()) return undefined
                 if (nodes % 50 === 0) {
                     await new Promise(resolve => setTimeout(resolve, 0))
                     if (Date.now() > deadline) return undefined
                 }
+                if (seen.has(node)) continue
+                seen.add(node)
                 if (node.shadowRoot) roots.push(node.shadowRoot)
                 if (node.localName === 'uci-header-control-list') {
                     lists.add(node)
@@ -69,28 +88,44 @@ export async function readCurrentRecordCreatedOn(expected: string): Promise<Crea
         // Read live slot values only after the last yield, not a pre-yield identity.
         const numbers = new Set<string>()
         for (const item of items) {
+            if (!spend()) return undefined
             if (!item.isConnected) continue
-            const children = Array.from(item.children)
-            const label = children.find(el => el.getAttribute('slot') === 'label')?.textContent?.replace(/\s+/g, ' ').trim().toLowerCase()
+            const children: Element[] = []
+            let label: string | undefined
+            for (const child of item.children) {
+                if (++nodes > 2000 || !spend()) return undefined
+                children.push(child)
+                if (child.getAttribute('slot') === 'label' && label === undefined) {
+                    const value = text(child)
+                    if (value === undefined) return undefined
+                    label = value.replace(/\s+/g, ' ').trim().toLowerCase()
+                }
+            }
             if (item.getAttribute('data-name') !== 'header_msdfm_casenumberservicelevel' && label !== 'case number / service name') continue
             for (const value of children.filter(el => el.getAttribute('slot') === 'value')) {
+                if (!spend()) return undefined
                 if (!value.getClientRects().length) continue
+                if (!spend()) return undefined
                 const style = getComputedStyle(value)
                 if (style.visibility !== 'visible' || style.display === 'none' || style.opacity === '0') continue
                 let visible = true
                 let ancestor: Element | null = value
+                let depth = 0
                 while (ancestor) {
+                    if (++depth > 64 || !spend()) return undefined
                     const ancestorStyle = getComputedStyle(ancestor)
                     if (ancestorStyle.display === 'none' || ancestorStyle.opacity === '0') { visible = false; break }
                     const tree = ancestor.getRootNode()
                     ancestor = ancestor.assignedSlot || ancestor.parentElement || (tree instanceof ShadowRoot ? tree.host : null)
                 }
                 if (!visible) continue
-                const matches = value.textContent?.match(/\b\d{16}(?:\d{3})?\b/g) || []
+                const valueText = text(value)
+                if (valueText === undefined) return undefined
+                const matches = valueText.match(/\b\d{16}(?:\d{3})?\b/g) || []
                 matches.forEach(number => numbers.add(number))
             }
         }
-        return numbers.size === 1 ? [...numbers][0] : undefined
+        return spend() && numbers.size === 1 ? [...numbers][0] : undefined
     }
     try {
         if (location.origin !== origin || typeof expected !== 'string' || !exactNumber.test(expected)) return unavailable

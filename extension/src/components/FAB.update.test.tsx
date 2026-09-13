@@ -46,7 +46,8 @@ vi.mock('../utils/prefs', async (importOriginal) => {
 })
 
 vi.mock('../utils/pageReader', () => ({
-  PageReader: { scanForErrors: state.scanForErrors },
+  CUSTOMER_LOOKUP_SELECTOR: '[data-id="customerid.fieldControl-LookupResultsDropdown_customerid_SelectedRecordList"]',
+  PageReader: { scanForErrors: state.scanForErrors, readLiveRecordNumber: () => undefined },
 }))
 
 vi.mock('../hooks/useAnalysisHydration', () => ({
@@ -83,6 +84,7 @@ vi.mock('./MarkdownPreview', () => ({ default: () => null }))
 
 import FAB from './FAB'
 import Options from './Options'
+import { publishAnalyzeProgress } from '../utils/analyzeProgressChannel'
 
 const targetVersion = '2.0.76-beta.1'
 const candidate = {
@@ -205,9 +207,10 @@ async function replaceWithPersistentProgress(text: string): Promise<void> {
     payload?: { requestId?: string }
   } | undefined)?.payload?.requestId
   expect(requestId).toEqual(expect.any(String))
-  act(() => window.dispatchEvent(new CustomEvent('dh-native-progress', {
-    detail: { requestId, payload: text },
-  })))
+  // Inline progress owns the open menu; exercise bubble replacement while closed.
+  fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+  await act(async () => { await Promise.resolve() })
+  act(() => publishAnalyzeProgress({ requestId, payload: text }))
 }
 
 describe('FAB reliable update projection', () => {
@@ -729,6 +732,7 @@ describe('FAB reliable update projection', () => {
   })
 
   it('keeps FAB and Options on a newer authoritative state when simultaneous duplicate ACK responses race', async () => {
+    seedStorage({ dh_items: [] })
     vi.useFakeTimers()
     const fabGetState = deferNextResponse('DH_UPDATE_GET_STATE')
     const optionsGetState = deferNextResponse('DH_UPDATE_GET_STATE')
@@ -763,6 +767,7 @@ describe('FAB reliable update projection', () => {
   })
 
   it('cancels the later view timer when the first global ACK broadcast consumes completion', async () => {
+    seedStorage({ dh_items: [] })
     vi.useFakeTimers()
     const fabGetState = deferNextResponse('DH_UPDATE_GET_STATE')
     const optionsGetState = deferNextResponse('DH_UPDATE_GET_STATE')
@@ -790,6 +795,7 @@ describe('FAB reliable update projection', () => {
   })
 
   it('lets visible Options win while a cold FAB remains closed', async () => {
+    seedStorage({ dh_items: [] })
     vi.useFakeTimers()
     const fabGetState = deferNextResponse('DH_UPDATE_GET_STATE')
     const optionsGetState = deferNextResponse('DH_UPDATE_GET_STATE')
@@ -894,15 +900,15 @@ describe('FAB reliable update projection', () => {
     await renderLiveCompletion()
     const staleCallback = timeoutSpy.mock.calls.find(([, delay]) => delay === 10_000)?.[0]
     expect(staleCallback).toEqual(expect.any(Function))
-    await replaceWithPersistentProgress('PERSISTENT PROGRESS')
-    expect(bubble()).toHaveTextContent('PERSISTENT PROGRESS')
+    await replaceWithPersistentProgress('Analysis in progress')
+    expect(bubble()).toHaveTextContent('Analysis in progress')
     expect(bubble()).toHaveClass('visible')
 
     act(() => {
       ;(staleCallback as () => void)()
     })
 
-    expect(bubble()).toHaveTextContent('PERSISTENT PROGRESS')
+    expect(bubble()).toHaveTextContent('Analysis in progress')
     expect(bubble()).toHaveClass('visible')
   })
 

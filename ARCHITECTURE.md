@@ -382,25 +382,25 @@ not grant broader extraction coverage.
 
 ### Source Selection Boundary
 
-The Native Host, not Copilot CLI discovery, owns every configurable instruction source used by DH. Every SDK `create_session()` and `resume_session()` call, including create fallback and transport retry, sets `skip_custom_instructions=True`. This excludes CLI-global instructions, `AGENTS.md`/related agent files, path-specific instruction files, and automatically discovered repository instructions from all DH sessions.
+The Native Host, not Copilot CLI discovery, owns every configurable instruction source used by DH. Every SDK `create_session()` and `resume_session()` call, including create fallback and transport retry, sets `skip_custom_instructions=True`. This excludes automatic discovery of CLI-global instructions, `AGENTS.md`/related agent files, path-specific instruction files, and repository instructions. DH explicitly injects only its selected Root entry in effective Repository ONLY mode.
 
 DH explicitly assembles system content from:
 
 1. Product-managed DH Core (`host/system_prompt.md` in development or beside the installed Host executable).
 2. Exactly one editable source selected by `effective_repository_only = bool(effective_root) and use_workspace_only`:
    * false: `%LOCALAPPDATA%\DynamicsHelper\copilot-instructions.md` (DH-specific Instructions);
-   * true: `<Root>/.github/copilot-instructions.md` (Repository Instructions).
+   * true: `<Root>/AGENTS.md` first; only if absent, `<Root>/.github/copilot-instructions.md` (Repository Instructions), never both.
 3. Deterministic Session Info containing the UUIDv5 session name.
 
-Custom User Prompt (`%LOCALAPPDATA%\DynamicsHelper\user_prompt.md`) never enters system content. The Host rereads this canonical source for each Analyze, replaces/removes any Extension-provided `## User Prompt` section, and then PII-scrubs the final user content. The only supported repository instruction path is the Root-level `.github/copilot-instructions.md`; DH does not reproduce the CLI's parent, agent-file, or path-specific discovery rules.
+Custom User Prompt (`%LOCALAPPDATA%\DynamicsHelper\user_prompt.md`) never enters system content. The Host rereads this canonical source for each Analyze, replaces/removes any Extension-provided `## User Prompt` section, and then PII-scrubs the final user content. Repository entry selection is limited to `<Root>/AGENTS.md` and the legacy `<Root>/.github/copilot-instructions.md`; DH does not search parents or nested directories or reproduce the CLI's path-specific discovery rules. Empty Root or disabled Repository ONLY retains DH-specific selection; Skills/MCP paths and rules are unchanged.
 
 ### Snapshot and Refresh Boundary
 
-`PromptSnapshot` is frozen and contains source mode, effective Root, exact Core/selected bytes, strict UTF-8 decoded strings, and a `v1:` SHA-256 fingerprint. Core and the selected source are each opened once per resolution attempt. The fingerprint length-frames the version marker, source mode, Core bytes, and selected bytes, preventing ambiguous concatenation and ensuring assembly and comparison observe the same bytes.
+`PromptSnapshot` is frozen and contains source mode, effective Root, exact Core/selected bytes, strict UTF-8 decoded strings, and a `v1:` SHA-256 fingerprint. Core and the selected source are each opened once per resolution attempt. The fingerprint length-frames the version marker, source mode, Core bytes, and selected bytes, preventing ambiguous concatenation and ensuring assembly and comparison observe the same bytes. The selected filename is not a fingerprint input; switching repository entries with identical bytes does not itself require refresh.
 
 Analyze resolves a fresh snapshot before every turn. The active session is reused only when client/session, case identity, active Root, and fingerprint all match. Any source-mode or byte change refreshes/resumes the same UUIDv5 session, preserving persisted history. The candidate fingerprint becomes active only after awaited SDK resume/create succeeds. All active-session invalidation routes use `_invalidate_active_session()`, which clears session identity, active Root, and `current_prompt_fingerprint`; transport failures may also clear the client.
 
-Prompt resolution is fail-closed. Missing/unreadable Core, unreadable selected DH-specific Instructions, and missing/unreadable selected Repository Instructions return stable safe errors and send no model turn. A missing DH-specific file and an existing empty Repository file are valid empty editable layers. There is no fallback to an unselected source.
+Prompt resolution is fail-closed. Missing/unreadable Core and unreadable selected DH-specific Instructions return stable safe errors and send no model turn. A missing DH-specific file and an existing empty Repository file are valid empty editable layers. Empty `AGENTS.md` does not trigger fallback. Only absent `AGENTS.md` selects the legacy entry; both absent returns `repository_instructions_missing`. An unreadable/invalid-UTF-8 entry, directory, or broken link returns `repository_instructions_unreadable`, without fallback or a model turn. There is no fallback to DH-specific or CLI-global instructions.
 
 ### Config and Error Boundary
 
@@ -468,4 +468,4 @@ pending identity rather than a boolean mirror.
 
 ### Product Scope
 
-Repository ONLY selects repository Skills, MCP, and the single Root instruction file while DH Core and Custom User Prompt remain active. This architecture is generic to any absolute Root; it does not detect or initialize repository-specific workflows or files. See [TODO.md](TODO.md) for current limitations and planned work.
+Repository ONLY selects repository Skills, MCP, and one Root instruction entry (`AGENTS.md` first, legacy `.github/copilot-instructions.md` only if absent) while DH Core and Custom User Prompt remain active. This architecture is generic to any absolute Root; it does not detect or initialize repository-specific workflows or files. See [TODO.md](TODO.md) for current limitations and planned work.

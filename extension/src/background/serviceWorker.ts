@@ -31,7 +31,12 @@ import {
     summarizeNativeHostMessage,
     type AnalyzeForwardResponse,
 } from './analyzeBridge';
-import { resetAnalysisState } from '../utils/analysisStore';
+import {
+    LATEST_ANALYSIS_OWNER_KEY,
+    parseLatestAnalysisOwner,
+    resetAnalysisState,
+} from '../utils/analysisStore';
+import { prepareAttachments } from './attachmentPreparation';
 import {
     guardNonAnalyzeNativeMessage,
     handleAnalyzeRequest,
@@ -42,6 +47,11 @@ import {
     type ResetExtensionStateRequest,
 } from './resetExtensionState';
 import { ownDataProperty } from '../utils/ownData';
+import {
+    captureAnalyzeProgressTarget,
+    parseAnalyzeProgress,
+    type AnalyzeProgressTarget,
+} from '../utils/analyzeProgress';
 import { handleReadCreatedOn } from '../utils/createdOnBridge';
 import {
     handleNativeUpdateError,
@@ -182,10 +192,14 @@ async function trackBackgroundException(error: any, severityLevel?: number) {
 
 // --- Native Messaging (Persistent Port) ---
 let nativePort: chrome.runtime.Port | null = null;
+let attachmentGeneration = 0;
 const pendingRequests = new Map<string, {
     resolve: (val: unknown) => void
     reject: (err: unknown) => void
     port: chrome.runtime.Port
+    analyze: boolean
+    progressVersion1: boolean
+    progressTarget?: AnalyzeProgressTarget
 }>();
 
 function connectToNativeHost() {
@@ -203,25 +217,39 @@ function connectToNativeHost() {
                 && pendingRequests.get(requestId.value)?.port === port
             ) {
                 if (status.kind === 'value' && status.value === 'progress') {
+                    const pending = pendingRequests.get(requestId.value)!
                     const progress = exactOwnObject(msg, ['requestId', 'status', 'data'])
+                    const parsed = progress ? parseAnalyzeProgress(progress.data) : null
                     if (
                         progress
                         && progress.requestId === requestId.value
                         && progress.status === 'progress'
-                        && typeof progress.data === 'string'
-                        && progress.data.length > 0
+                        && parsed !== null
                     ) {
+                        if (typeof parsed !== 'string' && !pending.progressVersion1) return
+                        const event = Object.freeze({
+                            type: 'NATIVE_PROGRESS',
+                            requestId: requestId.value,
+                            payload: parsed,
+                        })
+                        if (pending.analyze) {
+                            const target = pending.progressTarget
+                            if (target) {
+                                try {
+                                    void chrome.tabs.sendMessage(target.tabId, event, {
+                                        frameId: target.frameId,
+                                        documentId: target.documentId,
+                                    }).catch(() => undefined)
+                                } catch { /* Progress delivery must not settle the Analyze lease. */ }
+                            }
+                            return
+                        }
                         chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
                             if (tabs[0]?.id) {
-                                void chrome.tabs.sendMessage(tabs[0].id, {
-                                    type: 'NATIVE_PROGRESS',
-                                    requestId: requestId.value,
-                                    payload: progress.data,
-                                }).catch(() => undefined)
+                                void chrome.tabs.sendMessage(tabs[0].id, event).catch(() => undefined)
                             }
                         })
-                    } else {
-                        const pending = pendingRequests.get(requestId.value)!
+                    } else if (!pending.analyze) {
                         pendingRequests.delete(requestId.value)
                         pending.reject(new Error('Invalid Native Host response'))
                     }
@@ -288,7 +316,17 @@ function connectToNativeHost() {
 // Raw correlated lease for strict action-specific parsers.
 export function requestNativeMessage(
     forwarded: Readonly<Record<string, unknown>>,
+    progressTarget?: AnalyzeProgressTarget,
 ): NativePendingRequest {
+    const action = ownDataProperty(forwarded, 'action')
+    const privateAnalyze = action.kind === 'value' && action.value === 'analyze_with_attachments'
+    const analyze = isAnalyzePayload(forwarded) || privateAnalyze
+    const payload = ownDataProperty(forwarded, 'payload')
+    const analysis = privateAnalyze
+        ? ownDataProperty(payload.kind === 'value' ? payload.value : undefined, 'analysis')
+        : payload
+    const version = ownDataProperty(analysis.kind === 'value' ? analysis.value : undefined, 'progressVersion')
+    const progressVersion1 = analyze && version.kind === 'value' && version.value === 1
     if (!nativePort) connectToNativeHost()
     const port = nativePort
     if (!port) throw new Error('Could not establish connection to Native Host')
@@ -309,7 +347,7 @@ export function requestNativeMessage(
                     throw new Error('Duplicate Native Host request ID')
                 }
                 requestId = id
-                pendingRequests.set(id, { resolve, reject, port })
+                pendingRequests.set(id, { resolve, reject, port, analyze, progressVersion1, progressTarget })
             },
             unregister: id => {
                 pendingRequests.delete(id)
@@ -339,8 +377,9 @@ export function requestNativeMessage(
 // Compatibility adapter for existing Analyze/config callers.
 function sendNativeMessage(
     forwarded: Readonly<Record<string, unknown>>,
+    progressTarget?: AnalyzeProgressTarget,
 ): Promise<unknown> {
-    return requestNativeMessage(forwarded).response.then(normalizeNativeHostResponse)
+    return requestNativeMessage(forwarded, progressTarget).response.then(normalizeNativeHostResponse)
 }
 // ------------------------------------------
 
@@ -529,7 +568,7 @@ function reservedUpdateAction(value: unknown): boolean {
     const action = ownDataProperty(value, 'action')
     return action.kind === 'value'
         && typeof action.value === 'string'
-        && UPDATE_ACTIONS.has(action.value)
+        && (UPDATE_ACTIONS.has(action.value) || action.value === 'analyze_with_attachments')
 }
 
 export { createTransactionId }
@@ -576,6 +615,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 error_code: 'invalid_native_message_metadata',
             })
         } else if (isAnalyzePayload(inner)) {
+            const generation = ++attachmentGeneration
+            const progressTarget = captureAnalyzeProgressTarget(sender, chrome.runtime.id)
             request = handleAnalyzeRequest(inner, {
                 acquireAuthorizedTransport: async () => {
                     await updateRuntimeReady
@@ -583,10 +624,90 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     return allowed
                         ? {
                             allowed: true as const,
-                            transport: { send: sendNativeMessage },
+                            transport: { send: forwarded => sendNativeMessage(forwarded, progressTarget) },
                             authorizeSend: async forwarded => {
+                                let nativeMessage: Readonly<Record<string, unknown>> = forwarded
+                                const caseNumber = forwarded.payload.caseNumber
+                                const cancelled = Object.freeze({
+                                    status: 'error' as const,
+                                    error: 'Attachment preparation was cancelled because this Analyze request is no longer current.',
+                                })
+                                let attachmentsPrepared = false
+                                let currentPreparation: () => Promise<boolean> = async () => true
+                                if (progressTarget && progressTarget.documentId.trim()
+                                    && progressTarget.documentId.length <= 512
+                                    && typeof caseNumber === 'string'
+                                    && /^\d{16}(?:\d{3})?(?![\s\S])/.test(caseNumber)) {
+                                    // Also bound reads outside the coordinator, including final authorization.
+                                    const readState = async () => {
+                                        let timer: ReturnType<typeof setTimeout> | undefined
+                                        try {
+                                            return await Promise.race([
+                                                chrome.storage.local.get([LATEST_ANALYSIS_OWNER_KEY, 'dh_prefs']),
+                                                new Promise<undefined>(resolve => {
+                                                    timer = setTimeout(() => resolve(undefined), 2000)
+                                                }),
+                                            ])
+                                        } catch { return undefined }
+                                        finally { clearTimeout(timer) }
+                                    }
+                                    const isCurrent = async () => {
+                                        if (generation !== attachmentGeneration) return false
+                                        const state = await readState()
+                                        const field = ownDataProperty(state, LATEST_ANALYSIS_OWNER_KEY)
+                                        const owner = parseLatestAnalysisOwner(field.kind === 'value' ? field.value : undefined)
+                                        return generation === attachmentGeneration
+                                            && owner?.caseNumber === caseNumber
+                                            && owner.requestId === forwarded.requestId
+                                    }
+                                    currentPreparation = isCurrent
+                                    const state = await readState()
+                                    const prefs = ownDataProperty(state, 'dh_prefs')
+                                    const language = ownDataProperty(prefs.kind === 'value' ? prefs.value : undefined, 'language')
+                                    const prep = await prepareAttachments({
+                                        requestId: forwarded.requestId,
+                                        caseNumber,
+                                        sourceTarget: progressTarget,
+                                        language: language.kind === 'value' && language.value === 'zh' ? 'zh' : 'en',
+                                    }, {
+                                        browser: chrome,
+                                        isCurrent,
+                                        notify: async () => {
+                                            if (!await isCurrent()) return
+                                            try {
+                                                await chrome.tabs.sendMessage(progressTarget.tabId, {
+                                                    type: 'NATIVE_PROGRESS',
+                                                    requestId: forwarded.requestId,
+                                                    payload: 'Waiting for DTM sign-in (30 seconds)...',
+                                                }, {
+                                                    frameId: progressTarget.frameId,
+                                                    documentId: progressTarget.documentId,
+                                                })
+                                            } catch { /* A notice cannot settle or authorize Analyze. */ }
+                                        },
+                                    })
+                                    if (prep.reason === 'stale' || !await isCurrent()) {
+                                        return { allowed: false as const, response: cancelled }
+                                    }
+                                    nativeMessage = Object.freeze({
+                                        action: 'analyze_with_attachments',
+                                        requestId: forwarded.requestId,
+                                        payload: Object.freeze({ analysis: forwarded.payload, attachments: prep }),
+                                    })
+                                    attachmentsPrepared = true
+                                }
                                 const lease = await updateRuntime.beginOrdinaryMainHostRequest(
-                                    () => sendNativeMessage(forwarded),
+                                    async () => {
+                                        if (!attachmentsPrepared) return sendNativeMessage(nativeMessage, progressTarget)
+                                        if (!await currentPreparation()) return cancelled
+                                        // The ownership read yields beyond the first updater lease's queue turn.
+                                        const finalLease = await updateRuntime.beginOrdinaryMainHostRequest(
+                                            () => generation !== attachmentGeneration
+                                                ? Promise.resolve(cancelled)
+                                                : sendNativeMessage(nativeMessage, progressTarget),
+                                        )
+                                        return finalLease.allowed ? finalLease.response : UPDATE_UNAVAILABLE_RESPONSE
+                                    },
                                 )
                                 return lease.allowed
                                     ? lease
@@ -686,11 +807,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     if (messageType === "RESET_EXTENSION_STATE") {
         handleResetExtensionState(messagePayload as ResetExtensionStateRequest, {
-            beginGeneration: beginTeamSyncGeneration,
+            beginGeneration: () => {
+                ++attachmentGeneration
+                return beginTeamSyncGeneration()
+            },
             identityIsCurrent: currentTeamIdentityMatches,
             clearTeamState: (identity, generation) =>
                 clearTeamBookmarksAtGeneration(generation, identity),
-            clearAnalysisState: resetAnalysisState,
+            clearAnalysisState: async () => {
+                ++attachmentGeneration
+                try {
+                    await resetAnalysisState()
+                } finally {
+                    ++attachmentGeneration
+                }
+            },
         }).then(sendResponse);
         return true;
     }

@@ -39,7 +39,9 @@ vi.mock('../utils/prefs', () => {
 })
 
 vi.mock('../utils/pageReader', () => ({
+  CUSTOMER_LOOKUP_SELECTOR: '[data-id="customerid.fieldControl-LookupResultsDropdown_customerid_SelectedRecordList"]',
   PageReader: {
+    readLiveRecordNumber: () => undefined,
     scanForErrors: vi.fn().mockResolvedValue({
       caseNumber: '1234567890123456',
       ticketTitle: 'fixture',

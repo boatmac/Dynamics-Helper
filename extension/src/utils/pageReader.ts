@@ -1,5 +1,6 @@
 import { getReactProps } from './reactFiber';
 import { logCreatedOn, requestCreatedOn } from './createdOnBridge';
+import { readIrSla } from './irSla';
 
 export interface ScrapedData {
     errorText?: string;
@@ -7,6 +8,8 @@ export interface ScrapedData {
     productCategory?: string;
     caseNumber?: string; // New field for Case Number
     createdOn?: string;
+    irSlaStatus?: string;
+    irSlaCapturedAt?: string;
     customerName?: string;
     severity?: string; // New field for Severity
     statusReason?: string; // New field for Status Reason
@@ -30,6 +33,11 @@ export interface ScrapedData {
  */
 export const ID_REGEX = /(\b\d{16}(?:\d{3})?\b)|(\b[A-Z]{2,10}-?\d{3,}[-\w]*\b)/;
 
+export const CUSTOMER_LOOKUP_SELECTOR = '[data-id="customerid.fieldControl-LookupResultsDropdown_customerid_SelectedRecordList"]';
+
+type DomBudget = { nodes: number; work: number; text: number; deadline: number; exhausted: boolean };
+type HeaderValue = { owner: Element | null; name: string | null; label: string; value: string };
+
 export class PageReader {
     /**
      * Helper to yield control to the main thread to prevent freezing
@@ -38,175 +46,476 @@ export class PageReader {
         return new Promise(resolve => setTimeout(resolve, 0));
     }
 
-    private static async readStructuredHeaders(): Promise<Partial<ScrapedData>> {
-        const data: Partial<ScrapedData> = {};
-        let aliasCaseNumber: string | undefined;
-        // Only known header lists are entry points, never arbitrary page/shadow text.
-        const roots: Node[] = Array.from(document.querySelectorAll('uci-header-control-list')).slice(0, 20).reverse();
-        let visited = 0;
-        while (roots.length && visited < 2000) {
-            const root = roots.pop()!;
-            if (root instanceof Element && root.shadowRoot) roots.push(root.shadowRoot);
-            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-            let node = walker.nextNode() as Element | null;
-            while (node && visited < 2000) {
-                if (++visited % 50 === 0) await this.yieldToMain();
-                if (node.shadowRoot) roots.push(node.shadowRoot);
-                if (node.localName === 'uci-header-control-list-item') {
-                    // The observed values are light children, not text in the item's shadow controls.
-                    const valueNode = node.querySelector('[slot="value"]');
-                    const labelNode = node.querySelector('[slot="label"]');
-                    const value = valueNode?.parentElement === node ? valueNode.textContent?.trim() : undefined;
-                    const label = labelNode?.parentElement === node ? labelNode.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() : undefined;
-                    const name = node.getAttribute('data-name');
-                    if (value) {
-                        if (name === 'header_severitycode') {
-                            if (!data.severity && /^[1ABC]$/i.test(value)) data.severity = value;
-                        } else if (name === 'header_statuscode') {
-                            data.statusReason ||= value;
-                        } else if (name === 'header_msdfm_casenumberservicelevel' || label === 'case number / service name') {
-                            data.caseNumber ||= value.match(ID_REGEX)?.[0];
-                        } else if (name === 'header_ticketnumber') {
-                            aliasCaseNumber ||= value.match(ID_REGEX)?.[0];
-                        }
-                    }
-                }
-                node = walker.nextNode() as Element | null;
-            }
-        }
-        data.caseNumber ||= aliasCaseNumber;
-        return data;
+    private static domBudget(): DomBudget {
+        return { nodes: 0, work: 0, text: 0, deadline: Date.now() + 1000, exhausted: false };
     }
 
-    // Synchronous and bounded: no identity captured before a yield can authorize a scan.
-    // undefined means no supported identity surface; null means present but unsafe.
-    private static readLiveRecordNumber(): string | null | undefined {
+    private static spendDomWork(budget: DomBudget, node = false): boolean {
+        if (++budget.work > 12000 || (node && ++budget.nodes > 2000) || Date.now() > budget.deadline) budget.exhausted = true;
+        return !budget.exhausted;
+    }
+
+    private static composedParent(node: Element): Element | null {
+        const root = node.getRootNode();
+        return node.assignedSlot || node.parentElement || (root instanceof ShadowRoot ? root.host : null);
+    }
+
+    // No geometry read: boxless custom-element hosts are supported. Visibility can
+    // be overridden by descendants, but display/opacity apply through assigned slots.
+    private static isRendered(node: Element, budget: DomBudget): boolean {
+        if (!node.isConnected || !this.spendDomWork(budget)) return false;
+        const style = getComputedStyle(node);
+        if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+        let ancestor: Element | null = node;
+        for (let depth = 0; ancestor; depth++) {
+            if (depth === 64 || !this.spendDomWork(budget)) { budget.exhausted = true; return false; }
+            const current = getComputedStyle(ancestor);
+            if (ancestor.hasAttribute('hidden') || current.display === 'none' || current.opacity === '0') return false;
+            ancestor = this.composedParent(ancestor);
+        }
+        return true;
+    }
+
+    private static readDomText(root: Element, budget: DomBudget): string | undefined {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+        let text = '';
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+            if (!this.spendDomWork(budget, true)) return undefined;
+            if (node.nodeType !== Node.TEXT_NODE) continue;
+            const leaf = node as Text;
+            if (leaf.length > 10000 - budget.text) { budget.exhausted = true; return undefined; }
+            budget.text += leaf.length;
+            if (leaf.parentElement && this.isRendered(leaf.parentElement, budget)) text += leaf.data;
+        }
+        return budget.exhausted ? undefined : text.trim();
+    }
+
+    private static headerOwner(item: Element, budget: DomBudget): Element | null {
+        let owner: Element | null = null;
+        let node: Element | null = item;
+        for (let depth = 0; node; depth++) {
+            if (depth === 64 || !this.spendDomWork(budget)) { budget.exhausted = true; return null; }
+            if (node.matches('[role="main"], [role="tabpanel"]')) return node;
+            if (node.localName === 'uci-header-control-list') owner = node;
+            node = this.composedParent(node);
+        }
+        return owner;
+    }
+
+    private static *headerNodes(budget: DomBudget): Generator<Element> {
         const lists = document.querySelectorAll('uci-header-control-list');
-        if (lists.length > 20) return null;
-        const roots: Node[] = Array.from(lists);
+        if (lists.length > 20) { budget.exhausted = true; return; }
+        const roots: Node[] = Array.from(lists).reverse();
         const seen = new Set<Node>();
-        const items: Element[] = [];
-        let visited = 0;
         while (roots.length) {
             const root = roots.pop()!;
+            if (!this.spendDomWork(budget, true)) return;
             if (root instanceof Element && root.shadowRoot) roots.push(root.shadowRoot);
             const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
             let node: Element | null;
             while ((node = walker.nextNode() as Element | null)) {
+                // Repeated visits through nested entry roots also consume the bound.
+                if (!this.spendDomWork(budget, true)) return;
                 if (seen.has(node)) continue;
                 seen.add(node);
-                if (++visited > 2000) return null;
                 if (node.shadowRoot) roots.push(node.shadowRoot);
-                if (node.localName === 'uci-header-control-list-item') items.push(node);
+                yield node;
             }
         }
+    }
+
+    private static headerValue(item: Element, budget: DomBudget): HeaderValue | undefined {
+        if (item.localName !== 'uci-header-control-list-item') return undefined;
+        let label = '';
+        const values: string[] = [];
+        for (const child of item.children) {
+            if (!this.spendDomWork(budget, true)) return undefined;
+            const slot = child.getAttribute('slot');
+            if (slot === 'label') label = this.readDomText(child, budget)?.replace(/\s+/g, ' ').toLowerCase() || '';
+            if (slot === 'value') {
+                const value = this.readDomText(child, budget);
+                if (value) values.push(value);
+            }
+        }
+        const name = item.getAttribute('data-name');
+        if (!values.length || (label !== 'case number / service name' && !['header_msdfm_casenumberservicelevel', 'header_ticketnumber', 'header_severitycode', 'header_statuscode'].includes(name || ''))) return undefined;
+        return { owner: this.headerOwner(item, budget), name, label, value: values.join(' ') };
+    }
+
+    private static summarizeHeaders(entries: HeaderValue[]) {
+        const data: Partial<ScrapedData> = {};
+        const owners = new Set(entries.map(entry => entry.owner));
+        if (owners.size > 1) return { data, number: null, owner: null };
         const primary = new Set<string>();
         const aliases = new Set<string>();
-        for (const item of items) {
-            if (!item.isConnected) continue;
-            const children = Array.from(item.children);
-            const label = children.find(el => el.getAttribute('slot') === 'label')?.textContent?.replace(/\s+/g, ' ').trim().toLowerCase();
-            const name = item.getAttribute('data-name');
-            const numbers = name === 'header_msdfm_casenumberservicelevel' || label === 'case number / service name'
-                ? primary : name === 'header_ticketnumber' ? aliases : undefined;
-            if (!numbers) continue;
-            for (const value of children.filter(el => el.getAttribute('slot') === 'value')) {
-                for (const match of (value.textContent || '').matchAll(new RegExp(ID_REGEX.source, 'g'))) numbers.add(match[0]);
+        for (const { name, label, value } of entries) {
+            if (name === 'header_severitycode' && /^[1ABC]$/i.test(value)) data.severity ||= value;
+            else if (name === 'header_statuscode') data.statusReason ||= value;
+            else {
+                const numbers = name === 'header_msdfm_casenumberservicelevel' || label === 'case number / service name'
+                    ? primary : name === 'header_ticketnumber' ? aliases : undefined;
+                if (numbers) for (const match of value.matchAll(new RegExp(ID_REGEX.source, 'g'))) numbers.add(match[0]);
             }
         }
         const numbers = primary.size ? primary : aliases;
-        if (numbers.size) return numbers.size === 1 ? [...numbers][0] : null;
+        const number = numbers.size > 1 ? null : [...numbers][0];
+        if (number) data.caseNumber = number;
+        return { data, number, owner: entries[0]?.owner || null };
+    }
+
+    private static async readStructuredHeaders(): Promise<Partial<ScrapedData>> {
+        const budget = this.domBudget();
+        const entries: HeaderValue[] = [];
+        let visited = 0;
+        for (const node of this.headerNodes(budget)) {
+            if (++visited % 50 === 0) await this.yieldToMain();
+            if (!this.spendDomWork(budget)) return {};
+            const entry = this.headerValue(node, budget);
+            if (entry) entries.push(entry);
+        }
+        return budget.exhausted ? {} : this.summarizeHeaders(entries).data;
+    }
+
+    // Synchronous and bounded: no identity captured before a yield can authorize a scan.
+    // undefined means no supported identity surface; null means present but unsafe.
+    static readLiveRecordNumber(allowLegacyHeaders = true): string | null | undefined {
+        const budget = this.domBudget();
+        const entries: HeaderValue[] = [];
+        // Finish traversal before reading values, including synchronous DOM seams.
+        const nodes = [...this.headerNodes(budget)];
+        for (const node of nodes) {
+            if (budget.exhausted) return null;
+            const entry = this.headerValue(node, budget);
+            if (entry) entries.push(entry);
+        }
+        if (budget.exhausted) return null;
+        const { number } = this.summarizeHeaders(entries);
+        if (number !== undefined) return number;
+        if (!allowLegacyHeaders) return undefined;
         // Same legacy header/title surfaces as extraction, without a broad label/body scan.
         for (const selector of ['[id^="headerControlsList_"]', '[id^="headerContainer"]', '[data-automation-id="ticket-title"], [data-test-id="ticket-header-title"], [id^="formHeaderTitle_"], h1, [role="heading"][aria-level="1"]']) {
-            const header = document.querySelector(selector);
-            if (!header) continue;
-            const walker = document.createTreeWalker(header, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
-            let text = '';
+            const headers = document.querySelectorAll(selector);
+            if (headers.length > 20) return null;
+            const numbers = new Set<string>();
+            for (const header of headers) {
+                const text = this.readDomText(header, budget);
+                if (budget.exhausted) return null;
+                if (text) for (const match of text.matchAll(new RegExp(ID_REGEX.source, 'g'))) numbers.add(match[0]);
+            }
+            if (numbers.size) return numbers.size === 1 ? [...numbers][0] : null;
+        }
+        return undefined;
+    }
+
+    // Customer-only DOM read; an enrichment caller must supply the exact live record.
+    static readCustomerName(expectedCaseNumber?: string): string | undefined {
+        const budget = this.domBudget();
+        const entries: HeaderValue[] = [];
+        const nodes = [...this.headerNodes(budget)];
+        for (const node of nodes) {
+            if (budget.exhausted) return undefined;
+            const entry = this.headerValue(node, budget);
+            if (entry) entries.push(entry);
+        }
+        const { number, owner } = this.summarizeHeaders(entries);
+        if (budget.exhausted || !number || !/^\d{16}(?:\d{3})?$/.test(number)
+            || (expectedCaseNumber !== undefined && expectedCaseNumber !== number)
+            || !owner?.matches('[role="main"], [role="tabpanel"]')) return undefined;
+        // Only a proven record pane can own a Customer lookup, never the document.
+        let context = owner;
+        let lists = context.querySelectorAll(CUSTOMER_LOOKUP_SELECTOR);
+        if (!lists.length && owner.matches('[role="main"]')) {
+            let ancestor = owner.parentElement;
+            for (let depth = 0; ancestor; depth++) {
+                if (depth === 64 || !this.spendDomWork(budget)) return undefined;
+                if (ancestor.matches('[role="tabpanel"]')) { context = ancestor; break; }
+                ancestor = ancestor.parentElement;
+            }
+            lists = context.querySelectorAll(CUSTOMER_LOOKUP_SELECTOR);
+        }
+        if (lists.length > 20) return undefined;
+        const mains = context.querySelectorAll('[role="main"]');
+        if (mains.length > 20) return undefined;
+        let visibleMains = 0;
+        for (const main of mains) if (this.isRendered(main, budget) && ++visibleMains > 1) return undefined;
+        const customerNames = new Set<string>();
+        for (const list of lists) {
+            if (!this.isRendered(list, budget)) continue;
+            let container: Element | null = list;
+            for (let depth = 0; container; depth++) {
+                if (depth === 64 || !this.spendDomWork(budget)) return undefined;
+                if (container.getAttribute('aria-hidden') === 'true') return undefined;
+                if (container === context) break;
+                if (container.matches('[role="main"]') && container !== owner) return undefined;
+                if (container.matches('[role="tabpanel"]') && !container.contains(owner)) {
+                    // A content panel is not a record pane: require its selected tab
+                    // under the same owner, and never cross an independent header.
+                    if (container.querySelector('uci-header-control-list')) return undefined;
+                    const tabs = context.querySelectorAll('[role="tablist"] > [role="tab"][aria-selected="true"]');
+                    if (tabs.length > 20) return undefined;
+                    let selected = 0;
+                    let associated = false;
+                    for (const tab of tabs) {
+                        if (!this.spendDomWork(budget)) return undefined;
+                        const tablist = tab.parentElement!;
+                        if (tablist.parentElement !== context || tablist.getAttribute('aria-hidden') === 'true'
+                            || tab.getAttribute('aria-hidden') === 'true' || !this.isRendered(tab, budget)) continue;
+                        selected++;
+                        const controls = tab.getAttribute('aria-controls');
+                        if (controls) associated = controls === container.id && document.getElementById(controls) === container;
+                        else associated = container.parentElement === context && container.getAttribute('aria-label') === 'Summary'
+                            && (tab.getAttribute('aria-label') || this.readDomText(tab, budget)) === 'Summary';
+                    }
+                    if (selected !== 1 || !associated) return undefined;
+                }
+                container = container.parentElement;
+            }
+            const walker = document.createTreeWalker(list, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+            const names = new Map<Element, string>();
+            const leaves = new Set<string>();
+            const items = new Set<Element>();
             let node: Node | null;
             while ((node = walker.nextNode())) {
-                if (++visited > 2000 || text.length > 10000) return null;
-                if (node.nodeType === Node.TEXT_NODE) text += node.textContent || '';
+                if (!this.spendDomWork(budget, true)) return undefined;
+                if (node instanceof Element && node.localName === 'li' && this.isRendered(node, budget)) {
+                    items.add(node);
+                    if (items.size > 1) return undefined;
+                }
+                if (node.nodeType !== Node.TEXT_NODE) continue;
+                const leaf = node as Text;
+                if (leaf.length > 10000 - budget.text) return undefined;
+                budget.text += leaf.length;
+                let ancestor = leaf.parentElement;
+                let item: Element | undefined;
+                let link: Element | undefined;
+                let excluded = false;
+                for (let depth = 0; ancestor && ancestor !== list; depth++) {
+                    if (depth === 64 || !this.spendDomWork(budget)) return undefined;
+                    if (ancestor.matches('button, [role="button"], svg, img, input, [hidden], [aria-hidden="true"], [aria-label*="remove" i], [aria-label*="clear" i], [data-id^="customerid.fieldControl-entityIconContainer_"]')) excluded = true;
+                    if (ancestor.localName === 'li') item = ancestor;
+                    if (ancestor.localName === 'a') link = ancestor;
+                    ancestor = ancestor.parentElement;
+                }
+                if (excluded || !item || !leaf.parentElement || !this.isRendered(leaf.parentElement, budget)) continue;
+                const text = leaf.data.trim();
+                if (!text || /^(x|\u00d7|remove|clear)$/i.test(text)) continue;
+                items.add(item);
+                if (items.size > 1) return undefined;
+                if (link) names.set(link, (names.get(link) || '') + leaf.data);
+                else leaves.add(text);
             }
-            const match = text.match(ID_REGEX)?.[0];
-            if (match) return match;
+            const candidates = new Set(names.size ? [...names.values()].map(name => name.trim()) : leaves);
+            if (candidates.size > 1) return undefined;
+            candidates.forEach(name => customerNames.add(name));
+        }
+        if (budget.exhausted) return undefined;
+        if (customerNames.size === 1) {
+            const name = customerNames.values().next().value;
+            if (name && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name.replace(/^\{(.+)\}$/, '$1'))) return name;
         }
         return undefined;
     }
 
     private static async readCreatedOn(context: Element): Promise<string | undefined> {
         const inputSelector = 'input:not([type="hidden"]):not([type="button"]), textarea';
-        const datetimeFields = context.querySelectorAll('[data-id="createdon.fieldControl-datetime-description_container"]');
+        const budget = this.domBudget();
+        const chargeText = (value: string): boolean => {
+            if (!this.spendDomWork(budget) || value.length > 10000 - budget.text) {
+                budget.exhausted = true;
+                return false;
+            }
+            budget.text += value.length;
+            return true;
+        };
+        const attribute = (element: Element, name: string): string => {
+            if (!this.spendDomWork(budget)) return '';
+            const value = element.getAttribute(name) || '';
+            return chargeText(value) ? value : '';
+        };
+        const walk = function* (root: Element): Generator<Node> {
+            if (!PageReader.spendDomWork(budget)) return;
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ALL);
+            while (PageReader.spendDomWork(budget, true)) {
+                const node = walker.nextNode();
+                if (!node) return;
+                yield node;
+            }
+        };
+        // Labels retain their existing text semantics, including hidden labels used
+        // by visible readonly controls; never aggregate an unbounded textContent.
+        const text = (element: Element): string => {
+            let value = '';
+            for (const node of walk(element)) {
+                if (node.nodeType !== Node.TEXT_NODE) continue;
+                const leaf = node as Text;
+                if (leaf.length > 10000 - budget.text) { budget.exhausted = true; return ''; }
+                if (!chargeText(leaf.data)) return '';
+                value += leaf.data;
+            }
+            return value.trim().toLowerCase();
+        };
+        const firstChild = context.firstChild;
+        const discovered: { node: Node; parent: Node | null; next: Node | null; first: Node | null }[] = [];
+        for (const node of walk(context)) {
+            discovered.push({ node, parent: node.parentNode, next: node.nextSibling, first: node.firstChild });
+            if (discovered.length % 50 === 0) {
+                if (!this.spendDomWork(budget)) return undefined;
+                await this.yieldToMain();
+                if (!this.spendDomWork(budget)) return undefined;
+            }
+        }
+        if (budget.exhausted || !context.isConnected || context.firstChild !== firstChild) return undefined;
+        // No more awaits: validate discovery topology, then read current attributes
+        // and values. A changed tree cannot authorize a partial candidate inventory.
+        const datetimeFields: Element[] = [];
+        const labels: Element[] = [];
+        const inputs: Element[] = [];
+        const references: { element: Element; ids: string[] }[] = [];
+        const byId = new Map<string, Element | null>();
+        for (const { node, parent, next, first } of discovered) {
+            if (!this.spendDomWork(budget) || !node.isConnected || node.parentNode !== parent || node.nextSibling !== next || node.firstChild !== first) return undefined;
+            if (node.nodeType === Node.TEXT_NODE) {
+                const leaf = node as Text;
+                if (leaf.length > 10000 - budget.text || !chargeText(leaf.data)) return undefined;
+            }
+            if (!(node instanceof Element)) continue;
+            if (attribute(node, 'data-id') === 'createdon.fieldControl-datetime-description_container') datetimeFields.push(node);
+            if (node.matches(inputSelector)) inputs.push(node);
+            if (node.matches('label, span, div') && node.childElementCount === 0 && text(node) === 'created on') labels.push(node);
+            const id = attribute(node, 'id');
+            if (id) byId.set(id, byId.has(id) ? null : node);
+            const ids = attribute(node, 'aria-labelledby');
+            if (ids) references.push({ element: node, ids: ids.split(/\s+/) });
+            if (budget.exhausted) return undefined;
+        }
+        const inside = (element: Element, field: Element): boolean => {
+            let ancestor = element.parentElement;
+            for (let depth = 0; ancestor; depth++, ancestor = ancestor.parentElement) {
+                if (depth === 64 || !this.spendDomWork(budget)) { budget.exhausted = true; return false; }
+                if (ancestor === field) return true;
+                if (ancestor === context) return false;
+            }
+            return false;
+        };
+        const foreign = (element: Element, field: Element): boolean => {
+            let ancestor: Element | null = element;
+            for (let depth = 0; ancestor && ancestor !== field; depth++, ancestor = ancestor.parentElement) {
+                if (depth === 64 || !this.spendDomWork(budget)) { budget.exhausted = true; return true; }
+                const id = attribute(ancestor, 'data-id');
+                if (id.includes('.fieldControl') && !id.startsWith('createdon.')) return true;
+            }
+            return false;
+        };
+        const fieldInputs = (field: Element, excludeForeign = false): Element[] => {
+            const result: Element[] = [];
+            for (const input of inputs) {
+                if (!this.spendDomWork(budget)) break;
+                if (inside(input, field) && (!excludeForeign || !foreign(input, field))) result.push(input);
+                if (result.length > 2 || budget.exhausted) break;
+            }
+            return result;
+        };
+        const values = new Map<Element, string>();
+        const readValues = (controls: Iterable<Element>): string | undefined => {
+            const result: string[] = [];
+            for (const control of controls) {
+                if (!this.spendDomWork(budget) || !context.isConnected || !control.isConnected || !inside(control, context)) {
+                    budget.exhausted = true;
+                    return undefined;
+                }
+                if (foreign(control, context) || !this.isRendered(control, budget)) continue;
+                if (!values.has(control)) {
+                    const raw = (control as HTMLInputElement).value;
+                    if (raw.length > 256 || !chargeText(raw)) { budget.exhausted = true; return undefined; }
+                    values.set(control, raw.trim());
+                }
+                const value = values.get(control)!;
+                if (value) result.push(value);
+            }
+            return this.spendDomWork(budget) && context.isConnected ? result.join(' ') || undefined : undefined;
+        };
+        if (budget.exhausted) return undefined;
         if (datetimeFields.length > 1) return undefined;
         if (datetimeFields.length === 1) {
             // D365's readonly inputs can be deeply nested and have no usable label-for target.
-            const field = datetimeFields[0];
-            const inputs = Array.from(field.querySelectorAll(inputSelector)).filter(input => {
-                const foreignField = input.closest('[data-id*=".fieldControl"]:not([data-id^="createdon."])');
-                return !foreignField || !field.contains(foreignField);
-            });
-            if (inputs.length > 2) return undefined;
-            const values = inputs.map(el => (el as HTMLInputElement).value.trim()).filter(Boolean);
-            if (values.length) return values.join(' ');
+            const controls = fieldInputs(datetimeFields[0], true);
+            if (budget.exhausted || controls.length > 2) return undefined;
+            const value = readValues(controls);
+            if (budget.exhausted || value) return value;
         }
-        const labels = Array.from(context.querySelectorAll('label, span, div')).filter(el =>
-            el.childElementCount === 0 && el.textContent?.trim().toLowerCase() === 'created on'
-        );
         for (const label of labels.slice(0, 20)) {
-            await this.yieldToMain();
+            if (!this.spendDomWork(budget)) return undefined;
             const associated = new Set<Element>();
-            const targetId = label.getAttribute('for');
-            const target = targetId ? document.getElementById(targetId) : null;
-            if (targetId && (!target || !context.contains(target))) continue;
-            if (target && context.contains(target)) associated.add(target);
-            if (label.id) {
-                for (const control of context.querySelectorAll('[aria-labelledby]')) {
-                    if (control.getAttribute('aria-labelledby')?.split(/\s+/).includes(label.id)) associated.add(control);
+            const targetId = attribute(label, 'for');
+            const target = targetId ? byId.get(targetId) : null;
+            if (targetId && (!target || !inside(target, context))) continue;
+            if (target) associated.add(target);
+            const labelId = attribute(label, 'id');
+            if (labelId) {
+                for (const { element, ids } of references) {
+                    for (const id of ids) {
+                        if (!this.spendDomWork(budget)) return undefined;
+                        if (id === labelId) { associated.add(element); break; }
+                    }
                 }
             }
-            const isSingleField = (field: Element) => field !== context
-                && !field.matches('section, form, main, [role="main"]')
-                && ![field, ...field.querySelectorAll('label, span, div, [aria-label], [data-id]')].some(el =>
-                    (el.matches('label') && el !== label && el.textContent?.trim().toLowerCase() !== 'created on')
-                    || (el.childElementCount === 0 && el.textContent?.trim().toLowerCase() === 'modified on')
-                    || /modified on/i.test(el.getAttribute('aria-label') || '')
-                    || (el.getAttribute('data-id')?.includes('.fieldControl') && !el.getAttribute('data-id')?.startsWith('createdon.'))
-                );
+            const isSingleField = (field: Element): boolean => {
+                if (!this.spendDomWork(budget) || field === context || field.matches('section, form, main, [role="main"]')) return false;
+                const check = (el: Element): boolean => {
+                    if (!this.spendDomWork(budget)) return false;
+                    const id = attribute(el, 'data-id');
+                    return !(el.matches('label') && el !== label && text(el) !== 'created on')
+                        && !(el.childElementCount === 0 && text(el) === 'modified on')
+                        && !/modified on/i.test(attribute(el, 'aria-label'))
+                        && !(id.includes('.fieldControl') && !id.startsWith('createdon.'));
+                };
+                if (!check(field)) return false;
+                for (const node of walk(field)) {
+                    if (node instanceof Element && node.matches('label, span, div, [aria-label], [data-id]') && !check(node)) return false;
+                }
+                return !budget.exhausted;
+            };
             // Apply the same boundary to ancestors and aria-labelledby groups.
             let field = label.parentElement;
             for (let depth = 0; field && depth < 3; depth++, field = field.parentElement) {
                 if (!isSingleField(field)) break;
-                const inputs = Array.from(field.querySelectorAll(inputSelector));
-                if (inputs.length) {
-                    if (inputs.length <= 2 && (!target || field.contains(target))) inputs.forEach(input => associated.add(input));
+                const candidates = fieldInputs(field);
+                if (candidates.length) {
+                    if (candidates.length <= 2 && (!target || inside(target, field))) candidates.forEach(input => associated.add(input));
                     break;
                 }
             }
             const controls = new Set<Element>();
             for (const el of associated) {
+                if (!this.spendDomWork(budget)) return undefined;
                 if (el.matches(inputSelector)) controls.add(el);
-                else if (isSingleField(el)) el.querySelectorAll(inputSelector).forEach(input => controls.add(input));
+                else if (isSingleField(el)) fieldInputs(el).forEach(input => controls.add(input));
+                if (controls.size > 2) break;
             }
+            if (budget.exhausted) return undefined;
             if (controls.size > 2) continue;
-            const values = Array.from(controls)
-                .sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)
-                .map(el => (el as HTMLInputElement).value.trim()).filter(Boolean);
-            if (values.length) return values.join(' ');
+            const ordered = Array.from(controls).sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+            const value = readValues(ordered);
+            if (budget.exhausted || value) return value;
         }
-        const explicit = Array.from(context.querySelectorAll(inputSelector)).filter(el =>
-            el.getAttribute('data-id')?.startsWith('createdon.')
-        );
-        if (explicit.length > 2) return undefined;
-        return explicit.map(el => (el as HTMLInputElement).value.trim()).filter(Boolean).join(' ') || undefined;
+        const explicit: Element[] = [];
+        for (const input of inputs) {
+            if (!this.spendDomWork(budget)) return undefined;
+            if (attribute(input, 'data-id').startsWith('createdon.')) explicit.push(input);
+            if (explicit.length > 2 || budget.exhausted) return undefined;
+        }
+        return readValues(explicit);
     }
 
     /**
      * Checks neighbors of a label node to find a value.
      * Strategies: Previous Sibling, Parent's Previous Sibling.
      */
-    private static extractValueFromNeighbors(labelNode: Element, validationRegex?: RegExp): string | undefined {
+    private static extractValueFromNeighbors(labelNode: Element, validationRegex?: RegExp, budget = this.domBudget()): string | undefined {
         // Strategy 1: Check immediate previous sibling
         // DOM: <ValueDiv>...</ValueDiv> <LabelDiv>Label</LabelDiv>
-        let value = this.extractValueFromNode(labelNode.previousElementSibling);
+        let value = this.extractValueFromNode(labelNode.previousElementSibling, budget);
         if (value && (!validationRegex || validationRegex.test(value))) {
             return value;
         }
@@ -214,7 +523,7 @@ export class PageReader {
         // Strategy 2: Check Parent's previous sibling
         // DOM: <Wrapper><ValueDiv>...</ValueDiv></Wrapper> <Wrapper><LabelDiv>Label</LabelDiv></Wrapper>
         if (labelNode.parentElement) {
-            value = this.extractValueFromNode(labelNode.parentElement.previousElementSibling);
+            value = this.extractValueFromNode(labelNode.parentElement.previousElementSibling, budget);
             if (value && (!validationRegex || validationRegex.test(value))) {
                 return value;
             }
@@ -281,10 +590,9 @@ export class PageReader {
         return undefined;
     }
 
-    private static extractValueFromNode(node: Element | null): string | undefined {
+    private static extractValueFromNode(node: Element | null, budget = this.domBudget()): string | undefined {
         if (!node) return undefined;
-        // Get text, clean it up
-        const text = (node.textContent || "").trim();
+        const text = this.readDomText(node, budget);
         // Ignore empty or structural characters if necessary, but usually trim() is enough
         return text || undefined;
     }
@@ -346,7 +654,7 @@ export class PageReader {
         // Strategy A: Check specific header container if it exists (Case Number specific)
         const headerControls = document.querySelector('[id^="headerControlsList_"]');
         if (!data.caseNumber && headerControls) {
-             const text = headerControls.textContent || '';
+             const text = this.readDomText(headerControls, this.domBudget()) || '';
              const match = text.match(idRegex);
              if (match) {
                  data.caseNumber = match[0];
@@ -359,20 +667,21 @@ export class PageReader {
             // Use relative path .//*
             const labelsXPath = idLabels.map(l => `contains(text(), '${l}')`).join(' or ');
             
-            const iterator = document.evaluate(
+            const budget = this.domBudget();
+            const snapshot = document.evaluate(
                 `.//*[${labelsXPath}]`, 
                 contextNode, 
                 null, 
-                XPathResult.ANY_TYPE, 
+                XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
                 null
             );
             
-            let node = iterator.iterateNext();
-            let checks = 0;
-            // Limit checks to prevent infinite loops on large DOMs
-            while (node && checks < 15) { // Reduced max checks
-                checks++;
-                if (checks % 5 === 0) await this.yieldToMain();
+            // Snapshot membership survives live DOM mutations while yielding.
+            for (let index = 0; index < Math.min(snapshot.snapshotLength, 15); index++) {
+                if ((index + 1) % 5 === 0) await this.yieldToMain();
+                if (!this.spendDomWork(budget, true)) break;
+                const node = snapshot.snapshotItem(index);
+                if (!(node instanceof Element) || !contextNode.contains(node) || !this.isRendered(node, budget)) continue;
 
                 // Check parent hierarchy for the value
                 const parent = node.parentElement;
@@ -384,7 +693,7 @@ export class PageReader {
                      // the case ID together with the SKU into one text node
                      // ("2605080030003014001 | Unfd AddOn | ProSv Ente - China Cld") would slip
                      // through verbatim and break the host's _extract_case_id contract.
-                     const value = this.extractValueFromNeighbors(node as Element, idRegex);
+                      const value = this.extractValueFromNeighbors(node, idRegex, budget);
 
                      if (value && value.length > 3) { // Basic length check
                          // extractValueFromNeighbors with a regex returns the raw matched
@@ -396,7 +705,6 @@ export class PageReader {
                          break;
                      }
                 }
-                node = iterator.iterateNext();
             }
         }
         
@@ -405,8 +713,8 @@ export class PageReader {
         // Strategy C: Direct Regex scan on header container
         if (!data.caseNumber) {
             const headerContainer = document.querySelector('[id^="headerContainer"]'); // or outerHeaderContainer_
-             if (headerContainer && headerContainer.textContent) {
-                 const match = headerContainer.textContent.match(idRegex);
+             if (headerContainer) {
+                 const match = this.readDomText(headerContainer, this.domBudget())?.match(idRegex);
                  if (match) data.caseNumber = match[0];
              }
         }
@@ -430,38 +738,7 @@ export class PageReader {
         data.statusReason = structuredHeaders.statusReason || await this.findValueForLabel('Status reason', undefined, contextNode);
 
         data.createdOn = await this.readCreatedOn(contextNode);
-        const customerSelector = '[data-id="customerid.fieldControl-LookupResultsDropdown_customerid_SelectedRecordList"]';
-        // This observed lookup can sit outside main. Never read its search input or contact-company fields.
-        const customerLists = contextNode.querySelectorAll(customerSelector);
-        const lists = customerLists.length ? customerLists : document.querySelectorAll(customerSelector);
-        const customerNames = new Set<string>();
-        let ambiguousCustomer = false;
-        for (const list of Array.from(lists).slice(0, 20)) {
-            await this.yieldToMain();
-            const items = list.querySelectorAll('li');
-            if (items.length > 1) ambiguousCustomer = true;
-            for (const item of Array.from(items).slice(0, 2)) {
-                const displayed = item.cloneNode(true) as Element;
-                displayed.querySelectorAll('button, [role="button"], svg, img, input, [hidden], [aria-hidden="true"], [aria-label*="remove" i], [aria-label*="clear" i], [data-id^="customerid.fieldControl-entityIconContainer_"]').forEach(el => el.remove());
-                const links = Array.from(displayed.querySelectorAll('a')).map(el => el.textContent?.trim()).filter(Boolean);
-                const walker = document.createTreeWalker(displayed, NodeFilter.SHOW_TEXT);
-                const leaves: string[] = [];
-                let node: Node | null;
-                while ((node = walker.nextNode())) {
-                    const text = node.textContent?.trim();
-                    if (text && !/^(x|\u00d7|remove|clear)$/i.test(text)) leaves.push(text);
-                }
-                const names = new Set(links.length ? links : leaves);
-                if (names.size > 1) ambiguousCustomer = true;
-                else names.forEach(name => { if (name) customerNames.add(name); });
-            }
-        }
-        if (!ambiguousCustomer && customerNames.size === 1) {
-            const name = customerNames.values().next().value;
-            if (name && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name.replace(/^\{(.+)\}$/, '$1'))) {
-                data.customerName = name;
-            }
-        }
+        data.customerName = this.readCustomerName(data.caseNumber);
 
         // 4. Try to find Product Category
         const categorySelectors = [
@@ -561,6 +838,7 @@ export class PageReader {
                 return null;
             }
             // Unsupported legacy identity keeps DOM data without starting an unbound wait.
+            const irCaseNumber = this.readLiveRecordNumber(false);
             if (before !== undefined) {
                 const createdOn = await requestCreatedOn(data.caseNumber, generation);
                 if (this.readLiveRecordNumber() !== before) {
@@ -571,6 +849,17 @@ export class PageReader {
                 logCreatedOn('scan', createdOn ? 'success' : data.createdOn ? 'dom_fallback' : 'missing', generation);
             } else {
                 logCreatedOn('scan', 'not_requested', generation);
+            }
+            // No await after IR capture: bind the pair to the exact live 16/19-digit
+            // record, never a title/legacy fallback or a task's parent case.
+            if (this.readLiveRecordNumber(false) !== irCaseNumber) return null;
+            if (irCaseNumber === data.caseNumber) {
+                const irSla = readIrSla(irCaseNumber);
+                if (this.readLiveRecordNumber(false) !== irCaseNumber) return null;
+                if (irSla) {
+                    data.irSlaStatus = irSla.status;
+                    data.irSlaCapturedAt = irSla.capturedAt;
+                }
             }
         } else {
             logCreatedOn('scan', 'not_requested', generation);

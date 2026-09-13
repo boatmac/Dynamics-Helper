@@ -4797,6 +4797,20 @@ describe('Options prompt source mode matrix', () => {
     expect(getTranslation('dhSpecificInstructionsInactive', 'zh')).toContain(
       '保留',
     )
+    for (const key of ['useWorkspaceOnlyDesc', 'dhSpecificInstructionsInactive']) {
+      expect(getTranslation(key, 'en')).toContain(
+        'prioritizes <Root>/AGENTS.md; only if absent, uses <Root>/.github/copilot-instructions.md, never both',
+      )
+      expect(getTranslation(key, 'zh')).toContain(
+        '优先使用 <Root>/AGENTS.md；仅当其不存在时使用 <Root>/.github/copilot-instructions.md，绝不同时注入两者',
+      )
+    }
+    expect(getTranslation('promptErrorRepositoryMissing', 'en')).toContain(
+      'both <Root>/AGENTS.md and <Root>/.github/copilot-instructions.md are absent',
+    )
+    expect(getTranslation('promptErrorRepositoryMissing', 'zh')).toContain(
+      '<Root>/AGENTS.md 和 <Root>/.github/copilot-instructions.md 均不存在',
+    )
   })
 
   it.each([
