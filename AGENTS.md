@@ -633,9 +633,18 @@ To ensure long-term maintainability and consistency, a task is only considered "
 1. **Code Functional:** The feature or bug fix is implemented and verified.
 2. **No "Split Brain":** Changes to the Host architecture are compatible with both **Dev Mode** (Python script) and **Prod Mode** (Compiled Exe).
 3. **Verification Matches Scope:** Behavior changes require relevant tests;
-   milestone/release verification includes the agreed full Host/Extension suites
-   and build. Documentation-only work requires static document checks, not a
-   full product run. State exact code/artifact identity and any skipped checks.
+   release verification uses the fixed selection documented in the release notes:
+   existing `analysis-attachments` (31), `analyze-progress` (25),
+   `repository-instructions` (10), fixed SDK contracts (25), and full Extension
+   default-items (5) plus configured Vitest suite (2060). Do not label this "full Host".
+   Verify version alignment, Extension/Host builds, artifact identity and package integrity.
+   Relevant new behavior outside these helpers needs explicit coverage or a documented
+   limitation; unrelated legacy test debt does not become a release prerequisite.
+   Existing results may be reused for the exact source/test/dependency scope with
+   accepted before/after raw hashes; changed bytes do not inherit a historical PASS.
+   Documentation-only work requires static document checks, not a full product run.
+   State exact code/artifact identity and pending checks. Stop on failure or lost
+   observability; preserve evidence and do not automatically expand the scope.
 4. **Documentation Updated:**
     * If the **Architecture** changed (e.g., Registry keys, Manifest logic), update `ARCHITECTURE.md`.
     * If the **User Workflow** changed (e.g., new installation step, new UI feature), update `USER_GUIDE.md`.
@@ -660,6 +669,14 @@ of the default installation template. Notes under `releases/` are preserved;
 output cleanup removes only `*.zip` and `DynamicsHelper_v*` staging directories.
 
 **Required packaged assets:** Every manifest-referenced release input must be tracked or reproducibly generated before a release tag is created. `extension/items.json` is a tracked public-only product asset; never replace it with an ignored local/private menu. `release_helper.py` currently commits and tags before invoking its own build, so the operator MUST start from a clean worktree and successfully run `npm run build --prefix extension` before invoking the helper. That preflight must pass the source/dist `items.json` byte-identity check and is the pre-tag gate; the helper's later build is a second check, not the pre-tag gate.
+
+**Controlled publication alternative:** Within the authorized release scope, use the
+existing `build_host()` and `create_zip()` functions directly, the existing Extension
+build entry, and explicit Git/`gh` operations instead of `main`. Apply the same
+version, pre-tag build, asset and integrity checks; defer push/publication until
+verification succeeds. This avoids `main --publish` pushing commits/tags before
+its builds. `main` remains available under its documented preflight and authorization;
+no new wrapper, test platform or release-helper change is required.
 
 **What it does:**
 

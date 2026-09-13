@@ -23,7 +23,7 @@ SHA-256 values from `source-before.json`: FAB `D52BD10D...`, pageReader
   as reported by the user. This follow-up explicitly performs no staging, commit
   or push, regardless of broader sequence approval.
 - [ ] Record build evidence separately through the main agent; it remains pending.
-- [ ] Confirm a Release version with the user; none has been selected or published.
+- [ ] Release v2.0.78 is selected and publication is authorized; not published until the main agent completes actual publication.
 - [ ] Keep running Dev/source snapshot identity distinct from frozen artifacts.
   The production entry is quarantined. Runtime entry remains separately scoped;
   no automatic Prod restoration, installation, Host restart or registry change.
