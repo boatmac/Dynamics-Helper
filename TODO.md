@@ -22,8 +22,8 @@ SHA-256 values from `source-before.json`: FAB `D52BD10D...`, pageReader
 - [x] Prior documentation commit `b78afd5` was already pushed by the prior agent,
   as reported by the user. This follow-up explicitly performs no staging, commit
   or push, regardless of broader sequence approval.
-- [ ] Record build evidence separately through the main agent; it remains pending.
-- [ ] Release v2.0.78 is selected and publication is authorized; not published until the main agent completes actual publication.
+- [x] Record v2.0.78 build and package evidence in [release notes](releases/v2.0.78.md); Extension/Host builds passed and the published ZIP digest matches the verified local asset.
+- [x] Publish stable [v2.0.78](https://github.com/boatmac/Dynamics-Helper/releases/tag/v2.0.78), tagged at `bc38795`. GitHub confirmed publication and matching asset size/SHA-256 on 2026-09-14 (UTC+08:00).
 - [ ] Keep running Dev/source snapshot identity distinct from frozen artifacts.
   The production entry is quarantined. Runtime entry remains separately scoped;
   no automatic Prod restoration, installation, Host restart or registry change.
