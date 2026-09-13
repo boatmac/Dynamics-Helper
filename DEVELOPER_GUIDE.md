@@ -16,7 +16,21 @@ The project consists of three main components:
 
 ### `extension/` (Frontend)
 
-* **`src/components/FAB.tsx`**: The main UI component. It contains the Analyze logic, derives its safety timeout from the Host preference with a 10-second grace period, localizes prompt-source errors at render time, and uses the `isUserEdited` ref pattern to protect user edits from background scans. Its update UI is projection-only: payload-free `DH_UPDATE_GET_STATE` / `DH_UPDATE_START` plus `DH_UPDATE_STATE` rendering.
+Current capture hardening is recorded once in the
+[ten-finding review](docs/capture-hardening-review.md). Identity invalidation is
+independent of preview protection; raw/empty edits advance intent revisions and
+pending refreshes cannot overwrite newer edits. Visibility and scheduled
+auto-Analyze timers retain their owners. Customer/header reads use visible record
+ownership and bounded live traversal without cloning; yielding XPath reads use
+snapshots, and Created On accounts for traversal/text/ancestry work in MAIN and
+the final `readCreatedOn` DOM fallback. Both IR panel paths require `expectedCase`
+and the same unique visible main/outer-pane/canonical-header ownership. All ten
+source issues have scoped offline verification; earlier
+source/build results below describe their own snapshots, not this hardening pass.
+No unified-coordinator completion, new API, OData migration or measured performance
+improvement is claimed. Running Dev source is not frozen-build qualification.
+
+* **`src/components/FAB.tsx`**: The main UI component. It contains the Analyze logic, derives its safety timeout from the Host preference plus 120 seconds of preparation allowance and 10 seconds of fallback grace, localizes prompt-source errors at render time, and uses the `isUserEdited` ref pattern to protect user edits from background scans. Its update UI is projection-only: payload-free `DH_UPDATE_GET_STATE` / `DH_UPDATE_START` plus `DH_UPDATE_STATE` rendering.
 * **`src/components/Options.tsx`**: The extension settings page. Handles preferences, Root Path, MCP/Skill directory config, team catalog sync, and projected update status. It never owns update storage, Host update payloads, or reload. DH-specific Instructions and Custom User Prompt textareas include an Edit/Preview toggle for rendered Markdown preview.
 * **`src/components/MarkdownPreview.tsx`**: Shared Markdown renderer using `react-markdown` + `remark-gfm`. Provides styled GFM rendering (headings, code blocks, tables, links, lists, blockquotes). Used by Options.tsx for preview toggles.
 * **`src/utils/pageReader.ts`**: Extracts case numbers, error text, and context on the supported `https://onesupport.crm.dynamics.com/*` pages, not Azure Portal or arbitrary websites. Reads direct value/label slots inside known `uci-header-control-list` open shadow trees first, then uses the 4-strategy fallback cascade (header controls, label search, header container regex, ticket title fallback). Structured traversal is capped at 20 lists/2,000 elements and yields every 50 elements; it does not search arbitrary shadow text or closed roots. Shadow-only mutations do not independently trigger the document observer, so later field changes require a scan signal or explicit refresh. User-edited context remains protected.
@@ -32,6 +46,37 @@ The project consists of three main components:
   GUID-only values are rejected. No tab activation/cache/timezone inference is
   performed. Both sections use the existing scrubbed-text analysis/report path;
   the scrubber does not generally redact company names.
+  Late Customer enrichment uses `PageReader.readCustomerName(expectedCaseNumber)`
+  and FAB's fixed five-second epoch: 250 ms targeted reads plus a lookup-scoped
+  observer, not repeated full scraping. Exact live case, accepted snapshot and scan
+  generation must agree; only a missing Customer is filled, never an existing
+  value or user-edited/explicitly emptied context. Sparse same-case scans retain
+  a known Customer. Repeated scans do not renew the deadline; identity change or
+  explicit refresh resets the epoch. A menu-open background scan may revalidate
+  and rebind only Customer enrichment to its new generation, never apply its full
+   snapshot to the preview. Active Analyze input remains frozen. New source adds a
+   passive capture-phase scroll listener only while the menu is open, Customer is
+   missing, context is unedited, and no active or hydrated Analyze is pending.
+   It debounces one Customer-field read by 200 ms; pending-scan gating waits at most
+   one second from the latest scroll. The read retains expected-case and scan-
+   generation checks, never starts a full scan, and does not extend or restart the
+   original five-second polling window. Sparse same-case retention is not a
+   cross-case cache. No auto-scroll is performed. The user confirmed that scrolling
+   materializes the Customer DOM and reopening DH then reads it; this observation
+   does not verify the new listener. An unrendered name cannot be read, and initial
+   Customer availability without user scrolling is not guaranteed.
+  See the [confirmed offline and mutation/restoration results](docs/dtm-attachment-investigation.md#workspace-missing-and-late-customer-follow-up).
+   The scroll-listener change now has supplied restored GREEN confirmation:
+   **17 passed, 95 skipped, 0 failed**, with raw FAB hash prefix `7B06...` matching
+   initial GREEN. TypeScript `customer-scroll` exited 0 with sources unchanged.
+   The approved local Extension build passed all five default-items gates and
+   tsc/Vite/copy, producing 13 artifacts with 408 sources and selected tooling
+   unchanged; evidence and manifest identity are recorded in
+   [TODO](TODO.md#attachment-analysis). These are synthetic source checks and a
+   build PASS, not live confirmation of the new listener. The user can reload
+   local `extension/dist/`, refresh D365, keep the menu open and scroll until the
+   field renders to check the expected preview update, without Analyze. Real modal
+   markup remains live-unverified.
   `createdOnBridge.ts` sends one extension-local `DH_READ_CREATED_ON` request to
   the SW; strict sender origin/top-frame/document checks target only the originating
   document in MAIN. Self-contained `createdOnModel.ts` reads the constrained
@@ -69,7 +114,8 @@ The project consists of three main components:
 * **`src/background/serviceWorker.ts`**: Service worker handling telemetry, native messaging relay, analysis-result persistence, and the sole production update coordinator. Native-message logging is metadata-only; it must not log prompt-bearing payloads.
 * **`src/background/updateRuntime.ts`**: Strict update parsers and serialized durable state machine for `dh_update_state`, restart resume, alarms, detached status polling, terminal reload, and receipt-backed finalization.
 * **`src/background/teamManifestSync.ts`**: Team sync response boundary. Manifest-only fetches re-read `dh_prefs` after every fetch result, including failure/null/304. Selected-team responses preserve `committed|unchanged|failed|skipped|stale` plus captured identity.
-* **`src/utils/analysisPrompt.ts`**: Idempotent send-time Custom User Prompt assembly for both constructed and preformatted FAB context.
+* **`src/utils/irSla.ts`**: First bounded IR SLA milestone: recognizes only the observed exact `Succeeded` terminal label under strict active Summary ownership, returning a scan-time status/timestamp pair or no pair when the timer root is absent. Not a countdown or general SLA-state reader. See [IR SLA snapshot](docs/specs/ir-sla-snapshot.md).
+* **`src/utils/analysisPrompt.ts`**: Send-time Custom User Prompt assembly and reserved IR SLA section replacement for both constructed and preformatted FAB context. IR metadata comes from the current accepted scan, not edited template text or a new send-time clock.
 * **`src/utils/telemetry.ts`**: Azure Application Insights integration for anonymous telemetry.
 * **`manifest.json`**: Defines permissions (`nativeMessaging`) and background scripts.
 * **`dist/`**: The build output directory. Load the extension from here (`extension/dist`).
@@ -90,7 +136,7 @@ The project consists of three main components:
   wraps full service operations and is always acquired before the installation
   mutation mutex.
 * **`pii_scrubber.py`**: PII redaction utility for sanitizing text before sending to the LLM.
-* **`system_prompt.md`**: The base persona for the AI Agent.
+* **`system_prompt.md`**: Product-managed Core for one Analyze request: support-task scope, selected-instruction/data separation, authorized tool/file actions, privacy, evidence and output requirements. It does not assume a particular model, cloud product, MCP service or case-management framework. Repository instructions define specific workflows without overriding Core safety boundaries. Prompt wording is not a permission sandbox or proof that a workflow executed.
 
 ### Test Files (`host/`)
 
@@ -115,7 +161,7 @@ Understanding how a user request becomes an AI response.
 ### 1. The Prompt Pipeline
 
 1. **User Input:** The user provides error text, context, and case metadata via the Extension UI.
-2. **Native Messaging:** This data is sent to the `dh_native_host.exe` as a JSON payload (`analyze_error` action).
+2. **Native Messaging:** The page submits `analyze_error`. For each valid document-bound case Analyze, the SW prepares attachments and constructs private `analyze_with_attachments` with `{analysis, attachments}` before Host dispatch. Generic/page forwarding of the private action is denied; requests without the required case/document binding retain the ordinary path.
 3. **PII Scrubbing (`pii_scrubber.py`):**
     * Before sending to the LLM, the `text` and `context` are scrubbed using regex.
     * **Removes:** Emails, IPv4 Addresses, US Phone Numbers.
@@ -129,7 +175,146 @@ Understanding how a user request becomes an AI response.
     * On session creation or refresh, `resume_session(uuid, ...)` is tried first and ordinary failures fall back to `create_session(session_id=uuid, ...)`. `SessionOptionsPatchError` is terminal, with no create fallback or transport retry. Resume, create fallback, and transport retry receive equivalent Root, prompt, isolation, Skills, MCP, hook, permission, and model/performance kwargs.
     * The session UUID is injected into the `system_message` content as `## Session Info` / `Session Name: <uuid>`, making it available for `context.md` frontmatter `session_name:`.
 5. **SDK Execution (`send_and_wait`):**
-    * The backend sends the prompt as a plain string with a **user-configurable timeout** (default 1200s, range 60–3600s, set via Options → Analyze Timeout). The FAB safety timeout is derived as `(value + 10) * 1000` ms so the host's truthful "Copilot did not finish within Ns" error always fires first.
+    * The backend sends scrubbed case/context/Custom User Prompt text, appends eligible raw attachment text, and supplies qualified image blobs when available. The **user-configurable model timeout** remains unchanged (default 1200s, range 60-3600s, Options > Analyze Timeout). FAB uses `(clampedModelSeconds + 120 + 10) * 1000` ms, not the old model-plus-10 formula. Startup, refresh, import and retries prevent a guaranteed Host-first end-to-end timeout; the UI fallback is not cancellation.
+
+Analyze also projects best-effort phases and SDK tool start/completion events
+through `host/analyze_progress.py::AnalyzeProgress`. Inner-payload v1 opt-in,
+closed schemas, safe aliases, limits and originating-document routing are defined
+in the [progress contract](docs/specs/native-message-snapshot.md#analyze-progress-contract).
+Progress cannot settle the SDK request or detect per-service MCP auth waits.
+
+#### Automatic Attachment Preparation
+
+**Implemented-source; focused offline milestones passed, runtime UNVERIFIED:** `attachmentPreparation.ts`,
+`attachmentPortal.ts`, `attachmentDownload.ts`, the current SW and
+`host/analysis_attachments.py` / `handle_attachment_analyze` are production source,
+not just the standalone harness. The initial 13-file frontend run passed 519/524;
+all five failures were in `FAB.pageIdentity.test.tsx`. FAB prematurely settled
+progress before terminal page revalidation; settlement now shares the result UI's
+post-revalidation publication gate. The affected four complete files passed 98/98,
+including two new ownership cases. This expands the selected inventory to 526
+in aggregate, not evidence of a full 526-test run. An early-settle mutation made
+both new cases fail as expected (2/2 RED); it was removed. Restored GREEN
+(`green-restored`) is confirmed: 2 passed, 45 skipped, exit 0; FAB's raw hash
+matches the pre-RED ownership-fixed bytes (prefix `D5DF`). Final TypeScript
+(`attachments-final`) exited 0 with sources unchanged, independently of the
+earlier corrected TypeScript PASS.
+
+The `analysis-attachments` pure-Host profile is confirmed 21/21, exit 0. Its reader
+tests mock every filesystem operation and qualification uses SDK-shaped RPC mocks;
+it does not exercise real attachment file I/O or Host/SDK runtime. The Host source
+hash in `tests/sdk-test-review.json` was updated to `32736e8b912ebf54b51de265932e3baa856aa353f43bb2be560edde486fd018e`,
+but the fixed SDK tests were not rerun; a review hash is not runtime qualification.
+Production is not built, installed or live-verified and no actual attachment model
+inputs were exercised. Broader SDK/full-build verification needs applicable user
+approval; the previous standalone-harness scope does not authorize production
+builds. Historical harness metadata completion is not product qualification. See the
+[verification status](docs/dtm-attachment-investigation.md#initial-verification-status).
+
+Every valid, originating-document-bound Analyze prepares a fresh invocation,
+including repeat requests for the same case, before its first model send. Durable
+pending/latest-owner commit precedes preparation; generation, source identity and
+serialized updater authorization are rechecked before private dispatch. Stale
+preparation does not send. Unavailable attachment preparation can continue a
+still-current Analyze with cautious notice metadata, without another confirmation.
+
+The SW opens an inactive owned DTM Home tab. Its 30-second create-to-ready/auth
+deadline includes navigation/readiness, not model execution. Only transient
+read-only inspection retries within that original deadline; uncertain external-tab
+selection or download dispatch is not retried. Sign-in and browser safety prompts
+remain user actions. Up to four sequential 10-second observation windows correlate
+full initial request URI to a unique safe completed browser download ID, never
+filename/time alone. The helper budgets 89 seconds of work plus up to one second
+of cleanup, with bounded API awaits. Timeout cannot recall a dispatched script or
+cancel a browser download. Late auth/files cannot change the returned file set.
+
+`readAttachmentPortal` returns the closed `{status: 'workspace_missing'}` only
+for inspection of the exact no-workspace modal for the full same 16/19-digit
+case. A readable background case header must agree; absent/hidden headers are
+allowed. It never clicks Create or Cancel. The coordinator validates document
+binding and returns known-empty (`files: []`, `skipped: 0`, `reason: 'none'`)
+without a yellow attachment warning, unless a positive D365 count conflicts,
+including at final source revalidation; that remains unknown/unavailable.
+`tabOrigin` updates `authPending` from the latest successfully read URL, so a
+return to the portal clears historical login evidence rather than misclassifying
+a later readiness failure as `auth_timeout`. Failed tab reads retain the last
+observed state; the 30-second deadline is unchanged. These are implemented source
+fixes, not live verification.
+
+Host receives only selected completed download `{path, size}` descriptors from
+the private SW action, never local paths supplied by a page. The reader rejects
+observed links/reparse points, checks ordinary replacement/size changes, and reads
+at most 2 MiB per file into immutable bytes, four files/8 MiB total. Local path
+syntax and these checks are not an OS sandbox, exclusive provenance proof, or
+guarantee against concurrent filesystem mutation. Downloads stay in the browser's
+normal destination; import is in memory with no Root staging or Root/report-path
+change. Never log raw URLs, credentials or attachment contents.
+
+Allow only `.png`, `.jpg`, `.jpeg`, `.txt`, `.log`, `.json`, `.xml`, `.csv`, `.md`.
+Text decodes strict UTF-8 without BOM/newline normalization and is wrapped as
+untrusted evidence after the unchanged case/context/Custom User Prompt scrub.
+Images receive signature checks (not full sanitization), then effective-session
+model vision/media/count/size qualification before sending. Unknown capabilities
+skip images, never switch models. Reconnect attempts reuse frozen bytes and
+requalify images against the active session. Unsupported/failed inputs contribute
+to the product notice; unknown inventory never asserts that attachments exist.
+
+`AttachmentImportOwner` now owns at most one import task per Host, with a
+cooperative 5-second caller wait. It validates and freezes all metadata before
+any I/O or busy fallback. Empty input starts no thread; a busy call immediately
+gets a fresh fallback counting its selected files as skipped, without queuing or
+reusing earlier inputs. Timeout likewise returns a fresh skip fallback. Late
+completion is discarded, never reused or allowed to trigger a model send. Caller
+cancellation propagates while the worker remains owned until completion.
+
+The timer is not a hard real-time deadline under event-loop starvation. Timeout
+and caller cancellation do not cancel/bound underlying OS reads or executor
+shutdown. FAB's unchanged 120-second preparation allowance is separate, as is
+DTM's 30-second readiness/auth deadline; file limits and the model timeout are
+unchanged. Existing startup/session refresh is not fully bounded. Model
+qualification RPCs have individual cooperative 3-second waits, not an end-to-end
+guarantee.
+
+This import-wait source-plus-focused-offline milestone is complete: main-agent
+confirmation is **31/31**, zero failures/errors/skips, runner exit 0 and unchanged
+sources. Evidence `dh-safe-tests-5ukf7zga/results.jsonl` ends with `finished: 31`;
+`cleanupErrors: []`, `capture_errors: []`, `reader_pending: false` and
+`child_unreaped: false`. Broader supervisor
+`dh-analyze-progress-host-attachments-import-deadline` returned 0 with
+`changedSources: []`. Current `host/dh_native_host.py` SHA-256 is
+`fefd0ccef620e54c5c06a04c3e37d9a31fb79e685f1e4ed3c5e4b0592187a160`.
+The SDK review binding was refreshed for source only; fixed SDK tests were not
+rerun. The historical 25-pass SDK result does not qualify this new hash. See the
+[import-wait evidence](docs/dtm-attachment-investigation.md#host-import-caller-wait-follow-up).
+This is focused offline verification, not real attachment I/O or live runtime
+qualification; this documentation finalization runs no new tests or runtime work.
+Only Host source changed for this follow-up, so no new Extension build/reload is
+required for it. An already-running source Dev Host needs a normal restart before
+future authorized live verification; no automatic restart or registry switch.
+
+The Extension accepts wire `attachment_notice` as separate `attachmentNotice`
+through persistence, hydration and rendering beside known prompt-code localization.
+Host now emits a nonempty `attachment_notice` beside success `data.markdown`, or
+beside the inner Analyze error fields, without prefixing `full_response` or error
+text. Saved reports write it in a separate `## Attachment Status` section before
+`## AI Explanation`. Known prompt-code localization therefore does not replace
+the separately carried notice.
+
+Before each send attempt, after image qualification, Host resets `send_prompt`
+from `safe_prompt` and appends a fixed product input-status summary from
+`report_notice` when nonempty. It uses frozen preparation and that attempt's
+qualified-image count, asks the model to use only supplied inputs, not claim
+omitted files were reviewed, and not repeat the separately displayed status.
+Retries do not accumulate summaries. This source fix does not prove model
+compliance, current SDK compatibility or end-to-end runtime behavior.
+
+No attachment capability was added to `get_capabilities`/`product_info.py` and no
+private-action version negotiation or old-Host fallback exists. A matching updated
+Host is necessary; the existing generic version/integrity gates do not prove this
+new action is supported, especially with unchanged version metadata. An old runtime
+fails rather than silently reverting to `analyze_error`. See the
+[wire contract](docs/specs/native-message-snapshot.md#private-attachment-analyze)
+and [remaining verification](TODO.md#attachment-analysis).
 
 #### SDK Adapter And Headless Permissions
 
@@ -169,7 +354,7 @@ The host maintains persistent sessions so users can continue analysis in the Cop
 
 ### 3. Deterministic Prompt Sources
 
-DH owns instruction selection. Every SDK `create_session()` and `resume_session()` call, including fallback/retry paths, sets `skip_custom_instructions=True`. The spawned Copilot CLI therefore does not automatically add CLI-global instructions, Root/ancestor `AGENTS.md`, path-specific `.instructions.md` files, agent instruction files, or automatically discovered `.github/copilot-instructions.md` to a DH session.
+DH owns instruction selection. Every SDK `create_session()` and `resume_session()` call, including fallback/retry paths, sets `skip_custom_instructions=True`. The spawned Copilot CLI therefore does not automatically add CLI-global instructions, Root/ancestor `AGENTS.md`, path-specific `.instructions.md` files, agent instruction files, or automatically discovered `.github/copilot-instructions.md` to a DH session. This does not exclude DH's explicit injection of its selected Root entry.
 
 The Host explicitly injects DH Core plus exactly one editable system source. Custom User Prompt remains separate PII-scrubbed user-role content on every Analyze:
 
@@ -177,9 +362,9 @@ The Host explicitly injects DH Core plus exactly one editable system source. Cus
 |---|---:|---|---|
 | Empty | false or true | DH Core + DH-specific Instructions | Case payload + Custom User Prompt |
 | Non-empty | false | DH Core + DH-specific Instructions | Case payload + Custom User Prompt |
-| Non-empty | true | DH Core + `<Root>/.github/copilot-instructions.md` | Case payload + Custom User Prompt |
+| Non-empty | true | DH Core + `<Root>/AGENTS.md`; only if absent, use `<Root>/.github/copilot-instructions.md` instead | Case payload + Custom User Prompt |
 
-`effective_repository_only = bool(effective_root) and use_workspace_only`. A non-empty Root does not select Repository Instructions by itself. DH-specific and Repository Instructions are mutually exclusive, and only the Root-level `.github/copilot-instructions.md` is supported. Repository ONLY still controls Skills and MCP according to their existing rules; DH Core, SDK built-ins, Session Info, hooks, tool definitions, and Custom User Prompt remain active.
+`effective_repository_only = bool(effective_root) and use_workspace_only`. A non-empty Root does not select Repository Instructions by itself. DH-specific and Repository Instructions are mutually exclusive. In Repository ONLY mode, `<Root>/AGENTS.md` takes priority; only its absence permits the legacy `<Root>/.github/copilot-instructions.md`, never both. Only these two Root entries are candidates: no parent or nested-directory search. Empty Root or mode off retains DH-specific selection. Repository ONLY still controls Skills and MCP according to their existing paths and rules; DH Core, SDK built-ins, Session Info, hooks, tool definitions, and Custom User Prompt remain active.
 
 #### Immutable Snapshot and Fingerprint
 
@@ -189,7 +374,7 @@ The Host explicitly injects DH Core plus exactly one editable system source. Cus
 2. The selected editable source, omitted from assembly only when its decoded content is empty/whitespace.
 3. Deterministic Session Info.
 
-The snapshot fingerprint is `v1:` plus SHA-256 over length-framed version marker, source mode, exact Core bytes, and exact selected bytes. Root identity remains a separate refresh condition. Before each Analyze, an unchanged case/Root/fingerprint reuses the active session; any change refreshes the same UUIDv5 session. The candidate fingerprint is committed only after awaited SDK resume/create succeeds. `_invalidate_active_session()` always clears `current_prompt_fingerprint`, so resolution, refresh, timeout, transport, and uncertain durable-write failures cannot reuse stale prompt state.
+The snapshot fingerprint is `v1:` plus SHA-256 over length-framed version marker, source mode, exact Core bytes, and exact selected bytes. Root identity remains a separate refresh condition. The selected filename is not hashed; switching between repository entries with identical bytes does not itself require a refresh. Before each Analyze, an unchanged case/Root/fingerprint reuses the active session; any change refreshes the same UUIDv5 session. The candidate fingerprint is committed only after awaited SDK resume/create succeeds. `_invalidate_active_session()` always clears `current_prompt_fingerprint`, so resolution, refresh, timeout, transport, and uncertain durable-write failures cannot reuse stale prompt state.
 
 #### Source Errors and Config Health
 
@@ -197,8 +382,8 @@ Strict Analyze/session resolution fails closed:
 
 * Missing or unreadable/invalid-UTF-8 DH Core blocks Analyze.
 * A missing DH-specific file is valid empty content; an existing unreadable/invalid-UTF-8 file blocks Analyze when selected.
-* An existing empty Repository Instructions file is valid; a missing or unreadable/invalid-UTF-8 selected Repository file blocks Analyze.
-* The Host never falls back to the unselected DH-specific, Repository, or CLI-global source, and no user turn is sent on failure.
+* An existing empty Repository Instructions file is valid; empty `AGENTS.md` never selects the legacy entry. Only absent `AGENTS.md` permits legacy selection. Both absent reports `repository_instructions_missing`.
+* An unreadable/invalid-UTF-8 repository entry, directory, or broken link reports `repository_instructions_unreadable` and blocks Analyze without fallback. The Host never falls back to DH-specific or CLI-global instructions, and no user turn is sent on failure.
 
 `get_config` is intentionally softer. `_get_session_config(include_prompt_status=True)` returns normal configuration plus `prompt_source_status` without creating or committing a session snapshot. It returns readable `_user_instructions_raw` and `extension_preferences.user_prompt`, including explicit empty content. If either file exists but cannot be read as strict UTF-8, its content property is omitted so Options retains its Chrome mirror and shows the safe health warning; unreadable Custom User Prompt reports `user_prompt_unreadable`. Legacy hydration is used only when `prompt_source_status` is absent. Calls without `include_prompt_status=True` never read, migrate, or hydrate `user_prompt.md`; Analyze owns one separate canonical read per request.
 
@@ -213,8 +398,8 @@ FAB applies Custom User Prompt immediately before every send for an accurate edi
 | `dh_core_prompt_missing` | Core absent | Localized install repair warning |
 | `dh_core_prompt_unreadable` | Core read/decode failure | Localized install/permission warning |
 | `dh_specific_instructions_unreadable` | DH-specific file read/decode failure | Omit raw field; preserve Chrome mirror |
-| `repository_instructions_missing` | Selected Root file absent | Localized add-file/disable-mode warning |
-| `repository_instructions_unreadable` | Selected Root file read/decode failure | Localized repair/disable-mode warning |
+| `repository_instructions_missing` | Both `<Root>/AGENTS.md` and legacy `<Root>/.github/copilot-instructions.md` absent | Localized add-file/disable-mode warning |
+| `repository_instructions_unreadable` | Repository entry read/decode failure, directory, or broken link | Localized repair/disable-mode warning; no fallback |
 | `user_prompt_unreadable` | Custom User Prompt read/decode failure | Omit `user_prompt`; preserve mirror until explicit repair |
 
 Options treats `user_instructions` and top-level `user_prompt` as sparse
@@ -268,6 +453,13 @@ paths cannot clear or report against the replacement request.
 Ownership remains live through all response-processing awaits, including case
 hashing; every post-await continuation rechecks request ID before UI, duration,
 menu, or outcome-telemetry changes.
+
+FAB freezes progress intake at response receipt, before the case-hash await,
+without releasing terminal ownership. `analyzeProgressState.ts` retains bounded
+request-local activity while page/scan identity gates hide stale views; closing
+the menu does not clear it. `AnalyzeProgress.tsx` renders the panel independently
+of the optional status bubble. The content-to-FAB channel is an isolated-world
+module, not a public DOM event.
 
 Team manifest and bookmark URLs are credential-bearing data because Azure SAS values commonly live in their query strings. `teamCatalog.ts` returns fixed safe diagnostics and logs only failure kind plus numeric status. Every Options request captures enabled/URL/team plus a request generation. The Service Worker synchronously allocates a storage generation before any asynchronous pref/cache read, rejects stale identity before clear/fetch, rechecks generation after awaited reads, and queues identity validation together with awaited mutation. `setStorage` and `removeStorage` inspect `chrome.runtime.lastError` inside their callbacks and reject with fixed safe errors. Manifest/bookmark/304 writes and clear/Reset removes therefore cannot report committed after a rejected mutation; selected failed responses omit items and timestamps. The queue's rejection continuation keeps later operations usable. Options sends messages only and clears rendered team items/timestamp immediately on identity change.
 
@@ -329,6 +521,116 @@ Model Context Protocol (MCP) servers follow similar logic:
 ---
 
 ## Frontend Patterns
+
+### IR SLA Snapshot
+
+The first bounded terminal milestone is implemented in `irSla.ts`,
+`pageReader.ts`, `pageIdentity.ts`, `FAB.tsx`, and `analysisPrompt.ts`. The observed
+`TimercontrolState` evidence is the exact `Succeeded` label, not a general enum
+mapping or an API contract. Extraction requires the exact `IR_SLA_Timer` root,
+one rendered selected `Summary` tab, and verified panel ownership of the rendered
+terminal label. A present `aria-controls` must resolve its single valid target;
+invalid explicit controls never enable fallback. A unique timer alone does not establish
+ownership. Label `aria-hidden="true"` does not mean CSS-hidden; the panel's own
+`aria-hidden="true"` does reject panel authority. Exact selectors and rendering
+checks are specified in the [contract](docs/specs/ir-sla-snapshot.md).
+Read-only inspection in the confirmed Profile 1 context found a selected Summary
+`li` with `aria-label="Summary"`, direct text `Summary`, extra aggregate text and
+no `aria-controls`. The source fix uses accessible/direct tab text and permits
+fallback only for an absent attribute: a unique outer record tabpanel under the
+unique main contains the matching canonical record header and selected Summary
+tab (whose nearest pane is that outer pane), plus a Summary tabpanel whose
+parent's nearest pane is the same outer pane. The exact `Performance indicators`
+section inside Summary must own the IR root and label. Rendering ancestry follows
+CSS and `assignedSlot`. The earlier source allowed the explicit path without
+`expectedCase`; current hardening requires an exact full 16/19-digit canonical
+header and the same record-pane ownership for both explicit and fallback paths.
+The TypeScript parameter remains syntactically optional, but omission cannot
+authorize a `Succeeded` read. Invalid explicit linkage never enables fallback.
+This tightens the earlier source fix without erasing its historical evidence;
+current scoped offline verification is recorded in the capture hardening review,
+not a new full-suite or runtime qualification.
+
+PageReader binds capture before/after to the full live 16/19-digit record number,
+without title fallback or task-to-parent normalization. The snapshot parser
+accepts only the complete string pair `irSlaStatus: 'Succeeded' | 'unknown'` and
+`irSlaCapturedAt` in canonical ISO UTC form, or neither. A missing supported root
+omits both; a recognized root with insufficient evidence returns `unknown` with
+capture time. These are internal scraped metadata, not new Host RPC fields.
+
+FAB requires the current accepted scan and no newer pending scan. Same-case
+acceptance can update scan-owned IR metadata while retaining user-edited context.
+At send assembly it uses `invocation.accepted.data`, removes the canonical User
+Prompt tail, replaces the reserved IR section, then appends the current prompt.
+The outgoing replacement leaves the editor and already-frozen Analyze untouched.
+The timestamp is the accepted scan's capture time, never a fresh send clock.
+Countdown/deadline stay unknown; no Severity/Created On deduction, live budget or
+percentage is implemented.
+
+Only the IR section helper recognizes ordinary backtick/tilde fences; this is
+not a general Markdown parser. `applyCurrentUserPrompt` still uses the first exact
+line-level `## User Prompt` marker even inside a fence. Host canonical prompt-file
+behavior is unchanged.
+
+The earlier bounded source/offline milestone is **complete**, with results confirmed by
+the user: `initial-green` passed **297/297 across seven complete test files**;
+TypeScript `ir-sla` exited 0 with sources unchanged. RED mutations disabling
+Succeeded capture and outgoing accepted-snapshot use produced **4 failed,
+3 passed, 109 skipped**. After removing the mutations, `green-restored` confirmed
+**7 passed, 109 skipped, actual exit 0**, with raw `FAB.tsx` and `irSla.ts` bytes
+matching `initial-green`. The restored focused run is not a second full 297-test
+run. These prior tests were not rerun for this update.
+
+The earlier user-confirmed Extension build is **PASS, not live-qualified**:
+version **2.0.77**, evidence
+`dh-local-extension-2077-ir-sla-20260913`, five default items,
+TypeScript/Vite/copy checks and 13 artifacts. The 407 source files and selected
+tooling were unchanged. Inventory SHA-256:
+`97493B28EECA5CFFB625F748ACBD04A65349AD6B80246FF6468BE616F9C7C219`.
+This is historical build evidence, not verification of the ownership source fix.
+Earlier ownership-fix verification is user-confirmed: the seven-file run had
+**350 passed, 1 failed (351 total)**. The new slot fixture encountered jsdom's
+cached opacity; mutating a fixture host attribute invalidated the cache without
+changing production checks. Both affected complete files then passed **187/187**.
+Disabling the case comparison produced **3 failed, 184 passed**; restoration
+passed **187/187**, with restored hashes matching the fixed source (`irSla.ts`
+SHA-256 prefix `24D7`). Final TypeScript exited **0**, sources unchanged. This
+does not establish a full 351-test GREEN rerun.
+
+The earlier local Extension **2.0.77** build passed the five-item gate and
+TypeScript/Vite/copy checks, producing **13 artifacts** with **408 source files
+and selected tooling unchanged**. Evidence:
+`dh-local-extension-2077-ir-record-pane-20260913`; manifest SHA-256:
+`CC88CAB04810FD826F17052DA11FAD9216B016213B64EA0B9BFD1C19939B40F1`.
+Content artifact: `index.tsx-B5TB3eTu`, reported SHA-256 prefix `B6369`.
+Read-only DOM source evidence and the actual-anchor fallback fix are complete;
+compiled runtime preview remains unverified. No Host changes
+are part of this milestone. This docs-only update performs static checks only,
+with no new source review, tests, product/build-tool edits or build.
+
+The user's prior browser verification identified **TSEWork / Profile 1** using
+`edge://version` and the same browser context, not endpoint existence alone.
+No browser reconnection or profile verification was performed for this docs-only
+update. Keep endpoint/target identifiers, emails and case/customer data out of
+documents; any fixture must be synthetic. The user confirmed cleanup of the new
+direct CDP connections used for read-only evidence; this was not model execution.
+
+The reported current environment remains source Dev, sharing real DH configuration
+with Prod, not a sandbox; this update does not recheck or change registration.
+The new local build is ready; the eventual Extension-only route still requires
+authorized **Load unpacked** from `extension/dist/` with the installed production
+Host. That route does not
+authorize automatically switching the current Dev registration to Prod. Any
+later switch needs its applicable scope. Host and registry remained unchanged.
+Compiled preview verification awaits the user's Extension reload and D365 refresh;
+inspect Case Context without Analyze or a model call. The fixed reader should return
+`Succeeded` if all confirmed structure and rendering checks match; otherwise it
+returns `unknown`. Neither source correction nor the current build PASS qualifies
+that future preview. No browser load/test, Analyze, Host
+restart, registry mutation, commit or publication occurs this turn. Remaining
+countdown/deadline and other-status source discovery needs a separately scoped
+user-provided running case, not one this turn. Main research/MCP work stays
+separate and is not duplicated here.
 
 ### User Edit Protection (`isUserEdited` Pattern)
 
@@ -393,6 +695,7 @@ For errors, persistence stores the raw safe Host fallback in `content` and prese
 * `extension/src/background/analyzeBridge.ts` exposes `handleAnalyzeForward(payload, ctx, deps)` with DI'd `send`. Its focused suite covers P-I1..P-I4, error-code transport, and edge 6.3 without spinning up a real Chrome port; the test count is not a contract.
 * `extension/src/hooks/useAnalysisHydration.ts` exposes `{popover, pending, isAnalyzing, dismissPopover(identity)}`. It uses a batched snapshot, newest matching pending selection, storage-change refresh, and expiry timer.
 * FAB keeps local Analyze in-flight state separate from the hydrated mirror. Hydration true/false is mirrored when no local request owns the spinner; hydration false cannot stop an active local request. Completion clears local ownership and retains only a different hydrated request if present.
+* Progress is local-only, separate from all pending/result storage. Hydration can restore a pending spinner, not its phase, activity or session-copy details; there is no progress replay.
 
 **popoverIsAnalyze ref discriminator:**
 
@@ -759,7 +1062,7 @@ reload before terminal finalization.
 
 * **Check:** Does the log show `Copilot request timed out after X seconds`?
 * **Meaning:** The analysis exceeded the configured budget; the timeout alone does not establish why it was slow.
-* **Fix:** Adjust Options -> Analyze Timeout (60-3600 seconds, default 1200), rather than editing source. The Host uses that preference and FAB derives its fallback as `(value + 10) * 1000` ms, preserving the Host-first timeout contract.
+* **Fix:** Adjust Options -> Analyze Timeout (60-3600 seconds, default 1200), rather than editing source. The Host model wait uses that preference; FAB uses `(clampedModelSeconds + 120 + 10) * 1000` ms. Preparation allowance does not bound startup, refresh or file I/O, and a FAB timeout does not prove Host cancellation or guarantee Host-first completion.
 
 ### 3. Agent failing to run Kusto queries
 
@@ -962,6 +1265,14 @@ see [SDK upgrade workflow](docs/sdk-upgrade-workflow.md) for invocation and limi
 Verify readiness against the current checkout and user request. Evidence and
 this guide do not grant execution authorization.
 
+For live feature testing, select the publication/component route in
+[AGENTS.md's Testing Cycle](AGENTS.md#native-host-mode-selection), not a local
+complete-installer cycle. Published GitHub Release upgrade tests must exercise
+the Extension's own production upgrade feature. This does not grant publication
+permission or replace the separate recovery/fault-test disposable-VM gate below.
+Matching-full-installer repair is explicitly approved user maintenance, not a
+routine feature-test entry.
+
 An approved work package includes reversible source/documentation changes,
 necessary tooling repairs, and its agreed tests without per-command approval.
 Do not expand a pure-Python scope into PowerShell, SDK, browser, installation,
@@ -1023,16 +1334,31 @@ packaged assets, and effect boundaries.
 
 ### 2. Native Host Mode Selection
 
-`dev_switch.py` selects which Native Host future browser launches use by writing
+The user's `switch_prod` refers to the existing `dev_switch.py`, not a new script
+or alias. `dev_switch.py` selects which Native Host future browser launches use by writing
 the real Chrome and Edge Native Messaging keys in HKCU. It is not an isolated
 test environment, does not switch the loaded Extension, and neither runs nor
-verifies the installer. Registry mutation requires applicable authorization.
+verifies the installer. It does not terminate or replace an already-running Host;
+a changed registration is not proof the active connection uses the selected Host.
+Source Dev is not a sandbox and shares the user's DH configuration with Prod.
+Registry mutation requires an applicable work package covering that effect.
+
+For unreleased Extension-only changes, use browser **Load unpacked** on the
+approved local build at this checkout's `extension/dist/`, retaining the installed
+production Host. For unreleased Host-only changes, retain the installed production
+Extension and select the source Host with `python dev_switch.py dev`; Native
+Messaging uses the registry to connect that Extension to Dev. For changes to both,
+combine these two routes. Do not install a local complete package or copy local
+files into the production installation for feature testing. For published GitHub
+Releases, use only the Extension's own real production upgrade feature, not these
+Dev routes or a full installer as a substitute. The authoritative table is in
+[AGENTS.md](AGENTS.md#native-host-mode-selection).
 
 Operator prerequisites, not checks supplied by the tool:
 
 * Run from the intended repository root; Dev paths derive from the current working directory.
 * Verify the target manifest actually exists: `host/host_manifest.json` for Dev or `%LOCALAPPDATA%\DynamicsHelper\manifest.json` for Prod. Inspect its contents and ensure its Host path resolves to the intended existing launcher/executable; verify the Dev runtime or matching installed product separately.
-* Record current Chrome/Edge registration and the intended restoration target before switching. Inspect both keys afterward; a success banner is not proof both writes succeeded.
+* Record current Chrome/Edge registration with read-only `status` before switching. Inspect both keys afterward; a success banner is not proof both writes succeeded. There is no automatic return-to-Prod or return-to-Dev requirement; any subsequent switch must stay within the applicable work package.
 
 The tool checks only Dev manifest existence. Prod merely warns when its manifest
 is absent and still writes registration; neither mode validates the manifest's
