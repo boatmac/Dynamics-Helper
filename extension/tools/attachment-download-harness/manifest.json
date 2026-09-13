@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "DTM 附件下载单次诊断",
+  "version": "1.0.2",
+  "description": "独立诊断工具：仅对已就绪的 DTM 门户执行一次附件点击并观察下载元数据。",
+  "permissions": ["downloads", "scripting", "storage", "activeTab"],
+  "host_permissions": ["https://client.dtmnebula.microsoft.com/*"],
+  "options_ui": {
+    "page": "page.html",
+    "open_in_tab": true
+  }
+}

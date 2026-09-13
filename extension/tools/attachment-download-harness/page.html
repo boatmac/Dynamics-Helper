@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DTM 附件下载单次诊断</title>
+    <link rel="stylesheet" href="page.css">
+    <script type="module" src="page.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">独立诊断工具 · 单次操作</p>
+        <h1>DTM 附件下载观察</h1>
+        <p>仅检查已就绪的门户，并在一次下载点击后观察最多 30 秒。不会登录、处理身份验证或等待身份验证完成。</p>
+      </header>
+
+      <aside aria-labelledby="limits-title">
+        <h2 id="limits-title">开始前请确认</h2>
+        <ul>
+          <li>自行打开并登录 DTM 门户，切换到目标记录的 External 附件列表。</li>
+          <li>仅保留一个匹配门户；不要同时下载同一附件，也不要打开多个诊断页。</li>
+          <li>运行期间不要关闭、刷新此页或导航目标门户，否则观察监听会丢失。</li>
+          <li>每次安装仅允许一次下载点击。尝试标记会保留，刷新后不能重试；没有重置入口。</li>
+        </ul>
+      </aside>
+
+      <form id="form" autocomplete="off">
+        <div class="field">
+          <label for="caseNumber">Case Number</label>
+          <input id="caseNumber" name="caseNumber" type="text" required inputmode="numeric" pattern="[0-9]{16}([0-9]{3})?" minlength="16" maxlength="19" spellcheck="false" aria-describedby="case-help">
+          <small id="case-help">手动输入完整的 16 位案例编号或 19 位任务编号，不截取任务后缀。</small>
+        </div>
+        <div class="field">
+          <label for="workspace">Workspace UUID</label>
+          <input id="workspace" name="workspace" type="text" required pattern="[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}" minlength="36" maxlength="36" spellcheck="false" autocapitalize="none" aria-describedby="workspace-help">
+          <small id="workspace-help">手动输入小写 UUID；不要粘贴完整 URL、令牌或登录信息。</small>
+        </div>
+        <div class="field">
+          <label for="filename">附件文件名</label>
+          <input id="filename" name="filename" type="text" required maxlength="255" spellcheck="false" aria-describedby="filename-help">
+          <small id="filename-help">手动输入列表中的完整文件名；不要输入本地路径。</small>
+        </div>
+        <div class="field">
+          <label for="portal">匹配的门户</label>
+          <div class="portal-row">
+            <select id="portal" name="portal" disabled aria-describedby="portal-help">
+              <option value="">尚未检查</option>
+            </select>
+            <button id="refresh" type="button">刷新门户</button>
+          </div>
+          <small id="portal-help">选择本次目标页面，再按输入身份检查该页面的唯一附件。列表不展示 URL 或客户标题。</small>
+        </div>
+        <div class="actions">
+          <button id="inspect" type="button">Inspect</button>
+          <button id="run" type="button" disabled>Download once</button>
+        </div>
+      </form>
+
+      <section aria-labelledby="result-title">
+        <h2 id="result-title">诊断状态</h2>
+        <output id="status" role="status" aria-live="polite">尚未检查。请先确认控制器已构建并加载。</output>
+        <pre id="result" aria-label="非敏感诊断结果" tabindex="0"></pre>
+        <p class="footnote">MATCH 或 complete 仅表示浏览器下载元数据符合观察条件，不证明下载字节属于该附件，也不能排除同源请求的并发下载。</p>
+      </section>
+    </main>
+  </body>
+</html>

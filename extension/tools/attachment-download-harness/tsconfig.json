@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["page.ts", "observer.ts", "portal.ts", "*.test.ts"],
+  "references": []
+}
