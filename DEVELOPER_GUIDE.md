@@ -123,11 +123,12 @@ improvement is claimed. Running Dev source is not frozen-build qualification.
 ### `host/` (Backend)
 
 * **`dh_native_host.py`**: The core backend script.
-  * **Loop:** Reads messages from `stdin` (from Chrome) and writes to `stdout`.
+  * **Loop:** Runs an asyncio event loop; `start_input_thread` reads Chrome messages from `stdin` in a separate daemon thread. Keep I/O-bound SDK calls async and use Python type hints extensively. Catch main-loop exceptions and return `{"status": "error", "message": "..."}` rather than crashing.
+  * **Stdout:** Reserve it for Native Messaging; use `logging.info()` / `logging.error()`, never diagnostic `print()`. Preserve the post-dispatch stdout redirection described in [Stdout Protection](ARCHITECTURE.md#c-stdout-protection).
   * **Startup Boundary:** The constructor does not import, overwrite, or delete sibling or nested Extension trees. Verified packaged startup permits legacy `.old*` cleanup; product replacement belongs to transactional update or the matching installer.
   * **Frozen Build:** `release_helper.py::pyinstaller_build_command` excludes only the development-time `pydantic.mypy` and `pydantic.v1.mypy` plugins to avoid collecting development dependencies and vendored runtime/data. Keep all 17 required hidden imports; confirm exclusions against actual build graphs, not just command arguments. This is not proof of antivirus compatibility.
-  * **Timeout:** User-configurable timeout for Copilot requests via Options → Analyze Timeout (range 60–3600s, default 1200s). Stored as `extension_preferences.analyze_timeout_seconds` in `config.json`. Live-updated on `update_config`. See `AGENTS.md` § 4.2 for the three-site sync contract.
-  * **Logging:** Uses `_SafeRotatingFileHandler` (5 MB max, 3 backups) writing to `%LOCALAPPDATA%\DynamicsHelper\native_host.log`. Log level is configurable via the Options UI (DEBUG/INFO/WARNING/ERROR) and is applied at startup from `config.json`, then live-updated on `update_config`.
+  * **Timeout:** User-configurable timeout for Copilot requests via Options -> Analyze Timeout (range 60-3600s, default 1200s). Stored as `extension_preferences.analyze_timeout_seconds` in `config.json`. See [Analysis Timeout](#2-analysis-timeout) for clamping and the three-site sync contract.
+  * **Logging:** Uses `_SafeRotatingFileHandler` (5 MB max, 3 backups, about 20 MB total), catching Windows `PermissionError` for locked files. Writes to `%LOCALAPPDATA%\DynamicsHelper\native_host.log` (Windows), or `~/.config/dynamics_helper/` (Linux/Mac). Options selects DEBUG/INFO/WARNING/ERROR, default INFO; apply at startup from `config.json` and live on `update_config`.
   * **Config Loading:** Prioritizes `%LOCALAPPDATA%` config over the local directory.
   * **Session Persistence:** Uses deterministic UUID v5 session IDs (derived from case IDs via `_case_to_session_id()`) for Copilot `/resume` support.
   * **Case ID Validation:** `_extract_case_id()` validates 16-digit case IDs and 19-digit task IDs.
@@ -145,6 +146,10 @@ improvement is claimed. Running Dev source is not frozen-build qualification.
 * Live/unreviewed analysis probes are not ordinary offline unit tests. Their filenames do not authorize discovery or execution; separate source/dependency review and applicable live-effect authorization are required.
 
 ### `%LOCALAPPDATA%\DynamicsHelper\` (User Configuration)
+
+Resolve log/config paths from `os.environ.get("LOCALAPPDATA")` on Windows or
+`~/.config` on Linux/Mac. Use absolute paths; never write user data to the program
+directory (such as Program Files), which requires administrator privileges.
 
 * **`config.json`**: Defines Root Path, Repository ONLY, MCP, Skills, model/performance settings, and mirrored extension preferences. Ships with a minimal default; additional capabilities are user-configured.
   * *Note:* In Production mode, this file is shared between the installed app and the user's overrides.
@@ -522,6 +527,14 @@ Model Context Protocol (MCP) servers follow similar logic:
 
 ## Frontend Patterns
 
+Use small, focused functional components with `useState`, `useEffect` and `useRef`.
+Keep UI state local and persistent preferences in `chrome.storage.local`.
+Use asynchronous `pageReader.ts` for scraping, `await yieldToMain()` in long
+content-script loops, and debounced `MutationObserver` auto-scans.
+Prefer Tailwind `className` utilities for new UI; existing inline styles remain
+appropriate for complex dynamic positioning (`clsx` / `tailwind-merge` are used).
+Use `lucide-react` for all icons.
+
 ### IR SLA Snapshot
 
 The first bounded terminal milestone is implemented in `irSla.ts`,
@@ -649,6 +662,7 @@ Background scans (MutationObserver, `useEffect` on `isOpen`) continuously scrape
 
 ### Telemetry
 
+* **Async failures:** Import `trackEvent` / `trackException` from `../utils/telemetry`; catch async failures with `try/catch` and report safe diagnostics, never raw SDK responses, prompt contents, or credential-bearing URLs/errors.
 * **Anonymous Identity:** Stable UUID generated via `chrome.storage.local` in `serviceWorker.ts`. Do NOT use cookies/localStorage (unavailable in service workers).
 * **Extension Version:** Injected automatically in `trackBackgroundEvent`. Do NOT rely on `item.data` for version stamping.
 * **Querying:** Use `dcount(user_Id)` in App Insights for unique anonymous user counts.
@@ -657,7 +671,7 @@ Background scans (MutationObserver, `useEffect` on `isOpen`) continuously scrape
 
 * **Hook:** `useTranslation()` from `src/utils/i18n.ts` returns a `t(key)` function.
 * **Dictionary:** `src/utils/translations.ts` maps keys to `{ en, zh }` string pairs.
-* **Rule:** All user-facing strings in FAB.tsx and Options.tsx must use `t('key')` lookups. Do not hardcode English strings in UI code.
+* **Rule:** All user-facing strings must use `t('key')` lookups. Add new keys to `translations.ts` first, then reference them with `t()`; do not hardcode English strings in UI code.
 * **Status messages:** Timeout comparisons that use `setStatus(prev => prev === "..." ? "..." : prev)` must capture the translated string into a local variable before the `setTimeout` closure (see the `checkingMsg` / `timedOutMsg` pattern in Options.tsx).
 
 ### Analysis Result Persistence
@@ -1060,6 +1074,18 @@ reload before terminal finalization.
 
 ### 2. "Analysis Timeout"
 
+The Host clamps `extension_preferences.analyze_timeout_seconds` to [60, 3600]
+on every config load and `update_config`; Options clamps `prefs.analyzeTimeoutSeconds`
+on field blur so the displayed and stored values agree. Keep these sites in sync:
+
+* `host/dh_native_host.py::NativeHost.__init__`: initial value 1200 seconds.
+* `host/dh_native_host.py::_get_session_config` + `handle_update_config`: config read and clamp.
+* `extension/src/components/FAB.tsx::handleAnalyze`: safety timeout derivation below.
+
+The Host timeout error must name the configured budget and direct users to
+Options -> Analyze Timeout, not re-authentication. Timeout alone establishes
+neither authentication nor approval failure.
+
 * **Check:** Does the log show `Copilot request timed out after X seconds`?
 * **Meaning:** The analysis exceeded the configured budget; the timeout alone does not establish why it was slow.
 * **Fix:** Adjust Options -> Analyze Timeout (60-3600 seconds, default 1200), rather than editing source. The Host model wait uses that preference; FAB uses `(clampedModelSeconds + 120 + 10) * 1000` ms. Preparation allowance does not bound startup, refresh or file I/O, and a FAB timeout does not prove Host cancellation or guarantee Host-first completion.
@@ -1327,10 +1353,24 @@ See [TODO.md](TODO.md) for current limitations and planned work.
 ### 1. Release Automation
 
 `release_helper.py` manages versions, commits/tags, builds, and release outputs.
-Invocation requires an approved target version and release scope; it is not a
-local-only build entry. `--publish` publishes to GitHub, `--prerelease` marks a Beta,
-and `--notes-file` supplies the release body. See `AGENTS.md` for pre-tag checks,
-packaged assets, and effect boundaries.
+Its `main` entry commits/tags and cleans outputs; never use it for a local-only
+build or artifact cleanup. Invocation requires an approved target version and
+release scope. `--publish` publishes to GitHub, `--prerelease` marks a Beta, and
+`--notes-file` supplies the Markdown release body verbatim instead of the default
+installation template. Cleanup removes only `*.zip` and `DynamicsHelper_v*` staging
+directories from release outputs; notes under `releases/` are preserved.
+
+Within authorized release scope, the controlled alternative uses existing
+`build_host()` and `create_zip()` functions directly, the existing Extension build
+entry, and explicit Git/`gh` operations instead of `main`. Apply the same version,
+pre-tag build, public-asset and integrity checks; defer push/publication until
+verification succeeds, avoiding `main --publish` pushing commits/tags before builds.
+`main` remains available with its documented preflight and authorization; no new
+wrapper, test platform or release-helper change is needed. See
+[Required Packaged Assets](#required-packaged-assets) for the clean-worktree,
+pre-tag build and source/dist public `items.json` byte-identity gate,
+[Package Integrity Boundary](#package-integrity-boundary) for package checks, and
+[AGENTS.md](AGENTS.md) for operational authorization boundaries.
 
 ### 2. Native Host Mode Selection
 

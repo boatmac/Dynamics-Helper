@@ -4,8 +4,28 @@
 
 The Python SDK dependency is pinned in `host/requirements.txt`. Host code imports
 `CopilotClient` from `host/sdk_client.py`, while `RuntimeConnection` comes from
-`copilot`. Explicit external CLI selection uses `RuntimeConnection.for_stdio(path=...)`;
-do not infer compatibility with every CLI version from a successful protocol handshake.
+`copilot`. DH first looks for an installed Copilot CLI and passes its path explicitly
+via `RuntimeConnection.for_stdio(path=...)` with `CopilotClient(connection=...)`.
+Otherwise DH supplies no path: the SDK resolves `COPILOT_CLI_PATH` from the effective
+environment, then uses `ensure_runtime_wrapper()` to reuse or provision its
+versioned runtime bundle. A complete cache can be reused; a missing bundle may
+require a download. Disabled downloads, incomplete cache or provisioning failures
+can prevent startup; neither successful download nor network-free construction
+is guaranteed. The selected CLI/runtime handles model-service communication,
+authentication and tool execution over stdio JSON-RPC.
+
+`_verify_protocol_version()` sends `connect` first and falls back to `ping` only
+for method-not-found (`-32601`) or `Unhandled method connect`. It validates the
+reported version against the SDK's supported protocol range. A successful
+handshake does not establish field-level wire compatibility.
+
+`host/requirements.txt` pins the SDK, not an externally selected CLI; the SDK
+downloader defaults to its own pinned runtime version. Diagnose the actual runtime
+source and version. Field drift can fail startup, session creation or later RPCs
+and events even after a successful handshake. Source inspection does not qualify
+a frozen runtime or prove provisioning works. Do not pin the user's CLI version,
+bundle a CLI binary inside DH, pin its npm install version, or wrap `copilot.cmd`
+to freeze it; the CLI auto-updates independently.
 
 The adapter checks the first post-create options RPC, including instruction
 discovery isolation. Only literal `success is True` confirms the update. Negative,
@@ -25,6 +45,11 @@ confirming upstream enforcement of first-update success and passing the relevant
 regressions without the wrapper. See [upgrade workflow](sdk-upgrade-workflow.md).
 
 ## Headless Permissions
+
+Import permission types from `copilot.session`: `PermissionRequestResult` is
+annotation-only; `PermissionDecisionApproveOnce` and
+`PermissionDecisionUserNotAvailable` are concrete result variants. Never substitute
+the internal `copilot.generated.rpc.PermissionRequestResult`.
 
 Keep the permission handler on every session creation/resumption path. Requests
 with `managed_approval_required` exactly False or None return approve-once. True,

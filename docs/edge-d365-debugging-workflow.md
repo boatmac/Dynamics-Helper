@@ -43,9 +43,12 @@ Installed extension state is separate from source state; do not silently switch 
 7. Opening DevTools, or using an `openDevTools` option, does not establish an endpoint.
    Do not scan ports, profile directories, or other users' browser state.
 
-OpenCode uses an `mcp` wrapper, a named entry with `type: "local"`, and a `command`
-array containing the executable and individual arguments. Do not paste VS Code's
-`servers` configuration or split executable/arguments into its different schema.
+Configure the approved browser MCP server in the coding client actually in use;
+check that client's schema and available tools rather than assuming a particular
+assistant or machine. Moving to a Cloud PC does not establish browser access.
+For OpenCode only, its schema uses an `mcp` wrapper, a named entry with
+`type: "local"`, and a `command` array containing the executable and individual
+arguments. Do not paste VS Code's `servers` configuration into that schema.
 Select a compatible package version explicitly for an approved `npx` invocation;
 neither a global package install nor any coding-agent plugin is required.
 `npx` may download a package, so its use is not exempt from installation approval.
@@ -58,8 +61,8 @@ Use these privacy/category arguments when supported by the selected version:
 - `--no-category-performance`
 - `--no-category-emulation`
 
-Keep existing MCP entries intact. After an approved OpenCode configuration change,
-restart OpenCode into a new session and reopen the correct development checkout.
+Keep existing MCP entries intact. Apply approved configuration changes using the
+current client's reload/restart procedure, then reopen the correct checkout.
 Keep the user's Edge session intact; do not restart or replace their browser.
 Tool initialization and tool listing prove registration, not successful attachment.
 

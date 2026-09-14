@@ -1,5 +1,16 @@
 # Documentation
 
+## Start Here
+
+Use [AGENTS.md](../AGENTS.md) for durable execution boundaries and topic routing,
+then read only the documents relevant to the requested change. This is not a
+mandatory read-all checklist and does not require a particular coding assistant.
+[TODO.md](../TODO.md) owns current work and limitations; release notes and scoped
+investigation records own dated verification evidence. Historical commands,
+approvals and machine paths in those records are not instructions for a new
+machine or session. Start with the unchecked items in TODO; investigation records
+are supporting references, not a prerequisite reading stack.
+
 ## Product And Development
 
 - [Overview and installation](../README.md)
