@@ -445,6 +445,27 @@ class EntrypointDispatchTests(EntrypointFixture, unittest.TestCase):
             ["--install-package", str(self.root)],
         )
 
+    def test_settle_installer_repair_is_frozen_main_only_and_skips_dependencies(self):
+        with mock.patch(
+            "update_service.settle_installer_repair",
+            return_value=True,
+        ) as settle:
+            result = dispatch_early_mode(
+                str(self.main),
+                ["--settle-installer-repair"],
+                source_runtime=False,
+                dependencies_factory=mock.Mock(
+                    side_effect=AssertionError("dependencies constructed")
+                ),
+            )
+        self.assertEqual(result, EXIT_SUCCESS)
+        settle.assert_called_once_with(self.main.parent)
+        self.assert_invalid(
+            self.source,
+            ["--settle-installer-repair"],
+            source_runtime=True,
+        )
+
     def test_complete_update_validates_authority_before_controller(self):
         identity = InitiatingProcessIdentity(77, "win-create-time-123")
         value = validate_complete_update_command(
@@ -495,6 +516,7 @@ class EntrypointDispatchTests(EntrypointFixture, unittest.TestCase):
         invalid = (
             (self.main, ["--register", "extra"]),
             (self.main, ["--install-package"]),
+            (self.main, ["--settle-installer-repair", "extra"]),
             (self.runner, ["--complete-update"]),
             (self.runner, ["--complete-update", TX, "0", "win-create-time-1"]),
             (self.runner, ["--complete-update", "F" * 32, "77", "win-create-time-1"]),
@@ -515,6 +537,7 @@ class EntrypointDispatchTests(EntrypointFixture, unittest.TestCase):
             ["--register"],
             ["--complete-update", TX, "77", "win-create-time-1"],
             ["--install-package", str(self.package_root)],
+            ["--settle-installer-repair"],
             ["--recover-active"],
             ["--recover-update", str(self.paths.journal)],
         )
@@ -523,6 +546,7 @@ class EntrypointDispatchTests(EntrypointFixture, unittest.TestCase):
             "--register": {self.main, self.source},
             "--complete-update": {self.runner},
             "--install-package": {self.main},
+            "--settle-installer-repair": {self.main},
             "--recover-active": {self.runner},
             "--recover-update": {self.runner},
         }

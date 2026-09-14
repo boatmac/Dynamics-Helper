@@ -1,6 +1,8 @@
+import json
 import re
 import tempfile
 import unittest
+from contextlib import chdir
 from pathlib import Path
 
 import release_helper
@@ -11,32 +13,77 @@ from product_info import (
     HostCapabilities,
     get_host_capabilities,
 )
+from test_update_support import current_extension_manifest_bytes
+from update_service import normalize_update_version
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _extension_versions() -> tuple[str, str]:
+    package = json.loads(
+        (REPOSITORY_ROOT / "extension/package.json").read_text(encoding="utf-8")
+    )
+    manifest = json.loads(
+        (REPOSITORY_ROOT / "extension/manifest.json").read_text(encoding="utf-8")
+    )
+    return package["version"], manifest.get("version_name") or manifest["version"]
 
 
 class TestProductInfo(unittest.TestCase):
-    def test_plan_a_capability_contract(self):
-        self.assertEqual(VERSION, "2.0.74-beta.4")
+    def test_transactional_update_capability_contract(self):
         self.assertEqual(REQUIRED_PROTOCOL_CAPABILITIES, ("prompt-scope-v1",))
-        self.assertEqual(PROVIDED_PROTOCOL_CAPABILITIES, ("prompt-scope-v1",))
-        self.assertNotIn("transactional-update-v1", PROVIDED_PROTOCOL_CAPABILITIES)
+        self.assertEqual(
+            PROVIDED_PROTOCOL_CAPABILITIES,
+            ("prompt-scope-v1", "transactional-update-v1"),
+        )
 
     def test_projection_is_frozen_and_exact(self):
         actual = get_host_capabilities()
         self.assertEqual(
             actual,
             HostCapabilities(
-                host_version="2.0.74-beta.4",
+                host_version=VERSION,
                 required=("prompt-scope-v1",),
-                provided=("prompt-scope-v1",),
+                provided=("prompt-scope-v1", "transactional-update-v1"),
             ),
         )
         with self.assertRaises((AttributeError, TypeError)):
             actual.host_version = "changed"
 
-    def test_release_helper_updates_the_product_info_version_source(self):
+    def test_current_extension_manifest_fixture_tracks_the_real_carrier(self):
+        manifest = json.loads(
+            (REPOSITORY_ROOT / "extension/manifest.json").read_text(encoding="utf-8")
+        )
+        expected = {"version": manifest["version"]}
+        if "version_name" in manifest:
+            expected["version_name"] = manifest["version_name"]
+        self.assertEqual(json.loads(current_extension_manifest_bytes()), expected)
+
+    def test_authoritative_version_carriers_agree(self):
+        with tempfile.TemporaryDirectory() as directory, chdir(directory):
+            package_version, extension_version = _extension_versions()
+            manifest = json.loads(
+                (REPOSITORY_ROOT / "extension/manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        self.assertEqual(package_version, VERSION)
+        self.assertEqual(extension_version, VERSION)
+        self.assertEqual(manifest["version"], VERSION.split("-", 1)[0])
+        self.assertEqual(normalize_update_version(VERSION), VERSION)
+
+    def test_release_helper_targets_all_authoritative_version_carriers(self):
         self.assertEqual(
-            release_helper.HOST_FILE.resolve(),
-            Path(release_helper.__file__).resolve().parent / "host" / "product_info.py",
+            release_helper.PACKAGE_JSON.resolve(),
+            REPOSITORY_ROOT / "extension/package.json",
+        )
+        self.assertEqual(
+            release_helper.MANIFEST_JSON.resolve(),
+            REPOSITORY_ROOT / "extension/manifest.json",
+        )
+        self.assertEqual(
+            release_helper.HOST_FILE.resolve(), REPOSITORY_ROOT / "host/product_info.py"
         )
 
     def test_release_helper_does_not_retain_a_stale_host_version_source(self):
@@ -47,7 +94,7 @@ class TestProductInfo(unittest.TestCase):
         self.assertIn('HOST_FILE = HOST_DIR / "product_info.py"', source)
         self.assertEqual(source.count("update_python_version(HOST_FILE, args.version)"), 1)
         self.assertNotRegex(
-            Path("host/dh_native_host.py").read_text(encoding="utf-8"),
+            (REPOSITORY_ROOT / "host/dh_native_host.py").read_text(encoding="utf-8"),
             re.compile(r'^VERSION\s*=\s*["\']', re.MULTILINE),
         )
 
@@ -55,7 +102,7 @@ class TestProductInfo(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "product_info.py"
             target.write_text(
-                Path("host/product_info.py").read_text(encoding="utf-8"),
+                (REPOSITORY_ROOT / "host/product_info.py").read_text(encoding="utf-8"),
                 encoding="utf-8",
             )
             release_helper.update_python_version(target, "9.9.9-test")

@@ -33,6 +33,7 @@ from update_journal import (
     read_active_transaction,
     read_journal,
     resolve_active_journal,
+    settle_after_installer_repair,
     transition,
     write_active_transaction_atomic,
     write_journal_atomic,
@@ -2067,6 +2068,18 @@ class UpdateEngine:
             if journal.phase not in (JournalPhase.COMMITTED, JournalPhase.ROLLED_BACK):
                 raise UpdateStateConflict()
             return self._finalize_terminal_evidence(paths, active_exists)
+
+    def settle_installer_repair(
+        self,
+        transaction_id: str,
+        installed_version: str,
+    ) -> UpdateJournal:
+        tx = parse_transaction_id(transaction_id)
+        with self._mutex_factory(self.install_root):
+            paths, journal, _plan = self._load_authority(tx)
+            settled = settle_after_installer_repair(journal, installed_version)
+            write_journal_atomic(paths.journal, settled)
+            return settled
 
     def _finalize_terminal_evidence(
         self,

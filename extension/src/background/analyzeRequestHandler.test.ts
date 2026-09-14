@@ -68,6 +68,17 @@ describe('handleAnalyzeRequest', () => {
         resetChromeMock()
     })
 
+    it('ARH-ATT-01 rejects a private action before Analyze transport acquisition or persistence', async () => {
+        const inner = validAnalyzePayload()
+        inner.action = 'analyze_with_attachments'
+        const transport = { send: vi.fn() }
+        const acquireAuthorizedTransport = vi.fn(async () => ({ allowed: true as const, transport }))
+        await expect(handleAnalyzeRequest(inner, { acquireAuthorizedTransport })).resolves.toEqual(INVALID_ANALYZE)
+        expect(acquireAuthorizedTransport).not.toHaveBeenCalled()
+        expect(transport.send).not.toHaveBeenCalled()
+        expect(chromeMockSpies.storageSet).not.toHaveBeenCalled()
+    })
+
     it('returns invalid Analyze metadata before transport acquisition, storage, or send', async () => {
         const inner = validAnalyzePayload()
         inner._persist = null
@@ -160,6 +171,49 @@ describe('handleAnalyzeRequest', () => {
         expect(transportA.send).toHaveBeenCalledTimes(1)
         expect(transportB.send).not.toHaveBeenCalled()
         expect(transportA.send.mock.calls[0][0]).toBe(acquiredAction)
+    })
+
+    it('rechecks authorization after persistence immediately before send', async () => {
+        const transport = { send: vi.fn(async () => HOST_SUCCESS) }
+        const authorizeSend = vi.fn(async (_forwarded: unknown) => ({
+            allowed: false as const,
+            response: DENIED,
+        }))
+        const acquireAuthorizedTransport = vi.fn(async () => ({
+            allowed: true as const,
+            transport,
+            authorizeSend,
+        }))
+
+        await expect(handleAnalyzeRequest(validAnalyzePayload(), {
+            acquireAuthorizedTransport,
+        })).resolves.toEqual(DENIED)
+
+        expect(authorizeSend).toHaveBeenCalledTimes(1)
+        expect(authorizeSend).toHaveBeenCalledWith({
+            action: 'analyze_error',
+            requestId: 'request-1',
+            payload: HOST_PAYLOAD,
+        })
+        expect(transport.send).not.toHaveBeenCalled()
+    })
+
+    it('uses the response started inside final authorization without a second send', async () => {
+        const transport = { send: vi.fn(async () => HOST_SUCCESS) }
+        const authorizeSend = vi.fn(async () => ({
+            allowed: true as const,
+            response: Promise.resolve(HOST_SUCCESS),
+        }))
+
+        await expect(handleAnalyzeRequest(validAnalyzePayload(), {
+            acquireAuthorizedTransport: vi.fn(async () => ({
+                allowed: true as const,
+                transport,
+                authorizeSend,
+            })),
+        })).resolves.toEqual({ status: 'success', data: HOST_SUCCESS.data.data })
+
+        expect(transport.send).not.toHaveBeenCalled()
     })
 
     it('fails a disconnected lease without reacquiring or reconnecting', async () => {
@@ -296,6 +350,28 @@ describe('handleAnalyzeRequest', () => {
 describe('guardNonAnalyzeNativeMessage', () => {
     beforeEach(() => {
         resetChromeMock()
+    })
+
+    it('ARH-ATT-02 denies the private action in the captured non-Analyze snapshot', () => {
+        const payload = { analysis: HOST_PAYLOAD, attachments: { files: [] } }
+        expect(guardNonAnalyzeNativeMessage({
+            action: 'analyze_with_attachments', requestId: 'private-request', payload,
+        })).toEqual({ ok: false, response: INVALID_NATIVE })
+
+        let reads = 0
+        const source = new Proxy({ action: 'ping', requestId: 'private-request', payload }, {
+            getOwnPropertyDescriptor(target, key) {
+                if (key === 'action') return {
+                    value: ++reads === 1 ? 'ping' : 'analyze_with_attachments',
+                    enumerable: true, configurable: true,
+                }
+                return Reflect.getOwnPropertyDescriptor(target, key)
+            },
+        })
+        expect(Object.getOwnPropertyDescriptor(source, 'action')?.value).toBe('ping')
+        expect(guardNonAnalyzeNativeMessage(source)).toEqual({ ok: false, response: INVALID_NATIVE })
+        expect(reads).toBe(2)
+        expect(chromeMockSpies.storageSet).not.toHaveBeenCalled()
     })
 
     it('rejects reserved metadata on non-Analyze Native messages', () => {

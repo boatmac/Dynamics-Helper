@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-09-10T12:04:52.9240252Z",
+  "source_workspace": "C:\\MyWorkbench\\Repository\\Dynamics-Helper",
+  "operation": "copy-only",
+  "source_files_deleted": 0,
+  "verified_file_count": 21,
+  "files": [
+    {
+      "path": "host/debug_integration_short.py",
+      "bytes": 3080,
+      "sha256": "5c59dc6ce92b68ed3cf6a7b58e136af8d1eccdee7226f96c3edcdc2123091ea4",
+      "disposition": "archive-copy",
+      "source_before_sha256": "5c59dc6ce92b68ed3cf6a7b58e136af8d1eccdee7226f96c3edcdc2123091ea4",
+      "source_after_sha256": "5c59dc6ce92b68ed3cf6a7b58e136af8d1eccdee7226f96c3edcdc2123091ea4"
+    },
+    {
+      "path": "host/debug_integration_test.py",
+      "bytes": 3095,
+      "sha256": "397d7cbe49686003d899a8cac030351d568eae86fb92198a7919cf93f4e5d705",
+      "disposition": "archive-copy",
+      "source_before_sha256": "397d7cbe49686003d899a8cac030351d568eae86fb92198a7919cf93f4e5d705",
+      "source_after_sha256": "397d7cbe49686003d899a8cac030351d568eae86fb92198a7919cf93f4e5d705"
+    },
+    {
+      "path": "host/find_logs.py",
+      "bytes": 707,
+      "sha256": "4a179c53dd8fbc857a1d73691645fb7122758132b4995fd65afa9e962f4394e4",
+      "disposition": "archive-copy",
+      "source_before_sha256": "4a179c53dd8fbc857a1d73691645fb7122758132b4995fd65afa9e962f4394e4",
+      "source_after_sha256": "4a179c53dd8fbc857a1d73691645fb7122758132b4995fd65afa9e962f4394e4"
+    },
+    {
+      "path": "host/inspect_sdk.py",
+      "bytes": 593,
+      "sha256": "49661691cc827adc6e853bbd3f448561453a754a0b5a9eeef8a82db4af393891",
+      "disposition": "archive-copy",
+      "source_before_sha256": "49661691cc827adc6e853bbd3f448561453a754a0b5a9eeef8a82db4af393891",
+      "source_after_sha256": "49661691cc827adc6e853bbd3f448561453a754a0b5a9eeef8a82db4af393891"
+    },
+    {
+      "path": "host/inspect_sdk_detailed.py",
+      "bytes": 639,
+      "sha256": "022b290b85d4b839f3e5d7735f334cd9e06ac21e6509f0a37e09df62bf9aabb7",
+      "disposition": "archive-copy",
+      "source_before_sha256": "022b290b85d4b839f3e5d7735f334cd9e06ac21e6509f0a37e09df62bf9aabb7",
+      "source_after_sha256": "022b290b85d4b839f3e5d7735f334cd9e06ac21e6509f0a37e09df62bf9aabb7"
+    },
+    {
+      "path": "host/inspect_types.py",
+      "bytes": 440,
+      "sha256": "c5e4a7703a07e085019caaff4ea502a787abbc39b0431394f5f9202f7414d79f",
+      "disposition": "archive-copy",
+      "source_before_sha256": "c5e4a7703a07e085019caaff4ea502a787abbc39b0431394f5f9202f7414d79f",
+      "source_after_sha256": "c5e4a7703a07e085019caaff4ea502a787abbc39b0431394f5f9202f7414d79f"
+    },
+    {
+      "path": "host/repro_subprocess.py",
+      "bytes": 1203,
+      "sha256": "14a30027d9c3c13015cac169a08aab78f2794b186c2ca968df695dc554471fb0",
+      "disposition": "archive-copy",
+      "source_before_sha256": "14a30027d9c3c13015cac169a08aab78f2794b186c2ca968df695dc554471fb0",
+      "source_after_sha256": "14a30027d9c3c13015cac169a08aab78f2794b186c2ca968df695dc554471fb0"
+    },
+    {
+      "path": "host/reproduce_issue.py",
+      "bytes": 2560,
+      "sha256": "0b39031b791b504f8f3d711994cc21c9da84f30d28c8b2cc857f4a504e785532",
+      "disposition": "archive-copy",
+      "source_before_sha256": "0b39031b791b504f8f3d711994cc21c9da84f30d28c8b2cc857f4a504e785532",
+      "source_after_sha256": "0b39031b791b504f8f3d711994cc21c9da84f30d28c8b2cc857f4a504e785532"
+    },
+    {
+      "path": "host/reproduce_user_error.py",
+      "bytes": 4060,
+      "sha256": "7f21580004ca67beb641bd82929e450ec7345f3551b073d15e0e2e467c97e352",
+      "disposition": "archive-copy",
+      "source_before_sha256": "7f21580004ca67beb641bd82929e450ec7345f3551b073d15e0e2e467c97e352",
+      "source_after_sha256": "7f21580004ca67beb641bd82929e450ec7345f3551b073d15e0e2e467c97e352"
+    },
+    {
+      "path": "host/dh_native_host.py.bak",
+      "bytes": 54267,
+      "sha256": "753d45151fc4997ce4fa8efd1109d327e297e03df6b5df137825e6b5903b7d1f",
+      "disposition": "archive-copy",
+      "source_before_sha256": "753d45151fc4997ce4fa8efd1109d327e297e03df6b5df137825e6b5903b7d1f",
+      "source_after_sha256": "753d45151fc4997ce4fa8efd1109d327e297e03df6b5df137825e6b5903b7d1f"
+    },
+    {
+      "path": "host/error_analysis.md",
+      "bytes": 8341,
+      "sha256": "03803dfe66de762da0bf7d66b851bdf6f9af5dfef93156a03e6090a2a8809116",
+      "disposition": "archive-copy",
+      "source_before_sha256": "03803dfe66de762da0bf7d66b851bdf6f9af5dfef93156a03e6090a2a8809116",
+      "source_after_sha256": "03803dfe66de762da0bf7d66b851bdf6f9af5dfef93156a03e6090a2a8809116"
+    },
+    {
+      "path": "host/install_host.bat",
+      "bytes": 2039,
+      "sha256": "3ce838387c0e72e3a079c71939a9aaaacb1656c413451903c9da94289de6ff9e",
+      "disposition": "archive-copy",
+      "source_before_sha256": "3ce838387c0e72e3a079c71939a9aaaacb1656c413451903c9da94289de6ff9e",
+      "source_after_sha256": "3ce838387c0e72e3a079c71939a9aaaacb1656c413451903c9da94289de6ff9e"
+    },
+    {
+      "path": "dyhelper_installer.ps1",
+      "bytes": 11227,
+      "sha256": "9ebd64e0507c8110afd30526227d51562467f284a811057e1ede808d11aff227",
+      "disposition": "archive-copy",
+      "source_before_sha256": "9ebd64e0507c8110afd30526227d51562467f284a811057e1ede808d11aff227",
+      "source_after_sha256": "9ebd64e0507c8110afd30526227d51562467f284a811057e1ede808d11aff227"
+    },
+    {
+      "path": "scripts/maintenance/Prepare-B2CandidateMaintenance.ps1",
+      "bytes": 8297,
+      "sha256": "0d5b7bb94815b71eecb0175c3236d20cd58366ad73788bb767a49897bca47e95",
+      "disposition": "archive-copy",
+      "source_before_sha256": "0d5b7bb94815b71eecb0175c3236d20cd58366ad73788bb767a49897bca47e95",
+      "source_after_sha256": "0d5b7bb94815b71eecb0175c3236d20cd58366ad73788bb767a49897bca47e95"
+    },
+    {
+      "path": "scripts/maintenance/Test-B2CandidateMaintenance.cjs",
+      "bytes": 6939,
+      "sha256": "36680aeeba44ad637a92bf9c90d23b5ac9da4f687cd8ca811eb339c69a10746c",
+      "disposition": "archive-copy",
+      "source_before_sha256": "36680aeeba44ad637a92bf9c90d23b5ac9da4f687cd8ca811eb339c69a10746c",
+      "source_after_sha256": "36680aeeba44ad637a92bf9c90d23b5ac9da4f687cd8ca811eb339c69a10746c"
+    },
+    {
+      "path": "scripts/maintenance/Prepare-Beta3Install.ps1",
+      "bytes": 7386,
+      "sha256": "aae31833d5b87fe3d9e4af03a9089f2f6a813f9738073fba685c37cc522cb66c",
+      "disposition": "archive-copy",
+      "source_before_sha256": "aae31833d5b87fe3d9e4af03a9089f2f6a813f9738073fba685c37cc522cb66c",
+      "source_after_sha256": "aae31833d5b87fe3d9e4af03a9089f2f6a813f9738073fba685c37cc522cb66c"
+    },
+    {
+      "path": "scripts/maintenance/README.md",
+      "bytes": 8007,
+      "sha256": "87e6008b317454669d01649fde3f8c11824a66eccc03f65fe364379ab13d163d",
+      "disposition": "archive-copy",
+      "source_before_sha256": "87e6008b317454669d01649fde3f8c11824a66eccc03f65fe364379ab13d163d",
+      "source_after_sha256": "87e6008b317454669d01649fde3f8c11824a66eccc03f65fe364379ab13d163d"
+    },
+    {
+      "path": "scripts/read-only/Test-OriginalCloudPcUpdateState.ps1",
+      "bytes": 16191,
+      "sha256": "ad48ad3ec4997e1afdc3463eb5858af2dae14bd2b05edcdc37bf97ec90f8fcae",
+      "disposition": "archive-copy",
+      "source_before_sha256": "ad48ad3ec4997e1afdc3463eb5858af2dae14bd2b05edcdc37bf97ec90f8fcae",
+      "source_after_sha256": "ad48ad3ec4997e1afdc3463eb5858af2dae14bd2b05edcdc37bf97ec90f8fcae"
+    },
+    {
+      "path": "scripts/read-only/Test-Beta3InstalledState.ps1",
+      "bytes": 4135,
+      "sha256": "44d79ad6c54622fe732eeb5cae0f60c72b40378c0cdb31de70ebafd98f396fab",
+      "disposition": "archive-copy",
+      "source_before_sha256": "44d79ad6c54622fe732eeb5cae0f60c72b40378c0cdb31de70ebafd98f396fab",
+      "source_after_sha256": "44d79ad6c54622fe732eeb5cae0f60c72b40378c0cdb31de70ebafd98f396fab"
+    },
+    {
+      "path": "scripts/read-only/README.md",
+      "bytes": 9437,
+      "sha256": "c95615e01ed4356aea3f6ffb851096a33abcac4a28133d1d275ef8a8df6dfdb3",
+      "disposition": "archive-copy",
+      "source_before_sha256": "c95615e01ed4356aea3f6ffb851096a33abcac4a28133d1d275ef8a8df6dfdb3",
+      "source_after_sha256": "c95615e01ed4356aea3f6ffb851096a33abcac4a28133d1d275ef8a8df6dfdb3"
+    },
+    {
+      "path": "tests/test-safety-manifest.json",
+      "bytes": 31491,
+      "sha256": "eb82ce23143f52a3940a761f2bccf47d08c7f5a44eae1dd811d5935cdf0cc020",
+      "disposition": "retain-modified",
+      "source_before_sha256": "eb82ce23143f52a3940a761f2bccf47d08c7f5a44eae1dd811d5935cdf0cc020",
+      "source_after_sha256": "eb82ce23143f52a3940a761f2bccf47d08c7f5a44eae1dd811d5935cdf0cc020"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "outcome": "success",
+  "target": "C:\\MyWorkbench\\Repository\\_archive\\Dynamics-Helper-builds-pre-EMU-20260910",
+  "moves": [
+    "build",
+    "dist",
+    "host/__pycache__",
+    "releases/local-20260909-0d1c6ee",
+    "releases/local-2.0.77-20260910",
+    "dh_native_host.spec"
+  ],
+  "files": 184,
+  "bytes": 132139721,
+  "hash": "SHA256: all files matched",
+  "manifestSha256": "f31ab39b561403ca975cc9362e141f3ac3da6c5f59e090de905c20e3ec94d586",
+  "errors": 0,
+  "emptyRemoved": [
+    ".superpowers/sdd",
+    ".superpowers",
+    "docs/superpowers/research",
+    "docs/superpowers/plans",
+    "docs/superpowers/specs",
+    "docs/superpowers"
+  ],
+  "nonemptyPreserved": [],
+  "sourceAbsent": [],
+  "gitStatusUnchanged": true,
+  "gitRefsUnchanged": true,
+  "elapsedSeconds": 45.145
+}

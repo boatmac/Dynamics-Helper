@@ -6,6 +6,7 @@ from pathlib import Path
 from package_archive import validate_staged_package
 from package_manifest import generate_release_documents, write_release_documents
 from product_info import VERSION
+from test_update_support import current_extension_manifest_bytes
 from update_ownership import (
     OwnershipConflictError,
     OwnershipError,
@@ -33,7 +34,7 @@ def make_package(root: Path):
         "host/system_prompt.md": b"new-core",
         "host/register.py": b"new-register",
         "host/config.json": b"{}\n",
-        "extension/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+        "extension/manifest.json": current_extension_manifest_bytes(),
         "extension/assets/app.js": b"new-app",
         "installer_core.ps1": b"installer",
         "install.bat": b"wrapper",

@@ -1,0 +1,12 @@
+{
+  "hash_count": 1,
+  "files": [
+    {
+      "original_relative_path": ".github/prompts/ui-ux-pro-max.prompt.md",
+      "archived_relative_path": ".github/prompts/ui-ux-pro-max.prompt.md",
+      "bytes": 10823,
+      "sha256": "ba9a5511b8fa255eb5a9a01cec5e0606e5f449defa6f74f47f437c9edf905f31",
+      "reason": "fixedmissingdependency"
+    }
+  ]
+}

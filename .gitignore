@@ -49,3 +49,11 @@ build/
 
 # Scratch / probes (B82)
 .scratch/
+
+# Local historical build copies; archive documents remain eligible for tracking.
+/archive/**/*.zip
+/archive/Dynamics-Helper-builds-pre-EMU-20260910/**
+!/archive/Dynamics-Helper-builds-pre-EMU-20260910/README.md
+!/archive/Dynamics-Helper-builds-pre-EMU-20260910/manifest-before.json
+!/archive/Dynamics-Helper-builds-pre-EMU-20260910/operations.jsonl
+!/archive/Dynamics-Helper-builds-pre-EMU-20260910/summary.json

@@ -1,0 +1,45 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: #172b3a;
+  background: #f3f5f5;
+  line-height: 1.65;
+  font-size: 15px;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(100% - 32px, 740px); margin: 36px auto; }
+header { border-top: 4px solid #22666b; padding-top: 20px; }
+h1 { font-size: clamp(1.6rem, 5vw, 2rem); line-height: 1.3; margin: 8px 0 16px; }
+h2 { font-size: 1rem; margin: 0 0 10px; }
+p { margin: 0 0 16px; }
+.eyebrow { color: #365f65; font-size: 0.85rem; font-weight: 600; margin: 0; }
+aside { background: #fff7e5; border-left: 3px solid #9a6818; padding: 18px 22px; margin: 24px 0; }
+ul { padding-left: 20px; margin: 0; }
+li + li { margin-top: 6px; }
+form, section { background: #fff; border: 1px solid #ced9dc; padding: 24px; margin-top: 20px; }
+.field + .field { margin-top: 20px; }
+label { display: block; font-weight: 600; margin-bottom: 6px; }
+input, select, button { font: inherit; }
+input, select { width: 100%; min-width: 0; border: 1px solid #82969d; border-radius: 4px; padding: 9px 11px; background: #fff; color: inherit; }
+small { display: block; color: #52646d; font-size: 0.85rem; margin-top: 6px; }
+.portal-row { display: flex; align-items: stretch; gap: 10px; }
+.portal-row select { flex: 1; }
+button { border: 1px solid #22666b; border-radius: 4px; background: #fff; color: #184e52; padding: 9px 16px; cursor: pointer; white-space: nowrap; }
+button:hover:not(:disabled) { background: #e8f2f1; }
+button:disabled, select:disabled { background: #edf0f1; color: #617079; border-color: #becacf; cursor: not-allowed; opacity: 1; }
+#run:not(:disabled) { background: #22666b; color: #fff; }
+#run:hover:not(:disabled) { background: #184e52; }
+:focus-visible { outline: 3px solid #a95813; outline-offset: 3px; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+output { display: block; overflow-wrap: anywhere; }
+pre { background: #f3f5f5; border: 1px solid #dbe2e4; padding: 14px; min-height: 70px; white-space: pre-wrap; overflow-wrap: anywhere; font: 0.85rem/1.6 Consolas, monospace; }
+.footnote { color: #52646d; font-size: 0.85rem; margin-bottom: 0; }
+
+@media (max-width: 480px) {
+  main { margin: 20px auto; }
+  form, section { padding: 18px; }
+  .portal-row { flex-direction: column; }
+  .actions button { flex: 1; }
+}

@@ -18,6 +18,7 @@ import {
     handleAnalyzeForward,
     isAnalyzePayload,
     normalizeAnalyzeHostOutcome,
+    normalizeNativeHostResponse,
     parseAnalyzeForwardRequest,
     parseAnalyzeForwardResult,
     parseAnalyzePersistContext,
@@ -251,6 +252,26 @@ describe('Analyze request parsing', () => {
         },
     )
 
+    it('copies only absent or exact v1 progress opt-in into the frozen payload', () => {
+        const absent = parseAnalyzeForwardRequest(validAnalyzePayload())
+        expect(absent.ok).toBe(true)
+        if (!absent.ok) throw new Error('Expected legacy payload')
+        expect(Object.hasOwn(absent.forwarded.payload, 'progressVersion')).toBe(false)
+        const present = validAnalyzePayload()
+        ;(present.payload as Record<string, unknown>).progressVersion = 1
+        const parsed = parseAnalyzeForwardRequest(present)
+        expect(parsed.ok).toBe(true)
+        if (!parsed.ok) throw new Error('Expected v1 payload')
+        ;(present.payload as Record<string, unknown>).progressVersion = 2
+        expect(parsed.forwarded.payload.progressVersion).toBe(1)
+        expect(Object.isFrozen(parsed.forwarded.payload)).toBe(true)
+        for (const malformed of [0, 2, true, undefined, null, '1', {}, []]) {
+            const value = validAnalyzePayload()
+            ;(value.payload as Record<string, unknown>).progressVersion = malformed
+            assertInvalid(value)
+        }
+    })
+
     it('accepts only absent or exact true rootPathOverrideProvided', () => {
         const absent = validAnalyzePayload()
         expect(parseAnalyzeForwardRequest(absent).ok).toBe(true)
@@ -280,6 +301,7 @@ describe('Analyze request parsing', () => {
         ['product', 'payload'],
         ['caseNumber', 'payload'],
         ['rootPathOverrideProvided', 'payload'],
+        ['progressVersion', 'payload'],
     ])('rejects a getter for %s %s without invoking it', (key, location) => {
         const getter = vi.fn(() => 'SECRET-GETTER')
         const value = validAnalyzePayload()
@@ -428,6 +450,113 @@ describe('Analyze request parsing', () => {
 describe('strict Analyze Host outcome parsing', () => {
     beforeEach(() => {
         resetChromeMock()
+    })
+
+    it.each(['success', 'error'] as const)('attachment notice normalizes and persists %s separately', async status => {
+        const notice = 'Some attachments were not included.'
+        const inner = status === 'success'
+            ? { status, data: { markdown: '# Report', saved_to: 'report.md', attachment_notice: notice } }
+            : { ...HOST_ERROR.data, attachment_notice: notice }
+        const response = await handleAnalyzeForward(FORWARDED, CTX, {
+            send: async () => ({ status: 'success', data: inner }),
+        })
+        expect(response).toEqual({
+            ...normalizeAnalyzeHostOutcome(status === 'success' ? HOST_SUCCESS : HOST_ERROR),
+            attachmentNotice: notice,
+        })
+        expect(parseAnalyzeForwardResult(response)).toEqual(response)
+        expect(getStorageSnapshot().dh_last_analysis).toMatchObject({
+            status,
+            content: status === 'success' ? '# Report' : 'Host analysis failed',
+            attachmentNotice: notice,
+            ...(status === 'error' ? { errorCode: 'repository_instructions_missing' } : {}),
+        })
+    })
+
+    it('attachment notice ignores malformed fields at Host and forward boundaries without coercion', () => {
+        const convert = vi.fn(() => 'unsafe')
+        const getter = vi.fn(() => 'unsafe')
+        const invalid: unknown[] = [undefined, null, '', ' \n ', [], {}, 1, true, 'x'.repeat(2049),
+            new String('boxed'), { toString: convert, toJSON: convert }, () => 'unsafe']
+        for (const status of ['success', 'error'] as const) {
+            const baseline = normalizeAnalyzeHostOutcome(status === 'success' ? HOST_SUCCESS : HOST_ERROR)
+            const hostFields = status === 'success' ? HOST_SUCCESS.data.data : HOST_ERROR.data
+            const candidates: Record<string, unknown>[] = invalid.map(attachment_notice => ({ ...hostFields, attachment_notice }))
+            candidates.push(Object.defineProperty({ ...hostFields }, 'attachment_notice', { get: getter }))
+            candidates.push(Object.assign(Object.create({ attachment_notice: 'inherited' }), hostFields))
+            for (const fields of candidates) {
+                const inner = status === 'success' ? { status, data: fields } : fields
+                expect(normalizeAnalyzeHostOutcome({ status: 'success', data: inner })).toEqual(baseline)
+            }
+            for (const attachmentNotice of invalid) {
+                expect(parseAnalyzeForwardResult({ ...baseline, attachmentNotice })).toEqual(baseline)
+            }
+            expect(parseAnalyzeForwardResult(Object.defineProperty({ ...baseline }, 'attachmentNotice', { get: getter }))).toEqual(baseline)
+            expect(parseAnalyzeForwardResult(Object.assign(Object.create({ attachmentNotice: 'inherited' }), baseline))).toEqual(baseline)
+        }
+        expect(convert).not.toHaveBeenCalled()
+        expect(getter).not.toHaveBeenCalled()
+    })
+
+    it('attachment notice accepts the 2048-character boundary without trimming product text', () => {
+        const notice = ` ${'x'.repeat(2046)} `
+        expect(parseAnalyzeSuccess({ markdown: '# Report', attachment_notice: notice }))
+            .toEqual({ markdown: '# Report', attachmentNotice: notice })
+        expect(parseAnalyzeForwardResult({ status: 'success', data: { markdown: '# Report' }, attachmentNotice: notice }))
+            .toEqual({ status: 'success', data: { markdown: '# Report' }, attachmentNotice: notice })
+    })
+
+    it('preserves outer attachment notice and known error code through native normalization and Analyze completion', async () => {
+        const notice = 'Some attachments were not included.'
+        const completePersistence = vi.fn(async (): Promise<AnalysisPersistenceWarning[]> => [])
+        const response = await handleAnalyzeForward(FORWARDED, CTX, {
+            send: async () => normalizeNativeHostResponse({
+                status: 'error',
+                error: 'Safe Host fallback',
+                error_code: 'repository_instructions_missing',
+                attachment_notice: notice,
+            }),
+            recordStart: vi.fn(async () => undefined),
+            completePersistence,
+        })
+        expect(response).toEqual({
+            status: 'error',
+            error: 'Safe Host fallback',
+            error_code: 'repository_instructions_missing',
+            attachmentNotice: notice,
+        })
+        expect(completePersistence).toHaveBeenCalledExactlyOnceWith(CTX, {
+            status: 'error',
+            error: 'Safe Host fallback',
+            errorCode: 'repository_instructions_missing',
+            attachmentNotice: notice,
+        }, undefined)
+    })
+
+    it('prefers a valid wire attachment notice then a safe normalized notice without getters or coercion', () => {
+        const base = { status: 'error', error: 'Safe Host fallback' }
+        const notice = 'x'.repeat(2048)
+        const getter = vi.fn(() => 'unsafe')
+        const convert = vi.fn(() => 'unsafe')
+        const invalid: unknown[] = [undefined, null, '', ' \n ', [], {}, true, 1,
+            'x'.repeat(2049), { toString: convert, toJSON: convert }]
+        expect(normalizeAnalyzeHostOutcome({ ...base, attachment_notice: 'Wire notice', attachmentNotice: notice }))
+            .toEqual({ ...base, attachmentNotice: 'Wire notice' })
+        for (const attachment_notice of invalid) {
+            expect(normalizeAnalyzeHostOutcome({ ...base, attachment_notice, attachmentNotice: notice }))
+                .toEqual({ ...base, attachmentNotice: notice })
+        }
+        for (const attachmentNotice of invalid) {
+            expect(normalizeAnalyzeHostOutcome({ ...base, attachmentNotice })).toEqual(base)
+        }
+        expect(normalizeAnalyzeHostOutcome(Object.defineProperty({ ...base, attachmentNotice: notice },
+            'attachment_notice', { get: getter }))).toEqual({ ...base, attachmentNotice: notice })
+        expect(normalizeAnalyzeHostOutcome(Object.defineProperty({ ...base },
+            'attachmentNotice', { get: getter }))).toEqual(base)
+        expect(normalizeAnalyzeHostOutcome(Object.assign(Object.create({ attachmentNotice: notice }), base)))
+            .toEqual(base)
+        expect(getter).not.toHaveBeenCalled()
+        expect(convert).not.toHaveBeenCalled()
     })
 
     it('normalizes an exact Analyze success and drops extra fields', () => {

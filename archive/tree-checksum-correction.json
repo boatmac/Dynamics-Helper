@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "purpose": "Correct canonical tree-digest metadata without changing original restoration records or payloads.",
+  "original_manifest": {
+    "path": "restoration-manifest.json",
+    "sha256": "d5f2dbc846b12d5647dd168c8f40fc90ab26285b7f6479ef63cee5a081c0f2a3"
+  },
+  "original_verification": {
+    "path": "restoration-verification.json",
+    "sha256": "4e16ae357d9676800a66127f6c24ca5b0f0628878386a26ca48669ee35e19037"
+  },
+  "cause": "The original PowerShell Sort-Object relative_path operation did not resolve OrderedDictionary keys as sort properties. Its unstable equal-key ordering is not canonical relative-path sorting. Original per-file hashes remain valid.",
+  "format": "Paths relative to each tree root, using forward slashes; ascending StringComparer.Ordinal order; each record is relative_path + TAB + invariant decimal byte count + TAB + lowercase SHA-256. Encode as UTF-8 without BOM, join with LF, no trailing LF.",
+  "trees": [
+    {
+      "path": "Dynamics-Helper-docs-pre-EMU-20260910",
+      "original_digest": "d7735121d010fc000cc9a72b21888747fc8bbf385f45e29b004e5a6f650cf44f",
+      "canonical_digest": "ac98de42200775cde1bff07b91fd66f917b674e8150cb3833a9ed40adef6e849"
+    },
+    {
+      "path": "Dynamics-Helper-tools-pre-EMU-20260910",
+      "original_digest": "a7882678c96aecbb0d92a86d616e081aa1e1378061e96b7c1f39261ddad8dbf1",
+      "canonical_digest": "4d83e1426242c26a3ce23ba761b40b4a161c89f6456cf4b84779ceb7241416cf"
+    },
+    {
+      "path": "Dynamics-Helper-builds-pre-EMU-20260910",
+      "original_digest": "090fd75332b9534d6c4b97a45e4c9eb7afbce645442dcc12e97bd995207b84da",
+      "canonical_digest": "edb9cdf3a2d0218e9ebd5a97f08af66dab7709e5c642f33434d4a2fccf4254b6"
+    },
+    {
+      "path": "Dynamics-Helper-fresh-start-records-20260910",
+      "original_digest": "9f07c5ad8a09f9dd34bf5f99656551f20ca1fe565bcac3290488f816b872b2d0",
+      "canonical_digest": "7a51795de327656329a112f62f05b2cfe6748e2e0a4ae2c1c7b8c388c2fab49f"
+    },
+    {
+      "path": "committed-specifications-5930759",
+      "original_digest": "a9ed765624e85d817e7bbd079a11d17091048da6a626353dd02ecef0b0650d95",
+      "canonical_digest": "511f0e99224bce246e862ec1dd664fd94c0a0eb2e439095e8f949c652dc562ca"
+    }
+  ],
+  "limits": "Current destination-tree digests were recomputed from actual files and matched per-file manifest records. This correction does not repeat historical before/after observations or certify unrecorded streams, permissions, or intermediate edits. It supersedes only the original tree-level sorting claim and aggregate digests."
+}

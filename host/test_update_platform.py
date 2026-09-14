@@ -425,6 +425,26 @@ class ProcessAdapterTests(unittest.TestCase):
         self.assertEqual(self.api.inherited_handles, (self.api.nul_handle,))
         self.assertEqual(self.api.created.cwd, self.paths.transaction_root.resolve())
 
+    def test_post_create_identity_or_close_failure_is_marked_launched(self):
+        cases = ("identity", "close")
+        for case in cases:
+            self.setUp()
+            with self.subTest(case=case):
+                if case == "identity":
+                    original = self.api.creation_ticks
+                    self.api.creation_ticks = lambda handle: (
+                        0 if handle == 701 else original(handle)
+                    )
+                else:
+                    self.api.close_error_handles.add(702)
+                with self.assertRaises(BaseException) as captured:
+                    self.adapter.launch_detached(
+                        self.runner,
+                        ["--complete-update", TX_ID, "77", "win-create-time-123"],
+                        self.paths.transaction_root,
+                    )
+                self.assertTrue(getattr(captured.exception, "process_launched", False))
+
     def test_launch_rejects_relative_wrong_cwd_or_bad_args(self):
         cases = (
             (Path("runner.exe"), ["--recover-active"], self.paths.transaction_root),

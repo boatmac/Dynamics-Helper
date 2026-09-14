@@ -1,7 +1,10 @@
 import sys
 from pathlib import Path
 
-from update_entrypoint import dispatch_early_mode  # noqa: E402
+from update_entrypoint import (  # noqa: E402
+    MANUAL_RECOVERY_REQUIRED,
+    dispatch_early_mode,
+)
 
 _source_runtime = not bool(getattr(sys, "frozen", False))
 _early_entrypoint = (
@@ -20,6 +23,19 @@ _early_exit = (
 )
 if _early_exit is not None:
     raise SystemExit(_early_exit)
+
+from update_service import launch_startup_recovery_if_needed  # noqa: E402
+
+_startup_recovery = (
+    launch_startup_recovery_if_needed(Path(sys.executable).resolve().parent)
+    if __name__ == "__main__" and not _source_runtime
+    else "continue"
+)
+if _startup_recovery != "continue":
+    if _startup_recovery == "manual-recovery":
+        sys.stderr.buffer.write(MANUAL_RECOVERY_REQUIRED)
+        sys.stderr.buffer.flush()
+    raise SystemExit(0 if _startup_recovery == "recovery-launched" else 30)
 
 # --- STDOUT PROTECTION ---
 # Native Messaging requires STDOUT to be exclusively used for length-prefixed JSON.
@@ -71,6 +87,15 @@ except Exception as e:
     NATIVE_STDOUT = sys.stdout.buffer
 
 import asyncio
+from contextlib import nullcontext
+from contextvars import ContextVar
+from analyze_progress import AnalyzeProgress
+from analysis_attachments import (
+    AttachmentImportOwner,
+    PreparedAttachments,
+    qualify_images,
+    report_notice,
+)
 import copy
 import threading
 from native_messaging import read_native_message, write_message
@@ -88,9 +113,18 @@ import urllib.request
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+from repository_instructions import read_repository_instructions
 
 from install_integrity import InstallationVerification, InstallationVerifier
 from product_info import VERSION, get_host_capabilities
+from update_service import (
+    ActivatedUpdate,
+    PreparedUpdate,
+    UpdateService,
+    UpdateServiceError,
+    normalize_update_version,
+)
+from update_journal import parse_transaction_id
 
 # --- Cross-repo session-id coordination anchor (2026-07-03) ---
 # DH derives each Copilot session id as a deterministic UUIDv5 from the bare
@@ -103,6 +137,25 @@ from product_info import VERSION, get_host_capabilities
 _NAMESPACE_MYCASE = uuid.UUID("816bee4e-8eee-4c0b-ae69-70879d032f4d")
 _WORKING_DIRECTORY_UNSET = object()
 _PAYLOAD_FIELD_UNSET = object()
+_ANALYZE_PROGRESS = ContextVar("analyze_progress", default=None)
+_UPDATE_ACTIONS = frozenset(
+    {
+        "perform_update",
+        "activate_update",
+        "finalize_update_status",
+        "acknowledge_update_finalization",
+    }
+)
+_UPDATE_UNEXPECTED_ERROR_CODES = {
+    "perform_update": "update_prepare_failed",
+    "activate_update": "update_activation_failed",
+    "finalize_update_status": "update_cleanup_failed",
+    "acknowledge_update_finalization": "update_cleanup_failed",
+}
+_INSTALLATION_INTEGRITY_MESSAGE = (
+    "The installed Host and Extension do not match. "
+    "Run the matching full installer."
+)
 
 _PROMPT_ERROR_MESSAGES = {
     "dh_core_prompt_missing": (
@@ -118,7 +171,7 @@ _PROMPT_ERROR_MESSAGES = {
     ),
     "repository_instructions_missing": (
         "Repository Instructions are missing. Add "
-        ".github/copilot-instructions.md under Root Path or disable Repository ONLY."
+        "AGENTS.md or .github/copilot-instructions.md under Root Path, or disable Repository ONLY."
     ),
     "repository_instructions_unreadable": (
         "Repository Instructions cannot be read as UTF-8. "
@@ -275,22 +328,13 @@ logger.info(f"Python Executable: {sys.executable}")
 # Import the SDK from the correct package name we discovered: 'copilot'
 try:
     log_emergency("Attempting to import copilot SDK...")
-    # SDK 1.0.5 import map (upgraded from 0.3.0 on 2026-07-03, see
-    # docs/sdk-upgrade-2026-07-1.0.5.md):
-    #   - SubprocessConfig was REMOVED; the stdio connection is now expressed
-    #     via `RuntimeConnection.for_stdio(path=...)`.
-    #   - PermissionRequestResult is now a Union type (annotation-only, not a
-    #     constructor). The headless auto-approve handler returns the concrete
-    #     `PermissionDecisionApproveOnce()` variant instead.
-    #   - PreToolUseHookOutput stays a TypedDict accepting permissionDecision.
-    # WARNING: `copilot.generated.rpc.PermissionRequestResult` is a different
-    # internal RPC type (success: bool); always import from `copilot.session`.
-    from copilot import CopilotClient, RuntimeConnection
+    from copilot import RuntimeConnection
     from copilot._jsonrpc import ProcessExitedError
-    from copilot.session import (
-        PermissionRequestResult,
-        PreToolUseHookOutput,
-        PermissionDecisionApproveOnce,
+    from copilot.session import PermissionRequestResult
+    from sdk_client import (
+        CopilotClient,
+        SessionOptionsPatchError,
+        headless_permission_handler,
     )
 
     # NOTE (2026-07-03): the PingResponse ISO-timestamp monkey-patch shim
@@ -300,7 +344,7 @@ try:
     # from_datetime()). Verified 2026-07-03 by a live client.start() on
     # clean 1.0.5 + CLI 1.0.69 with no shim — handshake succeeded, no
     # ValueError. Do not reintroduce the shim unless a future SDK/CLI pair
-    # regresses; see docs/sdk-upgrade-2026-07-1.0.5.md § 4.1.
+    # regresses; see docs/sdk-integration.md.
 
     logger.info("Successfully imported copilot SDK.")
     log_emergency("Successfully imported copilot SDK.")
@@ -418,8 +462,78 @@ def _version_gt(remote_tag: str, local_tag: str) -> bool:
     return _compare_prerelease(r_pre, l_pre) > 0
 
 
+def _direct_https_zip_url(value: object) -> str | None:
+    if type(value) is not str or not value:
+        return None
+    try:
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or bool(parsed.fragment)
+        or not parsed.path.lower().endswith(".zip")
+    ):
+        return None
+    return value
+
+
+def _select_update_candidate(releases: object) -> dict[str, object] | None:
+    if type(releases) is not list:
+        return None
+    best: tuple[str, dict[str, object]] | None = None
+    for release in releases:
+        if type(release) is not dict or set(release) < {
+            "tag_name",
+            "prerelease",
+            "assets",
+        }:
+            continue
+        tag = release.get("tag_name")
+        prerelease = release.get("prerelease")
+        assets = release.get("assets")
+        if type(tag) is not str or type(prerelease) is not bool or type(assets) is not list:
+            continue
+        try:
+            version = normalize_update_version(tag)
+        except ValueError:
+            continue
+        if not _version_gt(version, VERSION):
+            continue
+        zip_urls = []
+        malformed_asset = False
+        for asset in assets:
+            if type(asset) is not dict:
+                malformed_asset = True
+                break
+            name = asset.get("name")
+            if type(name) is not str or not name.lower().endswith(".zip"):
+                continue
+            direct = _direct_https_zip_url(asset.get("browser_download_url"))
+            if direct is None:
+                malformed_asset = True
+                break
+            zip_urls.append(direct)
+        if malformed_asset or len(zip_urls) != 1:
+            continue
+        candidate = {
+            "version": version,
+            "url": zip_urls[0],
+            "is_prerelease": prerelease,
+        }
+        if best is None or _version_gt(version, best[0]):
+            best = (version, candidate)
+    return None if best is None else best[1]
+
+
 class NativeHost:
     def __init__(self):
+        self._source_runtime = _source_runtime
         self.input_queue = asyncio.Queue()
         self.client = None
         self.session = None
@@ -427,6 +541,7 @@ class NativeHost:
         self.loop = None
         self.scrubber = PiiScrubber()
         self.current_request_id = None  # Track current request for progress updates
+        self._attachment_import = AttachmentImportOwner()
         self.root_path = None  # Store root path from config
         self.last_update_check = 0  # Track last update check time
         # C2b-lite: timeout is user-configurable via Options
@@ -447,6 +562,28 @@ class NativeHost:
         self._installation_verifier = InstallationVerifier(
             Path(self._get_install_dir())
         )
+        try:
+            startup_verification = self._installation_verifier.verify()
+        except Exception:
+            startup_verification = InstallationVerification(
+                mode="packaged" if not self._source_runtime else "development",
+                integrity="failed",
+                error_code="installation_integrity_failed",
+            )
+        self._installation_ready = (
+            self._source_runtime
+            or (
+                startup_verification.mode == "packaged"
+                and startup_verification.integrity == "verified"
+                and startup_verification.host_version == VERSION
+                and startup_verification.extension_version == VERSION
+            )
+        )
+        self._update_service = (
+            UpdateService(Path(self._get_install_dir()))
+            if not self._source_runtime and self._installation_ready
+            else None
+        )
 
         # Log startup location
         logger.info(
@@ -454,116 +591,14 @@ class NativeHost:
         )
         logger.info(f"User Data Dir: {USER_DATA_DIR}")
 
-        # Cleanup old version if exists (Atomic Update)
-        try:
-            from updater import Updater
+        if not self._source_runtime and self._installation_ready:
+            # Legacy cleanup is safe only after the complete packaged install verifies.
+            try:
+                from updater import Updater
 
-            Updater.cleanup_old_version(sys.executable)
-        except Exception as e:
-            logger.error(f"Failed to cleanup old version: {e}")
-
-        # Fix for v2.0.45 Updater Bug (Wrong Directory) & Nested Extension
-        # v2.0.45 erroneously extracted extension to ../extension (AppData/Local/extension)
-        # v2.0.46 migration attempt might have created extension/extension if folder was locked
-        try:
-            # Determine directory of the running executable/script
-            if getattr(sys, "frozen", False):
-                base_dir = os.path.dirname(sys.executable)
-                is_prod = True
-            else:
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-                is_prod = False
-
-            if is_prod:
-                # The "Wrong" location defined by v2.0.45 logic (Parent/extension)
-                wrong_ext_dir = os.path.join(os.path.dirname(base_dir), "extension")
-                # The "Right" location (Current/extension)
-                right_ext_dir = os.path.join(base_dir, "extension")
-
-                # 1. FIX NESTED EXTENSION (caused by failed migration in v2.0.46)
-                # Check for DynamicsHelper/extension/extension/manifest.json
-                nested_ext_dir = os.path.join(right_ext_dir, "extension")
-                nested_manifest = os.path.join(nested_ext_dir, "manifest.json")
-
-                if os.path.exists(nested_manifest):
-                    logger.info(
-                        f"Detected nested extension at {nested_ext_dir}. Attempting repair..."
-                    )
-                    # We need to move content from extension/extension/* to extension/*
-                    # But extension/* contains locked files (maybe).
-                    # Actually, if extension/extension exists, it means the previous move succeeded
-                    # in moving the FOLDER into the FOLDER.
-                    # We should just move the contents UP one level.
-
-                    # Strategy: Rename current 'extension' to 'extension_locked' (if possible),
-                    # then move 'extension_locked/extension' to 'extension'.
-                    # If rename fails, we are stuck until Chrome closes.
-
-                    try:
-                        # Scan nested dir and copy/move files up
-                        for item in os.listdir(nested_ext_dir):
-                            src = os.path.join(nested_ext_dir, item)
-                            dst = os.path.join(right_ext_dir, item)
-                            try:
-                                if os.path.isdir(src):
-                                    # Recursive copy/overwrite
-                                    shutil.copytree(
-                                        src, dst, dirs_exist_ok=True
-                                    )  # Python 3.8+
-                                    shutil.rmtree(src)  # Remove source after copy
-                                else:
-                                    shutil.copy2(src, dst)  # Overwrite
-                                    os.remove(src)
-                            except Exception as ex:
-                                logger.warning(f"Failed to move {item} up: {ex}")
-
-                        # Clean up the empty nested folder
-                        try:
-                            os.rmdir(nested_ext_dir)
-                            logger.info("Nested extension repair complete.")
-                        except:
-                            pass
-
-                    except Exception as e:
-                        logger.error(f"Nested extension repair failed: {e}")
-
-                # 2. FIX MISPLACED EXTENSION (v2.0.45 bug)
-                # Only migrate if the wrong directory exists and contains a manifest
-                if os.path.exists(os.path.join(wrong_ext_dir, "manifest.json")):
-                    logger.info(
-                        f"Detected misplaced extension files at {wrong_ext_dir}. Migrating to {right_ext_dir}..."
-                    )
-
-                    # Robust Migration:
-                    # Do NOT use rmtree blindly. If it fails, move() creates nested folders.
-                    if os.path.exists(right_ext_dir):
-                        # Try to copy/overwrite instead of delete/move
-                        try:
-                            shutil.copytree(
-                                wrong_ext_dir, right_ext_dir, dirs_exist_ok=True
-                            )
-                            logger.info(
-                                "Extension files updated via copytree (overwrite)."
-                            )
-
-                            # Now safe to remove the wrong dir
-                            shutil.rmtree(wrong_ext_dir)
-                            logger.info("Cleaned up misplaced extension folder.")
-
-                        except Exception as e:
-                            logger.error(
-                                f"Failed to overwrite extension files (likely locked by Chrome): {e}"
-                            )
-                            # If we can't overwrite, we leave the 'wrong' folder there
-                            # hoping the next restart (when Chrome is closed) might succeed?
-                            # Or we just accept we can't update without Chrome closing.
-                    else:
-                        # Destination doesn't exist, safe to move
-                        shutil.move(wrong_ext_dir, right_ext_dir)
-                        logger.info("Extension migration successful (move).")
-
-        except Exception as e:
-            logger.error(f"Extension migration/repair failed: {e}")
+                Updater.cleanup_old_version(sys.executable)
+            except Exception as e:
+                logger.error("Failed to cleanup old version (%s).", type(e).__name__)
 
     @staticmethod
     def _normalize_root_path(root_path: str | None) -> str | None:
@@ -689,6 +724,15 @@ class NativeHost:
             digest.update(part)
         return f"v1:{digest.hexdigest()}"
 
+    @staticmethod
+    def _read_repository_instructions(effective_root: str) -> tuple[bytes, str]:
+        try:
+            return read_repository_instructions(effective_root)
+        except FileNotFoundError as error:
+            raise PromptSourceError("repository_instructions_missing") from error
+        except (OSError, UnicodeDecodeError) as error:
+            raise PromptSourceError("repository_instructions_unreadable") from error
+
     def _resolve_prompt_snapshot(
         self,
         effective_root: str | None,
@@ -701,20 +745,13 @@ class NativeHost:
             unreadable_error_code="dh_core_prompt_unreadable",
         )
         if mode == "repository-only":
-            selected_path = os.path.join(
-                effective_root or "", ".github", "copilot-instructions.md"
-            )
-            missing_code = "repository_instructions_missing"
-            unreadable_code = "repository_instructions_unreadable"
+            selected_bytes, selected_text = self._read_repository_instructions(effective_root or "")
         else:
-            selected_path = os.path.join(USER_DATA_DIR, "copilot-instructions.md")
-            missing_code = None
-            unreadable_code = "dh_specific_instructions_unreadable"
-        selected_bytes, selected_text = self._read_prompt_source(
-            selected_path,
-            missing_error_code=missing_code,
-            unreadable_error_code=unreadable_code,
-        )
+            selected_bytes, selected_text = self._read_prompt_source(
+                os.path.join(USER_DATA_DIR, "copilot-instructions.md"),
+                missing_error_code=None,
+                unreadable_error_code="dh_specific_instructions_unreadable",
+            )
         return PromptSnapshot(
             mode=mode,
             effective_root=effective_root,
@@ -768,21 +805,17 @@ class NativeHost:
         selected_error: PromptSourceError | None = None
         if effective_root and use_workspace_only:
             try:
-                self._read_prompt_source(
-                    os.path.join(
-                        effective_root,
-                        ".github",
-                        "copilot-instructions.md",
-                    ),
-                    missing_error_code="repository_instructions_missing",
-                    unreadable_error_code="repository_instructions_unreadable",
-                )
+                self._read_repository_instructions(effective_root)
             except PromptSourceError as error:
                 selected_error = error
 
         if status["status"] == "ok" and selected_error is not None:
             status = selected_error.to_result()
-        if status["status"] == "ok" and dh_error is not None:
+        if (
+            status["status"] == "ok"
+            and not (effective_root and use_workspace_only)
+            and dh_error is not None
+        ):
             status = dh_error.to_result()
         if status["status"] == "ok" and user_prompt_error is not None:
             status = user_prompt_error.to_result()
@@ -834,6 +867,14 @@ class NativeHost:
         which GitHub server-side filters to stable only.
         """
         try:
+            if not self._source_runtime and not self._installation_ready:
+                self.send_message(
+                    {
+                        "action": "update_error",
+                        "payload": {"error": _INSTALLATION_INTEGRITY_MESSAGE},
+                    }
+                )
+                return
             now = time.time()
             if not force and (now - self.last_update_check) < 3600:
                 return
@@ -886,20 +927,8 @@ class NativeHost:
             else:
                 candidates = [data]
 
-            # Pick the highest semver-greater release.
-            best_release = None
-            best_tag = None
-            for release in candidates:
-                tag = release.get("tag_name", "")
-                if not tag:
-                    continue
-                if not _version_gt(tag, VERSION):
-                    continue
-                if best_tag is None or _version_gt(tag, best_tag):
-                    best_tag = tag
-                    best_release = release
-
-            if best_release is None:
+            selected = _select_update_candidate(candidates)
+            if selected is None:
                 logger.info(
                     f"No update available (Local: {VERSION}, "
                     f"checked {len(candidates)} release(s))"
@@ -913,29 +942,12 @@ class NativeHost:
                     )
                 return
 
-            logger.info(f"Update available: {best_tag}")
-
-            # Find the .zip asset URL on the chosen release.
-            assets = best_release.get("assets", [])
-            zip_url = None
-            for asset in assets:
-                if asset.get("name", "").endswith(".zip"):
-                    zip_url = asset.get("browser_download_url")
-                    break
-
-            final_url = zip_url if zip_url else best_release.get(
-                "html_url",
-                "https://github.com/boatmac/Dynamics-Helper/releases",
-            )
+            logger.info("A newer validated update package is available.")
 
             self.send_message(
                 {
                     "action": "update_available",
-                    "payload": {
-                        "version": best_tag,
-                        "url": final_url,
-                        "is_prerelease": bool(best_release.get("prerelease", False)),
-                    },
+                    "payload": selected,
                 }
             )
 
@@ -1047,7 +1059,7 @@ class NativeHost:
     #
     # DO NOT log plaintext URLs inside these methods.
     #
-    # Spec: docs/superpowers/specs/2026-05-25-team-manifest-url-encryption-design.md
+    # Spec: docs/specs/team-manifest-url-encryption.md
 
     def _decrypt_secrets_in_memory(self, config: dict) -> None:
         """Replace on-disk encrypted secret fields with in-memory plaintext.
@@ -1338,8 +1350,8 @@ class NativeHost:
         session_config["_effective_root"] = current_root
         session_config["_use_workspace_only"] = bool(use_workspace_only)
 
-        # Model / performance selection (spec 2026-07-03-configurable-model-
-        # performance). Surface as TOP-LEVEL session_config keys (like
+        # Model / performance selection (docs/specs/model-performance-configuration.md).
+        # Surface as TOP-LEVEL session_config keys (like
         # working_directory) so _refresh_session can add them to sdk_kwargs.
         # Empty / absent / invalid → key left empty → session inherits the
         # Copilot CLI's own default (~/.copilot/settings.json). Validate the
@@ -1393,7 +1405,7 @@ class NativeHost:
             # The user's mcp.json may still carry the legacy values; the SDK
             # silently accepts them on 0.3.0 but behaviour is undefined.
             # Migrate in-memory only — do NOT mutate the user's config file.
-            # See docs/sdk-upgrade-2026-05-0.3.0.md § 7 (B-4).
+            # See docs/sdk-integration.md.
             _MCP_TYPE_MIGRATION = {"local": "stdio", "remote": "http"}
             remapped = []
             for srv_name, srv_cfg in mcp_servers.items():
@@ -1408,8 +1420,7 @@ class NativeHost:
                     logger.warning(
                         "MCP server '%s' uses legacy type=%r; remapping "
                         "in-memory to %r. Update your mcp.json to silence "
-                        "this warning. See docs/sdk-upgrade-2026-05-0.3.0.md "
-                        "(B-4).",
+                        "this warning. See docs/sdk-integration.md.",
                         srv_name, old_type, new_type,
                     )
             session_config["mcp_servers"] = mcp_servers
@@ -1460,26 +1471,8 @@ class NativeHost:
         return session_config
 
     def _permission_handler(self, request, context) -> PermissionRequestResult:
-        """
-        Auto-approves permissions to prevent headless hangs.
-        Fallback safety net — if pre_tool_use hook doesn't catch it.
-        """
-        logger.info("Permission requested (fallback handler); auto-approving.")
-        # SDK 1.0.5: PermissionRequestResult is a Union (annotation-only);
-        # the concrete approval variant is PermissionDecisionApproveOnce().
-        # (0.3.0 used PermissionRequestResult(kind="approve-once"), removed
-        # in 1.0.5 — see docs/sdk-upgrade-2026-07-1.0.5.md § 3 B2.)
-        return PermissionDecisionApproveOnce()
-
-    @staticmethod
-    def _pre_tool_use_hook(hook_input, context) -> PreToolUseHookOutput:
-        """
-        Auto-approves all tool calls BEFORE they reach the permission request stage.
-        This eliminates the permission request overhead entirely, improving speed.
-        The _permission_handler above serves as a fallback safety net.
-        """
-        logger.info("Pre-tool-use hook: auto-allowing tool request.")
-        return PreToolUseHookOutput(permissionDecision="allow")
+        """Resolve headless permissions without approving managed requests."""
+        return headless_permission_handler(request, context)
 
     @staticmethod
     def _log_session_observability(session, origin: str) -> None:
@@ -1489,7 +1482,7 @@ class NativeHost:
         disabling it: automatic background compaction lets a long, complex
         analysis keep going past the context ceiling instead of failing —
         directly relevant to the C2b-lite long-analysis-timeout work
-        (docs/sdk-upgrade-2026-07-1.0.5.md § 4.2). This log makes the
+        (docs/sdk-integration.md). This log makes the
         adoption observable rather than blind: it surfaces the session-state
         workspace path (where compaction checkpoints + persisted state live)
         so beta testing can confirm behaviour and spot runaway disk use.
@@ -1603,6 +1596,20 @@ class NativeHost:
         logger.error(summary)
         return summary
 
+    async def _reject_session_options(self) -> bool:
+        self.last_session_error = "Copilot session options patch failed."
+        logger.error(self.last_session_error)
+        rejected_client = self.client
+        self._invalidate_active_session(clear_client=True)
+        if rejected_client is not None:
+            try:
+                await asyncio.wait_for(rejected_client.stop(), timeout=10)
+            except Exception:
+                logger.warning(
+                    "Copilot client options cleanup failed; process exit is unconfirmed."
+                )
+        return False
+
     async def _refresh_session(
         self,
         session_id: str | None = None,
@@ -1610,6 +1617,7 @@ class NativeHost:
         working_directory_override=_WORKING_DIRECTORY_UNSET,
         session_config: dict | None = None,
         prompt_snapshot: PromptSnapshot | None = None,
+        progress: AnalyzeProgress | None = None,
     ) -> bool:
         """Re-creates or resumes a Copilot session.
 
@@ -1627,6 +1635,8 @@ class NativeHost:
         # generic "session/client not initialized".
         self.last_session_error = None
         self.last_prompt_source_error = None
+
+        phase = progress.phase if progress is not None else lambda *args, **kwargs: None
 
         try:
             full_config = session_config or self._get_session_config(
@@ -1689,7 +1699,6 @@ class NativeHost:
         # to the SDK, which now uses strict keyword-only arguments.
         sdk_kwargs = {
             "on_permission_request": self._permission_handler,
-            "hooks": {"on_pre_tool_use": self._pre_tool_use_hook},
             "skip_custom_instructions": True,
             "system_message": self._build_system_message(snapshot, session_id),
         }
@@ -1702,7 +1711,7 @@ class NativeHost:
         if "skill_directories" in full_config:
             sdk_kwargs["skill_directories"] = full_config["skill_directories"]
 
-        # Model / performance (spec 2026-07-03-configurable-model-performance).
+        # Model / performance (docs/specs/model-performance-configuration.md).
         # Only pass when set to a non-empty value — empty means "inherit the
         # Copilot CLI's own default from ~/.copilot/settings.json" (the prior
         # behaviour). _get_session_config has already validated the values.
@@ -1717,6 +1726,7 @@ class NativeHost:
 
         # If a session_id is provided, try to resume an existing session first
         if session_id:
+            phase("session_resuming", "running")
             try:
                 self.session = await self.client.resume_session(
                     session_id, **sdk_kwargs
@@ -1735,15 +1745,28 @@ class NativeHost:
                     f"Resumed existing session: {session_id} (Server ID: {self.current_session_id})"
                 )
                 self._log_session_observability(self.session, "resumed")
+                phase("session_resuming", "succeeded")
+                if progress is not None:
+                    progress.session_ready(self.session)
                 return True
+            except SessionOptionsPatchError:
+                return await self._reject_session_options()
+            except asyncio.CancelledError:
+                phase("session_resuming", "failed")
+                self._invalidate_active_session(clear_client=True)
+                logger.warning("Copilot session refresh cancelled; cleanup is unconfirmed.")
+                raise
             except AttributeError:
+                phase("session_resuming", "unavailable")
                 logger.info(
                     "SDK does not support resume_session. Will create new session."
                 )
             except (OSError, ProcessExitedError) as error:
+                phase("session_resuming", "failed")
                 transport_error = error
                 self._safe_sdk_error("resume Copilot session transport", error)
             except Exception as error:
+                phase("session_resuming", "failed")
                 self._safe_sdk_error("resume Copilot session", error)
 
         try:
@@ -1759,6 +1782,7 @@ class NativeHost:
             safe_keys = {k: type(v).__name__ for k, v in sdk_kwargs.items()}
             logger.info(f"create_session config keys: {safe_keys}")
 
+            phase("session_creating", "running")
             self.session = await self.client.create_session(**sdk_kwargs)
             # Capture the server-returned session ID
             server_session_id = getattr(self.session, "session_id", None)
@@ -1782,8 +1806,21 @@ class NativeHost:
                     f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
             )
             self._log_session_observability(self.session, "created")
+            phase("session_creating", "succeeded")
+            if progress is not None:
+                progress.session_ready(self.session)
             return True
+        except SessionOptionsPatchError:
+            return await self._reject_session_options()
+        except asyncio.CancelledError:
+            phase("session_creating", "failed")
+            self._invalidate_active_session(clear_client=True)
+            logger.warning("Copilot session refresh cancelled; cleanup is unconfirmed.")
+            raise
         except (OSError, ProcessExitedError) as error:
+            if transport_error is None:
+                phase("session_creating", "failed")
+            phase("session_reconnecting", "running")
             self._safe_sdk_error("create Copilot session transport", error)
             broken_client = self.client
             if broken_client:
@@ -1810,7 +1847,9 @@ class NativeHost:
                 )
                 await self.client.start()
                 logger.info("Client re-initialized after transport failure.")
+                phase("session_reconnecting", "succeeded")
             except Exception as retry_err:
+                phase("session_reconnecting", "failed")
                 self.last_session_error = self._safe_sdk_error(
                     "restart Copilot client", retry_err
                 )
@@ -1818,6 +1857,7 @@ class NativeHost:
                 return False
 
             try:
+                phase("session_creating", "running")
                 self.session = await self.client.create_session(**sdk_kwargs)
                 server_session_id = getattr(self.session, "session_id", None)
                 self.current_session_id = server_session_id
@@ -1831,8 +1871,19 @@ class NativeHost:
                 f"Session Name: {self.current_session_id}, Case: {self.current_case_id or 'generic'}"
                 )
                 self._log_session_observability(self.session, "created-after-retry")
+                phase("session_creating", "succeeded")
+                if progress is not None:
+                    progress.session_ready(self.session)
                 return True
+            except SessionOptionsPatchError:
+                return await self._reject_session_options()
+            except asyncio.CancelledError:
+                phase("session_creating", "failed")
+                self._invalidate_active_session(clear_client=True)
+                logger.warning("Copilot session refresh cancelled; cleanup is unconfirmed.")
+                raise
             except (OSError, ProcessExitedError) as retry_err:
+                phase("session_creating", "failed")
                 self.last_session_error = self._safe_sdk_error(
                     "retry Copilot session", retry_err
                 )
@@ -1845,12 +1896,14 @@ class NativeHost:
                 self._invalidate_active_session(clear_client=True)
                 return False
             except Exception as retry_err:
+                phase("session_creating", "failed")
                 self.last_session_error = self._safe_sdk_error(
                     "retry Copilot session", retry_err
                 )
                 self._invalidate_active_session()
                 return False
         except Exception as error:
+            phase("session_creating", "failed")
             self.last_session_error = self._safe_sdk_error(
                 "create Copilot session", error
             )
@@ -2087,7 +2140,7 @@ class NativeHost:
                 self.running = False
                 break
 
-    def send_message(self, message_content):
+    def send_message(self, message_content, *, raise_on_error=False):
         """Writes a message to stdout in Native Messaging format."""
         try:
             logger.debug(
@@ -2105,9 +2158,98 @@ class NativeHost:
             write_message(output_stream, message_content)
         except Exception as e:
             logger.error("Error sending Native Messaging response (%s).", type(e).__name__)
+            if raise_on_error:
+                raise
+
+    def _send_message_or_raise(self, message_content):
+        self.send_message(message_content, raise_on_error=True)
+
+    @staticmethod
+    def _exact_update_payload(message, action):
+        if type(message) is not dict or set(message) != {
+            "requestId",
+            "action",
+            "payload",
+        }:
+            raise UpdateServiceError("invalid_update_request")
+        if type(message.get("requestId")) is not str or message.get("action") != action:
+            raise UpdateServiceError("invalid_update_request")
+        payload = message.get("payload")
+        expected = (
+            {"url", "transactionId", "targetVersion"}
+            if action == "perform_update"
+            else {"transactionId"}
+        )
+        if type(payload) is not dict or set(payload) != expected:
+            raise UpdateServiceError("invalid_update_request")
+        if any(type(payload[key]) is not str or not payload[key] for key in expected):
+            raise UpdateServiceError("invalid_update_request")
+        try:
+            parse_transaction_id(payload["transactionId"])
+            if action == "perform_update":
+                if normalize_update_version(payload["targetVersion"]) != payload["targetVersion"]:
+                    raise ValueError("noncanonical target version")
+                if _direct_https_zip_url(payload["url"]) is None:
+                    raise ValueError("invalid update URL")
+        except Exception as error:
+            raise UpdateServiceError("invalid_update_request") from error
+        return payload
+
+    @staticmethod
+    def _update_error_response(request_id, error):
+        return {
+            "requestId": request_id,
+            "status": "error",
+            "error_code": error.error_code,
+            "error": str(error),
+        }
+
+    async def _run_update_action(self, action, payload):
+        service = self._update_service
+        if service is None:
+            raise UpdateServiceError("installation_integrity_failed")
+        loop = getattr(self, "loop", None) or asyncio.get_running_loop()
+        if action == "perform_update":
+            result = await loop.run_in_executor(
+                None,
+                service.prepare,
+                payload["url"],
+                payload["transactionId"],
+                payload["targetVersion"],
+            )
+            if type(result) is not PreparedUpdate:
+                raise UpdateServiceError("update_prepare_failed")
+            return {
+                "state": "update_prepared",
+                "transactionId": result.transaction_id,
+                "targetVersion": result.target_version,
+                "priorVersion": result.prior_version,
+            }
+        if action == "activate_update":
+            result = await loop.run_in_executor(None, service.activate, payload["transactionId"])
+            if type(result) is not ActivatedUpdate:
+                raise UpdateServiceError("update_activation_failed")
+            return {
+                "state": "update_activated",
+                "transactionId": result.transaction_id,
+            }
+        if action == "finalize_update_status":
+            result = await loop.run_in_executor(None, service.finalize, payload["transactionId"])
+            return result.to_dict()
+        acknowledged = await loop.run_in_executor(
+            None, service.acknowledge, payload["transactionId"]
+        )
+        if acknowledged is not True:
+            raise UpdateServiceError("update_cleanup_failed")
+        return {"transactionId": payload["transactionId"], "acknowledged": True}
+
+    def _get_analyze_progress(self):
+        return _ANALYZE_PROGRESS.get()
 
     def send_progress(self, message):
         """Sends a progress update to the client."""
+        if self._get_analyze_progress() is not None:
+            return
         if self.current_request_id:
             progress_msg = {
                 "requestId": self.current_request_id,
@@ -2142,7 +2284,7 @@ class NativeHost:
         """Fetch available Copilot models via the SDK for the Options model
         dropdown. Returns a CLASSIFIED error on failure — never a silent
         empty list — so the extension can surface auth/connectivity problems
-        (spec 2026-07-03-configurable-model-performance-design.md § 5).
+        (docs/specs/model-performance-configuration.md § 5).
 
         Returns one of:
           {"status": "success", "data": {"models": [{id, name,
@@ -2162,15 +2304,28 @@ class NativeHost:
                 mid = getattr(m, "id", None)
                 if not mid:
                     continue
-                efforts = getattr(m, "supported_reasoning_efforts", None) or []
-                out.append({
+                row = {
                     "id": mid,
                     "name": getattr(m, "name", None) or mid,
-                    "supported_reasoning_efforts": list(efforts),
-                    "default_reasoning_effort": getattr(
+                }
+                raw_efforts = getattr(m, "supported_reasoning_efforts", None)
+                if (
+                    isinstance(raw_efforts, list)
+                    and all(isinstance(effort, str) for effort in raw_efforts)
+                ):
+                    efforts = [
+                        effort
+                        for effort in raw_efforts
+                        if effort in {"low", "medium", "high", "xhigh"}
+                    ]
+                    default_effort = getattr(
                         m, "default_reasoning_effort", None
-                    ),
-                })
+                    )
+                    row["supported_reasoning_efforts"] = efforts
+                    row["default_reasoning_effort"] = (
+                        default_effort if default_effort in efforts else None
+                    )
+                out.append(row)
             logger.info(f"list_models returned {len(out)} model(s).")
             return {"status": "success", "data": {"models": out}}
         except Exception as e:
@@ -2182,8 +2337,62 @@ class NativeHost:
                 "errorKind": kind,
             }
 
-    async def handle_analyze_error(self, payload):
+    async def handle_attachment_analyze(self, payload):
+        """Accept attachment paths only from the private Service Worker action."""
+        invalid = {
+            "status": "error",
+            "error": "Invalid attachment metadata.",
+            "error_code": "invalid_attachment_metadata",
+        }
+        if type(payload) is not dict or payload.keys() != {"analysis", "attachments"}:
+            return invalid
+        analysis = payload["analysis"]
+        if (
+            type(analysis) is not dict
+            or not {"text", "context", "timestamp", "rootPath", "caseNumber"} <= analysis.keys()
+            or not analysis.keys() <= {
+                "text", "context", "timestamp", "rootPath", "product", "caseNumber",
+                "rootPathOverrideProvided", "progressVersion",
+            }
+            or any(type(analysis[key]) is not str for key in (
+                "text", "context", "timestamp", "rootPath", "caseNumber",
+            ))
+            or re.fullmatch(r"[0-9]{16}(?:[0-9]{3})?", analysis["caseNumber"]) is None
+            or ("product" in analysis and type(analysis["product"]) is not str)
+            or ("rootPathOverrideProvided" in analysis and analysis["rootPathOverrideProvided"] is not True)
+            or ("progressVersion" in analysis and (
+                type(analysis["progressVersion"]) is not int or analysis["progressVersion"] != 1
+            ))
+        ):
+            return invalid
+        try:
+            # Validate the entire metadata record before reading; freeze once for retries.
+            prepared = await self._attachment_import.prepare(payload["attachments"])
+        except Exception:
+            return invalid
+        try:
+            result = await self.handle_analyze_error(analysis, prepared=prepared)
+        except Exception as error:
+            result = {"status": "error", "error": self._safe_sdk_error("Copilot request", error)}
+        if result.get("status") == "error":
+            notice = report_notice(prepared, included_images=0)
+            if notice:
+                result = {**result, "attachment_notice": notice}
+        return result
+
+    async def handle_analyze_error(self, payload, *, prepared: PreparedAttachments | None = None):
         """Uses the Copilot SDK to analyze the error."""
+        if type(payload) is not dict or not payload.keys() <= {
+            "text", "context", "timestamp", "rootPath", "product", "caseNumber",
+            "rootPathOverrideProvided", "progressVersion",
+        }:
+            return {
+                "status": "error", "error": "Invalid analysis payload.",
+                "error_code": "invalid_analyze_request",
+            }
+        progress = self._get_analyze_progress()
+        phase = progress.phase if progress is not None else lambda *args, **kwargs: None
+        phase("prepare", "running")
         text = payload.get("text")
         context = payload.get("context", "Unknown")
         product = payload.get("product", "General")
@@ -2246,6 +2455,7 @@ class NativeHost:
         # (see _case_to_session_id + MyCasesKit docs/dh-uuid5-change-spec.md)
         valid_case_id = self._extract_case_id(case_number)
         session_id = self._case_to_session_id(valid_case_id) if valid_case_id else None
+        phase("prepare", "succeeded")
 
         # Determine if we need to refresh the session:
         # 1. Root path changed (workspace MCP/Skills config may differ)
@@ -2286,8 +2496,10 @@ class NativeHost:
                 case_id=valid_case_id,
                 session_config=full_config,
                 prompt_snapshot=snapshot,
+                progress=progress,
             )
             if not refreshed:
+                phase("session_ready", "failed")
                 detail = getattr(self, "last_session_error", None)
                 prompt_error = getattr(self, "last_prompt_source_error", None)
                 self._invalidate_active_session()
@@ -2297,11 +2509,17 @@ class NativeHost:
                     "status": "error",
                     "error": detail or "Copilot session refresh failed.",
                 }
+        else:
+            phase("session_reused", "succeeded")
+            if progress is not None:
+                progress.session_ready(self.session)
 
         if not text:
+            phase("prepare", "failed")
             return {"status": "error", "error": "No text provided for analysis."}
 
         if not self.session or not self.client:
+            phase("session_ready", "failed")
             return {
                 "status": "error",
                 "error": (
@@ -2311,6 +2529,7 @@ class NativeHost:
             }
 
         self.send_progress("Checking authentication...")
+        phase("auth", "running")
 
         # 1. Fast Fail: Check Authentication Status (with timeout to prevent hangs)
         try:
@@ -2318,7 +2537,8 @@ class NativeHost:
                 self.client.get_auth_status(), timeout=15.0
             )
             # SDK 0.2.0: get_auth_status() returns a GetAuthStatusResponse dataclass
-            is_auth = getattr(auth_status, "isAuthenticated", False)
+            is_auth = getattr(auth_status, "isAuthenticated", None)
+            phase("auth", "succeeded" if is_auth is True else "needs_auth" if is_auth is False else "unavailable")
             if not is_auth:
                 login_name = getattr(auth_status, "login", "Unknown")
                 status_msg = getattr(auth_status, "statusMessage", "Unknown")
@@ -2329,9 +2549,11 @@ class NativeHost:
                 }
             logger.info("Authentication check passed.")
         except asyncio.TimeoutError:
+            phase("auth", "unavailable")
             logger.warning("Auth status check timed out after 15s, continuing...")
             self.send_progress("Auth check timed out, continuing...")
         except Exception as error:
+            phase("auth", "unavailable")
             logger.error(
                 "Failed to check auth status (%s).",
                 type(error).__name__,
@@ -2340,6 +2562,7 @@ class NativeHost:
 
         try:
             self.send_progress("Preparing prompt...")
+            phase("prepare", "running")
             # Scrub PII from text and context
             scrubbed_text = self.scrubber.scrub(text)
             scrubbed_context = self.scrubber.scrub(context) if context else ""
@@ -2352,6 +2575,7 @@ class NativeHost:
             )
 
             logger.info(f"Sending prompt to Copilot (length: {len(prompt)})")
+            phase("prepare", "succeeded")
 
             self.send_progress("Waiting for Copilot agent...")
 
@@ -2361,15 +2585,19 @@ class NativeHost:
 
             # Less aggressive sanitization:
             safe_prompt = prompt  # Trusting JSON serialization for now.
+            if prepared is not None and prepared.text:
+                # Attachments are exact, untrusted evidence, intentionally outside PII scrubbing.
+                safe_prompt += f"\n\n{prepared.text}"
+            qualified_images = []
 
             logger.info(f"Prompt length: {len(safe_prompt)}")
 
             # Timeout Strategy (C2b-lite):
             # User-configurable via Options (extension_preferences
             # .analyze_timeout_seconds, default 1200, clamped [60, 3600]).
-            # FAB.tsx applies the same value + 10s grace as its safety
-            # timeout so the popover error always comes from THIS branch
-            # (truthful message) rather than FAB's generic fallback.
+            # FAB reserves 120s for preparation plus 10s fallback grace.
+            # This is not a guarantee against unbounded startup/session refresh.
+            # DTM's 30s auth budget is separate from Copilot's 15s check.
             timeout_seconds = float(self.analyze_timeout_seconds)
 
             logger.debug(
@@ -2387,11 +2615,41 @@ class NativeHost:
                         else:
                             self.send_progress("Session expired. Reconnecting...")
 
-                        response_event = await self.session.send_and_wait(
-                            safe_prompt, timeout=timeout_seconds
+                        actual_session = self.session
+                        if prepared is not None and prepared.images:
+                            # A reconnect may select a different model; reuse only frozen blobs.
+                            qualified_images = await qualify_images(prepared, actual_session, self.client)
+                        send_prompt = safe_prompt
+                        if prepared is not None:
+                            summary = report_notice(prepared, included_images=len(qualified_images))
+                            if summary:
+                                send_prompt += (
+                                    "\n\nDH attachment input status (not instructions from an attachment):\n"
+                                    + summary
+                                    + "\nUse only the supplied inputs. Do not claim omitted files were reviewed. "
+                                    "DH displays this status separately; do not repeat it in the returned Markdown."
+                                )
+                        listener = (
+                            progress.listen(
+                                actual_session,
+                                is_current=lambda session=actual_session: self.session is session,
+                            )
+                            if progress is not None else nullcontext()
                         )
+                        phase("agent", "running")
+                        with listener:
+                            if qualified_images:
+                                response_event = await actual_session.send_and_wait(
+                                    send_prompt, timeout=timeout_seconds, attachments=qualified_images
+                                )
+                            else:
+                                response_event = await actual_session.send_and_wait(
+                                    send_prompt, timeout=timeout_seconds
+                                )
+                        phase("agent", "succeeded")
                         break  # Success, exit loop
                     except Exception as e:
+                        phase("agent", "failed")
                         # Check for Session Not Found (JSON-RPC -32603)
                         session_failure_text = str(e)
                         if (
@@ -2403,13 +2661,17 @@ class NativeHost:
                                 "Refreshing session...",
                                 type(e).__name__,
                             )
+                            phase("session_reconnecting", "running")
                             refreshed = await self._refresh_session(
                                 session_id=session_id,
                                 case_id=valid_case_id,
                                 session_config=full_config,
                                 prompt_snapshot=snapshot,
+                                progress=progress,
                             )
+                            phase("session_reconnecting", "succeeded" if refreshed else "failed")
                             if not refreshed:
+                                phase("session_ready", "failed")
                                 prompt_error = getattr(
                                     self, "last_prompt_source_error", None
                                 )
@@ -2423,6 +2685,7 @@ class NativeHost:
                             continue
                         # Re-raise other errors (including TimeoutError) to be handled by outer blocks
                         raise e
+                phase("response", "running")
                 raw_event_type = (
                     getattr(response_event, "type", "none")
                     if response_event is not None
@@ -2458,6 +2721,9 @@ class NativeHost:
                         logger.warning(
                             f"Copilot SDK requires interaction: {event_type}"
                         )
+                        phase("response", "failed")
+                        if event_type in ("auth_required", "login_required"):
+                            phase("auth", "needs_auth")
                         return {
                             "status": "error",
                             "error": f"Copilot requires authentication or interaction: {event_type}. Please run 'copilot' in your terminal first to authenticate.",
@@ -2476,6 +2742,7 @@ class NativeHost:
                         logger.warning(f"Response event data missing content: {event_summary}")
                 else:
                     full_response = "No response event received (None)."
+                phase("response", "succeeded" if has_content else "unavailable")
 
             except asyncio.TimeoutError:
                 logger.error(
@@ -2505,6 +2772,8 @@ class NativeHost:
                 }
 
             logger.info("Received full response from Copilot.")
+            notice = report_notice(prepared, included_images=len(qualified_images)) if prepared is not None else ""
+            phase("report", "running")
 
             # Determine Save Location
             effective_root = full_config.get("_effective_root")
@@ -2590,14 +2859,18 @@ class NativeHost:
                 f.write(f"## Original Error\n{scrubbed_text}\n\n")
                 if scrubbed_context:
                     f.write(f"## Context\n{scrubbed_context}\n\n")
+                if notice:
+                    f.write(f"## Attachment Status\n{notice}\n\n")
                 f.write(f"## AI Explanation\n{full_response}\n")
 
+            phase("report", "succeeded")
             return {
                 "status": "success",
                 "data": {
                     "markdown": full_response,
                     "saved_to": output_file,
                     "session_name": self.current_session_id,
+                    **({"attachment_notice": notice} if notice else {}),
                 },
             }
 
@@ -2625,17 +2898,55 @@ class NativeHost:
 
     async def process_message(self, message):
         """Dispatches messages to handlers."""
-        action = message.get("action")
-        payload = message.get("payload", {})
-        request_id = message.get("requestId")
+        action = message.get("action") if type(message) is dict else None
+        payload = message.get("payload", {}) if type(message) is dict else {}
+        request_id = message.get("requestId") if type(message) is dict else None
+        is_update_action = type(action) is str and action in _UPDATE_ACTIONS
 
         # Set current request ID for progress updates
         self.current_request_id = request_id
 
         response = {"requestId": request_id, "status": "success", "data": None}
+        response_sent = False
+        activation_launched = False
+        progress = None
 
+        if (
+            action == "perform_update"
+            and type(message) is dict
+            and type(payload) is dict
+            and set(payload) == {"url"}
+        ):
+            response = self._update_error_response(
+                request_id,
+                UpdateServiceError("installation_integrity_failed"),
+            )
+            self.current_request_id = None
+            self.send_message(response)
+            return
+
+        progress_context = _ANALYZE_PROGRESS.set(None)
         try:
-            if action == "ping":
+            if is_update_action:
+                if self._source_runtime:
+                    raise UpdateServiceError("source_update_disabled")
+                if not self._installation_ready:
+                    raise UpdateServiceError("installation_integrity_failed")
+                payload = self._exact_update_payload(message, action)
+                response["data"] = await self._run_update_action(action, payload)
+                if action == "activate_update":
+                    activation_launched = True
+                    try:
+                        self._send_message_or_raise(response)
+                    except Exception as error:
+                        self.running = False
+                        raise UpdateServiceError(
+                            "update_activation_failed"
+                        ) from error
+                    response_sent = True
+                    self.running = False
+
+            elif action == "ping":
                 self.send_progress("Pinging...")
                 response["data"] = "pong"
 
@@ -2691,49 +3002,48 @@ class NativeHost:
                     self.loop.create_task(self.check_for_updates(force=True))
                 response["data"] = "Update check initiated"
 
-            elif action == "analyze_error":
-                response["data"] = await self.handle_analyze_error(payload)
+            elif action in ("analyze_error", "analyze_with_attachments"):
+                private = action == "analyze_with_attachments"
+                if (
+                    message.keys() != {"action", "requestId", "payload"}
+                    or type(request_id) is not str or not request_id.strip()
+                    or (private and len(request_id) > 512)
+                ):
+                    response["data"] = {
+                        "status": "error",
+                        "error": "Invalid attachment metadata." if private else "Invalid analysis request.",
+                        "error_code": "invalid_attachment_metadata" if private else "invalid_analyze_request",
+                    }
+                    self.current_request_id = None
+                    self.send_message(response)
+                    response_sent = True
+                    return
+                analysis = payload.get("analysis") if private and type(payload) is dict else payload
+                previous_progress = getattr(self, "_analyze_progress", None)
+                if previous_progress is not None:
+                    previous_progress.deactivate()
+                self._analyze_progress = None
+                if (
+                    type(analysis) is dict
+                    and type(analysis.get("progressVersion")) is int
+                    and analysis["progressVersion"] == 1
+                ):
+                    progress = AnalyzeProgress(
+                        lambda data: self.send_message({
+                            "requestId": request_id, "status": "progress", "data": data,
+                        }),
+                        is_owner=lambda: getattr(self, "_analyze_progress", None) is progress,
+                    )
+                    self._analyze_progress = progress
+                    _ANALYZE_PROGRESS.set(progress)
+                response["data"] = (
+                    await self.handle_attachment_analyze(payload)
+                    if private else await self.handle_analyze_error(payload)
+                )
 
             elif action == "update_config":
                 self.send_progress("Updating configuration...")
                 response["data"] = await self.handle_update_config(payload)
-
-            elif action == "perform_update":
-                self.send_progress("Starting update process...")
-                url = payload.get("url")
-                if not url:
-                    response["status"] = "error"
-                    response["error"] = "No update URL provided"
-                else:
-                    try:
-                        from updater import Updater
-
-                        upd = Updater(sys.executable)
-
-                        self.send_progress("Downloading update...")
-                        if self.loop:
-                            zip_path = await self.loop.run_in_executor(
-                                None, upd.download_update, url
-                            )
-
-                            self.send_progress(
-                                "Applying update (this will restart the host)..."
-                            )
-                            # Apply update (extract and swap)
-                            await self.loop.run_in_executor(
-                                None, upd.apply_update, zip_path
-                            )
-
-                            response["data"] = {
-                                "message": "Update applied successfully. Please reload."
-                            }
-                        else:
-                            response["status"] = "error"
-                            response["error"] = "Event loop not available"
-                    except Exception as e:
-                        logger.error("Update failed (%s).", type(e).__name__)
-                        response["status"] = "error"
-                        response["error"] = "Update failed."
 
             elif action == "get_config":
                 # Return the effective configuration (merging defaults + user + workspace)
@@ -2762,19 +3072,51 @@ class NativeHost:
             else:
                 response["status"] = "error"
                 response["error"] = "unknown_action"
-                response["message"] = f"Unknown action: {action}"
+                response["message"] = (
+                    f"Unknown action: {action}"
+                    if type(action) is str
+                    else "Unknown action."
+                )
 
+        except UpdateServiceError as error:
+            if (
+                action == "activate_update"
+                and getattr(error, "activation_launched", False)
+            ):
+                activation_launched = True
+                response_sent = True
+            response = self._update_error_response(request_id, error)
         except Exception as e:
             self._safe_sdk_error("process Host action", e)
-            response["status"] = "error"
-            response["error"] = "internal_error"
-            response["message"] = (
-                f"Host action failed ({type(e).__name__})."
-            )
+            if is_update_action:
+                response = self._update_error_response(
+                    request_id,
+                    UpdateServiceError(_UPDATE_UNEXPECTED_ERROR_CODES[action]),
+                )
+            else:
+                response["status"] = "error"
+                response["error"] = "internal_error"
+                response["message"] = (
+                    f"Host action failed ({type(e).__name__})."
+                )
+        finally:
+            if progress is not None:
+                try:
+                    result = response.get("data")
+                    if response.get("status") != "success" or type(result) is not dict or result.get("status") != "success":
+                        progress.fail_running()
+                finally:
+                    progress.deactivate()
+                    if getattr(self, "_analyze_progress", None) is progress:
+                        self._analyze_progress = None
+            _ANALYZE_PROGRESS.reset(progress_context)
+            if activation_launched:
+                self.running = False
 
         # Clear current request ID after processing
         self.current_request_id = None
-        self.send_message(response)
+        if not response_sent:
+            self.send_message(response)
 
     async def run(self):
         """Main async loop."""

@@ -1,0 +1,320 @@
+[
+  {
+    "relativepath": ".superpowers/sdd/eighth-final-review-fix-report.md",
+    "bytes": 8437,
+    "hash": "96019a8b24e530afb9d3c71bc4cffc391c4942137d2c193b5949b5ae447a4f8e",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": ".superpowers/sdd/fifth-final-review-fix-report.md",
+    "bytes": 5163,
+    "hash": "d0038224909746c34af58bf560b21ed907e5abad52cd9e4768afdf9e50e178e5",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": ".superpowers/sdd/hardening-b-journal-engine-report.md",
+    "bytes": 8291,
+    "hash": "88892fcf79b485f49b319359a2297d1808e36d1fbeaafe3f1ffd1a526ac47dab",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": ".superpowers/sdd/hardening-c-detached-recovery-report.md",
+    "bytes": 48558,
+    "hash": "17b8cfdf51d745a4199e8d8906c8a8e9700863ec320b35a1f36f5fc9b119ac96",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": ".superpowers/sdd/ninth-final-review-fix-report.md",
+    "bytes": 10085,
+    "hash": "432a0439b8508d0b5d37656308e8d524542f5943251380013d0a44933bb54a31",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": ".superpowers/sdd/package-integrity-plan-a-report.md",
+    "bytes": 4823,
+    "hash": "b1d356710aad52b6de5f21070647ca900abc832b4a9b58e46d31ed140f400fb5",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": ".superpowers/sdd/plan-e-extension-hardening-report.md",
+    "bytes": 8410,
+    "hash": "7f02df7d711acd706def79fbceb8c98d95cc2a05b2f11924b60c3222fded549a",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": ".superpowers/sdd/plan-e-post-master-merge-verification.md",
+    "bytes": 3373,
+    "hash": "ff0bca41f3c22f0ea2acfe8484d3463293d1bee6437ad530e2096335f9336b72",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": ".superpowers/sdd/seventh-final-review-fix-report.md",
+    "bytes": 5032,
+    "hash": "b4e728f0abc74505a2d4bd08ba8877e41c92fb3b105d9fa6870816251a129bc0",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": ".superpowers/sdd/sixth-final-review-fix-report.md",
+    "bytes": 6190,
+    "hash": "7712da240053953367794edd19a52cb09fe31b702c10534855fd12712df92e92",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": ".superpowers/sdd/tenth-final-review-fix-report.md",
+    "bytes": 7899,
+    "hash": "9fcd88a4e14d67ef991df5c7ef7fe0896f037f075ffb2a25c29a473f1780d49b",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/history/session-handoff-through-test-safety-2026-09-09.md",
+    "bytes": 99058,
+    "hash": "88371ce071c5301601d262b6424ff5c3ede56da83054e518eec180a0e31c6d12",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/plan-d-pragmatic-cloud-pc-results.md",
+    "bytes": 37954,
+    "hash": "f8b6cda835803c2fc5bedb24ec2307e77dd21d7a36f5b9cda5a812ce1b14cedb",
+    "disposition": "retain-summary"
+  },
+  {
+    "relativepath": "docs/plan-d-pragmatic-cloud-pc-runbook.md",
+    "bytes": 5986,
+    "hash": "015686bd471302fb9746c22173078cd95dcaec7a7c7ed6d74f89a9cd4d40f8b0",
+    "disposition": "retain-summary"
+  },
+  {
+    "relativepath": "docs/sdk-1.0.13-upgrade-assessment.md",
+    "bytes": 7865,
+    "hash": "75221315421e7e2317a9d967ca55d9d77472c1b828b029376fbf1ce4c13f0604",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/session-handoff-2026-07-15.md",
+    "bytes": 69934,
+    "hash": "467bde843d59c8df375da3cebd765e33fcca856638c7ed9c34e511d5407adc7b",
+    "disposition": "retain-summary"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-05-11-beta-channel-toggle.md",
+    "bytes": 60844,
+    "hash": "8aaf93bf11f3107203b801a63c2e699b968bbc5b8d83d344f5e63d78565bd736",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-05-20-team-catalog-merge-policy.md",
+    "bytes": 22152,
+    "hash": "0b07ff1b6227bf3ffeaea369d5cbac0fe07972ff1754cc7ce57b09b6884ab0b4",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-05-20-team-catalog-user-config.md",
+    "bytes": 47401,
+    "hash": "2f6afd6335b9e89dd11286dbe1918571e6a2299cb9b2b608108eac0ff9491bfa",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-05-21-prefs-context-refactor-plan.md",
+    "bytes": 28096,
+    "hash": "5a83a4005baf67818dc839185877375fabdc37a1709d187594a1c441a0bee680",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-05-21-release-helper-notes-file-plan.md",
+    "bytes": 26217,
+    "hash": "46909f6d80ef13ded8df15f47ce4d20ea812d97c5e3d0081747cbfaa57b5c493",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-05-22-extension-test-infrastructure-plan.md",
+    "bytes": 48940,
+    "hash": "b6562863cb4652b050ddea7a4850765838570487224604ea6615742394e509db",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-05-25-team-manifest-url-encryption-plan.md",
+    "bytes": 49234,
+    "hash": "4a1a91dc646bc7da0ee8557691393ddb256f1da79ebe68f0e567f272daf11827",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-06-03-analysis-result-persistence.md",
+    "bytes": 9792,
+    "hash": "e30fbdfdd8f0367b57cdaa605998285cb249c70e0e20972f934a48b60fa6b6bc",
+    "disposition": "retain-summary"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-07-08-options-about-help-tab.md",
+    "bytes": 18024,
+    "hash": "ea869f4218dac708dd8fbef463db0f0a23439316f8f608959e1ca60a459dc013",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-07-15-dh-prompt-scope-cleanup.md",
+    "bytes": 128801,
+    "hash": "c446aa37d4793d6f926fb5ac2b1258b62a62c2279bb455a54397786ffb08aa78",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-07-17-fifth-review-important-fixes.md",
+    "bytes": 13549,
+    "hash": "f28ea22b4d869938cb9c40a0689d2055c3babbe69867e839aafed49625ebf2f7",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-07-17-seventh-review-important-fixes.md",
+    "bytes": 6939,
+    "hash": "8943406bb2e865254e6965cfc094ceffc7d091eb99cd370bbb9d0097f639d8ea",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-07-17-tenth-review-important-fixes.md",
+    "bytes": 6864,
+    "hash": "a097cedaf650577132cbcc25791780aff28ce86aea6140da8d7e0fd931ee3012",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-07-18-hardening-a-package-integrity.md",
+    "bytes": 182131,
+    "hash": "34464905f72df4feaf5d67aea9feeefdee52871a88613579f97c9c200bbb36d1",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-07-18-hardening-b-journal-engine.md",
+    "bytes": 106188,
+    "hash": "70289296430240e23c1a239fc667727945a5aabbb6db90bd52801a99ffe085f8",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-07-18-hardening-c-detached-recovery.md",
+    "bytes": 464079,
+    "hash": "7514bc147afdd70d40a24748369a8f46de3f3139033db0c909d671a9af863269",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-07-18-hardening-d-runtime-installer.md",
+    "bytes": 12037,
+    "hash": "4bf893f3d9ba771bb0d7974bb46157b9ae67206f63f4bb9b39c3d9982f850221",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-07-18-hardening-e-extension-data.md",
+    "bytes": 398716,
+    "hash": "8d5bc813609376349e95ac214474e3e4b687503e39358e77f6102c318ef69809",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-08-06-sanitized-default-menu-asset.md",
+    "bytes": 29964,
+    "hash": "567e2475f85c925f0238bab77a193de86504ad0fb216402505f1318937c093ab",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-09-03-plan-d-pragmatic-delivery-gate.md",
+    "bytes": 4142,
+    "hash": "a46dc17e75c06d369c8c7d5aa2f1a01484fe99555111821a34b9cfb1728b101e",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-09-04-one-shot-update-completion.md",
+    "bytes": 113568,
+    "hash": "0a9176e72064b75311d0db3149679ced395e7c42df3ab28cea6b7b4981e157ba",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-09-05-visible-update-completion.md",
+    "bytes": 119794,
+    "hash": "89383cf3d03101e775ad7c667383139f6cde5215ffdd79dc130aae644ffc9737",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/plans/2026-09-07-pragmatic-visible-completion-qualification.md",
+    "bytes": 2316,
+    "hash": "4f2592a6a02116fc1739532d6dd32145083dc84315d2c2f4a2edf153b02072bd",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/research/2026-07-14-dh-extension-stage0-integration-plan.md",
+    "bytes": 14932,
+    "hash": "bd528ea3a04f52361d2ce29543a7922c24376a3589e8ba541d6444cb96772d5e",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/research/2026-07-14-dh-mycaseskit-stage0-instructions-brief.md",
+    "bytes": 30986,
+    "hash": "67de0ca32e0e4ee2f39f3e75add29d10d5a6f60f966188b3b96b682b41913195",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-05-21-prefs-context-refactor-design.md",
+    "bytes": 14539,
+    "hash": "3def1860beda115a5529e4cb825ac7f41c24469231577ad5924fecc1d8ea6b24",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-05-21-release-helper-notes-file-design.md",
+    "bytes": 8997,
+    "hash": "e5657c12852b3d75f126ec09e18193a8c0ceb60d086b86a4aa5818953bb89346",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-05-22-extension-test-infrastructure-design.md",
+    "bytes": 21118,
+    "hash": "49e39a44503d44cbd50392fc1dc3b2ac1f8e74bc1854b25ab54236296acb8f3a",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-08-19-plan-e-evidence-loss-amendment-design.md",
+    "bytes": 32457,
+    "hash": "b39c806d9ac6fe2e3345cf28881aa00081858fd23ea383ccb9d0a1584c2bbf50",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-08-21-plan-e-executor-boundary-correction-design.md",
+    "bytes": 11446,
+    "hash": "50fb7990a4ab4c89760ab4490dec7db2e01a78e7e0fc90e17b663fd210b489c7",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-08-22-plan-e-scripted-evidence-executor-design.md",
+    "bytes": 25985,
+    "hash": "0c256e41d6da29e0268ba593ae7b35a7c5eaadf63b736a99cd368d05e52232b1",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-08-23-plan-e-build-asset-and-vitest-identity-correction-design.md",
+    "bytes": 9885,
+    "hash": "8cfbad35d92b57c1a976a4d249725a526ba23117c16462bf11a921bfebef774c",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-08-24-plan-e-task-9-evidence-correction-design.md",
+    "bytes": 8384,
+    "hash": "67e6eaefcd91183e1e78a893183ca138071b155fe41d40c1429ffdbfff56cc97",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-08-26-plan-d-execution-refresh-design.md",
+    "bytes": 56019,
+    "hash": "0263045777ff14d99bd59ab9338fdc8172966eaf2796863fdd664d4454172eb5",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-08-30-plan-d-installer-bootstrap-design.md",
+    "bytes": 80421,
+    "hash": "42924b62efb3a858cd66ecdd83b59f139877a52c4e077947b52d03007810085d",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-09-03-plan-d-pragmatic-delivery-gate-design.md",
+    "bytes": 17488,
+    "hash": "a4601c6976660bf1e663b7330cc0e852727bf7312895aa8bf01097724617b458",
+    "disposition": "remove"
+  },
+  {
+    "relativepath": "docs/superpowers/specs/2026-09-07-pragmatic-visible-completion-qualification-design.md",
+    "bytes": 11577,
+    "hash": "f26ac350b720852f6056f5b4d98bcdbf335e956e72e7d99b970bcb0d44f6d91a",
+    "disposition": "remove"
+  }
+]

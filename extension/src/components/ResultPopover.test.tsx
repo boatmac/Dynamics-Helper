@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { PrefsLanguageProvider } from '../utils/i18n'
-import { installChromeMock, resetChromeMock } from '../test/chromeMock'
+import { getStorageSnapshot, installChromeMock, resetChromeMock } from '../test/chromeMock'
+import { handleAnalyzeForward } from '../background/analyzeBridge'
+import { useAnalysisHydration } from '../hooks/useAnalysisHydration'
 import { ResultPopover } from './ResultPopover'
 
 installChromeMock()
@@ -26,6 +28,65 @@ function renderPopover(
 describe('ResultPopover', () => {
     beforeEach(() => {
         resetChromeMock()
+    })
+
+    it.each([
+        { status: 'success', prefix: '> **Attachment status:** ', displayPrefix: 'Attachment status: ' },
+        { status: 'error', prefix: '> **Attachment status:** ', displayPrefix: 'Attachment status: ' },
+        { status: 'success', prefix: '> **附件状态：** ', displayPrefix: '附件状态： ' },
+        { status: 'error', prefix: '> **附件状态：** ', displayPrefix: '附件状态： ' },
+    ] as const)('attachment notice formats the fixed $displayPrefix heading after persisted $status hydration', async ({ status, prefix, displayPrefix }) => {
+        const caseNumber = '1234567890123456'
+        const bodyText = 'Included: 1; skipped: 0. **literal** <b>safe product text</b> [link](https://example.test) ![image](https://example.test/image.png)'
+        const notice = prefix + bodyText
+        const displayNotice = displayPrefix + bodyText
+        await handleAnalyzeForward({
+            action: 'analyze_error', requestId: 'notice-request',
+            payload: { text: 'fixture', context: 'fixture', timestamp: 'fixture', rootPath: '' },
+        }, { caseNumber, requestId: 'notice-request', successTitle: 'Result', errorTitle: 'Failed' }, {
+            send: async () => ({ status: 'success', data: status === 'success'
+                ? { status, data: { markdown: '# Report', attachment_notice: notice } }
+                : { status, error: 'SAFE HOST FALLBACK', error_code: 'repository_instructions_missing', attachment_notice: notice },
+            }),
+        })
+        expect(getStorageSnapshot().dh_last_analysis).toMatchObject({ attachmentNotice: notice })
+        function HydratedResult() {
+            const { popover } = useAnalysisHydration(caseNumber)
+            return popover ? <ResultPopover {...popover} isAnalyze onClose={() => undefined} /> : null
+        }
+        const view = render(<PrefsLanguageProvider language="en"><HydratedResult /></PrefsLanguageProvider>)
+        const alert = await screen.findByRole('alert')
+        expect(alert.textContent).toBe(displayNotice)
+        expect(alert.querySelector('strong, b, a, img, blockquote')).toBeNull()
+        const body = status === 'success'
+            ? screen.getByRole('heading', { name: 'Report' })
+            : screen.getByText(/Repository Instructions are missing/i)
+        expect(alert.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(screen.queryByText('SAFE HOST FALLBACK')).toBeNull()
+        view.rerender(<PrefsLanguageProvider language="zh"><HydratedResult /></PrefsLanguageProvider>)
+        expect(screen.getByRole('alert').textContent).toBe(displayNotice)
+        if (status === 'error') expect(screen.getByText(/仓库指令缺失/)).toBeInTheDocument()
+        expect(getStorageSnapshot().dh_last_analysis).toMatchObject({ attachmentNotice: notice })
+    })
+
+    it.each([
+        '**Attachments omitted** <b>safe product text</b>',
+        '> **Attachment Status:** Unchanged capitalization.',
+        ' > **Attachment status:** Leading whitespace stays.',
+        '> **Attachment status:**No separator.',
+        'Prefix\n> **Attachment status:** Not at the start.',
+        '> **Unknown heading:** Keep **body** and > characters.',
+    ])('attachment notice leaves unknown or near-match formatting inert %#', notice => {
+        renderPopover({ attachmentNotice: notice })
+        const alert = screen.getByRole('alert')
+        expect(alert.textContent).toBe(notice)
+        expect(alert.querySelector('strong, b, a, img, blockquote')).toBeNull()
+    })
+
+    it.each([undefined, '', ' \n ', [], {}, 'x'.repeat(2049)])('attachment notice ignores malformed display value %#', attachmentNotice => {
+        renderPopover({ attachmentNotice: attachmentNotice as string })
+        expect(screen.queryByRole('alert')).toBeNull()
+        expect(screen.getByText('SAFE HOST FALLBACK')).toBeInTheDocument()
     })
 
     it.each([

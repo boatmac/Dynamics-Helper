@@ -8,6 +8,47 @@ export interface TranslationDictionary {
 }
 
 export const translations: TranslationDictionary = {
+    // --- Analyze progress (closed protocol labels) ---
+    analyzeProgressGeneral: { en: 'Analysis in progress', zh: '正在分析' },
+    analyzeProgressUnavailable: { en: 'Progress details unavailable', zh: '进度详情不可用' },
+    analyzeProgressPrepare: { en: 'Preparing analysis', zh: '准备分析' },
+    analyzeProgressResuming: { en: 'Resuming session', zh: '恢复会话' },
+    analyzeProgressCreating: { en: 'Creating session', zh: '创建会话' },
+    analyzeProgressReused: { en: 'Reusing session', zh: '复用会话' },
+    analyzeProgressReady: { en: 'Session ready', zh: '会话已就绪' },
+    analyzeProgressReconnecting: { en: 'Reconnecting session', zh: '重新连接会话' },
+    analyzeProgressAuth: { en: 'Checking authentication', zh: '检查身份验证' },
+    analyzeProgressDtmAuth: { en: 'Waiting for DTM sign-in (30 seconds)...', zh: '等待 DTM 登录（最多 30 秒）...' },
+    analyzeProgressAgent: { en: 'Copilot analysis', zh: 'Copilot 分析' },
+    analyzeProgressTool: { en: 'Tool activity', zh: '工具活动' },
+    analyzeProgressResponse: { en: 'Processing response', zh: '处理响应' },
+    analyzeProgressReport: { en: 'Writing report', zh: '写入报告' },
+    analyzeProgressRunning: { en: 'Running', zh: '进行中' },
+    analyzeProgressSucceeded: { en: 'Succeeded', zh: '已成功' },
+    analyzeProgressFailed: { en: 'Failed', zh: '已失败' },
+    analyzeProgressNeedsAuth: { en: 'Authentication required', zh: '需要身份验证' },
+    analyzeProgressStateUnavailable: { en: 'Unavailable', zh: '不可用' },
+    analyzeProgressComplete: { en: 'Analysis complete', zh: '分析完成' },
+    analyzeProgressEnded: { en: 'Analysis did not complete', zh: '分析未完成' },
+    analyzeProgressElapsed: { en: 'Elapsed', zh: '已用时' },
+    analyzeProgressSeconds: { en: 's', zh: '秒' },
+    analyzeProgressHistory: { en: 'Recent activity', zh: '近期活动' },
+    analyzeProgressActive: { en: 'Active tools', zh: '活动工具' },
+    analyzeProgressMoreActive: { en: 'Additional active tools', zh: '其他活动工具' },
+    analyzeProgressSession: { en: 'Session ID', zh: '会话 ID' },
+    analyzeProgressCopy: { en: 'Copy session ID', zh: '复制会话 ID' },
+    analyzeProgressCopied: { en: 'Session ID copied', zh: '已复制会话 ID' },
+    analyzeProgressCopyFailed: { en: 'Could not copy session ID', zh: '无法复制会话 ID' },
+    analyzeProgressServiceWorkiq: { en: 'WorkIQ', zh: 'WorkIQ' },
+    analyzeProgressServiceWebiq: { en: 'WebIQ', zh: 'WebIQ' },
+    analyzeProgressServiceAdo: { en: 'Azure DevOps', zh: 'Azure DevOps' },
+    analyzeProgressServiceMslearn: { en: 'Microsoft Learn', zh: 'Microsoft Learn' },
+    analyzeProgressServiceKusto: { en: 'Kusto', zh: 'Kusto' },
+    analyzeProgressServiceEnghub: { en: 'Engineering Hub', zh: 'Engineering Hub' },
+    analyzeProgressServiceIcm: { en: 'Incident management', zh: '事件管理' },
+    analyzeProgressServiceResearch: { en: 'Research', zh: '研究' },
+    analyzeProgressServiceFilesystem: { en: 'Files', zh: '文件' },
+    analyzeProgressServiceOther: { en: 'Other tool', zh: '其他工具' },
     // --- Common ---
     appName: { en: "Dynamics Helper", zh: "Dynamics 助手" },
     saveChanges: { en: "Save Changes", zh: "保存更改" },
@@ -110,12 +151,12 @@ export const translations: TranslationDictionary = {
     },
     useWorkspaceOnly: { en: "Use repository SKILLS, MCP, and instructions ONLY", zh: "仅使用仓库的 SKILLS、MCP 和指令" },
     useWorkspaceOnlyDesc: {
-        en: "Uses repository SKILLS and MCP, with <Root>/.github/copilot-instructions.md as the only editable system instructions. DH Core System Prompt and Custom User Prompt remain active.",
-        zh: "使用仓库的 SKILLS 和 MCP，并将 <Root>/.github/copilot-instructions.md 作为唯一的可编辑系统指令。DH 核心系统提示词和自定义用户提示词仍然生效。"
+        en: "With a non-empty Root, uses repository SKILLS and MCP and prioritizes <Root>/AGENTS.md; only if absent, uses <Root>/.github/copilot-instructions.md, never both. Empty AGENTS.md is valid; read errors block Analyze without fallback. DH Core System Prompt and Custom User Prompt remain active.",
+        zh: "Root 非空时使用仓库的 SKILLS 和 MCP，并优先使用 <Root>/AGENTS.md；仅当其不存在时使用 <Root>/.github/copilot-instructions.md，绝不同时注入两者。空 AGENTS.md 有效；读取错误会阻止分析，不会回退。DH 核心系统提示词和自定义用户提示词仍然生效。"
     },
     dhSpecificInstructionsInactive: {
-        en: "This content is retained but inactive while Repository ONLY uses <Root>/.github/copilot-instructions.md.",
-        zh: "此内容会保留，但仅仓库模式使用 <Root>/.github/copilot-instructions.md 时不会生效。"
+        en: "This content is retained but inactive while Repository ONLY with a non-empty Root prioritizes <Root>/AGENTS.md; only if absent, uses <Root>/.github/copilot-instructions.md, never both.",
+        zh: "此内容会保留，但 Root 非空的仅仓库模式下不会生效：优先使用 <Root>/AGENTS.md；仅当其不存在时使用 <Root>/.github/copilot-instructions.md，绝不同时注入两者。"
     },
     mcpConfigPath: { en: "MCP Configuration", zh: "MCP 配置" },
     mcpConfigPathDesc: {
@@ -226,8 +267,8 @@ export const translations: TranslationDictionary = {
         zh: "无法读取 DH 专用指令。请在选项中修复或替换该文件。",
     },
     promptErrorRepositoryMissing: {
-        en: "Repository Instructions are missing. Add .github/copilot-instructions.md under Root Path or disable Repository ONLY.",
-        zh: "仓库指令缺失。请在根路径下添加 .github/copilot-instructions.md，或禁用仅仓库模式。",
+        en: "Repository Instructions are missing: both <Root>/AGENTS.md and <Root>/.github/copilot-instructions.md are absent. Add AGENTS.md (preferred) or .github/copilot-instructions.md under Root Path, or disable Repository ONLY.",
+        zh: "仓库指令缺失：<Root>/AGENTS.md 和 <Root>/.github/copilot-instructions.md 均不存在。请在根路径下添加 AGENTS.md（优先）或 .github/copilot-instructions.md，或禁用仅仓库模式。",
     },
     promptErrorRepositoryUnreadable: {
         en: "Repository Instructions cannot be read. Repair the file or disable Repository ONLY.",
@@ -290,6 +331,41 @@ export const translations: TranslationDictionary = {
     updateAvailable: { en: "Update Available", zh: "有可用更新" },
     updateNow: { en: "Update Now", zh: "立即更新" },
     updating: { en: "Updating...", zh: "正在更新..." },
+    retryUpdate: { en: "Retry Update", zh: "重试更新" },
+    updateRequiresAttention: { en: "Update requires attention.", zh: "更新需要处理。" },
+    invalidUpdateRequest: { en: "The update request is invalid.", zh: "更新请求无效。" },
+    updateInstallerRequired: {
+        en: "The installed Host and Extension do not match. Run the matching full installer.",
+        zh: "已安装的主机与扩展不匹配。请运行匹配版本的完整安装程序。",
+    },
+    updateAlreadyInProgress: { en: "Another update is already in progress.", zh: "另一个更新正在进行中。" },
+    updatePrepareFailed: {
+        en: "The update could not be prepared. Retry or run the matching full installer.",
+        zh: "无法准备更新。请重试或运行匹配版本的完整安装程序。",
+    },
+    updateActivationFailed: {
+        en: "The prepared update could not be started. Retry or run the matching full installer.",
+        zh: "无法启动已准备的更新。请重试或运行匹配版本的完整安装程序。",
+    },
+    updateNotTerminal: { en: "The update has not finished yet.", zh: "更新尚未完成。" },
+    updateCleanupFailed: {
+        en: "The update finished but cleanup is incomplete. Retry cleanup.",
+        zh: "更新已完成，但清理尚未完成。请重试清理。",
+    },
+    sourceUpdateDisabled: {
+        en: "Automatic update is disabled while the source Host is registered.",
+        zh: "注册源代码主机时，自动更新已禁用。",
+    },
+    manualRecoveryRequired: {
+        en: "Automatic recovery could not finish. Run the matching full installer.",
+        zh: "自动恢复无法完成。请运行匹配版本的完整安装程序。",
+    },
+    updateRequestFailed: { en: "Could not send the update request. Retry.", zh: "无法发送更新请求。请重试。" },
+    updateComplete: { en: "Update completed successfully.", zh: "更新已成功完成。" },
+    updateRolledBack: {
+        en: "The update could not be completed and the previous version was restored.",
+        zh: "更新未能完成，已恢复上一版本。",
+    },
     noItems: { en: "No items found", zh: "未找到项目" },
     back: { en: "Back", zh: "返回" },
     pingResult: { en: "Ping Result", zh: "测试结果" },
@@ -302,6 +378,7 @@ export const translations: TranslationDictionary = {
     checkingForUpdates: { en: "Checking for updates...", zh: "正在检查更新..." },
     upToDate: { en: "You are up to date!", zh: "已是最新版本！" },
     checkTimedOut: { en: "Check timed out.", zh: "检查超时。" },
+    updateCheckFinished: { en: "Update check finished. See the current update status.", zh: "更新检查已完成，请查看当前更新状态。" },
     downloadingUpdate: { en: "Downloading update...", zh: "正在下载更新..." },
     downloadingVersion: { en: "Downloading", zh: "正在下载" },
     updateSuccess: { en: "Update success! Restarting...", zh: "更新成功！正在重启..." },

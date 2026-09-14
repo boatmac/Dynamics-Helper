@@ -130,6 +130,27 @@ class PromptSourceFixture:
 
 
 class TestPromptSourceSelection(PromptSourceFixture, unittest.TestCase):
+    def test_repository_entry_priority_matches_health_and_snapshot(self):
+        agents = os.path.join(self.root, 'AGENTS.md')
+        legacy = self.host._resolve_prompt_snapshot(self.root, True)
+        for raw in (b'PRIMARY', b'', b'\xef\xbb\xbfPRIMARY\r\n'):
+            with self.subTest(raw=raw):
+                self._write(agents, raw)
+                with self._deny_open(self.repo_path):
+                    snapshot = self.host._resolve_prompt_snapshot(self.root, True)
+                    health = self.host._get_prompt_source_config_fields(self.root, True)
+                self.assertEqual(snapshot.selected_bytes, raw)
+                self.assertEqual(health['prompt_source_status'], {'status': 'ok'})
+        self._write(agents, b'REPOSITORY')
+        self.assertEqual(self.host._resolve_prompt_snapshot(self.root, True).fingerprint, legacy.fingerprint)
+        self._write(agents, b'\xff')
+        with self.assertRaises(PromptSourceError) as caught:
+            self.host._resolve_prompt_snapshot(self.root, True)
+        self.assertEqual(caught.exception.error_code, 'repository_instructions_unreadable')
+        self.assertEqual(self.host._get_prompt_source_config_fields(self.root, True)['prompt_source_status']['error_code'], 'repository_instructions_unreadable')
+        os.remove(agents)
+        self.assertEqual(self.host._resolve_prompt_snapshot(self.root, True).selected_bytes, b'REPOSITORY')
+
     def test_PS_I2_empty_root_makes_repository_only_ineffective(self):
         snapshot = self.host._resolve_prompt_snapshot(None, True)
         self.assertEqual(snapshot.mode, "dh-specific")
@@ -414,6 +435,15 @@ class TestPromptConfigApi(
             config["prompt_source_status"]["error_code"],
             "dh_specific_instructions_unreadable",
         )
+
+    def test_get_config_repository_mode_ignores_inactive_dh_health_error(self):
+        self._write(self.dh_path, b"\xff")
+        self._write_user_config(root=self.root, repository_only=True)
+
+        config = self.host._get_session_config(include_prompt_status=True)
+
+        self.assertNotIn("_user_instructions_raw", config)
+        self.assertEqual(config["prompt_source_status"], {"status": "ok"})
 
     def test_get_config_unreadable_user_prompt_omits_value_and_reports_health(self):
         prompt_path = os.path.join(self.user_dir, "user_prompt.md")

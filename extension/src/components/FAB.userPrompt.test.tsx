@@ -35,7 +35,8 @@ vi.mock('../utils/prefs', () => ({
 }))
 
 vi.mock('../utils/pageReader', () => ({
-  PageReader: { scanForErrors: state.scanForErrors },
+  CUSTOMER_LOOKUP_SELECTOR: '[data-id="customerid.fieldControl-LookupResultsDropdown_customerid_SelectedRecordList"]',
+  PageReader: { scanForErrors: state.scanForErrors, readLiveRecordNumber: () => undefined },
 }))
 
 vi.mock('../hooks/useAnalysisHydration', () => ({

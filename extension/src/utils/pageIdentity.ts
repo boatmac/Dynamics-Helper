@@ -60,6 +60,10 @@ const SCRAPED_STRING_FIELDS = [
     'ticketTitle',
     'productCategory',
     'caseNumber',
+    'createdOn',
+    'irSlaStatus',
+    'irSlaCapturedAt',
+    'customerName',
     'severity',
     'statusReason',
     'description',
@@ -82,6 +86,12 @@ export function parseScrapedDataSnapshot(value: unknown): ScrapedData | null {
             if (descriptor.value === undefined) continue
             if (typeof descriptor.value !== 'string') return null
             result[key] = descriptor.value
+        }
+        if (result.irSlaStatus !== undefined || result.irSlaCapturedAt !== undefined) {
+            if (result.irSlaStatus !== 'Succeeded' && result.irSlaStatus !== 'unknown') return null
+            if (result.irSlaCapturedAt === undefined) return null
+            const capturedAt = new Date(result.irSlaCapturedAt)
+            if (!Number.isFinite(capturedAt.getTime()) || capturedAt.toISOString() !== result.irSlaCapturedAt) return null
         }
         return result
     } catch {

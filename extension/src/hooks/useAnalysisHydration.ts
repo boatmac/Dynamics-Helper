@@ -3,8 +3,7 @@
 // for FAB to consume.
 //
 // See:
-//   docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md
-//   docs/superpowers/plans/2026-06-03-analysis-result-persistence.md
+//   docs/specs/analysis-result-persistence.md
 //
 // Why extracted from FAB.tsx: FAB has heavy side effects (DOM scraping,
 // MutationObserver, telemetry init, settings load). Testing the hook in
@@ -31,6 +30,7 @@ export interface HydratedPopover {
     content: string
     savedTo?: string
     errorCode?: string
+    attachmentNotice?: string
     durationSec?: number
     identity: LastAnalysisIdentity
 }
@@ -111,6 +111,9 @@ export function useAnalysisHydration(caseNumber: string): HydrationResult {
                     content: l.content,
                     savedTo: l.savedTo,
                     errorCode: l.errorCode,
+                    ...(l.attachmentNotice === undefined
+                        ? {}
+                        : { attachmentNotice: l.attachmentNotice }),
                     ...(l.durationSec === undefined
                         ? {}
                         : { durationSec: l.durationSec }),

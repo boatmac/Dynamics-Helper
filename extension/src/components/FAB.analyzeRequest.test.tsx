@@ -7,6 +7,7 @@ import {
     resetChromeMock,
 } from '../test/chromeMock'
 import { PrefsLanguageProvider } from '../utils/i18n'
+import { publishAnalyzeProgress } from '../utils/analyzeProgressChannel'
 
 const A = {
     caseNumber: 'CASE-A-1234',
@@ -62,7 +63,8 @@ vi.mock('../utils/prefs', () => ({
 }))
 
 vi.mock('../utils/pageReader', () => ({
-    PageReader: { scanForErrors: state.scanForErrors },
+    CUSTOMER_LOOKUP_SELECTOR: '[data-id="customerid.fieldControl-LookupResultsDropdown_customerid_SelectedRecordList"]',
+    PageReader: { scanForErrors: state.scanForErrors, readLiveRecordNumber: () => undefined },
 }))
 
 vi.mock('../utils/analyzeRequest', async importOriginal => {
@@ -183,6 +185,12 @@ async function openAndAnalyze(): Promise<void> {
     await flushReact()
 }
 
+function dispatchProgress(requestId: string, payload: unknown): void {
+    act(() => {
+        publishAnalyzeProgress({ requestId, payload })
+    })
+}
+
 async function triggerMutation(): Promise<void> {
     const callback = state.observerCallback
     expect(callback).not.toBeNull()
@@ -249,6 +257,7 @@ describe('FAB Analyze request Root snapshots', () => {
             ...state.prefs,
             rootPath: 'C:\\Prefs',
             autoAnalyzeMode: 'disabled',
+            enableStatusBubble: true,
         }
         state.scanValue = A
         state.scanForErrors.mockReset().mockImplementation(
@@ -268,6 +277,187 @@ describe('FAB Analyze request Root snapshots', () => {
     afterEach(() => {
         act(() => vi.clearAllTimers())
         vi.useRealTimers()
+    })
+
+    it('opts into progress v1, safely clones events and retains progress across menu remounts', async () => {
+        deferNextResponse('analyze_error')
+        await renderFab()
+        await openAndAnalyze()
+        const message = analyzeMessages()[0].payload
+        expect(message.payload.progressVersion).toBe(1)
+        const payload = { version: 1, seq: 1, stage: 'session_resuming', state: 'running', elapsedMs: 1200 }
+        dispatchProgress(message.requestId, payload)
+        payload.stage = 'report'
+        expect(screen.getByRole('status')).toHaveTextContent('Resuming session: Running')
+        expect(document.querySelector('.dh-status-bubble.visible')).toBeNull()
+        fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+        dispatchProgress(message.requestId, { version: 1, seq: 2, stage: 'agent', state: 'running', elapsedMs: 2400 })
+        fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+        await flushReact()
+        expect(screen.getByRole('status')).toHaveTextContent('Copilot analysis: Running')
+        expect(screen.getByRole('button', { name: 'Recent activity (2)' })).toBeInTheDocument()
+        dispatchProgress(message.requestId, { version: 1, seq: 1, stage: 'report', state: 'running', elapsedMs: 5000 })
+        const getter = vi.fn(() => 'report')
+        dispatchProgress(message.requestId, Object.defineProperty({ ...payload, seq: 3 }, 'stage', { enumerable: true, get: getter }))
+        expect(getter).not.toHaveBeenCalled()
+        expect(screen.getByRole('status')).toHaveTextContent('Copilot analysis: Running')
+    })
+
+    it('renders legacy progress and the exact DTM sign-in label safely without forcing a disabled bubble', async () => {
+        state.prefs = { ...state.prefs, enableStatusBubble: false }
+        deferNextResponse('analyze_error')
+        await renderFab()
+        await openAndAnalyze()
+        const { requestId } = analyzeMessages()[0].payload
+        dispatchProgress(requestId, 'Preparing prompt...')
+        expect(screen.getByRole('status')).toHaveTextContent('Preparing analysis')
+        dispatchProgress(requestId, 'Waiting for DTM sign-in (30 seconds)...')
+        expect(screen.getByRole('status')).toHaveTextContent('Waiting for DTM sign-in (30 seconds)...')
+        dispatchProgress(requestId, 'untrusted secret URL')
+        expect(screen.getByRole('status')).toHaveTextContent('Analysis in progress')
+        expect(screen.queryByText(/untrusted secret/)).not.toBeInTheDocument()
+        expect(document.querySelector('.dh-status-bubble.visible')).toBeNull()
+    })
+
+    it.each(['success', 'error'] as const)('attachment notice reaches the immediate FAB %s popover separately', async status => {
+        const response = deferNextResponse('analyze_error')
+        await renderFab()
+        await openAndAnalyze()
+        await act(async () => response.resolve({
+            ...(status === 'success'
+                ? { status, data: { markdown: '# Report', saved_to: 'report.md' } }
+                : { status, error: 'SAFE HOST FALLBACK', error_code: 'repository_instructions_missing' }),
+            attachmentNotice: 'Some attachments were not included.',
+        }))
+        await flushReact()
+        expect(screen.getByRole('alert')).toHaveTextContent('Some attachments were not included.')
+        if (status === 'success') expect(screen.getByRole('heading', { name: 'Report' })).toBeInTheDocument()
+        else {
+            expect(screen.getByText(/Repository Instructions are missing/i)).toBeInTheDocument()
+            expect(screen.queryByText('SAFE HOST FALLBACK')).toBeNull()
+        }
+        expect(JSON.stringify(state.trackEvent.mock.calls)).not.toContain('Some attachments were not included.')
+    })
+
+    it('reserves 120 seconds for attachment preparation before the unchanged model timeout and fallback grace', async () => {
+        deferNextResponse('analyze_error')
+        await renderFab()
+        await openAndAnalyze()
+        await act(async () => { await vi.advanceTimersByTimeAsync(189_999) })
+        expect(screen.getByRole('button', { name: /^analyze$/i })).toBeDisabled()
+        expect(state.trackEvent).not.toHaveBeenCalledWith('Analyze Timeout')
+        await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+        await flushReact()
+        expect(state.trackEvent).toHaveBeenCalledWith('Analyze Timeout')
+        expect(state.prefs.analyzeTimeoutSeconds).toBe(60)
+    })
+
+    it('rejects late progress as soon as the full response arrives, including while hashing', async () => {
+        const response = deferNextResponse('analyze_error')
+        const hash = deferredValue<string>()
+        state.hashCaseId.mockImplementationOnce(() => hash.promise)
+        await renderFab()
+        await openAndAnalyze()
+        const { requestId } = analyzeMessages()[0].payload
+        dispatchProgress(requestId, { version: 1, seq: 1, stage: 'report', state: 'succeeded', elapsedMs: 1000 })
+        expect(screen.getByRole('status')).toHaveTextContent('Writing report: Succeeded')
+        await act(async () => response.resolve({ status: 'success', data: { markdown: 'PROGRESS RESULT', saved_to: 'report.md' } }))
+        dispatchProgress(requestId, 'Preparing prompt...')
+        expect(screen.getByRole('status')).toHaveTextContent('Writing report: Succeeded')
+        await act(async () => hash.resolve('hash'))
+        await flushReact()
+        expect(screen.getByText('PROGRESS RESULT')).toBeInTheDocument()
+        dispatchProgress(requestId, { version: 1, seq: 2, stage: 'agent', state: 'running', elapsedMs: 2000 })
+        fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+        await flushReact()
+        expect(screen.getByRole('status')).toHaveTextContent('Analysis complete')
+    })
+
+    it('settles business failure through the existing result path and resets on a new request', async () => {
+        const response = deferNextResponse('analyze_error')
+        await renderFab()
+        await openAndAnalyze()
+        const oldId = analyzeMessages()[0].payload.requestId
+        dispatchProgress(oldId, { version: 1, seq: 1, stage: 'report', state: 'succeeded', elapsedMs: 1000 })
+        // The SW has already normalized the Host's inner business failure.
+        await act(async () => response.resolve({ status: 'error', error: 'BUSINESS FAILURE' }))
+        await flushReact()
+        expect(screen.getByText('BUSINESS FAILURE')).toBeInTheDocument()
+        expect(screen.getByRole('status')).toHaveTextContent('Analysis did not complete')
+        deferNextResponse('analyze_error')
+        await openAndAnalyze()
+        const newId = analyzeMessages()[1].payload.requestId
+        expect(newId).not.toBe(oldId)
+        dispatchProgress(oldId, 'Preparing prompt...')
+        expect(screen.getByRole('status')).toHaveTextContent('Analysis in progress')
+        expect(screen.queryByRole('button', { name: /Recent activity/ })).not.toBeInTheDocument()
+        dispatchProgress(newId, { version: 1, seq: 1, stage: 'auth', state: 'running', elapsedMs: 10 })
+        expect(screen.getByRole('status')).toHaveTextContent('Checking authentication: Running')
+    })
+
+    it('ignores forged public DOM progress even with the active request ID and a valid payload', async () => {
+        deferNextResponse('analyze_error')
+        await renderFab()
+        await openAndAnalyze()
+        const { requestId } = analyzeMessages()[0].payload
+        act(() => window.dispatchEvent(new CustomEvent('dh-native-progress', {
+            detail: { requestId, payload: { version: 1, seq: 999, stage: 'report', state: 'succeeded', elapsedMs: 999 } },
+        })))
+        expect(screen.getByRole('status')).toHaveTextContent('Analysis in progress')
+        expect(screen.queryByRole('button', { name: /Recent activity/ })).not.toBeInTheDocument()
+        expect(document.querySelector('.dh-status-bubble.visible')).toBeNull()
+        dispatchProgress(requestId, { version: 1, seq: 1, stage: 'agent', state: 'running', elapsedMs: 1 })
+        expect(screen.getByRole('status')).toHaveTextContent('Copilot analysis: Running')
+    })
+
+    it('retains ready and parallel tool completion during a same-page scan without displaying them early', async () => {
+        deferNextResponse('analyze_error')
+        await renderFab()
+        await openAndAnalyze()
+        const { requestId } = analyzeMessages()[0].payload
+        dispatchProgress(requestId, { version: 1, seq: 1, stage: 'tool', state: 'running', service: 'webiq', toolId: 'tool-1', elapsedMs: 1 })
+        const scan = deferredValue<unknown>()
+        state.scanForErrors.mockImplementationOnce(() => scan.promise)
+        await triggerMutation()
+        const sessionId = '12345678-1234-1234-1234-123456789012'
+        dispatchProgress(requestId, { version: 1, seq: 2, stage: 'session_ready', state: 'succeeded', sessionId, elapsedMs: 2 })
+        dispatchProgress(requestId, { version: 1, seq: 3, stage: 'tool', state: 'succeeded', service: 'webiq', toolId: 'tool-1', elapsedMs: 3 })
+        expect(screen.queryByRole('region', { name: 'Analysis in progress' })).not.toBeInTheDocument()
+        expect(document.querySelector('.dh-status-bubble.visible')).toBeNull()
+        await act(async () => scan.resolve(A))
+        await flushReact()
+        expect(screen.getByText(sessionId)).toBeInTheDocument()
+        expect(screen.getByRole('status')).toHaveTextContent('Tool activity: Succeeded')
+        expect(screen.queryByRole('list', { name: 'Active tools' })).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Recent activity (3)' })).toBeInTheDocument()
+    })
+
+    it('hides old progress during a pending page scan and on a different case', async () => {
+        deferNextResponse('analyze_error')
+        await renderFab()
+        await openAndAnalyze()
+        const { requestId } = analyzeMessages()[0].payload
+        dispatchProgress(requestId, 'Preparing prompt...')
+        const scan = deferredValue<unknown>()
+        state.scanForErrors.mockImplementationOnce(() => scan.promise)
+        await triggerMutation()
+        dispatchProgress(requestId, { version: 1, seq: 2, stage: 'report', state: 'running', elapsedMs: 2000 })
+        expect(screen.queryByRole('button', { name: /Recent activity/ })).not.toBeInTheDocument()
+        expect(screen.queryByText('Preparing analysis')).not.toBeInTheDocument()
+        await act(async () => scan.resolve(B))
+        await flushReact()
+        state.scanValue = B
+        fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+        await flushReact()
+        dispatchProgress(requestId, 'Preparing prompt...')
+        expect(screen.queryByRole('region', { name: 'Analysis in progress' })).not.toBeInTheDocument()
+        dispatchProgress(requestId, { version: 1, seq: 3, stage: 'response', state: 'running', elapsedMs: 3000 })
+        state.scanValue = A
+        await triggerMutation()
+        fireEvent.click(document.querySelector('.dh-btn') as HTMLButtonElement)
+        await flushReact()
+        expect(screen.getByRole('status')).toHaveTextContent('Processing response: Running')
+        expect(screen.getByRole('button', { name: 'Recent activity (2)' })).toBeInTheDocument()
     })
 
     it('scopes a nonempty context-menu Root to one request', async () => {

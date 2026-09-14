@@ -32,7 +32,9 @@ vi.mock('../utils/prefs', () => {
 })
 
 vi.mock('../utils/pageReader', () => ({
+    CUSTOMER_LOOKUP_SELECTOR: '[data-id="customerid.fieldControl-LookupResultsDropdown_customerid_SelectedRecordList"]',
     PageReader: {
+        readLiveRecordNumber: () => undefined,
         scanForErrors: vi.fn().mockResolvedValue({
             caseNumber: '1234567890123456',
             ticketTitle: 'fixture',
@@ -49,6 +51,7 @@ vi.mock('../hooks/useAnalysisHydration', () => {
             status: 'error' as const,
             title: 'Analysis Failed',
             content: 'HYDRATED HOST FALLBACK',
+            attachmentNotice: 'Some attachments were not included.',
             errorCode: 'repository_instructions_missing',
             identity: {
                 requestId: 'req-hydrated',
@@ -126,7 +129,7 @@ describe('FAB prompt-source error display', () => {
         expect(screen.getByText('HOST FALLBACK')).toBeTruthy()
     })
 
-    it('UI-I6: full FAB copies hydrated errorCode into localized popover state', async () => {
+    it('UI-I6: full FAB copies hydrated errorCode and attachment notice into localized popover state', async () => {
         render(
             <PrefsLanguageProvider language="en">
                 <FAB />
@@ -137,6 +140,7 @@ describe('FAB prompt-source error display', () => {
             /Repository Instructions are missing/i,
         )).toBeTruthy()
         expect(screen.queryByText('HYDRATED HOST FALLBACK')).toBeNull()
+        expect(screen.getByRole('alert')).toHaveTextContent('Some attachments were not included.')
         expect(hydrationDismiss).toHaveBeenCalledWith({
             requestId: 'req-hydrated',
             caseNumber: '1234567890123456',

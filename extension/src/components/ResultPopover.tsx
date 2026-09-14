@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Activity, Folder, X } from 'lucide-react'
 import { useTranslation } from '../utils/i18n'
+import { parseAttachmentNotice } from '../utils/analysisStore'
 import {
     localizeAnalyzeError,
     localizePromptSourceError,
@@ -14,6 +15,7 @@ export interface ResultPopoverProps {
     title?: string
     content: string
     errorCode?: string
+    attachmentNotice?: string
     filePath?: string
     duration?: string
     isAnalyze?: boolean
@@ -26,12 +28,16 @@ export const ResultPopover: React.FC<ResultPopoverProps> = ({
     title,
     content,
     errorCode,
+    attachmentNotice,
     filePath,
     duration,
     isAnalyze = false,
     durabilityWarning,
 }) => {
     const { t } = useTranslation()
+    const displayAttachmentNotice = parseAttachmentNotice({ attachmentNotice })
+        // Strip only the Host's fixed Markdown heading; keep the body inert text.
+        ?.replace(/^> \*\*(Attachment status:|附件状态：)\*\* /, '$1 ')
     const displayContent = isAnalyze
         ? localizeAnalyzeError(errorCode, content, t)
         : localizePromptSourceError(errorCode, content, t)
@@ -143,6 +149,14 @@ export const ResultPopover: React.FC<ResultPopoverProps> = ({
                 lineHeight: '1.6',
                 color: '#334155',
             }}>
+                {displayAttachmentNotice && (
+                    <div
+                        role="alert"
+                        style={{ marginBottom: '16px', padding: '12px', color: '#92400E', backgroundColor: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '8px', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                    >
+                        {displayAttachmentNotice}
+                    </div>
+                )}
                 {displayContent ? (
                     <ReactMarkdown
                         remarkPlugins={[remarkGfm]}

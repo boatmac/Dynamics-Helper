@@ -22,7 +22,7 @@ INSTALL_WRAPPER = ROOT_DIR / "install.bat"
 VENV_PYTHON = (
     ROOT_DIR / "host" / "venv" / "Scripts" / "python.exe"
 ).resolve()
-PYINSTALLER_VERSION = "6.18.0"
+PYINSTALLER_VERSION = "6.22.2"
 PYINSTALLER_HIDDEN_IMPORTS = (
     "early_cli",
     "install_integrity",
@@ -36,8 +36,10 @@ PYINSTALLER_HIDDEN_IMPORTS = (
     "update_journal",
     "update_mutex",
     "update_ownership",
+    "update_operation",
     "update_platform",
     "update_recovery",
+    "update_service",
     "update_status_host",
 )
 
@@ -177,6 +179,10 @@ def pyinstaller_build_command() -> list[str]:
         "dh_native_host",
         "--paths",
         str(HOST_DIR.resolve()),
+        "--exclude-module",
+        "pydantic.mypy",
+        "--exclude-module",
+        "pydantic.v1.mypy",
     ]
     for module in PYINSTALLER_HIDDEN_IMPORTS:
         command.extend(("--hidden-import", module))
@@ -200,14 +206,14 @@ def build_host():
             text=True,
         )
         if version.stdout.strip() != PYINSTALLER_VERSION:
-            print("ERROR: required PyInstaller 6.18.0 is unavailable.")
+            print("ERROR: required PyInstaller 6.22.2 is unavailable.")
             sys.exit(1)
         cmd = pyinstaller_build_command()
         print(f"Executing: {' '.join(cmd)}")
         subprocess.run(cmd, cwd=ROOT_DIR, check=True)
         print("Host build successful.")
     except subprocess.CalledProcessError:
-        print("ERROR: required PyInstaller 6.18.0 is unavailable.")
+        print("ERROR: required PyInstaller 6.22.2 is unavailable.")
         sys.exit(1)
 
 
@@ -309,9 +315,11 @@ def publish_to_github(version, zip_path, prerelease=False, notes_file=None):
         notes = (
             f"Release {tag}\n\n"
             "## Installation\n"
-            "1. Download and extract the zip file.\n"
-            "2. Double-click `install.bat` (Safely bypasses PowerShell restrictions).\n"
-            "3. Follow the on-screen instructions."
+            "1. Download the complete release ZIP and extract all files.\n"
+            "2. Close the browser normally so the Native Host can exit.\n"
+            "3. Run the extracted root `install.bat` with the same Windows account.\n"
+            "4. Keep security protections enabled; the installer does not bypass execution policy. "
+            "If installation fails, stop and preserve the error and recovery evidence."
         )
         # Use argv-list form (NOT shell=True) so the multi-line --notes string
         # cannot swallow the trailing --prerelease flag. Previously

@@ -30,6 +30,7 @@ from update_journal import (
     read_journal,
     resolve_active_journal,
     resolve_ownership_path,
+    settle_after_installer_repair,
     terminal_version,
     terminal_version_to_value,
     transition,
@@ -268,6 +269,46 @@ class FailureLineageTests(unittest.TestCase):
         rolled_back = transition(retry, JournalPhase.ROLLED_BACK)
         self.assertEqual(rolled_back.reason_code, JournalReason.HOST_EXIT_WAIT_FAILED)
         self.assertEqual(rolled_back.original_failure_code, JournalReason.HOST_EXIT_WAIT_FAILED)
+
+    def test_installer_repair_settles_same_journal_to_exact_verified_version(self):
+        identity = InitiatingProcessIdentity(123, "created-1")
+        journal = transition(staging_journal(), JournalPhase.PREPARED)
+        journal = transition(
+            journal,
+            JournalPhase.WAITING_FOR_HOST_EXIT,
+            initiating_process=identity,
+        )
+        journal = transition(
+            journal,
+            JournalPhase.ROLLING_BACK,
+            failure_code=JournalReason.HOST_INSTALL_FAILED,
+        )
+        journal = transition(
+            journal,
+            JournalPhase.RECOVERY_REQUIRED,
+            failure_code=JournalReason.MANUAL_RECOVERY_REQUIRED,
+        )
+
+        committed = settle_after_installer_repair(journal, "2.0.75")
+        self.assertEqual(committed.phase, JournalPhase.COMMITTED)
+        self.assertIsNone(committed.reason_code)
+        self.assertIsNone(committed.original_failure_code)
+        self.assertIsNone(committed.rollback_from)
+
+        rolled_back = settle_after_installer_repair(journal, "2.0.74")
+        self.assertEqual(rolled_back.phase, JournalPhase.ROLLED_BACK)
+        self.assertEqual(
+            rolled_back.original_failure_code,
+            JournalReason.HOST_INSTALL_FAILED,
+        )
+        with self.assertRaises(JournalTransitionError):
+            settle_after_installer_repair(journal, "2.0.73")
+
+        prepared = transition(staging_journal(), JournalPhase.PREPARED)
+        settled_prepared = settle_after_installer_repair(prepared, "2.0.75")
+        self.assertEqual(settled_prepared.phase, JournalPhase.COMMITTED)
+        self.assertEqual(settled_prepared.initiator, UpdateInitiator.INSTALLER)
+        self.assertIsNone(settled_prepared.initiating_process)
 
 
 if __name__ == "__main__":

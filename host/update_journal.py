@@ -697,6 +697,46 @@ def transition(
         raise JournalTransitionError() from error
 
 
+def settle_after_installer_repair(
+    journal: UpdateJournal,
+    installed_version: str,
+) -> UpdateJournal:
+    _validate_journal(journal)
+    if type(installed_version) is not str or not installed_version:
+        raise JournalTransitionError()
+    owner = (
+        UpdateInitiator.INSTALLER
+        if journal.initiator is UpdateInitiator.BROWSER
+        and journal.initiating_process is None
+        else journal.initiator
+    )
+    if installed_version == journal.target_version:
+        return _validate_journal(
+            replace(
+                journal,
+                phase=JournalPhase.COMMITTED,
+                initiator=owner,
+                reason_code=None,
+                original_failure_code=None,
+                rollback_from=None,
+            )
+        )
+    if not journal.fresh_install and installed_version == journal.prior_version:
+        reason = journal.original_failure_code or JournalReason.STARTUP_PROBE_FAILED
+        rollback_from = journal.rollback_from or JournalPhase.PROBING
+        return _validate_journal(
+            replace(
+                journal,
+                phase=JournalPhase.ROLLED_BACK,
+                initiator=owner,
+                reason_code=reason,
+                original_failure_code=reason,
+                rollback_from=rollback_from,
+            )
+        )
+    raise JournalTransitionError()
+
+
 def record_seed_receipt(
     journal: UpdateJournal, receipt: SeedOperationReceipt
 ) -> UpdateJournal:

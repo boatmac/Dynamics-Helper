@@ -21,7 +21,11 @@ from release_helper import stage_release
 from native_registration import STATUS_HOST_NAME
 from test_native_registration import MemoryRegistryBackend
 from test_update_engine_host import TX, make_package
-from test_update_support import FakeMutationMutex, InjectedCrash
+from test_update_support import (
+    FakeMutationMutex,
+    InjectedCrash,
+    current_extension_manifest_bytes,
+)
 from update_engine import UpdateEngine, UpdateEngineHooks
 from update_journal import (
     JournalReason,
@@ -3733,10 +3737,7 @@ class FrozenStagedProbeIntegrationTests(unittest.TestCase):
         source = self.root / "source"
         shutil.copytree(onedir, source / "dist/dh_native_host")
         files = {
-            "extension/dist/manifest.json": (
-                b'{"version":"2.0.74",'
-                b'"version_name":"2.0.74-beta.4"}\n'
-            ),
+            "extension/dist/manifest.json": current_extension_manifest_bytes(),
             "extension/dist/assets/app.js": b"app",
             "host/config.json": b"{}\n",
             "host/system_prompt.md": b"core",

@@ -1,1 +1,38 @@
 extension/items.json text eol=lf
+
+# Preserve raw-byte test review identities across checkouts.
+scripts/check_test_safety.py -text
+scripts/run_safe_tests.py -text
+scripts/run_sdk_tests.py -text
+host/sdk_client.py -text
+host/dh_native_host.py -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+host/test_sdk_compat.py -text
+host/repository_instructions.py -text
+host/test_repository_instructions.py -text
+host/analyze_progress.py -text
+host/test_analyze_progress.py -text
+host/analysis_attachments.py -text
+host/test_analysis_attachments.py -text
+host/requirements.txt -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+tests/sdk-test-review.json -text
+scripts/test_profile_state.py -text
+tests/test-safety-manifest.json -text
+tests/test_test_safety.py -text
+tests/test_profile_state.py -text
+tests/test_safe_runner.py -text
+tests/validate_test_safety.py -text
+tests/validate_safe_runner.py -text
+tests/validate_installer_harness.py -text
+tests/validate_powershell_startup.py -text
+tests/harnesses/installer_safety.ps1 -text
+tests/harnesses/powershell_startup_baseline.ps1 -text
+tests/fixtures/test_safety_runner/passing_case.py -text
+tests/fixtures/test_safety_runner/failing_case.py -text
+tests/fixtures/test_safety_runner/waiting_case.py -text
+tests/fixtures/test_safety_runner/noisy_case.py -text
+tests/fixtures/test_safety_runner/scope_one_case.py -text
+tests/fixtures/test_safety_runner/scope_two_case.py -text
+
+# Old-repository records retain exact bytes and are excluded from Git exports.
+/archive export-ignore
+/archive/** -text export-ignore

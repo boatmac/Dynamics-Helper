@@ -9,12 +9,22 @@ export interface AuthorizedAnalyzeTransport {
     send(forwarded: AnalyzeNativeAction): Promise<unknown>
 }
 
+type AnalyzeSendAuthorization =
+    | { allowed: false; response: AnalyzeForwardResponse }
+    | { allowed: true; response: Promise<unknown> }
+
 export interface AnalyzeRequestHandlerDeps {
     acquireAuthorizedTransport(
         forwarded: Readonly<AnalyzeNativeAction>,
     ): Promise<
         | { allowed: false; response: AnalyzeForwardResponse }
-        | { allowed: true; transport: AuthorizedAnalyzeTransport }
+        | {
+              allowed: true
+              transport: AuthorizedAnalyzeTransport
+              authorizeSend?: (
+                  forwarded: Readonly<AnalyzeNativeAction>,
+              ) => Promise<AnalyzeSendAuthorization>
+          }
     >
 }
 
@@ -42,7 +52,15 @@ export async function handleAnalyzeRequest(
     return handleAnalyzeForward(
         parsed.forwarded,
         parsed.context,
-        { send: action => acquisition.transport.send(action) },
+        {
+            send: async action => {
+                if (acquisition.authorizeSend) {
+                    const authorization = await acquisition.authorizeSend(action)
+                    return authorization.response
+                }
+                return acquisition.transport.send(action)
+            },
+        },
     )
 }
 
@@ -70,7 +88,8 @@ export function guardNonAnalyzeNativeMessage(
         let requestIdPresent = false
         for (const key of keys) {
             if (typeof key !== 'string') return nonAnalyzeDenied()
-            if (key === '_persist' || key === 'extension_warnings' || key === 'toJSON') {
+            if (key === '_persist' || key === 'extension_warnings' || key === 'toJSON'
+                || key === 'attachments' || key === 'filePaths') {
                 return nonAnalyzeDenied()
             }
             const holder = Reflect.getOwnPropertyDescriptor(descriptors, key)
@@ -99,6 +118,7 @@ export function guardNonAnalyzeNativeMessage(
             !action
             || typeof action.value !== 'string'
             || action.value === 'analyze_error'
+            || action.value === 'analyze_with_attachments'
         ) return nonAnalyzeDenied()
         if (requestIdPresent && !Object.hasOwn(output, 'requestId')) {
             return nonAnalyzeDenied()

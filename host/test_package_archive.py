@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from package_archive import (
     PackageValidationError,
+    _extract_bounded_entry,
     _preflight_zip_infos,
     stage_and_validate_archive,
     validate_staged_package,
@@ -28,6 +29,8 @@ from package_manifest import (
     update_manifest_to_dict,
     write_release_documents,
 )
+from product_info import VERSION
+from test_update_support import current_extension_manifest_bytes
 
 
 def make_stage(root: Path) -> Path:
@@ -38,7 +41,7 @@ def make_stage(root: Path) -> Path:
         "host/system_prompt.md": b"core",
         "host/register.py": b"register",
         "host/config.json": b"{}\n",
-        "extension/manifest.json": b'{"version":"2.0.74","version_name":"2.0.74-beta.4"}\n',
+        "extension/manifest.json": current_extension_manifest_bytes(),
         "extension/assets/app.js": b"app",
         "installer_core.ps1": b"installer",
         "install.bat": b"wrapper",
@@ -47,7 +50,7 @@ def make_stage(root: Path) -> Path:
         path = stage.joinpath(*relative.split("/"))
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(payload)
-    documents = generate_release_documents(stage, "2.0.74-beta.4")
+    documents = generate_release_documents(stage, VERSION)
     write_release_documents(stage, documents)
     return stage
 
@@ -105,11 +108,11 @@ class StagedPackageValidationTests(unittest.TestCase):
 
     def test_valid_stage_returns_resolved_models(self):
         stage = self._fresh_stage()
-        result = validate_staged_package(stage, expected_version="2.0.74-beta.4")
+        result = validate_staged_package(stage, expected_version=VERSION)
         self.assertEqual(result.stage_root, stage.resolve())
-        self.assertEqual(result.manifest.package_version, "2.0.74-beta.4")
-        self.assertEqual(result.release_integrity.package_version, "2.0.74-beta.4")
-        self.assertEqual(result.installed_product.package_version, "2.0.74-beta.4")
+        self.assertEqual(result.manifest.package_version, VERSION)
+        self.assertEqual(result.release_integrity.package_version, VERSION)
+        self.assertEqual(result.installed_product.package_version, VERSION)
 
     def test_staged_mutation_table(self):
         mutations = (
@@ -268,6 +271,167 @@ class HostileArchiveTests(unittest.TestCase):
             archive.write_bytes(data.replace(original, replacement))
         return archive
 
+    @staticmethod
+    def _sized_info(
+        filename: str,
+        *,
+        file_size: int = 0,
+        compress_size: int = 0,
+    ) -> zipfile.ZipInfo:
+        info = zipfile.ZipInfo(filename)
+        info.create_system = 3
+        info.external_attr = 0o100644 << 16
+        info.file_size = file_size
+        info.compress_size = compress_size
+        return info
+
+    def test_archive_resource_limit_boundaries_pass(self):
+        entry_limit = 20_000
+        entry_bytes = 128 * 1024 * 1024
+        total_bytes = 512 * 1024 * 1024
+
+        entries = [
+            self._sized_info(f"entry-{index:05d}")
+            for index in range(entry_limit)
+        ]
+        self.assertEqual(len(_preflight_zip_infos(entries)), entry_limit)
+
+        self.assertEqual(
+            len(_preflight_zip_infos([
+                self._sized_info(
+                    "entry.bin",
+                    file_size=entry_bytes,
+                    compress_size=entry_bytes,
+                ),
+            ])),
+            1,
+        )
+
+        total_entries = [
+            self._sized_info(
+                f"total-{index}.bin",
+                file_size=entry_bytes,
+                compress_size=entry_bytes,
+            )
+            for index in range(total_bytes // entry_bytes)
+        ]
+        self.assertEqual(len(_preflight_zip_infos(total_entries)), 4)
+
+        self.assertEqual(
+            len(_preflight_zip_infos([
+                self._sized_info(
+                    "ratio.bin",
+                    file_size=200,
+                    compress_size=1,
+                ),
+            ])),
+            1,
+        )
+
+    def test_archive_resource_limit_one_over_table(self):
+        entry_limit = 20_000
+        entry_bytes = 128 * 1024 * 1024
+        total_bytes = 512 * 1024 * 1024
+        cases = (
+            (
+                "entry-count",
+                [
+                    self._sized_info(f"entry-{index:05d}")
+                    for index in range(entry_limit + 1)
+                ],
+            ),
+            (
+                "entry-bytes",
+                [
+                    self._sized_info(
+                        "entry.bin",
+                        file_size=entry_bytes + 1,
+                        compress_size=entry_bytes + 1,
+                    ),
+                ],
+            ),
+            (
+                "total-bytes",
+                [
+                    self._sized_info(
+                        f"total-{index}.bin",
+                        file_size=entry_bytes,
+                        compress_size=entry_bytes,
+                    )
+                    for index in range(total_bytes // entry_bytes)
+                ] + [
+                    self._sized_info(
+                        "one-over.bin",
+                        file_size=1,
+                        compress_size=1,
+                    ),
+                ],
+            ),
+            (
+                "compression-ratio",
+                [
+                    self._sized_info(
+                        "ratio.bin",
+                        file_size=201,
+                        compress_size=1,
+                    ),
+                ],
+            ),
+        )
+        for name, entries in cases:
+            with self.subTest(name=name):
+                with self.assertRaises(PackageValidationError) as captured:
+                    _preflight_zip_infos(entries)
+                self.assertEqual(
+                    captured.exception.error_code,
+                    "unsupported_archive_entry",
+                )
+
+    def test_actual_extraction_limits_and_length_agreement(self):
+        class ChunkSource:
+            def __init__(self, sizes: list[int]) -> None:
+                self._sizes = iter(sizes)
+
+            def read(self, _size: int) -> bytes:
+                return b"x" * next(self._sizes, 0)
+
+        class CountingTarget:
+            def __init__(self) -> None:
+                self.written = 0
+
+            def write(self, payload: bytes) -> None:
+                self.written += len(payload)
+
+        mebibyte = 1024 * 1024
+        target = CountingTarget()
+        total = _extract_bounded_entry(
+            ChunkSource([mebibyte] * 128),
+            target,
+            declared_size=128 * mebibyte,
+            extracted_total=384 * mebibyte,
+        )
+        self.assertEqual(target.written, 128 * mebibyte)
+        self.assertEqual(total, 512 * mebibyte)
+
+        cases = (
+            ("entry-one-over", [mebibyte] * 128 + [1], 128 * mebibyte, 0),
+            ("total-one-over", [1], 1, 512 * mebibyte),
+            ("shorter-than-declared", [3], 4, 0),
+        )
+        for name, chunks, declared_size, extracted_total in cases:
+            with self.subTest(name=name):
+                with self.assertRaises(PackageValidationError) as captured:
+                    _extract_bounded_entry(
+                        ChunkSource(chunks),
+                        CountingTarget(),
+                        declared_size=declared_size,
+                        extracted_total=extracted_total,
+                    )
+                self.assertEqual(
+                    captured.exception.error_code,
+                    "unsupported_archive_entry",
+                )
+
     def test_hostile_archive_table(self):
         cases = (
             ("parent", "../escape.txt", 3, 0o100644 << 16, "invalid_package_path"),
@@ -335,9 +499,9 @@ class HostileArchiveTests(unittest.TestCase):
         validated = stage_and_validate_archive(
             archive,
             destination,
-            expected_version="2.0.74-beta.4",
+            expected_version=VERSION,
         )
-        self.assertEqual(validated.manifest.package_version, "2.0.74-beta.4")
+        self.assertEqual(validated.manifest.package_version, VERSION)
 
     def test_dos_regular_entry_reaches_manifest_validation(self):
         archive = self._write_archive(

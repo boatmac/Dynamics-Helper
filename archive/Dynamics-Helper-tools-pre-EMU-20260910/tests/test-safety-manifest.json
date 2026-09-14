@@ -1,0 +1,381 @@
+{
+  "version": 2,
+  "status": "safety_core_source_reviewed_results_in_handoff",
+  "policy": {
+    "roots": ["host/test*.py", "tests/test*.py", "tests/harnesses/*.ps1"],
+    "optional_root": "scripts/maintenance/Test*.cjs",
+    "default_selection": "profile=None is full audit; named profiles select exactly their tests after validating the complete manifest schema",
+    "process_opt_in": "check_repository(process_tests=True); separate runner authorization required",
+    "never_autodiscover": ["live_probe", "observational_helper"],
+    "non_exempt": "forbidden_execution, shell_execution, inline_command, powershell_complex, powershell_unresolved and parse_error cannot be approved. An exception with any forbidden kind rejects the manifest globally, even outside inventory. Only the dedicated fixed_python_bootstrap shape can be reviewed for Python -c; compilation and dynamic imports require exact callsite review, never automatic approval.",
+    "hash_contract": "Lowercase SHA256 of complete raw file bytes, not generated source; null is pending, never approval. Source is exact AST call segment, or exact PowerShell line. Scope is dotted Python class/function nesting; PowerShell uses <file>.",
+    "integration": "Run gate before importing any test. Any diagnostic blocks all selection. Do not use unittest discovery to override returned paths. Imports/dependencies and selected files must remain unchanged between review, gate and runner.",
+    "limitations": "Initial inventory deliberately incomplete. Dependency closure is explicit, not an automated import graph. Python basic aliases only; unknown wrappers, monkeypatches and interprocedural flow still need human review. PowerShell is coarse positive command identification, not a parser: ordinary structure/interpolation and simple variable call targets require exact line review; constructed targets and unparsed quoting/subexpressions are non-exempt. Optional CJS is manual whole-source review. Frontend exceptions are pending handoff records, not scanner coverage.",
+    "roles": "test is runnable only for pure_mock/process classes; dependency/data/bootstrap use class support and are never selected. Dependencies are scanned and raw-byte hash-bound. Data is hash-bound only and cannot use a recognized source extension.",
+    "bootstrap_trust_boundary": "Only scripts/check_test_safety.py and scripts/run_safe_tests.py may use role bootstrap, review_kind bootstrap. They require separately reviewed full-file SHA256 and purpose, and are NOT scanned recursively or proven safe by this checker. The parent must review/import its bootstrap independently and bind manifest plus all closure bytes across gate/run; lstat checks are not atomic against concurrent mutation.",
+    "runner_interface": "check_repository(root, profile=None, process_tests=False, include_maintenance=False) returns (diagnostics, selected_test_paths), empty selection on any diagnostic. resolve_profile(manifest, name) is pure global schema validation returning copied tests/dependencies/test_ids lists; load_execution_profile(root, name) reads the validated manifest and returns the same metadata, NOT execution approval. Gate first, then bind the same snapshot; test_ids absent means all tests in the explicit files, present means exact module.Class.test_method IDs statically present in those modules. No discovery fallback.",
+    "pending_review": "The six safety-core source files and 31 exact callsite exceptions are source-reviewed and raw-byte hash-bound for that profile only; execution evidence is recorded in the active handoff. Remaining inventory reviews are pending. Shared bootstrap hashes do not approve pii-core. No global inventory or process-test qualification is supplied. installer-success is intentionally absent until separately qualified."
+  },
+  "profiles": {
+    "safety-core": {
+      "tests": ["tests/test_test_safety.py", "tests/test_profile_state.py", "tests/test_safe_runner.py"],
+      "dependencies": ["scripts/check_test_safety.py", "scripts/test_profile_state.py", "scripts/run_safe_tests.py"],
+      "test_ids": [
+        "tests.test_test_safety.TestTestSafety.test_dynamic_execution_and_basic_aliases",
+        "tests.test_test_safety.TestTestSafety.test_negative_assertions_and_base64_data_are_not_execution",
+        "tests.test_test_safety.TestTestSafety.test_process_shapes_require_review",
+        "tests.test_test_safety.TestTestSafety.test_unknown_callable_and_stdin_are_reviewed",
+        "tests.test_test_safety.TestTestSafety.test_fixed_bootstrap_is_review_candidate_not_approval",
+        "tests.test_test_safety.TestTestSafety.test_parse_failure_is_fixed",
+        "tests.test_test_safety.TestTestSafety.test_scope_and_exact_source",
+        "tests.test_test_safety.TestTestSafety.test_compilation_and_dynamic_imports_require_separate_review",
+        "tests.test_test_safety.TestTestSafety.test_fully_matching_forbidden_exceptions_never_approve",
+        "tests.test_test_safety.TestTestSafety.test_forbidden_exception_outside_inventory_rejects_manifest",
+        "tests.test_test_safety.TestTestSafety.test_exception_is_exact_and_pending_never_approves",
+        "tests.test_test_safety.TestTestSafety.test_powershell_literals_comments_and_fixture_review",
+        "tests.test_test_safety.TestTestSafety.test_ordinary_instances_do_not_poison_attribute_aliases",
+        "tests.test_test_safety.TestTestSafety.test_powershell_command_tokens_not_substrings",
+        "tests.test_test_safety.TestTestSafety.test_profile_resolver_and_loader_contract",
+        "tests.test_test_safety.TestTestSafety.test_checked_in_profiles_have_explicit_closure_without_source_imports",
+        "tests.test_test_safety.TestTestSafety.test_profile_ignores_unrelated_pending_and_unclassified_sources_audit_finds",
+        "tests.test_test_safety.TestTestSafety.test_dependency_raw_hash_including_line_endings_blocks_selection",
+        "tests.test_test_safety.TestTestSafety.test_dependency_scan_requires_exact_source_full_hash_exception",
+        "tests.test_test_safety.TestTestSafety.test_process_permission_is_checked_without_importing_tests",
+        "tests.test_test_safety.TestTestSafety.test_malformed_schema_rejects_before_source_reads_or_glob",
+        "tests.test_test_safety.TestTestSafety.test_exact_test_ids_must_exist_in_reviewed_module",
+        "tests.test_test_safety.TestTestSafety.test_links_and_windows_reparse_ancestors_block_before_read",
+        "tests.test_test_safety.TestTestSafety.test_audit_does_not_glob_through_reparse_root",
+        "tests.test_test_safety.TestTestSafety.test_bootstrap_is_explicit_hash_bound_trust_boundary_not_scan_proof",
+        "tests.test_test_safety.TestTestSafety.test_scanned_dependency_process_sink_needs_permission_and_review",
+        "tests.test_profile_state.ProfileStateTests.test_empty_and_exact_baseline_are_allowed_without_mutation",
+        "tests.test_profile_state.ProfileStateTests.test_wrong_root_keys_and_snapshot_shapes_fail",
+        "tests.test_profile_state.ProfileStateTests.test_wrong_entry_shapes_fail",
+        "tests.test_profile_state.ProfileStateTests.test_files_or_non_directory_kinds_at_either_baseline_path_fail",
+        "tests.test_profile_state.ProfileStateTests.test_any_other_root_change_fails",
+        "tests.test_profile_state.ProfileStateTests.test_partial_duplicate_extra_and_grandchild_entries_fail",
+        "tests.test_profile_state.ProfileStateTests.test_case_and_path_aliases_fail",
+        "tests.test_profile_state.ProfileStateTests.test_capture_empty_and_baseline_lists_roaming",
+        "tests.test_profile_state.ProfileStateTests.test_capture_never_descends_unexpected_directories",
+        "tests.test_profile_state.ProfileStateTests.test_capture_rejects_links_reparse_and_non_directory_roots_before_listing",
+        "tests.test_profile_state.ProfileStateTests.test_capture_child_links_reparse_and_files",
+        "tests.test_profile_state.ProfileStateTests.test_entry_limit_and_read_errors_fail_without_suppression",
+        "tests.test_safe_runner.SafeRunnerTests.test_success_and_launch_record_precedes_creation",
+        "tests.test_safe_runner.SafeRunnerTests.test_launch_failure_retains_independent_result",
+        "tests.test_safe_runner.SafeRunnerTests.test_kill_and_wait_failures_do_not_block_finalization",
+        "tests.test_safe_runner.SafeRunnerTests.test_capture_failure_is_nonzero",
+        "tests.test_safe_runner.SafeRunnerTests.test_postwait_input_mutation_blocks_success",
+        "tests.test_safe_runner.SafeRunnerTests.test_postwait_input_read_failure_retains_terminal_record",
+        "tests.test_safe_runner.SafeRunnerTests.test_hash_and_snapshot_failures_are_independent",
+        "tests.test_safe_runner.SafeRunnerTests.test_record_write_failures_cannot_pass",
+        "tests.test_safe_runner.SafeRunnerTests.test_interrupt_survives_cleanup_error",
+        "tests.test_safe_runner.SafeRunnerTests.test_full_capture_queue_stops_without_blocking",
+        "tests.test_safe_runner.SafeRunnerTests.test_join_and_flush_failures_still_write_result",
+        "tests.test_safe_runner.SafeRunnerTests.test_startup_rejects_flags_and_venv",
+        "tests.test_safe_runner.SafeRunnerTests.test_minimal_environment_does_not_inherit_credentials_or_optins",
+        "tests.test_safe_runner.SafeRunnerTests.test_gate_binds_dependency_ids_and_process_permission",
+        "tests.test_safe_runner.SafeRunnerTests.test_worker_hashes_all_sources_before_any_import",
+        "tests.test_safe_runner.SafeRunnerTests.test_gate_rejects_hooks_nonpython_and_manifest_races",
+        "tests.test_safe_runner.SafeRunnerTests.test_exact_ids_missing_methods_hooks_and_skips"
+      ]
+    },
+    "pii-core": {
+      "tests": ["host/test_pii_scrubber.py"],
+      "dependencies": ["host/pii_scrubber.py", "scripts/check_test_safety.py", "scripts/run_safe_tests.py"]
+    }
+  },
+  "inventory": [
+    {"path": "tests/test_test_safety.py", "role": "test", "class": "pure_mock", "source_kind": "python", "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e", "purpose": "Source review accepted for safety-core only: inert scanner fixtures and mocked repository reads, plus real read-only checked-in manifest metadata checks; no fixture execution."},
+    {"path": "tests/test_profile_state.py", "role": "test", "class": "pure_mock", "source_kind": "python", "sha256": "4ac970f571067996de0edf1c2b3d8bd1fc246ad6e1021f12f5bcb5779d6c41fc", "purpose": "Source review accepted for safety-core only: in-memory profile snapshots, lexical paths and patched metadata/listing reads; no real profile access or mutation."},
+    {"path": "tests/test_safe_runner.py", "role": "test", "class": "pure_mock", "source_kind": "python", "sha256": "93034488895fac5cc54eca020bff2868aafb1e92a7ef993c30d9398132bcb5cf", "purpose": "Source review accepted for safety-core only: runner regressions with process, filesystem, thread and dynamic-import boundaries mocked; real in-memory unittest cases and scoped environment/module patches that restore process-local state."},
+    {"path": "scripts/check_test_safety.py", "role": "bootstrap", "class": "support", "source_kind": "python", "review_kind": "bootstrap", "sha256": "958e43a9923a6ed6e2a8b79345a92a2f83f327f3579a28ac2139325720356c12", "purpose": "Independent bootstrap source review accepted for safety-core only: real read-only manifest/source inspection without test imports; self-scanning is not safety proof and this shared hash does not approve pii-core."},
+    {"path": "scripts/run_safe_tests.py", "role": "bootstrap", "class": "support", "source_kind": "python", "review_kind": "bootstrap", "sha256": "a3f6aeed580a95e95f98a635df996b483d494d66754ad0ff4704f3a437f8cfa1", "purpose": "Independent bootstrap source review accepted for safety-core only: real owned base-Python worker, reader thread, fresh profile/evidence directories, retained log writes and reviewed test imports; not an OS sandbox or descendant confinement. No pii-core or process-test qualification."},
+    {"path": "scripts/test_profile_state.py", "role": "dependency", "class": "support", "source_kind": "python", "sha256": "edcafb19545cb734f0508b3ef68807f5a01e421369667f9055623bb41dcb1152", "purpose": "Source review accepted for safety-core only: in-memory baseline validation and bounded read-only metadata/listing capture; capture reads are mocked in this profile, with no write or process operation."},
+    {"path": "host/test_pii_scrubber.py", "role": "test", "class": "pure_mock", "source_kind": "python", "sha256": null, "purpose": "PII-only test module; pending source/dependency review, not imported by checker validation."},
+    {"path": "host/pii_scrubber.py", "role": "dependency", "class": "support", "source_kind": "python", "sha256": null, "purpose": "Explicit pii-core dependency; regex compilation requires exact callsite review, not automatic exemption."},
+    {"path": "tests/test_pii.py", "role": "test", "class": "pure_mock", "source_kind": "python", "sha256": null, "purpose": "Scrubber unit tests outside named profiles; imported dependency review still required."},
+    {"path": "host/test_early_cli.py", "role": "test", "class": "process", "source_kind": "python", "sha256": null, "purpose": "Isolated source-host process probes; review environment and all callsites before opt-in."},
+    {"path": "host/test_early_update_dispatch.py", "role": "test", "class": "process", "source_kind": "python", "sha256": null, "purpose": "Early dispatch subprocess tests, including fixed frozen-state bootstrap."},
+    {"path": "host/test_install_integrity.py", "role": "test", "class": "process", "source_kind": "python", "sha256": null, "purpose": "Installer process fixtures; concurrent refactor requires later exact-source review."},
+    {"path": "tests/harnesses/installer_safety.ps1", "role": "test", "class": "process", "source_kind": "powershell", "sha256": null, "purpose": "Installer safety harness; no execution or callsite approval supplied."},
+    {"path": "host/test_analyzer.py", "role": "test", "class": "live_probe", "source_kind": "python", "sha256": null, "purpose": "Starts host and requests real analysis; never a default unit test."},
+    {"path": "host/test_analyze_full.py", "role": "test", "class": "live_probe", "source_kind": "python", "sha256": null, "purpose": "Live analysis probe excluded from automatic test selection."},
+    {"path": "host/test_analyze_flow.py", "role": "test", "class": "live_probe", "source_kind": "python", "sha256": null, "purpose": "Live analysis flow probe excluded from automatic test selection."},
+    {"path": "scripts/read-only/Test-Beta3InstalledState.ps1", "role": "test", "class": "observational_helper", "source_kind": "powershell", "sha256": null, "purpose": "Explicit observation inventory only; outside test roots, never autodiscover."},
+    {"path": "scripts/read-only/Test-OriginalCloudPcUpdateState.ps1", "role": "test", "class": "observational_helper", "source_kind": "powershell", "sha256": null, "purpose": "Explicit observation inventory only; outside test roots, never autodiscover."},
+    {"path": "scripts/maintenance/Test-B2CandidateMaintenance.cjs", "role": "test", "class": "pure_mock", "source_kind": "javascript", "sha256": null, "purpose": "Optional offline VM harness; generated JavaScript needs separate manual source review."}
+  ],
+  "exceptions": [
+    {
+      "path": "scripts/test_profile_state.py",
+      "scope": "capture_profile_state",
+      "kind": "unknown_execution",
+      "purpose": "Convert a pathlib child to a root-relative POSIX string for the bounded snapshot; these path operations do not read or write the filesystem.",
+      "source": "child.relative_to(root).as_posix()",
+      "sha256": "edcafb19545cb734f0508b3ef68807f5a01e421369667f9055623bb41dcb1152"
+    },
+    {
+      "path": "tests/test_profile_state.py",
+      "scope": "ProfileStateTests.capture",
+      "kind": "unknown_execution",
+      "purpose": "Inspect the lexical platform interpretation of a fixed path to choose a synthetic absolute fixture path; no filesystem access.",
+      "source": "Path('C:/').is_absolute()",
+      "sha256": "4ac970f571067996de0edf1c2b3d8bd1fc246ad6e1021f12f5bcb5779d6c41fc"
+    },
+    {
+      "path": "tests/test_profile_state.py",
+      "scope": "ProfileStateTests.capture.iterdir",
+      "kind": "unknown_execution",
+      "purpose": "Convert the mocked listing argument to a relative string used to look up an in-memory fixture tree; no real directory listing.",
+      "source": "path.relative_to(run).as_posix()",
+      "sha256": "4ac970f571067996de0edf1c2b3d8bd1fc246ad6e1021f12f5bcb5779d6c41fc"
+    },
+    {
+      "path": "tests/test_profile_state.py",
+      "scope": "ProfileStateTests.capture",
+      "kind": "unknown_execution",
+      "purpose": "Read the pathlib argument recorded by the patched iterdir mock and compute its relative path in memory; no filesystem access.",
+      "source": "call.args[0].relative_to(run)",
+      "sha256": "4ac970f571067996de0edf1c2b3d8bd1fc246ad6e1021f12f5bcb5779d6c41fc"
+    },
+    {
+      "path": "tests/test_profile_state.py",
+      "scope": "ProfileStateTests.capture",
+      "kind": "unknown_execution",
+      "purpose": "Format the relative pathlib argument recorded by the patched iterdir mock for assertions; no filesystem access.",
+      "source": "call.args[0].relative_to(run).as_posix()",
+      "sha256": "4ac970f571067996de0edf1c2b3d8bd1fc246ad6e1021f12f5bcb5779d6c41fc"
+    },
+    {
+      "path": "tests/test_profile_state.py",
+      "scope": "ProfileStateTests.test_empty_and_exact_baseline_are_allowed_without_mutation",
+      "kind": "unknown_execution",
+      "purpose": "Reverse the built-in list in a freshly constructed in-memory baseline to verify order-independent validation; no persisted state is changed.",
+      "source": "snapshot['USERPROFILE'].reverse()",
+      "sha256": "4ac970f571067996de0edf1c2b3d8bd1fc246ad6e1021f12f5bcb5779d6c41fc"
+    },
+    {
+      "path": "tests/test_profile_state.py",
+      "scope": "ProfileStateTests.test_capture_rejects_links_reparse_and_non_directory_roots_before_listing",
+      "kind": "unknown_execution",
+      "purpose": "Choose a synthetic absolute fixture path using only the lexical platform interpretation of the fixed C:/ path; all tested metadata reads are patched.",
+      "source": "Path('C:/').is_absolute()",
+      "sha256": "4ac970f571067996de0edf1c2b3d8bd1fc246ad6e1021f12f5bcb5779d6c41fc"
+    },
+    {
+      "path": "tests/test_profile_state.py",
+      "scope": "ProfileStateTests.test_capture_child_links_reparse_and_files",
+      "kind": "unknown_execution",
+      "purpose": "Select the platform-specific synthetic path string for mocked child metadata cases; is_absolute performs no filesystem access.",
+      "source": "Path('C:/').is_absolute()",
+      "sha256": "4ac970f571067996de0edf1c2b3d8bd1fc246ad6e1021f12f5bcb5779d6c41fc"
+    },
+    {
+      "path": "tests/test_profile_state.py",
+      "scope": "ProfileStateTests.test_entry_limit_and_read_errors_fail_without_suppression",
+      "kind": "unknown_execution",
+      "purpose": "Select the synthetic path string for an injected stat failure using a lexical path check only; no live profile access.",
+      "source": "Path('C:/').is_absolute()",
+      "sha256": "4ac970f571067996de0edf1c2b3d8bd1fc246ad6e1021f12f5bcb5779d6c41fc"
+    },
+    {
+      "path": "tests/test_safe_runner.py",
+      "scope": "<module>",
+      "kind": "unknown_execution",
+      "purpose": "Derive the checkout path from the module filename; absolute does not resolve links or open files, and may consult the current directory only for a relative filename.",
+      "source": "Path(__file__).absolute()",
+      "sha256": "93034488895fac5cc54eca020bff2868aafb1e92a7ef993c30d9398132bcb5cf"
+    },
+    {
+      "path": "tests/test_safe_runner.py",
+      "scope": "SafeRunnerTests.run_supervisor.hashing",
+      "kind": "unknown_execution",
+      "purpose": "Compute a relative path string inside the mocked digest callback to track synthetic source checks; no file is read or hashed by this callback.",
+      "source": "path.relative_to(ROOT).as_posix()",
+      "sha256": "93034488895fac5cc54eca020bff2868aafb1e92a7ef993c30d9398132bcb5cf"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_forbidden_exception_outside_inventory_rejects_manifest",
+      "kind": "unknown_execution",
+      "purpose": "Serialize a synthetic manifest to bytes returned by a patched read_bytes mock; fixture command text remains data and is never executed.",
+      "source": "json.dumps(manifest).encode()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.repository",
+      "kind": "unknown_execution",
+      "purpose": "Compute a hexadecimal SHA256 of inert in-memory fixture bytes for synthetic inventory entries, not approval of checkout files.",
+      "source": "hashlib.sha256(raw).hexdigest()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.gate",
+      "kind": "unknown_execution",
+      "purpose": "Derive the lexical synthetic repository location from this module filename; no directory is created or resolved, and relative filenames may consult cwd only.",
+      "source": "Path(__file__).absolute()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.gate",
+      "kind": "unknown_execution",
+      "purpose": "Encode the synthetic manifest into the in-memory contents mapping consumed by patched reads; no disk write or fixture execution.",
+      "source": "json.dumps(manifest).encode()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.gate.read_bytes",
+      "kind": "unknown_execution",
+      "purpose": "Convert a patched read argument into a relative dictionary key; returned bytes come from the in-memory fixture mapping, not disk.",
+      "source": "path.relative_to(root).as_posix()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.gate.lstat",
+      "kind": "unknown_execution",
+      "purpose": "Compute a lexical relative key for synthetic stat overrides inside the patched lstat callback; no actual metadata read.",
+      "source": "path.relative_to(root).as_posix()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.gate.glob",
+      "kind": "unknown_execution",
+      "purpose": "Record the relative directory argument of the patched glob callback in memory; no filesystem enumeration.",
+      "source": "path.relative_to(root).as_posix()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.gate.glob",
+      "kind": "unknown_execution",
+      "purpose": "Apply pathlib lexical pattern matching to names from the in-memory fixture mapping; this is not a real glob or file read.",
+      "source": "Path(name).match(pattern)",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_profile_resolver_and_loader_contract",
+      "kind": "unknown_execution",
+      "purpose": "Clear the built-in tests list in a copied resolver result to verify that resolving again is unaffected; no manifest file mutation.",
+      "source": "resolved['tests'].clear()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_checked_in_profiles_have_explicit_closure_without_source_imports",
+      "kind": "unknown_execution",
+      "purpose": "Derive the checkout root from this module filename for the existing read-only manifest contract check; absolute itself opens no file and resolves no links.",
+      "source": "Path(__file__).absolute()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_profile_ignores_unrelated_pending_and_unclassified_sources_audit_finds",
+      "kind": "unknown_execution",
+      "purpose": "Append a pending synthetic entry to the fixture inventory list in memory to exercise scoped versus full-audit selection; no real inventory is written.",
+      "source": "manifest['inventory'].append(entry)",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_profile_ignores_unrelated_pending_and_unclassified_sources_audit_finds",
+      "kind": "unknown_execution",
+      "purpose": "Append an inert pending exception to the synthetic manifest list for audit diagnostics; fixture() is literal data, never invoked or persisted.",
+      "source": "manifest['exceptions'].append(dict(path='outside/pending.py', scope='<module>', kind='unknown_execution',\n                                            source='fixture()', sha256=None, purpose='Pending outside profile'))",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_dependency_scan_requires_exact_source_full_hash_exception",
+      "kind": "unknown_execution",
+      "purpose": "Hash inert in-memory dependency source bytes for the synthetic exact-exception test; the source is scanned, not imported or executed.",
+      "source": "hashlib.sha256(raw).hexdigest()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_dependency_scan_requires_exact_source_full_hash_exception",
+      "kind": "unknown_execution",
+      "purpose": "Rehash mutated in-memory fixture bytes to verify an old exception cannot approve changed source; no real file or approval record is changed.",
+      "source": "hashlib.sha256(files['support/helper.py']).hexdigest()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_malformed_schema_rejects_before_source_reads_or_glob",
+      "kind": "unknown_execution",
+      "purpose": "Append a duplicate inventory entry to a deep-copied synthetic manifest to test schema rejection; only the local built-in list is mutated.",
+      "source": "changed['inventory'].append(dict(changed['inventory'][0], path=duplicate))",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_bootstrap_is_explicit_hash_bound_trust_boundary_not_scan_proof",
+      "kind": "unknown_execution",
+      "purpose": "Append the inert bootstrap fixture path to a synthetic profile dependency list; the fixture is never imported or executed.",
+      "source": "manifest['profiles']['core']['dependencies'].append(path)",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_bootstrap_is_explicit_hash_bound_trust_boundary_not_scan_proof",
+      "kind": "unknown_execution",
+      "purpose": "Append a synthetic bootstrap inventory entry in memory to test explicit role and hash requirements; no real bootstrap approval is granted.",
+      "source": "manifest['inventory'].append(entry)",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_bootstrap_is_explicit_hash_bound_trust_boundary_not_scan_proof",
+      "kind": "unknown_execution",
+      "purpose": "Hash the inert bootstrap fixture bytes in memory for the synthetic contract test; even its exec text remains unexecuted data.",
+      "source": "hashlib.sha256(files[path]).hexdigest()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "tests/test_test_safety.py",
+      "scope": "TestTestSafety.test_scanned_dependency_process_sink_needs_permission_and_review",
+      "kind": "unknown_execution",
+      "purpose": "Hash the inert process-shaped dependency fixture for scanner permission assertions; no subprocess is launched and no real source is approved.",
+      "source": "hashlib.sha256(raw).hexdigest()",
+      "sha256": "16b4744552dfb4859126848c2ad344f32282e1d8fbce5e304efc1536d7d9d57e"
+    },
+    {
+      "path": "scripts/test_profile_state.py",
+      "scope": "_checked_kind",
+      "kind": "unknown_execution",
+      "purpose": "Read the fixed Windows reparse-attribute field from a stat result with integer default; tests supply an inert SimpleNamespace. No returned callable is invoked.",
+      "source": "getattr(info, 'st_file_attributes', 0)",
+      "sha256": "edcafb19545cb734f0508b3ef68807f5a01e421369667f9055623bb41dcb1152"
+    },
+    {
+      "path": "host/test_early_update_dispatch.py",
+      "scope": "EarlyDispatchIsolationTests.test_frozen_manual_recovery_uses_fixed_stderr_before_startup",
+      "kind": "fixed_python_bootstrap",
+      "purpose": "Candidate only: fixed Python bootstrap sets frozen state and invokes the isolated shadow host. Review shadow dependencies and environment before supplying hash.",
+      "source": "subprocess.run(\n            [\n                sys.executable,\n                \"-c\",\n                (\n                    \"import runpy, sys; \"\n                    \"sys.frozen = True; \"\n                    \"runpy.run_path(sys.argv[1], run_name='__main__')\"\n                ),\n                str(shadow / \"dh_native_host.py\"),\n            ],\n            cwd=Path.cwd(),\n            env=env,\n            capture_output=True,\n            check=False,\n        )",
+      "sha256": null
+    },
+    {
+      "path": "extension/src/utils/createdOnModel.test.ts",
+      "scope": "read-only current record model Created On.it(is self-contained after function serialization)",
+      "kind": "browser_function_serialization",
+      "purpose": "Pending frontend reviewer handoff only: reconstruct product function in an isolated fixture realm; no general Function exemption or frontend coverage claimed.",
+      "source": "new Function(`return (${readCurrentRecordCreatedOn.toString()})`)()",
+      "sha256": null
+    },
+    {
+      "path": "extension/src/utils/createdOnModel.test.ts",
+      "scope": "read-only current record model Created On.it(accepts a foreign-realm Date without calling instance methods)",
+      "kind": "browser_foreign_realm",
+      "purpose": "Pending frontend reviewer handoff only: synthetic foreign-realm Date; exact full-file hash still required.",
+      "source": "runInNewContext(`new Date('${ISO}')`)",
+      "sha256": null
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 // Analysis result persistence — wrapper over chrome.storage.local for the
 // C2a+ result, pending, and per-identity acknowledgement keys (see
-// docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md).
+// docs/specs/analysis-result-persistence.md).
 //
 // Why a dedicated module:
 // - Single source of truth for the storage shape. Both the Service Worker
@@ -29,6 +29,7 @@ export interface LastAnalysis {
     durationSec?: number;     // success only
     savedTo?: string;         // success only, file path
     errorCode?: string;       // error only, raw Host machine-readable code
+    attachmentNotice?: string; // safe product text, separate from the report/error
 }
 
 export interface LastAnalysisIdentity {
@@ -394,7 +395,7 @@ export async function clearPendingAnalysis(): Promise<void> {
 //
 // The helpers are split out into named functions (vs inlined in the SW
 // handler) so each invariant in
-// docs/superpowers/specs/2026-06-03-analysis-result-persistence-design.md § 5
+// docs/specs/analysis-result-persistence.md § 5
 // can be tested without spinning up the full Service Worker module (which
 // has top-level side effects: native port connect, App Insights init, etc).
 // ---------------------------------------------------------------------------
@@ -418,8 +419,19 @@ export interface AnalyzePersistContext {
 }
 
 export type AnalyzeCompletion =
-    | { status: 'success'; markdown: string; savedTo?: string }
-    | { status: 'error'; error: string; errorCode?: string };
+    | { status: 'success'; markdown: string; savedTo?: string; attachmentNotice?: string }
+    | { status: 'error'; error: string; errorCode?: string; attachmentNotice?: string };
+
+/** Ignore malformed optional notices without invoking accessors or coercion. */
+export function parseAttachmentNotice(value: unknown, key = 'attachmentNotice'): string | undefined {
+    const field = ownDataProperty(value, key);
+    return field.kind === 'value'
+        && typeof field.value === 'string'
+        && field.value.length <= 2048
+        && field.value.trim().length > 0
+        ? field.value
+        : undefined;
+}
 
 export interface AnalyzePersistenceDeps {
     now?: () => number;
@@ -478,6 +490,7 @@ export function parseLastAnalysis(value: unknown): LastAnalysis | null {
     const durationSec = optionalFinite(value, 'durationSec');
     const savedTo = optionalString(value, 'savedTo');
     const errorCode = optionalString(value, 'errorCode');
+    const attachmentNotice = parseAttachmentNotice(value);
     if (
         caseNumber === null
         || statusField.kind !== 'value'
@@ -503,6 +516,7 @@ export function parseLastAnalysis(value: unknown): LastAnalysis | null {
         ...(durationSec.value === undefined ? {} : { durationSec: durationSec.value }),
         ...(savedTo.value === undefined ? {} : { savedTo: savedTo.value }),
         ...(errorCode.value === undefined ? {} : { errorCode: errorCode.value }),
+        ...(attachmentNotice === undefined ? {} : { attachmentNotice }),
     };
 }
 
@@ -558,6 +572,7 @@ export function parseAnalyzePersistContextValue(
 
 function parseAnalyzeCompletionValue(value: unknown): AnalyzeCompletion | null {
     const status = ownDataProperty(value, 'status');
+    const attachmentNotice = parseAttachmentNotice(value);
     if (status.kind !== 'value') return null;
     if (status.value === 'success') {
         const markdown = requiredString(value, 'markdown');
@@ -566,6 +581,7 @@ function parseAnalyzeCompletionValue(value: unknown): AnalyzeCompletion | null {
             ? {
                 status: 'success',
                 markdown,
+                ...(attachmentNotice === undefined ? {} : { attachmentNotice }),
                 ...(savedTo.value === undefined ? {} : { savedTo: savedTo.value }),
             }
             : null;
@@ -577,6 +593,7 @@ function parseAnalyzeCompletionValue(value: unknown): AnalyzeCompletion | null {
             ? {
                 status: 'error',
                 error,
+                ...(attachmentNotice === undefined ? {} : { attachmentNotice }),
                 ...(errorCode.value === undefined ? {} : { errorCode: errorCode.value }),
             }
             : null;
@@ -738,6 +755,9 @@ export async function completeAnalyzePersistence(
                         : capturedCompletion.error,
                     timestamp,
                     seen: false,
+                    ...(capturedCompletion.attachmentNotice === undefined
+                        ? {}
+                        : { attachmentNotice: capturedCompletion.attachmentNotice }),
                     ...(capturedCompletion.status === 'success'
                         && capturedCompletion.savedTo !== undefined
                         ? { savedTo: capturedCompletion.savedTo }

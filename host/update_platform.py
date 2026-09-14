@@ -209,6 +209,14 @@ class ParentHandleCloseError(BaseException):
         super().__init__("process_parent_handle_close_failed")
 
 
+def _mark_process_launched(error: BaseException) -> BaseException:
+    try:
+        error.process_launched = True
+    except Exception:
+        pass
+    return error
+
+
 def validate_cli_process_identity_text(
     pid_text: object,
     creation_token: object,
@@ -814,16 +822,16 @@ class WindowsProcessAdapter:
                     ParentHandleCloseError().with_traceback(error.__traceback__)
                 )
         if primary_error is not None and close_errors:
-            raise BaseExceptionGroup(
+            raise _mark_process_launched(BaseExceptionGroup(
                 "process_launch_and_close_failed",
                 [primary_error, *close_errors],
-            )
+            ))
         if primary_error is not None:
-            raise primary_error
+            raise _mark_process_launched(primary_error)
         if close_errors:
-            raise BaseExceptionGroup(
+            raise _mark_process_launched(BaseExceptionGroup(
                 "process_parent_handle_close_failed", close_errors
-            )
+            ))
         if identity is None:
             raise ProcessAdapterError("process_launch_failed")
         return identity
