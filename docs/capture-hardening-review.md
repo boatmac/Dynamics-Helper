@@ -2,6 +2,54 @@
 
 ## Scope And Status
 
+### September 14 Customer Wrapper Follow-Up
+
+The published 2.0.78 retained the Customer reader, but a read-only local Edge
+inspection found layout wrappers between the canonical record owner, selected
+Summary tablist and Customer content panel. The reader's direct-parent checks
+rejected this structure before reading the name. The inspection returned only
+structural tokens, booleans and counts, not customer values. This is a confirmed
+rejection condition, not evidence of source loss during rollback.
+
+The unreleased fix permits bounded wrapper ancestry within the same record.
+Independent main/header/tablist/panel boundaries remain rejected. Explicit
+`aria-controls` remains authoritative; absent linkage requires one selected
+record-level tab and a unique visible same-record panel with matching nonempty
+labels, not an English `Summary` literal. Nested widget tabs do not provide
+record-level authority. Customer text extraction, full 16/19-digit identity,
+editing protection and scroll timing are unchanged.
+
+Verification: the first 60-second metadata test attempt stopped after Vitest
+startup without results; owned observed processes were terminated and evidence
+retained under `pageReader-metadata-red-20260914T070103855Z-11c330d182664c52bf5e74f469aa1ee6`
+in the existing local temp evidence parent. This is not RED. A subsequent
+three-case selection against the old implementation failed 3/3 as expected
+(English, non-English and explicit-link wrappers; 144 unrelated cases skipped).
+After the fix, `D365 case metadata` passed 72/72 with 75 unrelated cases skipped
+in 25.02 seconds. Twelve synthetic cases were added, including foreign/hidden
+ownership, incorrect explicit linkage and duplicate tab/panel rejection.
+TypeScript `--noEmit` exited 0. These are focused offline results, not a full
+Extension run or browser verification of the fix. No build, reload, installation,
+commit, push or new release was performed for this follow-up.
+
+The subsequent explicitly requested Extension-only build passed on September 14:
+default-items 5/5, TypeScript, Vite and default-menu source/dist byte equality;
+exit 0, no timeout and unchanged build inputs. Evidence is
+`dh-customer-extension-build-da0473566ea643b58f2cc3101e904deb` under the local temp
+parent. Output is this checkout's `extension/dist`, still labeled 2.0.78 but
+containing the unreleased fix; it is not the published ZIP. Browserslist reported
+stale browser data; no dependency update was performed. Host build, browser
+loading/reload, installation and publication were not performed.
+
+After this local build, the user reported both observed viewport paths working:
+Customer is captured immediately when visible in the large-screen initial view,
+and captured after scrolling when absent from the small-screen initial view.
+This is user-reported runtime confirmation, not an independent loaded-byte check,
+proof across all languages/layouts, or qualification of the unchanged published
+2.0.78 ZIP. No additional code or timing changes were made in response.
+
+### September 13 Historical Milestone
+
 September 13, 2026: this is the single persistent review record for the ten
 capture-hardening findings below. All ten source issues are addressed, with
 scoped offline verification complete as detailed below. This is a bounded

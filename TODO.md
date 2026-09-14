@@ -1,5 +1,18 @@
 # Project TODO
 
+## Customer Capture Follow-Up
+
+- [x] Identify the 2.0.78 Customer failure on the local D365 page: same-record
+  layout wrappers fail the reader's direct-parent checks; no missing release code.
+- [x] Implement bounded same-record wrapper support and language-independent
+  tab/panel label matching. Focused metadata tests passed 72/72; TypeScript passed.
+  See [current evidence and limits](docs/capture-hardening-review.md#september-14-customer-wrapper-follow-up).
+- [x] Build the unreleased Extension fix locally: default-items 5/5, TypeScript,
+  Vite and source/dist menu identity passed; build inputs unchanged.
+- [x] User reports successful capture after the local build: large-screen first
+  view reads Customer immediately; small-screen view reads it after scrolling.
+  This confirms the observed paths, not all layouts/languages or the published ZIP.
+
 ## Capture Hardening
 
 The ten prior-review fixes are implemented in current source; their single

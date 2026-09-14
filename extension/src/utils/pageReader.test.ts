@@ -800,6 +800,42 @@ describe('D365 case metadata', () => {
     expect(PageReader.readCustomerName(currentNumber)).toBeUndefined()
   })
 
+  function wrappedCustomerPanel(label = 'Summary') {
+    document.body.innerHTML = `<main role="main"><section role="tabpanel" id="record-pane">
+      ${recordHeader()}<div><div><ul role="tablist"><li role="tab" aria-selected="true" aria-label="${label}" id="record-tab">Decorative text</li></ul></div></div>
+      <div><div><section id="customer-summary" role="tabpanel" aria-label="${label}">
+        <div><ul role="tablist"><li role="tab" aria-selected="true">Nested widget</li></ul></div>
+        ${customer('<li><div aria-hidden="true">Icon</div><div role="link"><div role="presentation">Synthetic Account</div></div></li>')}
+      </section></div></div>
+    </section></main>`
+  }
+
+  it.each(['Summary', '\u6458\u8981', 'explicit'])('reads Customer through same-record wrappers without relying on English: %s', mode => {
+    wrappedCustomerPanel(mode === 'explicit' ? 'Details' : mode)
+    if (mode === 'explicit') {
+      document.querySelector('#record-tab')!.setAttribute('aria-controls', 'customer-summary')
+      document.querySelector('#customer-summary')!.removeAttribute('aria-label')
+    }
+    expect(PageReader.readCustomerName(currentNumber)).toBe('Synthetic Account')
+    expect(PageReader.readCustomerName('2601190030003106002')).toBeUndefined()
+  })
+
+  it.each(['wrong-link', 'duplicate-panel', 'duplicate-tab', 'foreign-tab', 'foreign-panel', 'hidden-wrapper', 'different-label', 'empty-label', 'hidden-header'])('rejects ambiguous or foreign Customer wrappers: %s', mode => {
+    wrappedCustomerPanel()
+    const tab = document.querySelector('#record-tab')!
+    const panel = document.querySelector('#customer-summary')!
+    if (mode === 'wrong-link') tab.setAttribute('aria-controls', 'missing-panel')
+    if (mode === 'duplicate-panel') panel.insertAdjacentHTML('afterend', '<section role="tabpanel" aria-label="Summary"></section>')
+    if (mode === 'duplicate-tab') tab.insertAdjacentHTML('afterend', '<li role="tab" aria-selected="true" aria-label="Summary"></li>')
+    if (mode === 'foreign-tab') tab.parentElement!.parentElement!.setAttribute('role', 'tabpanel')
+    if (mode === 'foreign-panel') panel.parentElement!.setAttribute('role', 'tabpanel')
+    if (mode === 'hidden-wrapper') tab.parentElement!.parentElement!.setAttribute('aria-hidden', 'true')
+    if (mode === 'different-label') panel.setAttribute('aria-label', 'Other panel')
+    if (mode === 'empty-label') { panel.setAttribute('aria-label', ''); tab.setAttribute('aria-label', '') }
+    if (mode === 'hidden-header') panel.insertAdjacentHTML('afterbegin', `<div hidden>${recordHeader('2601190030003106002')}</div>`)
+    expect(PageReader.readCustomerName(currentNumber)).toBeUndefined()
+  })
+
   it('uses original-node CSS visibility and never infers a name from email attributes', () => {
     page(customer('<li><a href="mailto:other@example.invalid" title="Wrong title"><span style="display:none">Hidden B</span>Current A</a><span style="visibility:hidden">Hidden alias</span></li>'))
     const clone = vi.spyOn(Node.prototype, 'cloneNode')

@@ -239,6 +239,18 @@ export class PageReader {
         if (mains.length > 20) return undefined;
         let visibleMains = 0;
         for (const main of mains) if (this.isRendered(main, budget) && ++visibleMains > 1) return undefined;
+        // Layout wrappers are not ownership boundaries; nested panels/widgets are.
+        const belongsToRecord = (element: Element): boolean => {
+            let ancestor = element.parentElement;
+            for (let depth = 0; ancestor; depth++, ancestor = ancestor.parentElement) {
+                if (depth === 64 || !this.spendDomWork(budget)) { budget.exhausted = true; return false; }
+                if (ancestor.getAttribute('aria-hidden') === 'true') return false;
+                if (ancestor === context) return true;
+                if (ancestor.matches('[role="tabpanel"], [role="tablist"], uci-header-control-list')
+                    || (ancestor.matches('[role="main"]') && ancestor !== owner)) return false;
+            }
+            return false;
+        };
         const customerNames = new Set<string>();
         for (const list of lists) {
             if (!this.isRendered(list, budget)) continue;
@@ -251,7 +263,7 @@ export class PageReader {
                 if (container.matches('[role="tabpanel"]') && !container.contains(owner)) {
                     // A content panel is not a record pane: require its selected tab
                     // under the same owner, and never cross an independent header.
-                    if (container.querySelector('uci-header-control-list')) return undefined;
+                    if (container.querySelector('uci-header-control-list') || !belongsToRecord(container)) return undefined;
                     const tabs = context.querySelectorAll('[role="tablist"] > [role="tab"][aria-selected="true"]');
                     if (tabs.length > 20) return undefined;
                     let selected = 0;
@@ -259,13 +271,26 @@ export class PageReader {
                     for (const tab of tabs) {
                         if (!this.spendDomWork(budget)) return undefined;
                         const tablist = tab.parentElement!;
-                        if (tablist.parentElement !== context || tablist.getAttribute('aria-hidden') === 'true'
+                        if (!belongsToRecord(tablist) || tablist.getAttribute('aria-hidden') === 'true'
                             || tab.getAttribute('aria-hidden') === 'true' || !this.isRendered(tab, budget)) continue;
                         selected++;
                         const controls = tab.getAttribute('aria-controls');
                         if (controls) associated = controls === container.id && document.getElementById(controls) === container;
-                        else associated = container.parentElement === context && container.getAttribute('aria-label') === 'Summary'
-                            && (tab.getAttribute('aria-label') || this.readDomText(tab, budget)) === 'Summary';
+                        else {
+                            const label = container.getAttribute('aria-label')?.trim();
+                            const tabLabel = tab.getAttribute('aria-label') || this.readDomText(tab, budget);
+                            if (!label || label.length > 256 || tabLabel?.trim() !== label) return undefined;
+                            const panels = context.querySelectorAll('[role="tabpanel"]');
+                            if (panels.length > 20) return undefined;
+                            let matchingPanels = 0;
+                            for (const panel of panels) {
+                                if (!this.spendDomWork(budget)) return undefined;
+                                if (belongsToRecord(panel) && this.isRendered(panel, budget)
+                                    && panel.getAttribute('aria-hidden') !== 'true'
+                                    && panel.getAttribute('aria-label')?.trim() === label) matchingPanels++;
+                            }
+                            associated = matchingPanels === 1;
+                        }
                     }
                     if (selected !== 1 || !associated) return undefined;
                 }
